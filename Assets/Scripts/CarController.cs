@@ -11,9 +11,14 @@ public class CarController : MonoBehaviour
     [SerializeField] private float reverseSpeed = 10f;
 
     [Header("Steering Settings")]
-    [SerializeField] private float steeringSpeed = 150f;
-    [SerializeField] private float maxSteeringAngle = 35f;
-    [SerializeField] private AnimationCurve steeringCurve = AnimationCurve.Linear(0f, 1f, 1f, 0.3f);
+    [SerializeField] private float turnSpeed = 80f;
+    [SerializeField] private float maxSteeringAngle = 25f;
+    [SerializeField] private float steeringReturnSpeed = 8f;
+    [SerializeField] private AnimationCurve steeringCurve = AnimationCurve.Linear(0f, 1f, 1f, 0.4f);
+
+    [Header("Wheel Visual Settings")]
+    [SerializeField] private float maxWheelVisualAngle = 30f;
+    [SerializeField] private float wheelSteeringSmoothness = 10f;
 
     [Header("Physics Settings")]
     [SerializeField] private Vector3 centerOfMassOffset = new Vector3(0f, -0.5f, 0f);
@@ -32,6 +37,7 @@ public class CarController : MonoBehaviour
     // Private variables
     private float currentSpeed = 0f;
     private float currentSteerAngle = 0f;
+    private float visualSteerAngle = 0f;
     private float wheelSpinAngle = 0f;
     private Vector2 moveInput;
     private Rigidbody rb;
@@ -40,6 +46,7 @@ public class CarController : MonoBehaviour
 
     // Store initial wheel rotations
     private Dictionary<Transform, Quaternion> wheelInitialRotations = new Dictionary<Transform, Quaternion>();
+    private Dictionary<Transform, bool> wheelIsOnLeft = new Dictionary<Transform, bool>();
 
     void Start()
     {
@@ -90,6 +97,9 @@ public class CarController : MonoBehaviour
                     // Store initial rotation
                     wheelInitialRotations[wheelTransform] = wheelTransform.localRotation;
 
+                    // Determine if wheel is on left side (negative X position)
+                    wheelIsOnLeft[wheelTransform] = wheelTransform.localPosition.x < 0;
+
                     // Categorize by position or name
                     if (name.Contains("front"))
                     {
@@ -108,7 +118,7 @@ public class CarController : MonoBehaviour
                             rearWheels.Add(wheelTransform);
                     }
 
-                    Debug.Log($"Found wheel: {wheelTransform.name} at position {wheelTransform.localPosition}");
+                    Debug.Log($"Found wheel: {wheelTransform.name} at position {wheelTransform.localPosition}, Left side: {wheelIsOnLeft[wheelTransform]}");
                 }
             }
 
@@ -251,13 +261,22 @@ public class CarController : MonoBehaviour
         float steeringMultiplier = steeringCurve.Evaluate(speedFactor);
         float targetSteerAngle = horizontalInput * maxSteeringAngle * steeringMultiplier;
 
-        // Smooth steering
-        currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteerAngle, Time.fixedDeltaTime * 5f);
+        // Smooth steering with faster return to center
+        if (Mathf.Abs(horizontalInput) > 0.1f)
+        {
+            currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteerAngle, Time.fixedDeltaTime * 5f);
+        }
+        else
+        {
+            // Return to center faster when no input
+            currentSteerAngle = Mathf.Lerp(currentSteerAngle, 0f, Time.fixedDeltaTime * steeringReturnSpeed);
+        }
 
-        // Apply rotation only when moving
+        // Apply rotation (works even when stationary for easier maneuvering)
         if (Mathf.Abs(currentSpeed) > 0.1f)
         {
-            float turnAmount = currentSteerAngle * (currentSpeed / maxSpeed) * Time.fixedDeltaTime;
+            // Normal turning while moving
+            float turnAmount = currentSteerAngle * turnSpeed * Time.fixedDeltaTime;
             Quaternion turnRotation = Quaternion.Euler(0f, turnAmount, 0f);
             rb.MoveRotation(rb.rotation * turnRotation);
         }
@@ -278,6 +297,10 @@ public class CarController : MonoBehaviour
         if (wheelSpinAngle > 360f) wheelSpinAngle -= 360f;
         if (wheelSpinAngle < -360f) wheelSpinAngle += 360f;
 
+        // Smooth visual steering angle (slower than actual steering for realism)
+        float targetVisualAngle = moveInput.x * maxWheelVisualAngle;
+        visualSteerAngle = Mathf.Lerp(visualSteerAngle, targetVisualAngle, Time.deltaTime * wheelSteeringSmoothness);
+
         // Apply rotation to front wheels (spin + steering)
         foreach (Transform wheel in frontWheels)
         {
@@ -286,14 +309,19 @@ public class CarController : MonoBehaviour
                 // Get initial rotation
                 Quaternion initialRot = wheelInitialRotations[wheel];
 
+                // Check if wheel is on left or right side
+                bool isLeftWheel = wheelIsOnLeft.ContainsKey(wheel) && wheelIsOnLeft[wheel];
+
                 // Create spin rotation (around local X axis)
-                Quaternion spinRotation = Quaternion.AngleAxis(wheelSpinAngle, Vector3.right);
+                // Left wheels spin opposite direction
+                float spinDirection = isLeftWheel ? -wheelSpinAngle : wheelSpinAngle;
+                Quaternion spinRotation = Quaternion.AngleAxis(spinDirection, Vector3.right);
 
                 // Create steering rotation (around local Y axis)
-                Quaternion steerRotation = Quaternion.AngleAxis(currentSteerAngle, Vector3.up);
+                Quaternion steerRotation = Quaternion.AngleAxis(visualSteerAngle, Vector3.up);
 
-                // Combine: initial -> spin -> steer
-                wheel.localRotation = initialRot * spinRotation * steerRotation;
+                // Combine rotations properly
+                wheel.localRotation = initialRot * steerRotation * spinRotation;
             }
         }
 
@@ -305,8 +333,13 @@ public class CarController : MonoBehaviour
                 // Get initial rotation
                 Quaternion initialRot = wheelInitialRotations[wheel];
 
+                // Check if wheel is on left or right side
+                bool isLeftWheel = wheelIsOnLeft.ContainsKey(wheel) && wheelIsOnLeft[wheel];
+
                 // Create spin rotation (around local X axis)
-                Quaternion spinRotation = Quaternion.AngleAxis(wheelSpinAngle, Vector3.right);
+                // Left wheels spin opposite direction
+                float spinDirection = isLeftWheel ? -wheelSpinAngle : wheelSpinAngle;
+                Quaternion spinRotation = Quaternion.AngleAxis(spinDirection, Vector3.right);
 
                 // Combine: initial -> spin
                 wheel.localRotation = initialRot * spinRotation;
