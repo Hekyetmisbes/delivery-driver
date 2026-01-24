@@ -13,6 +13,7 @@ public class CarController : MonoBehaviour
     [Header("Steering Settings")]
     [SerializeField] private float turnSpeed = 80f;
     [SerializeField] private float maxSteeringAngle = 25f;
+    [SerializeField] private float steeringInputSmoothness = 12f;
     [SerializeField] private float steeringReturnSpeed = 8f;
     [SerializeField] private float minSpeedToTurn = 2f;
     [SerializeField] private AnimationCurve steeringCurve = AnimationCurve.Linear(0f, 1f, 1f, 0.4f);
@@ -248,6 +249,9 @@ public class CarController : MonoBehaviour
             currentSpeed = Mathf.MoveTowards(currentSpeed, 0f, brakePower * 0.3f * Time.fixedDeltaTime);
         }
 
+        // Enforce hard speed limits - prevent exceeding max speed
+        currentSpeed = Mathf.Clamp(currentSpeed, -reverseSpeed, maxSpeed);
+
         // Apply movement
         Vector3 movement = transform.forward * currentSpeed * Time.fixedDeltaTime;
         rb.MovePosition(rb.position + movement);
@@ -262,14 +266,15 @@ public class CarController : MonoBehaviour
         float steeringMultiplier = steeringCurve.Evaluate(speedFactor);
         float targetSteerAngle = horizontalInput * maxSteeringAngle * steeringMultiplier;
 
-        // Smooth steering with faster return to center
+        // Smooth steering input for more realistic, gradual turning
         if (Mathf.Abs(horizontalInput) > 0.1f)
         {
-            currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteerAngle, Time.fixedDeltaTime * 5f);
+            // Gradual steering response - feels more natural and less rigid
+            currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteerAngle, Time.fixedDeltaTime * steeringInputSmoothness);
         }
         else
         {
-            // Return to center faster when no input
+            // Return to center when no input
             currentSteerAngle = Mathf.Lerp(currentSteerAngle, 0f, Time.fixedDeltaTime * steeringReturnSpeed);
         }
 
@@ -279,6 +284,8 @@ public class CarController : MonoBehaviour
             // Calculate turn amount proportional to speed
             // This prevents spinning in place and makes turning feel realistic
             float speedBasedTurn = Mathf.Clamp01(Mathf.Abs(currentSpeed) / maxSpeed);
+
+            // More gradual turn application for smoother cornering
             float turnAmount = currentSteerAngle * turnSpeed * speedBasedTurn * Time.fixedDeltaTime;
 
             Quaternion turnRotation = Quaternion.Euler(0f, turnAmount, 0f);
