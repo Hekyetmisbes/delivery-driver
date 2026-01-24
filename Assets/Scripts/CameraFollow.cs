@@ -13,19 +13,25 @@ public class CameraFollow : MonoBehaviour
     [Header("Smooth Settings")]
     [Tooltip("Kamera takip yumuşaklığı (Düşük = daha sıkı, Yüksek = daha gevşek)")]
     [SerializeField] private float translateSmoothTime = 0.2f;
-    [Tooltip("Dönüş yumuşaklığı")]
-    [SerializeField] private float rotationSmoothSpeed = 5f;
+    [Tooltip("Dönüş yumuşaklığı (Düşük = daha gecikmeli, Yüksek = daha hızlı)")]
+    [SerializeField] private float rotationSmoothSpeed = 1.5f;
+    [Tooltip("Kamera rotasyonu tamamen arabayı takip etsin mi?")]
+    [SerializeField] private bool followRotation = false;
 
     [Header("Reverse Settings")]
     [Tooltip("Geri gidildiğinde kameranın öne geçme özelliği")]
     [SerializeField] private bool enableReverseView = true;
     [Tooltip("Hangi hızdan sonra geri görüşe geçsin (Negatif değer)")]
-    [SerializeField] private float reverseSpeedThreshold = -2f;
+    [SerializeField] private float reverseSpeedThreshold = -1f;
+
+    [Header("Debug")]
+    [SerializeField] private bool showDebugInfo = true;
 
     // Runtime variables
     private Vector3 currentVelocity;
     private Rigidbody targetRb;
     private bool isReversing = false;
+    private float currentLocalZVelocity = 0f;
 
     void Start()
     {
@@ -69,7 +75,10 @@ public class CameraFollow : MonoBehaviour
         if (targetRb != null)
         {
             // Dünya koordinatındaki hızı, aracın yerel koordinatına çevir
-            localZVelocity = target.InverseTransformDirection(targetRb.linearVelocity).z;
+            // Not: Yeni Unity versiyonlarında linearVelocity, eski versiyonlarda velocity
+            Vector3 rbVelocity = targetRb.linearVelocity;
+            localZVelocity = target.InverseTransformDirection(rbVelocity).z;
+            currentLocalZVelocity = localZVelocity; // Debug için sakla
         }
 
         // 2. Geri gitme durumunu kontrol et
@@ -93,25 +102,65 @@ public class CameraFollow : MonoBehaviour
         if (isReversing)
         {
             // Geri giderken Z offsetini tersine çevir (Arabanın önüne geç)
-            // Ayrıca Y yüksekliğini biraz koru
             targetOffset = new Vector3(offset.x, offset.y, -offset.z);
         }
 
-        // Hedef pozisyon: Arabanın rotasyonuna göre (TransformPoint) hesaplanır.
-        // Bu sayede araba döndükçe kamera da arkasından döner.
-        Vector3 desiredPosition = target.TransformPoint(targetOffset);
+        // 4. Pozisyon hesaplama
+        Vector3 desiredPosition;
 
-        // 4. Pozisyonu yumuşatarak uygula (SmoothDamp)
+        if (followRotation)
+        {
+            // Kamera arabayı dönerek takip eder (eski davranış)
+            desiredPosition = target.TransformPoint(targetOffset);
+        }
+        else
+        {
+            // Kamera düz kalır, sadece araba hareket edince hareket eder
+            // Dünya koordinatlarında sabit yön kullan
+            desiredPosition = target.position + new Vector3(targetOffset.x, targetOffset.y, targetOffset.z);
+        }
+
+        // 5. Pozisyonu yumuşatarak uygula
         transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref currentVelocity, translateSmoothTime);
 
-        // 5. Rotasyonu ayarla: Kameranın her zaman arabaya bakmasını sağla
-        Vector3 lookAtTarget = target.position + Vector3.up * 1.5f; // Arabanın biraz üstüne bak
-        Vector3 direction = lookAtTarget - transform.position;
-        
-        if (direction != Vector3.zero)
+        // 6. Rotasyon ayarı
+        if (followRotation)
         {
-            Quaternion targetRotation = Quaternion.LookRotation(direction);
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSmoothSpeed * Time.deltaTime);
+            // Kameranın arabaya bakmasını sağla (gecikmeli)
+            Vector3 lookAtTarget = target.position + Vector3.up * 1.5f;
+            Vector3 direction = lookAtTarget - transform.position;
+
+            if (direction != Vector3.zero)
+            {
+                Quaternion targetRotation = Quaternion.LookRotation(direction);
+                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSmoothSpeed * Time.deltaTime);
+            }
         }
+        else
+        {
+            // Kamera düz kalır, sadece arabaya bakar (yavaşça)
+            Vector3 lookAtTarget = target.position + Vector3.up * 1.5f;
+            Vector3 direction = lookAtTarget - transform.position;
+
+            if (direction != Vector3.zero)
+            {
+                Quaternion targetRotation = Quaternion.LookRotation(direction);
+                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSmoothSpeed * Time.deltaTime);
+            }
+        }
+    }
+
+    void OnGUI()
+    {
+        if (!showDebugInfo) return;
+
+        GUI.color = Color.yellow;
+        GUILayout.BeginArea(new Rect(10, 250, 350, 150));
+        GUILayout.Label("<b>CAMERA DEBUG</b>");
+        GUILayout.Label($"Local Z Velocity: {currentLocalZVelocity:F2}");
+        GUILayout.Label($"Reverse Threshold: {reverseSpeedThreshold:F2}");
+        GUILayout.Label($"Is Reversing: {isReversing}");
+        GUILayout.Label($"Target RB Found: {(targetRb != null ? "YES" : "NO")}");
+        GUILayout.EndArea();
     }
 }

@@ -67,8 +67,8 @@ public class CarController : MonoBehaviour
         // BUG FIX: CenterOfMass yanlışsa araba takla atar veya tekerler boşa döner.
         rb.centerOfMass = centerOfMassOffset;
         rb.mass = 1500f; // Standart bir araba ağırlığı
-        rb.drag = 0.05f; // Hava direnci (çok yüksek olursa araç gitmez)
-        rb.angularDrag = 0.5f; 
+        rb.linearDamping = 0.05f; // Hava direnci (çok yüksek olursa araç gitmez)
+        rb.angularDamping = 0.5f; 
         // BUG FIX: Uyuyan fizik motoru sorunu için
         rb.sleepThreshold = 0.0f; 
     }
