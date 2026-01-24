@@ -5691,12 +5691,49 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 880ae0fb105b3284298797351f2cd0d8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CarController
-  moveSpeed: 10
-  turnSpeed: 100
-  acceleration: 5
-  deceleration: 10
-  horizontalAxis: Horizontal
-  verticalAxis: Vertical
+  maxSpeed: 20
+  accelerationPower: 15
+  brakePower: 25
+  reverseSpeed: 10
+  turnSpeed: 80
+  maxSteeringAngle: 5
+  steeringInputSmoothness: 12
+  steeringReturnSpeed: 8
+  minSpeedToTurn: 2
+  steeringCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: -0.6
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 0.4
+      inSlope: -0.6
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  maxWheelVisualAngle: 30
+  wheelSteeringSmoothness: 10
+  centerOfMassOffset: {x: 0, y: -0.5, z: 0}
+  dragCoefficient: 0.98
+  bodyTiltAmount: 2
+  wheelRotationSpeed: 360
+  autoFindWheels: 1
+  frontWheels: []
+  rearWheels: []
+  inputActions: {fileID: 0}
 --- !u!114 &1584778970
 MonoBehaviour:
   m_ObjectHideFlags: 0
