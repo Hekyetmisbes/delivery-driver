@@ -32,6 +32,7 @@ public class CarController : MonoBehaviour
     // Private variables
     private float currentSpeed = 0f;
     private float currentSteerAngle = 0f;
+    private float wheelSpinAngle = 0f;
     private Vector2 moveInput;
     private Rigidbody rb;
     private InputAction moveAction;
@@ -257,16 +258,6 @@ public class CarController : MonoBehaviour
             Quaternion turnRotation = Quaternion.Euler(0f, turnAmount, 0f);
             rb.MoveRotation(rb.rotation * turnRotation);
         }
-
-        // Rotate front wheels for visual steering
-        foreach (Transform wheel in frontWheels)
-        {
-            if (wheel != null)
-            {
-                Vector3 currentRotation = wheel.localEulerAngles;
-                wheel.localEulerAngles = new Vector3(currentRotation.x, currentSteerAngle, currentRotation.z);
-            }
-        }
     }
 
     private void ApplyDrag()
@@ -277,24 +268,30 @@ public class CarController : MonoBehaviour
 
     private void AnimateWheels()
     {
-        if (Mathf.Abs(currentSpeed) < 0.01f) return;
+        // Update wheel spin angle based on speed
+        wheelSpinAngle += currentSpeed * wheelRotationSpeed * Time.deltaTime;
 
-        float rotationAmount = currentSpeed * wheelRotationSpeed * Time.deltaTime;
+        // Keep angle in reasonable range to prevent overflow
+        if (wheelSpinAngle > 360f) wheelSpinAngle -= 360f;
+        if (wheelSpinAngle < -360f) wheelSpinAngle += 360f;
 
-        // Rotate all wheels based on movement
+        // Apply rotation to front wheels (spin + steering)
         foreach (Transform wheel in frontWheels)
         {
             if (wheel != null)
             {
-                wheel.Rotate(rotationAmount, 0f, 0f, Space.Self);
+                // X = spin rotation, Y = steering angle, Z = keep original
+                wheel.localRotation = Quaternion.Euler(wheelSpinAngle, currentSteerAngle, 0f);
             }
         }
 
+        // Apply rotation to rear wheels (spin only)
         foreach (Transform wheel in rearWheels)
         {
             if (wheel != null)
             {
-                wheel.Rotate(rotationAmount, 0f, 0f, Space.Self);
+                // X = spin rotation, Y and Z = keep at 0
+                wheel.localRotation = Quaternion.Euler(wheelSpinAngle, 0f, 0f);
             }
         }
     }
