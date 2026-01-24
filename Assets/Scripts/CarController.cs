@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 public class CarController : MonoBehaviour
 {
@@ -8,12 +9,21 @@ public class CarController : MonoBehaviour
     [SerializeField] private float acceleration = 5f;
     [SerializeField] private float deceleration = 10f;
 
-    [Header("Input Settings")]
-    [SerializeField] private string horizontalAxis = "Horizontal";
-    [SerializeField] private string verticalAxis = "Vertical";
-
     private float currentSpeed = 0f;
+    private Vector2 moveInput;
     private Rigidbody rb;
+    private PlayerInput playerInput;
+    private InputAction moveAction;
+
+    void Awake()
+    {
+        playerInput = GetComponent<PlayerInput>();
+
+        if (playerInput == null)
+        {
+            playerInput = gameObject.AddComponent<PlayerInput>();
+        }
+    }
 
     void Start()
     {
@@ -28,6 +38,19 @@ public class CarController : MonoBehaviour
         rb.mass = 1000f;
         rb.linearDamping = 0.5f;
         rb.angularDamping = 0.5f;
+
+        if (playerInput != null)
+        {
+            moveAction = playerInput.actions["Move"];
+        }
+    }
+
+    void Update()
+    {
+        if (moveAction != null)
+        {
+            moveInput = moveAction.ReadValue<Vector2>();
+        }
     }
 
     void FixedUpdate()
@@ -38,7 +61,7 @@ public class CarController : MonoBehaviour
 
     private void HandleMovement()
     {
-        float verticalInput = Input.GetAxis(verticalAxis);
+        float verticalInput = moveInput.y;
 
         if (verticalInput != 0)
         {
@@ -55,7 +78,7 @@ public class CarController : MonoBehaviour
 
     private void HandleRotation()
     {
-        float horizontalInput = Input.GetAxis(horizontalAxis);
+        float horizontalInput = moveInput.x;
 
         if (Mathf.Abs(currentSpeed) > 0.1f)
         {
