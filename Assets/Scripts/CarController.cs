@@ -38,6 +38,9 @@ public class CarController : MonoBehaviour
     private InputAction moveAction;
     private Transform bodyTransform;
 
+    // Store initial wheel rotations
+    private Dictionary<Transform, Quaternion> wheelInitialRotations = new Dictionary<Transform, Quaternion>();
+
     void Start()
     {
         SetupRigidbody();
@@ -71,58 +74,58 @@ public class CarController : MonoBehaviour
         {
             frontWheels.Clear();
             rearWheels.Clear();
+            wheelInitialRotations.Clear();
 
-            // Find the Wheels parent object
-            Transform wheelsParent = transform.Find("Wheels");
-            if (wheelsParent == null)
+            // Find all transforms with MeshFilter (actual visual wheels)
+            MeshFilter[] meshFilters = GetComponentsInChildren<MeshFilter>();
+
+            foreach (MeshFilter meshFilter in meshFilters)
             {
-                // Try to find it in children
-                foreach (Transform child in transform.GetComponentsInChildren<Transform>())
+                Transform wheelTransform = meshFilter.transform;
+                string name = wheelTransform.name.ToLower();
+
+                // Check if this is a wheel mesh
+                if (name.Contains("wheel") && !name.Contains("collider"))
                 {
-                    if (child.name.ToLower().Contains("wheel"))
+                    // Store initial rotation
+                    wheelInitialRotations[wheelTransform] = wheelTransform.localRotation;
+
+                    // Categorize by position or name
+                    if (name.Contains("front"))
                     {
-                        wheelsParent = child.parent;
-                        break;
+                        frontWheels.Add(wheelTransform);
                     }
-                }
-            }
-
-            if (wheelsParent != null)
-            {
-                // Find all wheel objects
-                foreach (Transform child in wheelsParent.GetComponentsInChildren<Transform>())
-                {
-                    string name = child.name.ToLower();
-
-                    // Skip parent objects
-                    if (name == "wheels" || name == "front" || name == "rear") continue;
-
-                    if (name.Contains("wheel"))
+                    else if (name.Contains("rear") || name.Contains("back"))
                     {
-                        if (name.Contains("front"))
-                        {
-                            frontWheels.Add(child);
-                        }
-                        else if (name.Contains("rear") || name.Contains("back"))
-                        {
-                            rearWheels.Add(child);
-                        }
+                        rearWheels.Add(wheelTransform);
+                    }
+                    else
+                    {
+                        // Determine by Z position (front wheels have positive Z)
+                        if (wheelTransform.localPosition.z > 0)
+                            frontWheels.Add(wheelTransform);
                         else
-                        {
-                            // Try to determine by position
-                            if (child.localPosition.z > 0)
-                                frontWheels.Add(child);
-                            else
-                                rearWheels.Add(child);
-                        }
+                            rearWheels.Add(wheelTransform);
                     }
-                }
 
-                Debug.Log($"CarController: Found {frontWheels.Count} front wheels and {rearWheels.Count} rear wheels.");
+                    Debug.Log($"Found wheel: {wheelTransform.name} at position {wheelTransform.localPosition}");
+                }
             }
-            else
+
+            Debug.Log($"CarController: Found {frontWheels.Count} front wheels and {rearWheels.Count} rear wheels.");
+        }
+        else
+        {
+            // Store initial rotations for manually assigned wheels
+            foreach (Transform wheel in frontWheels)
             {
-                Debug.LogWarning("CarController: Could not find Wheels parent. Wheel rotation disabled.");
+                if (wheel != null)
+                    wheelInitialRotations[wheel] = wheel.localRotation;
+            }
+            foreach (Transform wheel in rearWheels)
+            {
+                if (wheel != null)
+                    wheelInitialRotations[wheel] = wheel.localRotation;
             }
         }
 
@@ -278,20 +281,35 @@ public class CarController : MonoBehaviour
         // Apply rotation to front wheels (spin + steering)
         foreach (Transform wheel in frontWheels)
         {
-            if (wheel != null)
+            if (wheel != null && wheelInitialRotations.ContainsKey(wheel))
             {
-                // X = spin rotation, Y = steering angle, Z = keep original
-                wheel.localRotation = Quaternion.Euler(wheelSpinAngle, currentSteerAngle, 0f);
+                // Get initial rotation
+                Quaternion initialRot = wheelInitialRotations[wheel];
+
+                // Create spin rotation (around local X axis)
+                Quaternion spinRotation = Quaternion.AngleAxis(wheelSpinAngle, Vector3.right);
+
+                // Create steering rotation (around local Y axis)
+                Quaternion steerRotation = Quaternion.AngleAxis(currentSteerAngle, Vector3.up);
+
+                // Combine: initial -> spin -> steer
+                wheel.localRotation = initialRot * spinRotation * steerRotation;
             }
         }
 
-        // Apply rotation to rear wheels (spin only)
+        // Apply rotation to rear wheels (spin only, no steering)
         foreach (Transform wheel in rearWheels)
         {
-            if (wheel != null)
+            if (wheel != null && wheelInitialRotations.ContainsKey(wheel))
             {
-                // X = spin rotation, Y and Z = keep at 0
-                wheel.localRotation = Quaternion.Euler(wheelSpinAngle, 0f, 0f);
+                // Get initial rotation
+                Quaternion initialRot = wheelInitialRotations[wheel];
+
+                // Create spin rotation (around local X axis)
+                Quaternion spinRotation = Quaternion.AngleAxis(wheelSpinAngle, Vector3.right);
+
+                // Combine: initial -> spin
+                wheel.localRotation = initialRot * spinRotation;
             }
         }
     }
