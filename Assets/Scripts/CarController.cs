@@ -2,397 +2,244 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using System.Collections.Generic;
 
+[RequireComponent(typeof(Rigidbody))]
 public class CarController : MonoBehaviour
 {
-    [Header("Movement Settings")]
-    [SerializeField] private float maxSpeed = 100f; // Increased for physics based speed (approx km/h)
-    [SerializeField] private float accelerationPower = 60000f; // Force in Newtons (Increased to overcome friction)
-    [SerializeField] private float brakePower = 30000f;
-    [SerializeField] private float reverseSpeed = 30f;
-    [SerializeField] private float handbrakeDrag = 2f; // Drag multiplier when handbraking
-
-    [Header("Steering Settings")]
-    [SerializeField] private float turnSpeed = 150f; // Torque
-    [SerializeField] private float maxSteeringAngle = 35f;
-    [SerializeField] private float steeringInputSmoothness = 5f; // Faster response
-    [SerializeField] private float driftFactor = 0.95f; // How much grip we lose when handbraking (0-1)
-    [SerializeField] private float tractionControl = 3000f; // Lateral friction force
-
-    [Header("Wheel Visual Settings")]
-    [SerializeField] private float maxWheelVisualAngle = 30f;
-    [SerializeField] private float wheelSteeringSmoothness = 10f;
-
-    [Header("Physics Settings")]
-    [SerializeField] private Vector3 centerOfMassOffset = new Vector3(0f, -0.5f, 0f);
-    [SerializeField] private float bodyTiltAmount = 5f;
-
-    [Header("Wheel Settings")]
-    [SerializeField] private float wheelRotationSpeed = 360f;
-    [SerializeField] private bool autoFindWheels = true;
-    [SerializeField] private List<Transform> frontWheels = new List<Transform>();
-    [SerializeField] private List<Transform> rearWheels = new List<Transform>();
-
-    [Header("Input Settings (Optional)")]
+    [Header("--- INPUT SYSTEM ---")]
     [SerializeField] private InputActionAsset inputActions;
+    
+    [Header("--- WHEEL COLLIDERS (Physics) ---")]
+    [Tooltip("Ön Sol Tekerlek Collider'ı")]
+    public WheelCollider frontLeftCollider;
+    [Tooltip("Ön Sağ Tekerlek Collider'ı")]
+    public WheelCollider frontRightCollider;
+    [Tooltip("Arka Sol Tekerlek Collider'ı (Çeker)")]
+    public WheelCollider rearLeftCollider;
+    [Tooltip("Arka Sağ Tekerlek Collider'ı (Çeker)")]
+    public WheelCollider rearRightCollider;
 
-    // Private variables
-    private float currentSpeed = 0f;
-    private float currentSteerAngle = 0f;
-    private float visualSteerAngle = 0f;
-    private float wheelSpinAngle = 0f;
-    private Vector2 moveInput;
-    private bool handbrakeInput;
+    [Header("--- WHEEL MESHES (Visuals) ---")]
+    [Tooltip("Ön Sol Tekerlek Görseli")]
+    public Transform frontLeftMesh;
+    [Tooltip("Ön Sağ Tekerlek Görseli")]
+    public Transform frontRightMesh;
+    [Tooltip("Arka Sol Tekerlek Görseli")]
+    public Transform rearLeftMesh;
+    [Tooltip("Arka Sağ Tekerlek Görseli")]
+    public Transform rearRightMesh;
+
+    [Header("--- CAR SETTINGS ---")]
+    [Tooltip("Motorun maksimum tork gücü (Newton-metre). Araç gitmiyorsa bunu artır.")]
+    [SerializeField] private float motorTorque = 1500f;
+    [Tooltip("Fren yapıldığında uygulanan tork gücü.")]
+    [SerializeField] private float brakeTorque = 3000f;
+    [Tooltip("Maksimum direksiyon açısı.")]
+    [SerializeField] private float maxSteeringAngle = 30f;
+    [Tooltip("El freni çekildiğinde arka tekerlere uygulanan sürtünme.")]
+    [SerializeField] private float handbrakeFrictionMultiplier = 2f;
+    [Tooltip("Aracın ağırlık merkezi dengesi (Yere yakın olmalı).")]
+    [SerializeField] private Vector3 centerOfMassOffset = new Vector3(0, -0.5f, 0.3f);
+    
+    [Header("--- DEBUG ---")]
+    [SerializeField] private bool showDebugGUI = true;
+
+    // Private Runtime Variables
     private Rigidbody rb;
+    private float currentSteerAngle;
+    private float currentBrakeTorque;
+    private bool isBraking;
+    private bool isHandbraking;
+    private Vector2 moveInput;
+    
+    // Input Action References
     private InputAction moveAction;
     private InputAction handbrakeAction;
-    private Transform bodyTransform;
 
-    // Store initial wheel rotations
-    private Dictionary<Transform, Quaternion> wheelInitialRotations = new Dictionary<Transform, Quaternion>();
-    private Dictionary<Transform, bool> wheelIsOnLeft = new Dictionary<Transform, bool>();
-
-    void Start()
+    private void Awake()
     {
+        rb = GetComponent<Rigidbody>();
         SetupRigidbody();
-        SetupWheels();
         SetupInput();
     }
 
-    void SetupRigidbody()
+    private void SetupRigidbody()
     {
-        rb = GetComponent<Rigidbody>();
-
-        if (rb == null)
-        {
-            Debug.LogWarning("CarController: No Rigidbody found. Adding Rigidbody component.");
-            rb = gameObject.AddComponent<Rigidbody>();
-        }
-
-        rb.mass = 1000f; // Reduced mass for better handling
-        rb.linearDamping = 0.05f; // Less air resistance for better coasting
-        rb.angularDamping = 0.5f; // Prevent endless spinning
+        // BUG FIX: CenterOfMass yanlışsa araba takla atar veya tekerler boşa döner.
         rb.centerOfMass = centerOfMassOffset;
-        rb.interpolation = RigidbodyInterpolation.Interpolate;
-        rb.isKinematic = false; // Ensure physics is enabled
-        rb.collisionDetectionMode = CollisionDetectionMode.Continuous; // Prevent passing through objects at high speed
-
-        // Freeze rotation on X and Z to prevent flipping, but allow Y for turning
-        // We might want to allow some X/Z tilt later for suspension, but keeping it simple for now
-        rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+        rb.mass = 1500f; // Standart bir araba ağırlığı
+        rb.drag = 0.05f; // Hava direnci (çok yüksek olursa araç gitmez)
+        rb.angularDrag = 0.5f; 
+        // BUG FIX: Uyuyan fizik motoru sorunu için
+        rb.sleepThreshold = 0.0f; 
     }
 
-    void SetupWheels()
-    {
-        if (autoFindWheels)
-        {
-            frontWheels.Clear();
-            rearWheels.Clear();
-            wheelInitialRotations.Clear();
-
-            // Find all transforms with MeshFilter (actual visual wheels)
-            MeshFilter[] meshFilters = GetComponentsInChildren<MeshFilter>();
-
-            foreach (MeshFilter meshFilter in meshFilters)
-            {
-                Transform wheelTransform = meshFilter.transform;
-                string name = wheelTransform.name.ToLower();
-
-                // Check if this is a wheel mesh
-                if (name.Contains("wheel") && !name.Contains("collider"))
-                {
-                    // Store initial rotation
-                    wheelInitialRotations[wheelTransform] = wheelTransform.localRotation;
-
-                    // Determine if wheel is on left side (negative X position)
-                    wheelIsOnLeft[wheelTransform] = wheelTransform.localPosition.x < 0;
-
-                    // Categorize by position or name
-                    if (name.Contains("front"))
-                    {
-                        frontWheels.Add(wheelTransform);
-                    }
-                    else if (name.Contains("rear") || name.Contains("back"))
-                    {
-                        rearWheels.Add(wheelTransform);
-                    }
-                    else
-                    {
-                        // Determine by Z position (front wheels have positive Z)
-                        if (wheelTransform.localPosition.z > 0)
-                            frontWheels.Add(wheelTransform);
-                        else
-                            rearWheels.Add(wheelTransform);
-                    }
-                }
-            }
-        }
-        else
-        {
-            // Store initial rotations for manually assigned wheels
-            foreach (Transform wheel in frontWheels)
-            {
-                if (wheel != null)
-                    wheelInitialRotations[wheel] = wheel.localRotation;
-            }
-            foreach (Transform wheel in rearWheels)
-            {
-                if (wheel != null)
-                    wheelInitialRotations[wheel] = wheel.localRotation;
-            }
-        }
-
-        // Find body for tilting effect
-        bodyTransform = transform.Find("Body");
-        if (bodyTransform == null)
-        {
-            foreach (Transform child in transform.GetComponentsInChildren<Transform>())
-            {
-                if (child.name.ToLower().Contains("body") || child.name.ToLower().Contains("chassis"))
-                {
-                    bodyTransform = child;
-                    break;
-                }
-            }
-        }
-    }
-
-    void SetupInput()
+    private void SetupInput()
     {
         if (inputActions != null)
         {
-            var actionMap = inputActions.FindActionMap("Player");
-            if (actionMap != null)
-            {
-                moveAction = actionMap.FindAction("Move");
-                handbrakeAction = actionMap.FindAction("Jump"); // Using Jump (Space) as Handbrake
-
-                if (moveAction != null)
-                {
-                    moveAction.Enable();
-                    if (handbrakeAction != null) handbrakeAction.Enable();
-                    return;
-                }
-            }
+            var playerMap = inputActions.FindActionMap("Player");
+            moveAction = playerMap.FindAction("Move");
+            handbrakeAction = playerMap.FindAction("Jump"); // Space tuşu genellikle Jump'tır
+            
+            moveAction.Enable();
+            handbrakeAction.Enable();
+        }
+        else
+        {
+            Debug.LogError("CarController: Input Actions atanmamış!");
         }
     }
 
-    void Update()
+    private void Update()
     {
-        GetInput();
-        AnimateWheels();
-        AnimateBodyTilt();
+        HandleInput();
     }
 
-    void GetInput()
+    private void FixedUpdate()
     {
-        if (moveAction != null && moveAction.enabled)
+        HandleMotor();
+        HandleSteering();
+        UpdateWheels();
+        ApplyDownforce(); // Yüksek hızda yol tutuşu için
+    }
+
+    private void HandleInput()
+    {
+        if (moveAction != null)
         {
             moveInput = moveAction.ReadValue<Vector2>();
-            handbrakeInput = handbrakeAction != null && handbrakeAction.IsPressed();
+            isHandbraking = handbrakeAction.IsPressed();
+        }
+    }
+
+    private void HandleMotor()
+    {
+        float accelInput = moveInput.y;
+        
+        // BUG FIX: "Teker dönüyor ama gitmiyor" sorununun ana kaynaklarından biri:
+        // Fren torku 0 değilse motor torku çalışmaz. Gaz veriyorsak freni kesinlikle 0 yapmalıyız.
+        
+        bool isMovingForward = Vector3.Dot(transform.forward, rb.linearVelocity) > 0.5f;
+        bool isMovingReverse = Vector3.Dot(transform.forward, rb.linearVelocity) < -0.5f;
+
+        // Yön değiştirme mantığı (İleri giderken geriye basılırsa fren yap)
+        if (accelInput > 0 && isMovingReverse)
+        {
+            isBraking = true;
+        }
+        else if (accelInput < 0 && isMovingForward)
+        {
+            isBraking = true;
         }
         else
         {
-            float horizontal = 0f;
-            float vertical = 0f;
-
-            if (Keyboard.current != null)
-            {
-                if (Keyboard.current.wKey.isPressed || Keyboard.current.upArrowKey.isPressed)
-                    vertical = 1f;
-                else if (Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed)
-                    vertical = -1f;
-
-                if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed)
-                    horizontal = -1f;
-                else if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed)
-                    horizontal = 1f;
-
-                handbrakeInput = Keyboard.current.spaceKey.isPressed;
-            }
-
-            moveInput = new Vector2(horizontal, vertical);
-        }
-    }
-
-    void FixedUpdate()
-    {
-        UpdateSpeed();
-        ApplyPhysics();
-    }
-
-    void UpdateSpeed()
-    {
-        // Get forward speed in km/h roughly (magnitude of local Z velocity)
-        Vector3 localVelocity = transform.InverseTransformDirection(rb.linearVelocity);
-        currentSpeed = localVelocity.z; // Use actual physics speed
-    }
-
-    private void ApplyPhysics()
-    {
-        float verticalInput = moveInput.y;
-        float horizontalInput = moveInput.x;
-
-        // 1. Acceleration / Braking
-        if (verticalInput > 0.1f)
-        {
-            // Accelerate
-            if (currentSpeed < maxSpeed)
-            {
-                rb.AddRelativeForce(Vector3.forward * verticalInput * accelerationPower);
-            }
-        }
-        else if (verticalInput < -0.1f)
-        {
-            // Reverse or Brake
-            if (currentSpeed > 1f)
-            {
-                // Moving forward, so this is braking
-                rb.AddRelativeForce(Vector3.forward * verticalInput * brakePower);
-            }
-            else
-            {
-                // Moving reverse
-                if (Mathf.Abs(currentSpeed) < reverseSpeed)
-                {
-                    rb.AddRelativeForce(Vector3.forward * verticalInput * accelerationPower);
-                }
-            }
+            isBraking = false;
         }
 
-        // 2. Handbrake
-        if (handbrakeInput)
+        // --- MOTOR GÜCÜ (Sadece Arka Tekerler - RWD) ---
+        if (!isBraking && !isHandbraking)
         {
-            // Apply strong drag to forward movement
-            rb.linearDamping = handbrakeDrag;
+            rearLeftCollider.motorTorque = accelInput * motorTorque;
+            rearRightCollider.motorTorque = accelInput * motorTorque;
+            currentBrakeTorque = 0f;
         }
         else
         {
-            rb.linearDamping = 0.05f;
+            rearLeftCollider.motorTorque = 0f;
+            rearRightCollider.motorTorque = 0f;
         }
 
-        // 3. Lateral Friction (Grip)
-        // Calculate lateral velocity (sliding sideways)
-        Vector3 localVelocity = transform.InverseTransformDirection(rb.linearVelocity);
-        float lateralSpeed = localVelocity.x;
-
-        // Apply force opposite to lateral speed to simulate tire grip
-        // If handbrake is on, reduce this force to allow sliding
-        float currentTraction = tractionControl;
-        if (handbrakeInput)
+        // --- FRENLEME ---
+        if (isHandbraking)
         {
-            currentTraction *= (1f - driftFactor); // Reduce grip
+            currentBrakeTorque = brakeTorque * handbrakeFrictionMultiplier; // El freni daha sert
+            // Ön tekerler el freninde kilitlenmez
+            frontLeftCollider.brakeTorque = 0f;
+            frontRightCollider.brakeTorque = 0f;
+            // Arka tekerler kilitlenir
+            rearLeftCollider.brakeTorque = currentBrakeTorque;
+            rearRightCollider.brakeTorque = currentBrakeTorque;
         }
-
-        // Apply the friction force
-        // We cap the force to avoid instability
-        Vector3 frictionForce = -transform.right * lateralSpeed * currentTraction;
-        rb.AddForce(frictionForce);
-
-
-        // 4. Steering
-        // Steer angle accumulation
-        float targetAngle = horizontalInput * maxSteeringAngle;
-        currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetAngle, Time.fixedDeltaTime * steeringInputSmoothness);
-
-        // Apply Rotation Torque
-        // We only rotate if we are moving (or slipping)
-        if (Mathf.Abs(currentSpeed) > 1f || handbrakeInput)
+        else if (isBraking || Mathf.Abs(accelInput) < 0.05f) // Gaz verilmiyorsa da hafif fren (drag)
         {
-            // If handbraking, we can rotate faster (drift entry)
-            float turnMultiplier = handbrakeInput ? 2.5f : 1f;
+            currentBrakeTorque = isBraking ? brakeTorque : 100f; // Drag braking
             
-            // Invert steering when reversing
-            float direction = currentSpeed > 0 ? 1f : -1f; 
-            
-            // Add torque
-            rb.AddTorque(Vector3.up * currentSteerAngle * turnSpeed * direction * turnMultiplier);
+            frontLeftCollider.brakeTorque = currentBrakeTorque;
+            frontRightCollider.brakeTorque = currentBrakeTorque;
+            rearLeftCollider.brakeTorque = currentBrakeTorque;
+            rearRightCollider.brakeTorque = currentBrakeTorque;
         }
-    }
-
-    private void AnimateWheels()
-    {
-        // Update wheel spin angle based on physics speed
-        // Speed is m/s. Wheel circumference approx 2m? 
-        // 360 deg per rotation. 
-        wheelSpinAngle += currentSpeed * (360f / 2f) * Time.deltaTime; // Approximation
-
-        // Keep angle in reasonable range
-        if (wheelSpinAngle > 360f) wheelSpinAngle -= 360f;
-        if (wheelSpinAngle < -360f) wheelSpinAngle += 360f;
-
-        // Smooth visual steering angle
-        float targetVisualAngle = moveInput.x * maxWheelVisualAngle;
-        visualSteerAngle = Mathf.Lerp(visualSteerAngle, targetVisualAngle, Time.deltaTime * wheelSteeringSmoothness);
-
-        // Apply rotation to front wheels (spin + steering)
-        foreach (Transform wheel in frontWheels)
+        else
         {
-            if (wheel != null && wheelInitialRotations.ContainsKey(wheel))
-            {
-                Quaternion initialRot = wheelInitialRotations[wheel];
-                bool isLeftWheel = wheelIsOnLeft.ContainsKey(wheel) && wheelIsOnLeft[wheel];
-
-                float spinDirection = isLeftWheel ? -wheelSpinAngle : wheelSpinAngle;
-                Quaternion spinRotation = Quaternion.AngleAxis(spinDirection, Vector3.right);
-                Quaternion steerRotation = Quaternion.AngleAxis(visualSteerAngle, Vector3.up);
-
-                wheel.localRotation = initialRot * steerRotation * spinRotation;
-            }
-        }
-
-        // Apply rotation to rear wheels
-        foreach (Transform wheel in rearWheels)
-        {
-            if (wheel != null && wheelInitialRotations.ContainsKey(wheel))
-            {
-                Quaternion initialRot = wheelInitialRotations[wheel];
-                bool isLeftWheel = wheelIsOnLeft.ContainsKey(wheel) && wheelIsOnLeft[wheel];
-
-                // Stop rear wheels spinning if handbrake is on
-                float effectiveSpin = handbrakeInput ? 0f : (isLeftWheel ? -wheelSpinAngle : wheelSpinAngle);
-                
-                Quaternion spinRotation = Quaternion.AngleAxis(effectiveSpin, Vector3.right);
-                wheel.localRotation = initialRot * spinRotation;
-            }
+            // Hareket halindeyiz
+            frontLeftCollider.brakeTorque = 0f;
+            frontRightCollider.brakeTorque = 0f;
+            rearLeftCollider.brakeTorque = 0f;
+            rearRightCollider.brakeTorque = 0f;
         }
     }
 
-    private void AnimateBodyTilt()
+    private void HandleSteering()
     {
-        if (bodyTransform == null) return;
+        float steerInput = moveInput.x;
+        currentSteerAngle = maxSteeringAngle * steerInput;
 
-        // Tilt body based on lateral velocity (physics drift) and steering
-        // Calculate lateral G-force approximation
-        Vector3 localVelocity = transform.InverseTransformDirection(rb.linearVelocity);
-        float lateralForce = localVelocity.x;
-
-        float targetTilt = -lateralForce * bodyTiltAmount;
-        Vector3 currentEuler = bodyTransform.localEulerAngles;
-        float newZ = Mathf.LerpAngle(currentEuler.z, targetTilt, Time.deltaTime * 5f);
-        bodyTransform.localEulerAngles = new Vector3(currentEuler.x, currentEuler.y, newZ);
+        // Sadece ön tekerler döner
+        frontLeftCollider.steerAngle = currentSteerAngle;
+        frontRightCollider.steerAngle = currentSteerAngle;
     }
 
-    void OnDisable()
+    private void UpdateWheels()
     {
-        if (moveAction != null) moveAction.Disable();
-        if (handbrakeAction != null) handbrakeAction.Disable();
+        UpdateSingleWheel(frontLeftCollider, frontLeftMesh);
+        UpdateSingleWheel(frontRightCollider, frontRightMesh);
+        UpdateSingleWheel(rearLeftCollider, rearLeftMesh);
+        UpdateSingleWheel(rearRightCollider, rearRightMesh);
     }
 
-    // Public getters
-    public float GetCurrentSpeed() => currentSpeed;
-    public float GetCurrentSteerAngle() => currentSteerAngle;
-    public bool IsHandbraking() => handbrakeInput;
-
-    // Debug visualization
-    void OnDrawGizmos()
+    private void UpdateSingleWheel(WheelCollider wheelCollider, Transform wheelTransform)
     {
-        if (Application.isPlaying && rb != null)
+        if (wheelCollider == null || wheelTransform == null) return;
+
+        // WheelCollider'ın fiziksel pozisyonunu al
+        Vector3 pos;
+        Quaternion rot;
+        wheelCollider.GetWorldPose(out pos, out rot);
+
+        // Görsel mesh'i bu pozisyona eşitle
+        wheelTransform.position = pos;
+        wheelTransform.rotation = rot;
+    }
+
+    private void ApplyDownforce()
+    {
+        // Yüksek hızda uçmayı engellemek için yere bastırma kuvveti
+        rb.AddForce(-transform.up * rb.linearVelocity.magnitude * 50f);
+    }
+
+    private void OnGUI()
+    {
+        if (!showDebugGUI) return;
+
+        GUI.color = Color.green;
+        GUILayout.BeginArea(new Rect(10, 10, 300, 200));
+        GUILayout.Label($"<b>CAR DEBUG SYSTEM</b>");
+        GUILayout.Label($"Speed: {(rb.linearVelocity.magnitude * 3.6f):F0} km/h");
+        GUILayout.Label($"Motor Torque: {rearLeftCollider.motorTorque:F0} / {motorTorque}");
+        GUILayout.Label($"Brake Torque: {rearLeftCollider.brakeTorque:F0}");
+        GUILayout.Label($"Handbrake: {isHandbraking}");
+        GUILayout.Label($"Is Grounded (RL): {rearLeftCollider.isGrounded}");
+        GUILayout.EndArea();
+    }
+
+    private void OnDrawGizmos()
+    {
+        // Ağırlık merkezini göster
+        if (rb != null)
         {
             Gizmos.color = Color.red;
-            Gizmos.DrawWireSphere(transform.TransformPoint(centerOfMassOffset), 0.1f);
-            
-            Gizmos.color = Color.blue;
-            Gizmos.DrawRay(transform.position, rb.linearVelocity);
+            Gizmos.DrawWireSphere(transform.TransformPoint(rb.centerOfMass), 0.25f);
+            Gizmos.DrawLine(transform.TransformPoint(rb.centerOfMass), transform.TransformPoint(rb.centerOfMass) + transform.forward);
         }
     }
 }
