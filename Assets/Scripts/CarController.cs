@@ -6,8 +6,8 @@ public class CarController : MonoBehaviour
 {
     [Header("Movement Settings")]
     [SerializeField] private float maxSpeed = 100f; // Increased for physics based speed (approx km/h)
-    [SerializeField] private float accelerationPower = 12000f; // Force in Newtons
-    [SerializeField] private float brakePower = 6000f;
+    [SerializeField] private float accelerationPower = 60000f; // Force in Newtons (Increased to overcome friction)
+    [SerializeField] private float brakePower = 30000f;
     [SerializeField] private float reverseSpeed = 30f;
     [SerializeField] private float handbrakeDrag = 2f; // Drag multiplier when handbraking
 
@@ -68,11 +68,13 @@ public class CarController : MonoBehaviour
             rb = gameObject.AddComponent<Rigidbody>();
         }
 
-        rb.mass = 1500f; // More realistic car mass
+        rb.mass = 1000f; // Reduced mass for better handling
         rb.linearDamping = 0.05f; // Less air resistance for better coasting
         rb.angularDamping = 0.5f; // Prevent endless spinning
         rb.centerOfMass = centerOfMassOffset;
         rb.interpolation = RigidbodyInterpolation.Interpolate;
+        rb.isKinematic = false; // Ensure physics is enabled
+        rb.collisionDetectionMode = CollisionDetectionMode.Continuous; // Prevent passing through objects at high speed
 
         // Freeze rotation on X and Z to prevent flipping, but allow Y for turning
         // We might want to allow some X/Z tilt later for suspension, but keeping it simple for now
