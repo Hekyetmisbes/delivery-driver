@@ -6,9 +6,11 @@ public class CarController : MonoBehaviour
 {
     [Header("Movement Settings")]
     [SerializeField] private float maxSpeed = 20f;
-    [SerializeField] private float accelerationPower = 15f;
-    [SerializeField] private float brakePower = 25f;
+    [SerializeField] private float accelerationPower = 8f;
+    [SerializeField] private float brakePower = 15f;
     [SerializeField] private float reverseSpeed = 10f;
+    [SerializeField] private float throttleResponseSpeed = 5f;
+    [SerializeField] private float speedSmoothness = 3f;
 
     [Header("Steering Settings")]
     [SerializeField] private float turnSpeed = 80f;
@@ -16,6 +18,7 @@ public class CarController : MonoBehaviour
     [SerializeField] private float steeringInputSmoothness = 12f;
     [SerializeField] private float steeringReturnSpeed = 8f;
     [SerializeField] private float minSpeedToTurn = 2f;
+    [SerializeField] private float rotationSmoothness = 8f;
     [SerializeField] private AnimationCurve steeringCurve = AnimationCurve.Linear(0f, 1f, 1f, 0.4f);
 
     [Header("Wheel Visual Settings")]
@@ -42,6 +45,7 @@ public class CarController : MonoBehaviour
     private float visualSteerAngle = 0f;
     private float wheelSpinAngle = 0f;
     private Vector2 moveInput;
+    private float smoothedThrottle = 0f;
     private Rigidbody rb;
     private InputAction moveAction;
     private Transform bodyTransform;
@@ -221,32 +225,38 @@ public class CarController : MonoBehaviour
     private void HandleAcceleration()
     {
         float verticalInput = moveInput.y;
+
+        // Smooth throttle input - pedal gibi, yavaşça basılıyor hissi
+        smoothedThrottle = Mathf.Lerp(smoothedThrottle, verticalInput, Time.fixedDeltaTime * throttleResponseSpeed);
+
         float targetSpeed = 0f;
 
-        if (verticalInput > 0)
+        if (smoothedThrottle > 0.01f)
         {
-            // Forward acceleration
-            targetSpeed = maxSpeed * verticalInput;
-            currentSpeed = Mathf.MoveTowards(currentSpeed, targetSpeed, accelerationPower * Time.fixedDeltaTime);
+            // Forward acceleration - smooth throttle kullan
+            targetSpeed = maxSpeed * smoothedThrottle;
+
+            // Lerp kullanarak daha smooth hızlanma
+            currentSpeed = Mathf.Lerp(currentSpeed, targetSpeed, Time.fixedDeltaTime * speedSmoothness);
         }
-        else if (verticalInput < 0)
+        else if (smoothedThrottle < -0.01f)
         {
             if (currentSpeed > 0.5f)
             {
-                // Braking
-                currentSpeed = Mathf.MoveTowards(currentSpeed, 0f, brakePower * Time.fixedDeltaTime);
+                // Braking - daha smooth fren
+                currentSpeed = Mathf.Lerp(currentSpeed, 0f, Time.fixedDeltaTime * (brakePower * 0.4f));
             }
             else
             {
-                // Reverse
-                targetSpeed = reverseSpeed * verticalInput;
-                currentSpeed = Mathf.MoveTowards(currentSpeed, targetSpeed, accelerationPower * 0.5f * Time.fixedDeltaTime);
+                // Reverse - smooth geri vites
+                targetSpeed = reverseSpeed * smoothedThrottle;
+                currentSpeed = Mathf.Lerp(currentSpeed, targetSpeed, Time.fixedDeltaTime * (speedSmoothness * 0.5f));
             }
         }
         else
         {
-            // Natural deceleration
-            currentSpeed = Mathf.MoveTowards(currentSpeed, 0f, brakePower * 0.3f * Time.fixedDeltaTime);
+            // Natural deceleration - yavaşça dur
+            currentSpeed = Mathf.Lerp(currentSpeed, 0f, Time.fixedDeltaTime * (brakePower * 0.2f));
         }
 
         // Enforce hard speed limits - prevent exceeding max speed
@@ -286,10 +296,14 @@ public class CarController : MonoBehaviour
             float speedBasedTurn = Mathf.Clamp01(Mathf.Abs(currentSpeed) / maxSpeed);
 
             // More gradual turn application for smoother cornering
-            float turnAmount = currentSteerAngle * turnSpeed * speedBasedTurn * Time.fixedDeltaTime;
+            // When reversing (currentSpeed < 0), reverse the steering direction
+            float directionMultiplier = currentSpeed >= 0 ? 1f : -1f;
+            float turnAmount = currentSteerAngle * turnSpeed * speedBasedTurn * directionMultiplier * Time.fixedDeltaTime;
 
-            Quaternion turnRotation = Quaternion.Euler(0f, turnAmount, 0f);
-            rb.MoveRotation(rb.rotation * turnRotation);
+            // Smooth rotation using Slerp instead of direct Euler rotation
+            Quaternion targetRotation = rb.rotation * Quaternion.Euler(0f, turnAmount, 0f);
+            Quaternion smoothRotation = Quaternion.Slerp(rb.rotation, targetRotation, rotationSmoothness * Time.fixedDeltaTime);
+            rb.MoveRotation(smoothRotation);
         }
     }
 
