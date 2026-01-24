@@ -14,6 +14,7 @@ public class CarController : MonoBehaviour
     [SerializeField] private float turnSpeed = 80f;
     [SerializeField] private float maxSteeringAngle = 25f;
     [SerializeField] private float steeringReturnSpeed = 8f;
+    [SerializeField] private float minSpeedToTurn = 2f;
     [SerializeField] private AnimationCurve steeringCurve = AnimationCurve.Linear(0f, 1f, 1f, 0.4f);
 
     [Header("Wheel Visual Settings")]
@@ -272,11 +273,14 @@ public class CarController : MonoBehaviour
             currentSteerAngle = Mathf.Lerp(currentSteerAngle, 0f, Time.fixedDeltaTime * steeringReturnSpeed);
         }
 
-        // Apply rotation (works even when stationary for easier maneuvering)
-        if (Mathf.Abs(currentSpeed) > 0.1f)
+        // Apply rotation ONLY when moving fast enough
+        if (Mathf.Abs(currentSpeed) >= minSpeedToTurn)
         {
-            // Normal turning while moving
-            float turnAmount = currentSteerAngle * turnSpeed * Time.fixedDeltaTime;
+            // Calculate turn amount proportional to speed
+            // This prevents spinning in place and makes turning feel realistic
+            float speedBasedTurn = Mathf.Clamp01(Mathf.Abs(currentSpeed) / maxSpeed);
+            float turnAmount = currentSteerAngle * turnSpeed * speedBasedTurn * Time.fixedDeltaTime;
+
             Quaternion turnRotation = Quaternion.Euler(0f, turnAmount, 0f);
             rb.MoveRotation(rb.rotation * turnRotation);
         }
