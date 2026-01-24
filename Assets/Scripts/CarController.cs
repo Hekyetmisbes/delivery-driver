@@ -5,21 +5,18 @@ using System.Collections.Generic;
 public class CarController : MonoBehaviour
 {
     [Header("Movement Settings")]
-    [SerializeField] private float maxSpeed = 20f;
-    [SerializeField] private float accelerationPower = 8f;
-    [SerializeField] private float brakePower = 15f;
-    [SerializeField] private float reverseSpeed = 10f;
-    [SerializeField] private float throttleResponseSpeed = 5f;
-    [SerializeField] private float speedSmoothness = 3f;
+    [SerializeField] private float maxSpeed = 100f; // Increased for physics based speed (approx km/h)
+    [SerializeField] private float accelerationPower = 12000f; // Force in Newtons
+    [SerializeField] private float brakePower = 6000f;
+    [SerializeField] private float reverseSpeed = 30f;
+    [SerializeField] private float handbrakeDrag = 2f; // Drag multiplier when handbraking
 
     [Header("Steering Settings")]
-    [SerializeField] private float turnSpeed = 80f;
-    [SerializeField] private float maxSteeringAngle = 25f;
-    [SerializeField] private float steeringInputSmoothness = 12f;
-    [SerializeField] private float steeringReturnSpeed = 8f;
-    [SerializeField] private float minSpeedToTurn = 2f;
-    [SerializeField] private float rotationSmoothness = 8f;
-    [SerializeField] private AnimationCurve steeringCurve = AnimationCurve.Linear(0f, 1f, 1f, 0.4f);
+    [SerializeField] private float turnSpeed = 150f; // Torque
+    [SerializeField] private float maxSteeringAngle = 35f;
+    [SerializeField] private float steeringInputSmoothness = 5f; // Faster response
+    [SerializeField] private float driftFactor = 0.95f; // How much grip we lose when handbraking (0-1)
+    [SerializeField] private float tractionControl = 3000f; // Lateral friction force
 
     [Header("Wheel Visual Settings")]
     [SerializeField] private float maxWheelVisualAngle = 30f;
@@ -27,8 +24,7 @@ public class CarController : MonoBehaviour
 
     [Header("Physics Settings")]
     [SerializeField] private Vector3 centerOfMassOffset = new Vector3(0f, -0.5f, 0f);
-    [SerializeField] private float dragCoefficient = 0.98f;
-    [SerializeField] private float bodyTiltAmount = 2f;
+    [SerializeField] private float bodyTiltAmount = 5f;
 
     [Header("Wheel Settings")]
     [SerializeField] private float wheelRotationSpeed = 360f;
@@ -45,9 +41,10 @@ public class CarController : MonoBehaviour
     private float visualSteerAngle = 0f;
     private float wheelSpinAngle = 0f;
     private Vector2 moveInput;
-    private float smoothedThrottle = 0f;
+    private bool handbrakeInput;
     private Rigidbody rb;
     private InputAction moveAction;
+    private InputAction handbrakeAction;
     private Transform bodyTransform;
 
     // Store initial wheel rotations
@@ -71,13 +68,14 @@ public class CarController : MonoBehaviour
             rb = gameObject.AddComponent<Rigidbody>();
         }
 
-        rb.mass = 1200f;
-        rb.linearDamping = 0.1f;
-        rb.angularDamping = 0.8f;
+        rb.mass = 1500f; // More realistic car mass
+        rb.linearDamping = 0.05f; // Less air resistance for better coasting
+        rb.angularDamping = 0.5f; // Prevent endless spinning
         rb.centerOfMass = centerOfMassOffset;
         rb.interpolation = RigidbodyInterpolation.Interpolate;
 
-        // Freeze rotation on X and Z to prevent flipping
+        // Freeze rotation on X and Z to prevent flipping, but allow Y for turning
+        // We might want to allow some X/Z tilt later for suspension, but keeping it simple for now
         rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
     }
 
@@ -123,12 +121,8 @@ public class CarController : MonoBehaviour
                         else
                             rearWheels.Add(wheelTransform);
                     }
-
-                    Debug.Log($"Found wheel: {wheelTransform.name} at position {wheelTransform.localPosition}, Left side: {wheelIsOnLeft[wheelTransform]}");
                 }
             }
-
-            Debug.Log($"CarController: Found {frontWheels.Count} front wheels and {rearWheels.Count} rear wheels.");
         }
         else
         {
@@ -168,16 +162,16 @@ public class CarController : MonoBehaviour
             if (actionMap != null)
             {
                 moveAction = actionMap.FindAction("Move");
+                handbrakeAction = actionMap.FindAction("Jump"); // Using Jump (Space) as Handbrake
+
                 if (moveAction != null)
                 {
                     moveAction.Enable();
-                    Debug.Log("CarController: Using InputActionAsset for controls.");
+                    if (handbrakeAction != null) handbrakeAction.Enable();
                     return;
                 }
             }
         }
-
-        Debug.Log("CarController: Using Keyboard direct input (WASD/Arrows).");
     }
 
     void Update()
@@ -192,6 +186,7 @@ public class CarController : MonoBehaviour
         if (moveAction != null && moveAction.enabled)
         {
             moveInput = moveAction.ReadValue<Vector2>();
+            handbrakeInput = handbrakeAction != null && handbrakeAction.IsPressed();
         }
         else
         {
@@ -209,6 +204,8 @@ public class CarController : MonoBehaviour
                     horizontal = -1f;
                 else if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed)
                     horizontal = 1f;
+
+                handbrakeInput = Keyboard.current.spaceKey.isPressed;
             }
 
             moveInput = new Vector2(horizontal, vertical);
@@ -217,112 +214,111 @@ public class CarController : MonoBehaviour
 
     void FixedUpdate()
     {
-        HandleAcceleration();
-        HandleSteering();
-        ApplyDrag();
+        UpdateSpeed();
+        ApplyPhysics();
     }
 
-    private void HandleAcceleration()
+    void UpdateSpeed()
+    {
+        // Get forward speed in km/h roughly (magnitude of local Z velocity)
+        Vector3 localVelocity = transform.InverseTransformDirection(rb.linearVelocity);
+        currentSpeed = localVelocity.z; // Use actual physics speed
+    }
+
+    private void ApplyPhysics()
     {
         float verticalInput = moveInput.y;
+        float horizontalInput = moveInput.x;
 
-        // Smooth throttle input - pedal gibi, yavaşça basılıyor hissi
-        smoothedThrottle = Mathf.Lerp(smoothedThrottle, verticalInput, Time.fixedDeltaTime * throttleResponseSpeed);
-
-        float targetSpeed = 0f;
-
-        if (smoothedThrottle > 0.01f)
+        // 1. Acceleration / Braking
+        if (verticalInput > 0.1f)
         {
-            // Forward acceleration - smooth throttle kullan
-            targetSpeed = maxSpeed * smoothedThrottle;
-
-            // Lerp kullanarak daha smooth hızlanma
-            currentSpeed = Mathf.Lerp(currentSpeed, targetSpeed, Time.fixedDeltaTime * speedSmoothness);
-        }
-        else if (smoothedThrottle < -0.01f)
-        {
-            if (currentSpeed > 0.5f)
+            // Accelerate
+            if (currentSpeed < maxSpeed)
             {
-                // Braking - daha smooth fren
-                currentSpeed = Mathf.Lerp(currentSpeed, 0f, Time.fixedDeltaTime * (brakePower * 0.4f));
+                rb.AddRelativeForce(Vector3.forward * verticalInput * accelerationPower);
+            }
+        }
+        else if (verticalInput < -0.1f)
+        {
+            // Reverse or Brake
+            if (currentSpeed > 1f)
+            {
+                // Moving forward, so this is braking
+                rb.AddRelativeForce(Vector3.forward * verticalInput * brakePower);
             }
             else
             {
-                // Reverse - smooth geri vites
-                targetSpeed = reverseSpeed * smoothedThrottle;
-                currentSpeed = Mathf.Lerp(currentSpeed, targetSpeed, Time.fixedDeltaTime * (speedSmoothness * 0.5f));
+                // Moving reverse
+                if (Mathf.Abs(currentSpeed) < reverseSpeed)
+                {
+                    rb.AddRelativeForce(Vector3.forward * verticalInput * accelerationPower);
+                }
             }
         }
-        else
+
+        // 2. Handbrake
+        if (handbrakeInput)
         {
-            // Natural deceleration - yavaşça dur
-            currentSpeed = Mathf.Lerp(currentSpeed, 0f, Time.fixedDeltaTime * (brakePower * 0.2f));
-        }
-
-        // Enforce hard speed limits - prevent exceeding max speed
-        currentSpeed = Mathf.Clamp(currentSpeed, -reverseSpeed, maxSpeed);
-
-        // Apply movement
-        Vector3 movement = transform.forward * currentSpeed * Time.fixedDeltaTime;
-        rb.MovePosition(rb.position + movement);
-    }
-
-    private void HandleSteering()
-    {
-        float horizontalInput = moveInput.x;
-
-        // Calculate target steering angle based on speed
-        float speedFactor = Mathf.Abs(currentSpeed) / maxSpeed;
-        float steeringMultiplier = steeringCurve.Evaluate(speedFactor);
-        float targetSteerAngle = horizontalInput * maxSteeringAngle * steeringMultiplier;
-
-        // Smooth steering input for more realistic, gradual turning
-        if (Mathf.Abs(horizontalInput) > 0.1f)
-        {
-            // Gradual steering response - feels more natural and less rigid
-            currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteerAngle, Time.fixedDeltaTime * steeringInputSmoothness);
+            // Apply strong drag to forward movement
+            rb.linearDamping = handbrakeDrag;
         }
         else
         {
-            // Return to center when no input
-            currentSteerAngle = Mathf.Lerp(currentSteerAngle, 0f, Time.fixedDeltaTime * steeringReturnSpeed);
+            rb.linearDamping = 0.05f;
         }
 
-        // Apply rotation ONLY when moving fast enough
-        if (Mathf.Abs(currentSpeed) >= minSpeedToTurn)
+        // 3. Lateral Friction (Grip)
+        // Calculate lateral velocity (sliding sideways)
+        Vector3 localVelocity = transform.InverseTransformDirection(rb.linearVelocity);
+        float lateralSpeed = localVelocity.x;
+
+        // Apply force opposite to lateral speed to simulate tire grip
+        // If handbrake is on, reduce this force to allow sliding
+        float currentTraction = tractionControl;
+        if (handbrakeInput)
         {
-            // Calculate turn amount proportional to speed
-            // This prevents spinning in place and makes turning feel realistic
-            float speedBasedTurn = Mathf.Clamp01(Mathf.Abs(currentSpeed) / maxSpeed);
-
-            // More gradual turn application for smoother cornering
-            // When reversing (currentSpeed < 0), reverse the steering direction
-            float directionMultiplier = currentSpeed >= 0 ? 1f : -1f;
-            float turnAmount = currentSteerAngle * turnSpeed * speedBasedTurn * directionMultiplier * Time.fixedDeltaTime;
-
-            // Smooth rotation using Slerp instead of direct Euler rotation
-            Quaternion targetRotation = rb.rotation * Quaternion.Euler(0f, turnAmount, 0f);
-            Quaternion smoothRotation = Quaternion.Slerp(rb.rotation, targetRotation, rotationSmoothness * Time.fixedDeltaTime);
-            rb.MoveRotation(smoothRotation);
+            currentTraction *= (1f - driftFactor); // Reduce grip
         }
-    }
 
-    private void ApplyDrag()
-    {
-        // Apply drag to simulate air resistance and rolling resistance
-        currentSpeed *= dragCoefficient;
+        // Apply the friction force
+        // We cap the force to avoid instability
+        Vector3 frictionForce = -transform.right * lateralSpeed * currentTraction;
+        rb.AddForce(frictionForce);
+
+
+        // 4. Steering
+        // Steer angle accumulation
+        float targetAngle = horizontalInput * maxSteeringAngle;
+        currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetAngle, Time.fixedDeltaTime * steeringInputSmoothness);
+
+        // Apply Rotation Torque
+        // We only rotate if we are moving (or slipping)
+        if (Mathf.Abs(currentSpeed) > 1f || handbrakeInput)
+        {
+            // If handbraking, we can rotate faster (drift entry)
+            float turnMultiplier = handbrakeInput ? 2.5f : 1f;
+            
+            // Invert steering when reversing
+            float direction = currentSpeed > 0 ? 1f : -1f; 
+            
+            // Add torque
+            rb.AddTorque(Vector3.up * currentSteerAngle * turnSpeed * direction * turnMultiplier);
+        }
     }
 
     private void AnimateWheels()
     {
-        // Update wheel spin angle based on speed
-        wheelSpinAngle += currentSpeed * wheelRotationSpeed * Time.deltaTime;
+        // Update wheel spin angle based on physics speed
+        // Speed is m/s. Wheel circumference approx 2m? 
+        // 360 deg per rotation. 
+        wheelSpinAngle += currentSpeed * (360f / 2f) * Time.deltaTime; // Approximation
 
-        // Keep angle in reasonable range to prevent overflow
+        // Keep angle in reasonable range
         if (wheelSpinAngle > 360f) wheelSpinAngle -= 360f;
         if (wheelSpinAngle < -360f) wheelSpinAngle += 360f;
 
-        // Smooth visual steering angle (slower than actual steering for realism)
+        // Smooth visual steering angle
         float targetVisualAngle = moveInput.x * maxWheelVisualAngle;
         visualSteerAngle = Mathf.Lerp(visualSteerAngle, targetVisualAngle, Time.deltaTime * wheelSteeringSmoothness);
 
@@ -331,42 +327,29 @@ public class CarController : MonoBehaviour
         {
             if (wheel != null && wheelInitialRotations.ContainsKey(wheel))
             {
-                // Get initial rotation
                 Quaternion initialRot = wheelInitialRotations[wheel];
-
-                // Check if wheel is on left or right side
                 bool isLeftWheel = wheelIsOnLeft.ContainsKey(wheel) && wheelIsOnLeft[wheel];
 
-                // Create spin rotation (around local X axis)
-                // Left wheels spin opposite direction
                 float spinDirection = isLeftWheel ? -wheelSpinAngle : wheelSpinAngle;
                 Quaternion spinRotation = Quaternion.AngleAxis(spinDirection, Vector3.right);
-
-                // Create steering rotation (around local Y axis)
                 Quaternion steerRotation = Quaternion.AngleAxis(visualSteerAngle, Vector3.up);
 
-                // Combine rotations properly
                 wheel.localRotation = initialRot * steerRotation * spinRotation;
             }
         }
 
-        // Apply rotation to rear wheels (spin only, no steering)
+        // Apply rotation to rear wheels
         foreach (Transform wheel in rearWheels)
         {
             if (wheel != null && wheelInitialRotations.ContainsKey(wheel))
             {
-                // Get initial rotation
                 Quaternion initialRot = wheelInitialRotations[wheel];
-
-                // Check if wheel is on left or right side
                 bool isLeftWheel = wheelIsOnLeft.ContainsKey(wheel) && wheelIsOnLeft[wheel];
 
-                // Create spin rotation (around local X axis)
-                // Left wheels spin opposite direction
-                float spinDirection = isLeftWheel ? -wheelSpinAngle : wheelSpinAngle;
-                Quaternion spinRotation = Quaternion.AngleAxis(spinDirection, Vector3.right);
-
-                // Combine: initial -> spin
+                // Stop rear wheels spinning if handbrake is on
+                float effectiveSpin = handbrakeInput ? 0f : (isLeftWheel ? -wheelSpinAngle : wheelSpinAngle);
+                
+                Quaternion spinRotation = Quaternion.AngleAxis(effectiveSpin, Vector3.right);
                 wheel.localRotation = initialRot * spinRotation;
             }
         }
@@ -376,37 +359,38 @@ public class CarController : MonoBehaviour
     {
         if (bodyTransform == null) return;
 
-        // Tilt body based on steering
-        float targetTilt = -currentSteerAngle * bodyTiltAmount * 0.1f;
+        // Tilt body based on lateral velocity (physics drift) and steering
+        // Calculate lateral G-force approximation
+        Vector3 localVelocity = transform.InverseTransformDirection(rb.linearVelocity);
+        float lateralForce = localVelocity.x;
+
+        float targetTilt = -lateralForce * bodyTiltAmount;
         Vector3 currentEuler = bodyTransform.localEulerAngles;
-        float newZ = Mathf.LerpAngle(currentEuler.z, targetTilt, Time.deltaTime * 3f);
+        float newZ = Mathf.LerpAngle(currentEuler.z, targetTilt, Time.deltaTime * 5f);
         bodyTransform.localEulerAngles = new Vector3(currentEuler.x, currentEuler.y, newZ);
     }
 
     void OnDisable()
     {
-        if (moveAction != null)
-        {
-            moveAction.Disable();
-        }
+        if (moveAction != null) moveAction.Disable();
+        if (handbrakeAction != null) handbrakeAction.Disable();
     }
 
     // Public getters
     public float GetCurrentSpeed() => currentSpeed;
     public float GetCurrentSteerAngle() => currentSteerAngle;
+    public bool IsHandbraking() => handbrakeInput;
 
     // Debug visualization
     void OnDrawGizmos()
     {
         if (Application.isPlaying && rb != null)
         {
-            // Draw center of mass
             Gizmos.color = Color.red;
             Gizmos.DrawWireSphere(transform.TransformPoint(centerOfMassOffset), 0.1f);
-
-            // Draw velocity direction
-            Gizmos.color = Color.green;
-            Gizmos.DrawRay(transform.position, transform.forward * 2f);
+            
+            Gizmos.color = Color.blue;
+            Gizmos.DrawRay(transform.position, rb.linearVelocity);
         }
     }
 }
