@@ -22,6 +22,10 @@ namespace TrafficSystem
         [SerializeField] private float minimumSpawnSpacing = 8f;
         [Tooltip("Spawn vehicles on Start()")]
         [SerializeField] private bool spawnOnStart = true;
+        [Tooltip("Initial delay before starting spawn (seconds, to let road graph build)")]
+        [SerializeField] private float initialSpawnDelay = 0.5f;
+        [Tooltip("Delay between each NPC spawn (seconds)")]
+        [SerializeField] private float spawnDelay = 0.3f;
 
         [Header("Pooling")]
         [Tooltip("Enable object pooling (disable/enable instead of destroy/instantiate)")]
@@ -45,7 +49,7 @@ namespace TrafficSystem
 
             if (spawnOnStart)
             {
-                SpawnNpcs();
+                StartCoroutine(SpawnNpcsCoroutine());
             }
         }
 
@@ -55,22 +59,33 @@ namespace TrafficSystem
         [ContextMenu("Spawn NPCs")]
         public void SpawnNpcs()
         {
+            StartCoroutine(SpawnNpcsCoroutine());
+        }
+
+        /// <summary>
+        /// Coroutine to spawn NPCs sequentially with delay
+        /// </summary>
+        private System.Collections.IEnumerator SpawnNpcsCoroutine()
+        {
+            // Wait for road graph to build
+            yield return new WaitForSeconds(initialSpawnDelay);
+
             if (roadGraphBuilder == null)
             {
                 Debug.LogError("[NpcSpawner] RoadGraphBuilder is not assigned!");
-                return;
+                yield break;
             }
 
             if (roadGraphBuilder.RoadGraph == null || roadGraphBuilder.RoadGraph.roadSegments.Count == 0)
             {
                 Debug.LogError("[NpcSpawner] Road graph is empty! Make sure RoadGraphBuilder has built the graph.");
-                return;
+                yield break;
             }
 
             if (npcVehiclePrefabs == null || npcVehiclePrefabs.Length == 0)
             {
                 Debug.LogError("[NpcSpawner] No NPC vehicle prefabs assigned!");
-                return;
+                yield break;
             }
 
             // Clear existing NPCs
@@ -132,6 +147,13 @@ namespace TrafficSystem
                 Waypoint spawnWaypoint = segment.waypoints[waypointIndex];
                 Vector3 spawnPos = spawnWaypoint.position;
 
+                // Skip invalid positions (0,0,0 or near origin)
+                if (spawnPos.sqrMagnitude < 1f)
+                {
+                    Debug.LogWarning($"[NpcSpawner] Invalid spawn position {spawnPos} on segment '{segment.name}', skipping");
+                    continue;
+                }
+
                 // Check spacing with existing spawns
                 bool validSpacing = true;
                 foreach (Vector3 existingPos in spawnPositions)
@@ -156,7 +178,13 @@ namespace TrafficSystem
 
                 // Use waypoint position directly (it's already on the road)
                 // Just add small height offset to prevent clipping through road surface
-                npcVehicle.transform.position = spawnPos + Vector3.up * 0.2f;
+                Vector3 finalSpawnPos = spawnPos + Vector3.up * 0.2f;
+                npcVehicle.transform.position = finalSpawnPos;
+
+                if (showDebugInfo)
+                {
+                    Debug.Log($"[NpcSpawner] Spawning {npcVehicle.name} at {finalSpawnPos} on segment '{segment.name}'");
+                }
 
                 // Safe rotation with zero vector check - flatten to horizontal
                 Vector3 forward = spawnWaypoint.forward;
@@ -218,6 +246,9 @@ namespace TrafficSystem
                 {
                     Debug.Log($"[NpcSpawner] Spawned {spawnedCount}/{spawnCount} NPCs");
                 }
+
+                // Wait before spawning next NPC
+                yield return new WaitForSeconds(spawnDelay);
             }
 
             // Log distribution summary
