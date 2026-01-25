@@ -129,17 +129,37 @@ namespace TrafficSystem
 
                 // Position vehicle at waypoint
                 Waypoint wp = segment.waypoints[waypointIndex];
-                transform.position = wp.position + Vector3.up * 0.5f;
 
-                // Safe rotation
+                // Find actual ground height with raycast
+                Vector3 spawnPos = wp.position + Vector3.up * 2f;
+                if (Physics.Raycast(spawnPos, Vector3.down, out RaycastHit hit, 10f))
+                {
+                    transform.position = hit.point + Vector3.up * 0.3f;
+                }
+                else
+                {
+                    transform.position = wp.position + Vector3.up * 0.3f;
+                }
+
+                // Safe rotation - flatten to horizontal plane for road following
                 Vector3 forward = wp.forward;
                 if (forward.sqrMagnitude < 0.01f)
                 {
                     forward = Vector3.forward;
                 }
+                forward.y = 0; // Keep car level
+                if (forward.sqrMagnitude < 0.01f)
+                {
+                    forward = Vector3.forward;
+                }
+                else
+                {
+                    forward.Normalize();
+                }
                 transform.rotation = Quaternion.LookRotation(forward);
 
-                rb.linearVelocity = Vector3.zero;
+                // Start with initial forward velocity
+                rb.linearVelocity = forward * (targetSpeed / 3.6f * 0.5f); // Start at 50% target speed
                 rb.angularVelocity = Vector3.zero;
             }
         }
@@ -233,12 +253,31 @@ namespace TrafficSystem
             {
                 Waypoint wp = segment.waypoints[waypointIndex];
 
-                // Smooth teleport with fade
-                Vector3 newPos = wp.position + Vector3.up * 2f; // Higher spawn to avoid collision
+                // Find actual ground height
+                Vector3 newPos = wp.position + Vector3.up * 2f;
+                if (Physics.Raycast(wp.position + Vector3.up * 5f, Vector3.down, out RaycastHit hit, 10f))
+                {
+                    newPos = hit.point + Vector3.up * 0.3f;
+                }
+                else
+                {
+                    newPos = wp.position + Vector3.up * 0.3f;
+                }
+
+                // Flatten forward direction
                 Vector3 forward = wp.forward;
                 if (forward.sqrMagnitude < 0.01f)
                 {
                     forward = Vector3.forward;
+                }
+                forward.y = 0;
+                if (forward.sqrMagnitude < 0.01f)
+                {
+                    forward = Vector3.forward;
+                }
+                else
+                {
+                    forward.Normalize();
                 }
                 Quaternion newRot = Quaternion.LookRotation(forward);
 
@@ -258,13 +297,18 @@ namespace TrafficSystem
             Vector3 lookAheadPoint = GetLookAheadPoint();
             currentLookAheadPoint = lookAheadPoint;
 
+            // Project lookahead point to horizontal plane for better steering
+            Vector3 flatLookAhead = lookAheadPoint;
+            flatLookAhead.y = transform.position.y;
+
             // Calculate steering angle using Pure Pursuit
-            Vector3 localTarget = transform.InverseTransformPoint(lookAheadPoint);
+            Vector3 localTarget = transform.InverseTransformPoint(flatLookAhead);
             float targetSteerAngle = Mathf.Atan2(localTarget.x, localTarget.z) * Mathf.Rad2Deg;
             targetSteerAngle = Mathf.Clamp(targetSteerAngle, -maxSteerAngle, maxSteerAngle);
 
-            // Smooth steering
-            currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteerAngle, Time.fixedDeltaTime * steeringSmoothSpeed);
+            // Smooth steering with adaptive speed based on turn sharpness
+            float steerSpeed = steeringSmoothSpeed * (1f + Mathf.Abs(targetSteerAngle) / maxSteerAngle);
+            currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteerAngle, Time.fixedDeltaTime * steerSpeed);
 
             // Apply to front wheels
             if (frontLeftCollider != null) frontLeftCollider.steerAngle = currentSteerAngle;
@@ -276,31 +320,53 @@ namespace TrafficSystem
         /// </summary>
         private Vector3 GetLookAheadPoint()
         {
-            float accumulatedDistance = 0f;
+            if (currentSegment == null || currentWaypointIndex >= currentSegment.waypoints.Count)
+                return transform.position + transform.forward * lookAheadDistance;
+
+            // Start from current waypoint
+            Vector3 carPos = transform.position;
+            float remainingDistance = lookAheadDistance;
             int searchIndex = currentWaypointIndex;
 
+            // Skip waypoints that are behind us
+            while (searchIndex < currentSegment.waypoints.Count)
+            {
+                Vector3 wpPos = currentSegment.waypoints[searchIndex].position;
+                Vector3 toWaypoint = wpPos - carPos;
+
+                // Check if waypoint is ahead of us
+                float dotProduct = Vector3.Dot(toWaypoint.normalized, transform.forward);
+                if (dotProduct > 0.3f) // At least somewhat in front
+                {
+                    break;
+                }
+
+                searchIndex++;
+            }
+
+            // Find lookahead point
             while (searchIndex < currentSegment.waypoints.Count)
             {
                 Waypoint wp = currentSegment.waypoints[searchIndex];
-                float distToWaypoint = Vector3.Distance(transform.position, wp.position);
+                float distToWaypoint = Vector3.Distance(carPos, wp.position);
 
-                if (accumulatedDistance + distToWaypoint >= lookAheadDistance)
+                if (distToWaypoint >= remainingDistance)
                 {
                     return wp.position;
                 }
 
-                accumulatedDistance += distToWaypoint;
+                remainingDistance -= distToWaypoint;
                 searchIndex++;
-
-                if (searchIndex >= currentSegment.waypoints.Count)
-                {
-                    // Return last waypoint if we've run out
-                    return currentSegment.waypoints[currentSegment.waypoints.Count - 1].position;
-                }
             }
 
-            // Fallback to current waypoint
-            return currentSegment.waypoints[currentWaypointIndex].position;
+            // Return last waypoint if we've run out
+            if (currentSegment.waypoints.Count > 0)
+            {
+                return currentSegment.waypoints[currentSegment.waypoints.Count - 1].position;
+            }
+
+            // Ultimate fallback
+            return transform.position + transform.forward * lookAheadDistance;
         }
 
         /// <summary>
@@ -388,8 +454,21 @@ namespace TrafficSystem
             currentSegment = segment;
             currentWaypointIndex = waypointIndex;
             transform.position = position;
-            transform.rotation = rotation;
-            rb.linearVelocity = rotation * Vector3.forward * (targetSpeed / 3.6f);
+
+            // Flatten rotation to keep car level
+            Vector3 forward = rotation * Vector3.forward;
+            forward.y = 0;
+            if (forward.sqrMagnitude > 0.01f)
+            {
+                forward.Normalize();
+                transform.rotation = Quaternion.LookRotation(forward);
+            }
+            else
+            {
+                transform.rotation = rotation;
+            }
+
+            rb.linearVelocity = transform.forward * (targetSpeed / 3.6f);
             rb.angularVelocity = Vector3.zero;
 
             if (logPathChanges)

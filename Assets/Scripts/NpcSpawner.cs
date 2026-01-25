@@ -148,14 +148,31 @@ namespace TrafficSystem
                     continue;
                 }
 
-                // Position and orient vehicle
-                npcVehicle.transform.position = spawnPos + Vector3.up * 0.5f;
+                // Find actual ground height with raycast
+                Vector3 actualSpawnPos = spawnPos + Vector3.up * 2f;
+                if (Physics.Raycast(actualSpawnPos, Vector3.down, out RaycastHit hit, 10f))
+                {
+                    npcVehicle.transform.position = hit.point + Vector3.up * 0.3f;
+                }
+                else
+                {
+                    npcVehicle.transform.position = spawnPos + Vector3.up * 0.3f;
+                }
 
-                // Safe rotation with zero vector check
+                // Safe rotation with zero vector check - flatten to horizontal
                 Vector3 forward = spawnWaypoint.forward;
                 if (forward.sqrMagnitude < 0.01f)
                 {
                     forward = Vector3.forward;
+                }
+                forward.y = 0; // Keep car level on road
+                if (forward.sqrMagnitude < 0.01f)
+                {
+                    forward = Vector3.forward;
+                }
+                else
+                {
+                    forward.Normalize();
                 }
                 npcVehicle.transform.rotation = Quaternion.LookRotation(forward);
 
@@ -164,6 +181,14 @@ namespace TrafficSystem
                 if (carAgent != null)
                 {
                     carAgent.Initialize(roadGraphBuilder, segment, waypointIndex);
+
+                    // Give initial velocity
+                    Rigidbody rb = npcVehicle.GetComponent<Rigidbody>();
+                    if (rb != null)
+                    {
+                        rb.linearVelocity = forward * 8f; // ~30 km/h initial speed
+                        rb.angularVelocity = Vector3.zero;
+                    }
                 }
                 else
                 {
@@ -280,13 +305,31 @@ namespace TrafficSystem
             GameObject npc = GetOrCreateNpc();
             Waypoint wp = segment.waypoints[waypointIndex];
 
-            npc.transform.position = wp.position + Vector3.up * 0.5f;
+            // Find actual ground height with raycast
+            Vector3 spawnPos = wp.position + Vector3.up * 2f;
+            if (Physics.Raycast(spawnPos, Vector3.down, out RaycastHit hit, 10f))
+            {
+                npc.transform.position = hit.point + Vector3.up * 0.3f;
+            }
+            else
+            {
+                npc.transform.position = wp.position + Vector3.up * 0.3f;
+            }
 
-            // Safe rotation
+            // Safe rotation - flatten to horizontal
             Vector3 forward = wp.forward;
             if (forward.sqrMagnitude < 0.01f)
             {
                 forward = Vector3.forward;
+            }
+            forward.y = 0; // Keep car level
+            if (forward.sqrMagnitude < 0.01f)
+            {
+                forward = Vector3.forward;
+            }
+            else
+            {
+                forward.Normalize();
             }
             npc.transform.rotation = Quaternion.LookRotation(forward);
 
@@ -294,6 +337,14 @@ namespace TrafficSystem
             if (carAgent != null)
             {
                 carAgent.Initialize(roadGraphBuilder, segment, waypointIndex);
+
+                // Give initial velocity
+                Rigidbody rb = npc.GetComponent<Rigidbody>();
+                if (rb != null)
+                {
+                    rb.linearVelocity = forward * 8f; // ~30 km/h initial speed
+                    rb.angularVelocity = Vector3.zero;
+                }
             }
 
             NpcRecovery recovery = npc.GetComponent<NpcRecovery>();
