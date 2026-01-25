@@ -26,6 +26,12 @@ namespace TrafficSystem
         [SerializeField] private float initialSpawnDelay = 0.5f;
         [Tooltip("Delay between each NPC spawn (seconds)")]
         [SerializeField] private float spawnDelay = 0.3f;
+        [Tooltip("Raycast mask for grounding spawn position")]
+        [SerializeField] private LayerMask spawnGroundMask = ~0;
+        [Tooltip("Raycast height above waypoint for grounding")]
+        [SerializeField] private float spawnRaycastHeight = 5f;
+        [Tooltip("Raycast distance downward for grounding")]
+        [SerializeField] private float spawnRaycastDistance = 10f;
 
         [Header("Pooling")]
         [Tooltip("Enable object pooling (disable/enable instead of destroy/instantiate)")]
@@ -185,7 +191,7 @@ namespace TrafficSystem
                     heightOffset = carAgent.GetGroundClearanceOffset();
                 }
 
-                Vector3 finalSpawnPos = spawnPos + Vector3.up * heightOffset;
+                Vector3 finalSpawnPos = GetGroundedSpawnPosition(spawnPos, heightOffset);
                 npcVehicle.transform.position = finalSpawnPos;
 
                 if (showDebugInfo)
@@ -358,7 +364,7 @@ namespace TrafficSystem
             NpcCarAgent carAgent = npc.GetComponent<NpcCarAgent>();
             if (carAgent != null)
                 heightOffset = carAgent.GetGroundClearanceOffset();
-            npc.transform.position = wp.position + Vector3.up * heightOffset;
+            npc.transform.position = GetGroundedSpawnPosition(wp.position, heightOffset);
 
             // Safe rotation - flatten to horizontal
             Vector3 forward = wp.forward;
@@ -454,6 +460,18 @@ namespace TrafficSystem
                 ClearAllNpcs();
             }
             GUILayout.EndArea();
+        }
+
+        private Vector3 GetGroundedSpawnPosition(Vector3 basePosition, float heightOffset)
+        {
+            Vector3 origin = basePosition + Vector3.up * spawnRaycastHeight;
+            float maxDistance = spawnRaycastHeight + spawnRaycastDistance;
+            if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, maxDistance, spawnGroundMask, QueryTriggerInteraction.Ignore))
+            {
+                return hit.point + Vector3.up * heightOffset;
+            }
+
+            return basePosition + Vector3.up * heightOffset;
         }
     }
 }

@@ -46,7 +46,7 @@ namespace TrafficSystemEditor
 
                 if (GUILayout.Button("Find RoadGraphBuilder in Scene"))
                 {
-                    roadGraphBuilder = FindObjectOfType<RoadGraphBuilder>();
+                    roadGraphBuilder = FindFirstObjectByType<RoadGraphBuilder>();
                     if (roadGraphBuilder != null)
                     {
                         Debug.Log($"[RouteVisualizer] Found RoadGraphBuilder: {roadGraphBuilder.name}");

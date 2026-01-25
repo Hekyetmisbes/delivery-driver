@@ -12,11 +12,27 @@ namespace TrafficSystem
     {
         [Header("Off-Road Detection")]
         [Tooltip("Max distance from road before considered off-road (meters)")]
-        [SerializeField] private float offRoadThreshold = 15f; // Increased to prevent false positives
+        [SerializeField] private float offRoadThreshold = 8f; // Catch cars before they go too far
         [Tooltip("Max vertical distance from road before considered off-road (meters)")]
-        [SerializeField] private float verticalOffRoadThreshold = 2f;
+        [SerializeField] private float verticalOffRoadThreshold = 3f;
         [Tooltip("Check interval (seconds)")]
-        [SerializeField] private float checkInterval = 1f; // Check less frequently
+        [SerializeField] private float checkInterval = 0.5f; // Faster detection
+        [Tooltip("Seconds off-road before recovery triggers")]
+        [SerializeField] private float offRoadRequiredSeconds = 2.0f; // Less aggressive
+        [Tooltip("Cooldown after a recovery (seconds)")]
+        [SerializeField] private float recoveryCooldownSeconds = 5f; // Longer cooldown to prevent loops
+        [Tooltip("Disable all recovery logic for this NPC")]
+        [SerializeField] private bool disableRecovery = false;
+        [Tooltip("Disable recovery if name contains any of these (case-insensitive)")]
+        [SerializeField] private string[] disableRecoveryNameContains = new string[0];
+
+        [Header("Scene Boundary")]
+        [Tooltip("Enable scene boundary safety net")]
+        [SerializeField] private bool enableSceneBoundary = true;
+        [Tooltip("Maximum distance from origin before emergency recovery (meters)")]
+        [SerializeField] private float sceneBoundaryRadius = 150f;
+        [Tooltip("Emergency recovery ignores cooldown")]
+        [SerializeField] private bool emergencyRecoveryIgnoresCooldown = true;
 
         [Header("Stuck Detection")]
         [Tooltip("Minimum speed before considered stuck (km/h)")]
@@ -31,6 +47,12 @@ namespace TrafficSystem
         [SerializeField] private float recoverySpeed = 20f;
         [Tooltip("Smooth recovery rotation speed")]
         [SerializeField] private float recoveryRotationSpeed = 5f;
+        [Tooltip("Raycast mask for snapping to road/ground")]
+        [SerializeField] private LayerMask snapGroundMask = ~0;
+        [Tooltip("Raycast height above snap point")]
+        [SerializeField] private float snapRaycastHeight = 5f;
+        [Tooltip("Raycast distance downward")]
+        [SerializeField] private float snapRaycastDistance = 10f;
 
         [Header("Debug")]
         [SerializeField] private bool showDebugInfo = true;
@@ -46,6 +68,8 @@ namespace TrafficSystem
         private float stuckTimer;
         private Vector3 lastPosition;
         private bool isRecovering;
+        private float offRoadTimer;
+        private float lastRecoveryTime;
 
         // Stats
         private int recoveryCount;
@@ -60,6 +84,21 @@ namespace TrafficSystem
         {
             lastPosition = transform.position;
             nextCheckTime = Time.time + checkInterval;
+
+            // FORCE FIX: Enable recovery for all vehicles
+            // This overrides any prefab settings that might be stuck
+            if (disableRecovery)
+            {
+                Debug.LogWarning($"[NpcRecovery] {name} - FORCE ENABLING recovery (was disabled in prefab)");
+                disableRecovery = false;
+            }
+
+            // Enable scene boundary for safety
+            enableSceneBoundary = true;
+            sceneBoundaryRadius = 150f;
+            emergencyRecoveryIgnoresCooldown = true;
+
+            Debug.Log($"[NpcRecovery] {name} - Recovery ENABLED, Boundary: {sceneBoundaryRadius}m");
         }
 
         /// <summary>
@@ -73,6 +112,15 @@ namespace TrafficSystem
         private void Update()
         {
             if (!carAgent.IsInitialized || roadGraphBuilder == null) return;
+
+            // Debug log to see if recovery is disabled
+            if (showDebugInfo && Time.frameCount % 120 == 0) // Log every 120 frames
+            {
+                Debug.Log($"[NpcRecovery] {name} - DisableRecovery: {disableRecovery}, DisableNameTokens: {(disableRecoveryNameContains?.Length ?? 0)}");
+            }
+
+            // Skip checks if disabled, but still log
+            if (IsRecoveryDisabled()) return;
 
             // Periodic checks
             if (Time.time >= nextCheckTime)
@@ -93,13 +141,72 @@ namespace TrafficSystem
             // Check if off-road
             var roadInfo = GetRoadDistanceInfo();
 
-            if (roadInfo.horizontalDistance > offRoadThreshold || roadInfo.verticalDistance > verticalOffRoadThreshold)
+            bool isOffRoad = roadInfo.horizontalDistance > offRoadThreshold || roadInfo.verticalDistance > verticalOffRoadThreshold;
+            if (isOffRoad)
             {
+                offRoadTimer += checkInterval;
                 if (logRecoveryEvents)
                 {
                     Debug.LogWarning($"[NpcRecovery] {name} is off-road! Horizontal: {roadInfo.horizontalDistance:F1}m, Vertical: {roadInfo.verticalDistance:F1}m");
                 }
-                TriggerRecovery("Off-road");
+                if (offRoadTimer >= offRoadRequiredSeconds && Time.time - lastRecoveryTime >= recoveryCooldownSeconds)
+                {
+                    TriggerRecovery("Off-road");
+                }
+            }
+            else
+            {
+                offRoadTimer = 0f;
+            }
+
+            // Check if vehicle is flipped
+            float upDot = Vector3.Dot(transform.up, Vector3.up);
+            if (showDebugInfo && Time.frameCount % 60 == 0) // Log every 60 frames
+            {
+                Debug.Log($"[NpcRecovery] {name} - UpDot: {upDot:F2}, IsFlipped: {IsFlipped()}, DisableRecovery: {IsRecoveryDisabled()}");
+            }
+
+            if (IsFlipped())
+            {
+                if (Time.time - lastRecoveryTime >= recoveryCooldownSeconds)
+                {
+                    if (logRecoveryEvents)
+                    {
+                        Debug.LogWarning($"[NpcRecovery] {name} is flipped! UpDot: {upDot:F2}");
+                    }
+                    TriggerRecovery("Flipped");
+                }
+            }
+
+            // Check if vehicle is falling
+            if (rb != null && rb.linearVelocity.y < -10f) // Falling fast
+            {
+                if (Time.time - lastRecoveryTime >= recoveryCooldownSeconds)
+                {
+                    if (logRecoveryEvents)
+                    {
+                        Debug.LogWarning($"[NpcRecovery] {name} is falling! Velocity Y: {rb.linearVelocity.y:F1}m/s");
+                    }
+                    TriggerRecovery("Falling");
+                }
+            }
+
+            // Check scene boundary
+            if (enableSceneBoundary)
+            {
+                float distanceFromOrigin = transform.position.magnitude;
+                if (distanceFromOrigin > sceneBoundaryRadius)
+                {
+                    bool allowRecovery = emergencyRecoveryIgnoresCooldown || (Time.time - lastRecoveryTime >= recoveryCooldownSeconds);
+                    if (allowRecovery)
+                    {
+                        if (logRecoveryEvents)
+                        {
+                            Debug.LogWarning($"[NpcRecovery] {name} exceeded scene boundary! Distance: {distanceFromOrigin:F1}m (limit: {sceneBoundaryRadius:F1}m)");
+                        }
+                        TriggerRecovery("Scene Boundary");
+                    }
+                }
             }
         }
 
@@ -108,6 +215,9 @@ namespace TrafficSystem
         /// </summary>
         private void UpdateStuckDetection()
         {
+            if (IsRecoveryDisabled()) return;
+            if (isRecovering) return;
+
             float currentSpeed = carAgent.CurrentSpeed;
 
             if (currentSpeed < stuckSpeedThreshold)
@@ -138,15 +248,16 @@ namespace TrafficSystem
             if (roadGraphBuilder == null || roadGraphBuilder.RoadGraph == null)
                 return (0f, 0f);
 
-            var (segment, waypointIndex, projectedPoint, tangent) = roadGraphBuilder.RoadGraph.ProjectPointOnRoad(transform.position);
+            Vector3 referencePos = GetReferencePosition();
+            var (segment, waypointIndex, projectedPoint, tangent) = roadGraphBuilder.RoadGraph.ProjectPointOnRoad(referencePos);
             if (segment == null)
                 return (0f, 0f);
 
-            Vector3 flatPos = transform.position;
+            Vector3 flatPos = referencePos;
             flatPos.y = projectedPoint.y;
 
             float horizontal = Vector3.Distance(flatPos, projectedPoint);
-            float vertical = Mathf.Abs(transform.position.y - projectedPoint.y);
+            float vertical = Mathf.Abs(referencePos.y - projectedPoint.y);
             return (horizontal, vertical);
         }
 
@@ -155,10 +266,13 @@ namespace TrafficSystem
         /// </summary>
         private void TriggerRecovery(string reason)
         {
+            // Don't check IsRecoveryDisabled here - let emergency recoveries work
             if (isRecovering) return;
+            if (Time.time - lastRecoveryTime < recoveryCooldownSeconds) return;
 
             recoveryCount++;
             isRecovering = true;
+            lastRecoveryTime = Time.time;
 
             if (logRecoveryEvents)
             {
@@ -166,7 +280,8 @@ namespace TrafficSystem
             }
 
             // Find nearest road segment and project vehicle back
-            var (segment, waypointIndex, projectedPoint, tangent) = roadGraphBuilder.RoadGraph.ProjectPointOnRoad(transform.position);
+            Vector3 referencePos = GetReferencePosition();
+            var (segment, waypointIndex, projectedPoint, tangent) = roadGraphBuilder.RoadGraph.ProjectPointOnRoad(referencePos);
 
             if (segment != null)
             {
@@ -175,7 +290,8 @@ namespace TrafficSystem
                 if (carAgent != null)
                     heightOffset = Mathf.Max(heightOffset, carAgent.GetGroundClearanceOffset());
 
-                Vector3 snapPosition = projectedPoint + Vector3.up * heightOffset;
+                Vector3 snapBase = GetGroundedPoint(projectedPoint);
+                Vector3 snapPosition = snapBase + Vector3.up * heightOffset;
 
                 // Safe rotation with zero vector check - flatten to horizontal
                 if (tangent.sqrMagnitude < 0.01f)
@@ -207,6 +323,7 @@ namespace TrafficSystem
             }
 
             isRecovering = false;
+            offRoadTimer = 0f;
         }
 
         /// <summary>
@@ -214,21 +331,64 @@ namespace TrafficSystem
         /// </summary>
         private void SnapToRoad(RoadSegment segment, int waypointIndex, Vector3 position, Quaternion rotation)
         {
-            // Use ForceReposition from NpcCarAgent
-            carAgent.ForceReposition(segment, waypointIndex, position, rotation);
+            // CRITICAL FIX: Make rigidbody kinematic during snap to prevent physics explosions
+            bool wasKinematic = rb.isKinematic;
+            rb.isKinematic = true;
 
-            // Apply recovery speed
-            rb.linearVelocity = rotation * Vector3.forward * (recoverySpeed / 3.6f);
+            // Reset all physics
+            rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
 
-            // Reset stuck timer
+            // Set position and rotation using rigidbody (not transform)
+            rb.position = position;
+            rb.rotation = rotation;
+
+            // Sync physics transforms immediately
+            Physics.SyncTransforms();
+
+            // Now use ForceReposition from NpcCarAgent
+            carAgent.ForceReposition(segment, waypointIndex, position, rotation);
+
+            // Re-enable physics and apply gentle velocity
+            rb.isKinematic = wasKinematic;
+
+            // Apply recovery velocity immediately but gently
+            Vector3 recoveryVelocity = rotation * Vector3.forward * (recoverySpeed / 3.6f);
+            rb.linearVelocity = recoveryVelocity;
+            rb.angularVelocity = Vector3.zero;
+
+            // Reset timers
             stuckTimer = 0f;
+            offRoadTimer = 0f;
             lastPosition = position;
 
             if (logRecoveryEvents)
             {
-                Debug.Log($"[NpcRecovery] {name} snapped to segment '{segment.name}' at waypoint {waypointIndex}");
+                Debug.Log($"[NpcRecovery] {name} snapped to segment '{segment.name}' at waypoint {waypointIndex}, pos: {position}, velocity: {recoveryVelocity.magnitude:F1}m/s");
             }
+        }
+
+        private Vector3 GetReferencePosition()
+        {
+            if (carAgent != null)
+                return carAgent.GetReferencePosition();
+
+            if (rb != null)
+                return rb.worldCenterOfMass;
+
+            return transform.position;
+        }
+
+        private Vector3 GetGroundedPoint(Vector3 desiredPoint)
+        {
+            Vector3 origin = desiredPoint + Vector3.up * snapRaycastHeight;
+            float maxDistance = snapRaycastHeight + snapRaycastDistance;
+            if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, maxDistance, snapGroundMask, QueryTriggerInteraction.Ignore))
+            {
+                return hit.point;
+            }
+
+            return desiredPoint;
         }
 
         /// <summary>
@@ -236,7 +396,10 @@ namespace TrafficSystem
         /// </summary>
         private bool IsFlipped()
         {
-            return Vector3.Dot(transform.up, Vector3.up) < 0.5f;
+            float upDot = Vector3.Dot(transform.up, Vector3.up);
+            // More aggressive: flipped if upDot < 0.7 (instead of 0.5)
+            // 0.7 means ~45 degrees tilted
+            return upDot < 0.7f;
         }
 
         private void OnDrawGizmos()
@@ -272,6 +435,7 @@ namespace TrafficSystem
         private void OnGUI()
         {
             if (!showDebugInfo) return;
+            if (IsRecoveryDisabled()) return;
 
             // Draw debug info above vehicle in world space
             Vector3 screenPos = Camera.main.WorldToScreenPoint(transform.position + Vector3.up * 3f);
@@ -300,5 +464,26 @@ namespace TrafficSystem
         /// Get recovery statistics
         /// </summary>
         public int GetRecoveryCount() => recoveryCount;
+
+        public void SetRecoveryDisabled(bool disabled)
+        {
+            disableRecovery = disabled;
+        }
+
+        private bool IsRecoveryDisabled()
+        {
+            if (disableRecovery) return true;
+            if (disableRecoveryNameContains == null || disableRecoveryNameContains.Length == 0) return false;
+
+            string n = name.ToLowerInvariant();
+            for (int i = 0; i < disableRecoveryNameContains.Length; i++)
+            {
+                string token = disableRecoveryNameContains[i];
+                if (string.IsNullOrEmpty(token)) continue;
+                if (n.Contains(token.ToLowerInvariant())) return true;
+            }
+
+            return false;
+        }
     }
 }

@@ -298,6 +298,7 @@ namespace TrafficSystem
 
                     if (segment.waypoints.Count > 0)
                     {
+                        NormalizeWaypointForwards(segment);
                         roadGraph.roadSegments.Add(segment);
                         Debug.Log($"[RoadGraphBuilder] Sampled road '{segment.name}' via ERRoad API: {segment.waypoints.Count} waypoints");
                         return true;
@@ -347,6 +348,7 @@ namespace TrafficSystem
                 segment.waypoints.Add(new Waypoint(pos, forward, segmentId));
             }
 
+            NormalizeWaypointForwards(segment);
             roadGraph.roadSegments.Add(segment);
             Debug.Log($"[RoadGraphBuilder] Sampled road '{segment.name}' from markers: {segment.waypoints.Count} waypoints");
             return true;
@@ -531,6 +533,7 @@ namespace TrafficSystem
                 segment.waypoints.Add(new Waypoint(pos, forward, segmentId));
             }
 
+            NormalizeWaypointForwards(segment);
             roadGraph.roadSegments.Add(segment);
             Debug.Log($"[RoadGraphBuilder] Sampled road '{segment.name}' from marker components: {segment.waypoints.Count} waypoints");
             return true;
@@ -562,6 +565,12 @@ namespace TrafficSystem
                     if (prop.PropertyType == typeof(float))
                         return (float)prop.GetValue(marker, null);
                 }
+            }
+
+            Transform tr = marker.transform;
+            if (tr != null && tr.parent != null)
+            {
+                return tr.GetSiblingIndex();
             }
 
             return float.MaxValue;
@@ -609,6 +618,7 @@ namespace TrafficSystem
                 segment.waypoints.Add(new Waypoint(pos, forward, segmentId));
             }
 
+            NormalizeWaypointForwards(segment);
             roadGraph.roadSegments.Add(segment);
             Debug.Log($"[RoadGraphBuilder] Sampled road from road object markers: {segment.waypoints.Count} waypoints");
             return true;
@@ -708,6 +718,7 @@ namespace TrafficSystem
 
             if (segment.waypoints.Count > 0)
             {
+                NormalizeWaypointForwards(segment);
                 roadGraph.roadSegments.Add(segment);
                 Debug.Log($"[RoadGraphBuilder] Sampled road '{segment.name}' from mesh hierarchy: {segment.waypoints.Count} waypoints");
                 return true;
@@ -921,6 +932,7 @@ namespace TrafficSystem
 
             if (segment.waypoints.Count > 0)
             {
+                NormalizeWaypointForwards(segment);
                 roadGraph.roadSegments.Add(segment);
                 Debug.Log($"[RoadGraphBuilder] Sampled road '{segment.name}' from transforms: {segment.waypoints.Count} waypoints");
             }
@@ -1035,6 +1047,8 @@ namespace TrafficSystem
 
                 segment.waypoints.Add(new Waypoint(pos, forward, segmentId));
             }
+
+            NormalizeWaypointForwards(segment);
         }
 
         /// <summary>
@@ -1140,6 +1154,41 @@ namespace TrafficSystem
                 result.Add(points[points.Count - 1]);
 
             return result;
+        }
+
+        private void NormalizeWaypointForwards(RoadSegment segment)
+        {
+            if (segment == null || segment.waypoints.Count == 0) return;
+
+            Vector3 prev = segment.waypoints[0].forward;
+            if (prev.sqrMagnitude < 0.01f && segment.waypoints.Count > 1)
+            {
+                prev = segment.waypoints[1].position - segment.waypoints[0].position;
+            }
+
+            prev.y = 0f;
+            if (prev.sqrMagnitude < 0.01f)
+                prev = Vector3.forward;
+            prev.Normalize();
+            segment.waypoints[0].forward = prev;
+
+            for (int i = 1; i < segment.waypoints.Count; i++)
+            {
+                Vector3 fwd = segment.waypoints[i].forward;
+                if (fwd.sqrMagnitude < 0.01f)
+                    fwd = prev;
+
+                fwd.y = 0f;
+                if (fwd.sqrMagnitude < 0.01f)
+                    fwd = prev;
+
+                if (Vector3.Dot(fwd, prev) < 0f)
+                    fwd = -fwd;
+
+                fwd.Normalize();
+                segment.waypoints[i].forward = fwd;
+                prev = fwd;
+            }
         }
 
         private static Type ResolveType(string typeName)

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace TrafficSystem
@@ -62,6 +63,16 @@ namespace TrafficSystem
         [Tooltip("Anti-roll stiffness")]
         [SerializeField] private float antiRollStiffness = 6000f;
 
+        [Header("Physics")]
+        [Tooltip("Rigidbody interpolation mode")]
+        [SerializeField] private RigidbodyInterpolation rbInterpolation = RigidbodyInterpolation.Interpolate;
+        [Tooltip("Rigidbody collision detection mode")]
+        [SerializeField] private CollisionDetectionMode rbCollisionDetection = CollisionDetectionMode.ContinuousDynamic;
+        [Tooltip("Solver iterations (higher = more stable)")]
+        [SerializeField] private int solverIterations = 12;
+        [Tooltip("Solver velocity iterations (higher = more stable)")]
+        [SerializeField] private int solverVelocityIterations = 12;
+
         [Header("Debug")]
         [SerializeField] private bool showDebugGizmos = true;
         [SerializeField] private bool logPathChanges = false;
@@ -73,6 +84,12 @@ namespace TrafficSystem
         [SerializeField] private float groundRaycastHeight = 5f;
         [Tooltip("Raycast distance downward")]
         [SerializeField] private float groundRaycastDistance = 10f;
+        [Tooltip("Prefer Road layer for grounding when groundMask is set to Everything")]
+        [SerializeField] private bool preferRoadLayerIfPresent = false;
+        [Tooltip("Minimum clearance used for spawn/recovery height")]
+        [SerializeField] private float minGroundClearance = 0.1f;
+        [Tooltip("Maximum clearance used for spawn/recovery height")]
+        [SerializeField] private float maxGroundClearance = 0.5f;
 
         // Runtime state
         private Rigidbody rb;
@@ -85,6 +102,7 @@ namespace TrafficSystem
         private bool isInitialized;
         private Vector3 currentLookAheadPoint;
         private bool isObstacleDetected;
+        private bool isPotentiallyOffRoad;
         private float wheelBase;
 
         // Randomized behavior parameters
@@ -101,38 +119,80 @@ namespace TrafficSystem
 
         public float GetGroundClearanceOffset()
         {
-            float offset = 0.3f;
-            bool usedWheelOffsets = false;
+            // Start with minimal offset
+            float offset = 0.1f;
 
-            offset = Mathf.Max(offset, GetWheelRootOffset(frontLeftCollider, ref usedWheelOffsets));
-            offset = Mathf.Max(offset, GetWheelRootOffset(frontRightCollider, ref usedWheelOffsets));
-            offset = Mathf.Max(offset, GetWheelRootOffset(rearLeftCollider, ref usedWheelOffsets));
-            offset = Mathf.Max(offset, GetWheelRootOffset(rearRightCollider, ref usedWheelOffsets));
+            // Use wheel radius only (suspension will compress when grounded)
+            // But cap it at 0.4m to prevent spawning too high
+            if (frontLeftCollider != null) offset = Mathf.Max(offset, Mathf.Min(frontLeftCollider.radius, 0.4f));
+            if (frontRightCollider != null) offset = Mathf.Max(offset, Mathf.Min(frontRightCollider.radius, 0.4f));
+            if (rearLeftCollider != null) offset = Mathf.Max(offset, Mathf.Min(rearLeftCollider.radius, 0.4f));
+            if (rearRightCollider != null) offset = Mathf.Max(offset, Mathf.Min(rearRightCollider.radius, 0.4f));
 
-            if (!usedWheelOffsets)
-            {
-                offset = Mathf.Max(offset, GetWheelClearance(frontLeftCollider));
-                offset = Mathf.Max(offset, GetWheelClearance(frontRightCollider));
-                offset = Mathf.Max(offset, GetWheelClearance(rearLeftCollider));
-                offset = Mathf.Max(offset, GetWheelClearance(rearRightCollider));
-            }
+            // CRITICAL: Clamp to very low values
+            offset = Mathf.Clamp(offset, 0.1f, 0.5f);
 
-            return offset + 0.05f;
+            Debug.Log($"[NpcCarAgent] {name} - Ground clearance: {offset:F2}m");
+            return offset;
         }
 
         private float GetWheelClearance(WheelCollider wheel)
         {
             if (wheel == null) return 0f;
-            return wheel.radius + wheel.suspensionDistance;
+            return wheel.radius; // Just radius, suspension will compress
         }
 
-        private float GetWheelRootOffset(WheelCollider wheel, ref bool used)
+        private float GetWheelRootOffsetSafe(WheelCollider wheel, ref bool used)
         {
             if (wheel == null) return 0f;
             Vector3 localPos = transform.InverseTransformPoint(wheel.transform.position);
             float required = wheel.radius - localPos.y;
             used = true;
+            float clearance = wheel.radius + wheel.suspensionDistance;
+            float maxReasonable = Mathf.Max(1.5f, wheel.radius * 4f + 0.2f);
+            if (required < 0.05f || required > maxReasonable)
+            {
+                return clearance;
+            }
             return required;
+        }
+
+        private float GetBoundsClearance()
+        {
+            Collider[] colliders = GetComponentsInChildren<Collider>();
+            if (colliders == null || colliders.Length == 0) return 0f;
+
+            Bounds bounds = colliders[0].bounds;
+            for (int i = 1; i < colliders.Length; i++)
+            {
+                bounds.Encapsulate(colliders[i].bounds);
+            }
+
+            float clearance = transform.position.y - bounds.min.y;
+            return Mathf.Max(0f, clearance);
+        }
+
+        public Vector3 GetReferencePosition()
+        {
+            Vector3 sum = Vector3.zero;
+            int count = 0;
+
+            if (frontLeftCollider != null) { sum += frontLeftCollider.transform.position; count++; }
+            if (frontRightCollider != null) { sum += frontRightCollider.transform.position; count++; }
+            if (rearLeftCollider != null) { sum += rearLeftCollider.transform.position; count++; }
+            if (rearRightCollider != null) { sum += rearRightCollider.transform.position; count++; }
+
+            if (count > 0)
+                return sum / count;
+
+            if (rb != null)
+                return rb.worldCenterOfMass;
+
+            Collider col = GetComponentInChildren<Collider>();
+            if (col != null)
+                return col.bounds.center;
+
+            return transform.position;
         }
 
         private void Awake()
@@ -172,8 +232,13 @@ namespace TrafficSystem
             // Randomize physics properties slightly for variation
             rb.mass = Random.Range(1300f, 1700f); // 1300-1700 kg
             rb.linearDamping = Random.Range(0.04f, 0.06f);
-            rb.angularDamping = Random.Range(0.4f, 0.6f);
+            rb.angularDamping = Random.Range(0.6f, 1.0f); // Increased for better stability
             rb.centerOfMass = new Vector3(0, -0.5f, 0);
+
+            rb.interpolation = rbInterpolation;
+            rb.collisionDetectionMode = rbCollisionDetection;
+            if (solverIterations > 0) rb.solverIterations = solverIterations;
+            if (solverVelocityIterations > 0) rb.solverVelocityIterations = solverVelocityIterations;
         }
 
         /// <summary>
@@ -229,6 +294,7 @@ namespace TrafficSystem
             if (!isInitialized || currentSegment == null) return;
 
             UpdatePath();
+            UpdateOffRoadStatus();
             CheckObstacles();
             ApplySteering();
             ApplyStability();
@@ -302,6 +368,34 @@ namespace TrafficSystem
         }
 
         /// <summary>
+        /// Update off-road status based on proximity to road
+        /// </summary>
+        private void UpdateOffRoadStatus()
+        {
+            if (roadGraphBuilder == null || roadGraphBuilder.RoadGraph == null)
+            {
+                isPotentiallyOffRoad = false;
+                return;
+            }
+
+            Vector3 referencePos = GetReferencePosition();
+            var (segment, waypointIndex, projectedPoint, tangent) = roadGraphBuilder.RoadGraph.ProjectPointOnRoad(referencePos);
+
+            if (segment == null)
+            {
+                isPotentiallyOffRoad = true;
+                return;
+            }
+
+            Vector3 flatPos = referencePos;
+            flatPos.y = projectedPoint.y;
+            float horizontalDistance = Vector3.Distance(flatPos, projectedPoint);
+
+            // Consider off-road if more than 5m from road
+            isPotentiallyOffRoad = horizontalDistance > 5f;
+        }
+
+        /// <summary>
         /// Teleport vehicle to random road position
         /// </summary>
         private void TeleportToRandomRoad()
@@ -363,9 +457,16 @@ namespace TrafficSystem
             float steerSpeed = personalitySteerSpeed * (1f + Mathf.Abs(targetSteerAngle) / maxSteerAngle);
             currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteerAngle, Time.fixedDeltaTime * steerSpeed);
 
+            // Reduce steering when off-road to prevent wild maneuvers
+            float finalSteerAngle = currentSteerAngle;
+            if (isPotentiallyOffRoad)
+            {
+                finalSteerAngle *= 0.5f;
+            }
+
             // Apply to front wheels
-            if (frontLeftCollider != null) frontLeftCollider.steerAngle = currentSteerAngle;
-            if (frontRightCollider != null) frontRightCollider.steerAngle = currentSteerAngle;
+            if (frontLeftCollider != null) frontLeftCollider.steerAngle = finalSteerAngle;
+            if (frontRightCollider != null) frontRightCollider.steerAngle = finalSteerAngle;
         }
 
         /// <summary>
@@ -504,12 +605,20 @@ namespace TrafficSystem
 
         private float GetTurnLimitedTargetSpeed()
         {
+            float baseSpeed = targetSpeed;
+
+            // Reduce speed when off-road
+            if (isPotentiallyOffRoad)
+            {
+                baseSpeed *= 0.6f;
+            }
+
             if (!enableStability)
-                return targetSpeed;
+                return baseSpeed;
 
             float steerAbs = Mathf.Abs(currentSteerAngle);
             if (steerAbs < 1f || wheelBase < 0.5f)
-                return targetSpeed;
+                return baseSpeed;
 
             float steerRad = Mathf.Deg2Rad * Mathf.Clamp(steerAbs, 1f, maxSteerAngle);
             float turnRadius = wheelBase / Mathf.Tan(steerRad);
@@ -519,7 +628,7 @@ namespace TrafficSystem
             float maxSpeedKmh = maxSpeedMs * 3.6f;
 
             float steerFactor = Mathf.Lerp(1f, minTurnSpeedFactor, steerAbs / maxSteerAngle);
-            return Mathf.Min(targetSpeed * steerFactor, maxSpeedKmh);
+            return Mathf.Min(baseSpeed * steerFactor, maxSpeedKmh);
         }
 
         private void ApplyStability()
@@ -536,6 +645,19 @@ namespace TrafficSystem
             {
                 ApplyAntiRoll(frontLeftCollider, frontRightCollider, antiRollStiffness);
                 ApplyAntiRoll(rearLeftCollider, rearRightCollider, antiRollStiffness);
+            }
+
+            // Limit angular velocity to prevent excessive spinning
+            if (rb.angularVelocity.magnitude > 3f)
+            {
+                rb.angularVelocity = rb.angularVelocity.normalized * 3f;
+            }
+
+            // Add extra damping when tilted or falling
+            float upDot = Vector3.Dot(transform.up, Vector3.up);
+            if (upDot < 0.7f)
+            {
+                rb.angularVelocity *= 0.95f; // Extra damping
             }
         }
 
@@ -655,6 +777,9 @@ namespace TrafficSystem
             if (groundMask.value != ~0)
                 return;
 
+            if (!preferRoadLayerIfPresent)
+                return;
+
             int roadLayer = LayerMask.NameToLayer("Road");
             if (roadLayer >= 0)
                 groundMask = 1 << roadLayer;
@@ -688,6 +813,16 @@ namespace TrafficSystem
 
             float spanX = maxX - minX;
             float spanZ = maxZ - minZ;
+
+            // Validate for ambiguous wheel geometry
+            float spanRatio = Mathf.Max(spanX, spanZ) / (Mathf.Min(spanX, spanZ) + 0.001f);
+            if (spanRatio < 1.2f) // Spans are too similar (nearly square layout)
+            {
+                // Use default forward
+                modelForwardLocal = Vector3.forward;
+                return;
+            }
+
             Vector3 axis = spanZ >= spanX ? Vector3.forward : Vector3.right;
 
             List<(WheelCollider wheel, Vector3 localPos, float proj)> list = new List<(WheelCollider, Vector3, float)>();
@@ -706,6 +841,14 @@ namespace TrafficSystem
             Vector3 frontAvg = (frontA.localPos + frontB.localPos) * 0.5f;
             float sign = Vector3.Dot(frontAvg, axis) >= 0f ? 1f : -1f;
             modelForwardLocal = axis * sign;
+
+            // Validate forward axis magnitude is reasonable
+            float forwardMagnitude = modelForwardLocal.magnitude;
+            if (forwardMagnitude < 0.5f || forwardMagnitude > 1.5f)
+            {
+                // Unreasonable magnitude, use default
+                modelForwardLocal = Vector3.forward;
+            }
 
             Vector3 rightAxis = Vector3.Cross(Vector3.up, modelForwardLocal).normalized;
             if (rightAxis.sqrMagnitude < 0.001f)

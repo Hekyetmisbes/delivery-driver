@@ -46,7 +46,7 @@ public class CameraFollow : MonoBehaviour
             else
             {
                 // CarController olan objeyi bul
-                CarController car = FindObjectOfType<CarController>();
+                CarController car = FindFirstObjectByType<CarController>();
                 if (car != null) target = car.transform;
             }
         }
