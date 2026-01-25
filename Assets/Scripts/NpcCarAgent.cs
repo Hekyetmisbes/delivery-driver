@@ -141,19 +141,9 @@ namespace TrafficSystem
             {
                 Initialize(builder, segment, waypointIndex);
 
-                // Position vehicle at waypoint
+                // Position vehicle at waypoint (waypoint is already on the road)
                 Waypoint wp = segment.waypoints[waypointIndex];
-
-                // Find actual ground height with raycast
-                Vector3 spawnPos = wp.position + Vector3.up * 2f;
-                if (Physics.Raycast(spawnPos, Vector3.down, out RaycastHit hit, 10f))
-                {
-                    transform.position = hit.point + Vector3.up * 0.3f;
-                }
-                else
-                {
-                    transform.position = wp.position + Vector3.up * 0.3f;
-                }
+                transform.position = wp.position + Vector3.up * 0.2f;
 
                 // Safe rotation - flatten to horizontal plane for road following
                 Vector3 forward = wp.forward;
@@ -268,16 +258,8 @@ namespace TrafficSystem
             {
                 Waypoint wp = segment.waypoints[waypointIndex];
 
-                // Find actual ground height
-                Vector3 newPos = wp.position + Vector3.up * 2f;
-                if (Physics.Raycast(wp.position + Vector3.up * 5f, Vector3.down, out RaycastHit hit, 10f))
-                {
-                    newPos = hit.point + Vector3.up * 0.3f;
-                }
-                else
-                {
-                    newPos = wp.position + Vector3.up * 0.3f;
-                }
+                // Use waypoint position directly (it's on the road)
+                Vector3 newPos = wp.position + Vector3.up * 0.2f;
 
                 // Flatten forward direction
                 Vector3 forward = wp.forward;

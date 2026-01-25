@@ -160,16 +160,8 @@ namespace TrafficSystem
 
             if (segment != null)
             {
-                // Find actual ground height
-                Vector3 snapPosition = projectedPoint + Vector3.up * 2f;
-                if (Physics.Raycast(projectedPoint + Vector3.up * 5f, Vector3.down, out RaycastHit hit, 10f))
-                {
-                    snapPosition = hit.point + Vector3.up * snapHeightOffset;
-                }
-                else
-                {
-                    snapPosition = projectedPoint + Vector3.up * snapHeightOffset;
-                }
+                // Use projected point directly (it's on the road)
+                Vector3 snapPosition = projectedPoint + Vector3.up * snapHeightOffset;
 
                 // Safe rotation with zero vector check - flatten to horizontal
                 if (tangent.sqrMagnitude < 0.01f)

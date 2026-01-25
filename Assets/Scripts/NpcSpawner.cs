@@ -154,16 +154,9 @@ namespace TrafficSystem
                     continue;
                 }
 
-                // Find actual ground height with raycast
-                Vector3 actualSpawnPos = spawnPos + Vector3.up * 2f;
-                if (Physics.Raycast(actualSpawnPos, Vector3.down, out RaycastHit hit, 10f))
-                {
-                    npcVehicle.transform.position = hit.point + Vector3.up * 0.3f;
-                }
-                else
-                {
-                    npcVehicle.transform.position = spawnPos + Vector3.up * 0.3f;
-                }
+                // Use waypoint position directly (it's already on the road)
+                // Just add small height offset to prevent clipping through road surface
+                npcVehicle.transform.position = spawnPos + Vector3.up * 0.2f;
 
                 // Safe rotation with zero vector check - flatten to horizontal
                 Vector3 forward = spawnWaypoint.forward;
@@ -323,16 +316,8 @@ namespace TrafficSystem
             GameObject npc = GetOrCreateNpc();
             Waypoint wp = segment.waypoints[waypointIndex];
 
-            // Find actual ground height with raycast
-            Vector3 spawnPos = wp.position + Vector3.up * 2f;
-            if (Physics.Raycast(spawnPos, Vector3.down, out RaycastHit hit, 10f))
-            {
-                npc.transform.position = hit.point + Vector3.up * 0.3f;
-            }
-            else
-            {
-                npc.transform.position = wp.position + Vector3.up * 0.3f;
-            }
+            // Use waypoint position directly (it's already on the road)
+            npc.transform.position = wp.position + Vector3.up * 0.2f;
 
             // Safe rotation - flatten to horizontal
             Vector3 forward = wp.forward;
