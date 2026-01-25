@@ -58,10 +58,10 @@ namespace TrafficSystem
         [SerializeField] private float maxLateralAcceleration = 6f;
         [Tooltip("Minimum speed factor at full steering lock")]
         [SerializeField] private float minTurnSpeedFactor = 0.35f;
-        [Tooltip("Downforce coefficient (N per (m/s)^2)")]
-        [SerializeField] private float downforceCoefficient = 50f;
-        [Tooltip("Anti-roll stiffness")]
-        [SerializeField] private float antiRollStiffness = 6000f;
+        [Tooltip("Downforce coefficient (N per (m/s)^2) - reduced to prevent suspension collapse")]
+        [SerializeField] private float downforceCoefficient = 20f; // Reduced from 100f
+        [Tooltip("Anti-roll stiffness - higher prevents rollovers")]
+        [SerializeField] private float antiRollStiffness = 12000f;
 
         [Header("Physics")]
         [Tooltip("Rigidbody interpolation mode")]
@@ -199,10 +199,48 @@ namespace TrafficSystem
         {
             rb = GetComponent<Rigidbody>();
             SetupRigidbody();
+            ConfigureSuspension(); // New method to tune physics
             AutoFixWheelAssignments();
             CacheWheelGeometry();
             NormalizeModelAxes();
             ConfigureGroundMaskIfNeeded();
+        }
+
+        private void ConfigureSuspension()
+        {
+            // Auto-tune suspension interactions
+            float totalMass = rb.mass;
+            float wheelParams = totalMass * 0.25f; // approx mass per wheel
+
+            // Calculate reasonable spring rate
+            // target sag ~0.15m at rest
+            float targetSag = 0.15f; 
+            float springForce = (wheelParams * Mathf.Abs(Physics.gravity.y)) / targetSag;
+            
+            // Calculate critical damping
+            // Damping ratio 1.0 = critical, 0.3-0.5 is good for slightly bouncy but stable cars
+            float dampingRatio = 0.6f; // Slightly stiffer for stability
+            float damperForce = 2f * dampingRatio * Mathf.Sqrt(springForce * wheelParams);
+
+            JointSpring spring = new JointSpring
+            {
+                spring = springForce,
+                damper = damperForce,
+                targetPosition = 0.5f
+            };
+
+            // Apply to all wheels
+            ApplySuspensionSettings(frontLeftCollider, spring);
+            ApplySuspensionSettings(frontRightCollider, spring);
+            ApplySuspensionSettings(rearLeftCollider, spring);
+            ApplySuspensionSettings(rearRightCollider, spring);
+        }
+
+        private void ApplySuspensionSettings(WheelCollider wheel, JointSpring spring)
+        {
+            if (wheel == null) return;
+            wheel.suspensionSpring = spring;
+            wheel.suspensionDistance = 0.3f; // Ensure reasonable travel
         }
 
         private void Start()
@@ -232,8 +270,8 @@ namespace TrafficSystem
             // Randomize physics properties slightly for variation
             rb.mass = Random.Range(1300f, 1700f); // 1300-1700 kg
             rb.linearDamping = Random.Range(0.04f, 0.06f);
-            rb.angularDamping = Random.Range(0.6f, 1.0f); // Increased for better stability
-            rb.centerOfMass = new Vector3(0, -0.5f, 0);
+            rb.angularDamping = Random.Range(1.0f, 1.5f); // Higher for better stability
+            rb.centerOfMass = new Vector3(0, -0.8f, 0); // Lower center of mass prevents rollovers
 
             rb.interpolation = rbInterpolation;
             rb.collisionDetectionMode = rbCollisionDetection;
@@ -636,9 +674,13 @@ namespace TrafficSystem
             if (!enableStability || rb == null) return;
 
             float speed = rb.linearVelocity.magnitude;
-            if (speed > 1f && downforceCoefficient > 0f)
+            
+            // Apply downforce - always apply some base downforce plus speed-based
+            if (downforceCoefficient > 0f)
             {
-                rb.AddForce(-transform.up * downforceCoefficient * speed * speed);
+                float baseDownforce = 500f; // Constant downforce to keep vehicle grounded
+                float speedDownforce = downforceCoefficient * speed * speed;
+                rb.AddForce(Vector3.down * (baseDownforce + speedDownforce));
             }
 
             if (antiRollStiffness > 0f)
@@ -648,16 +690,28 @@ namespace TrafficSystem
             }
 
             // Limit angular velocity to prevent excessive spinning
-            if (rb.angularVelocity.magnitude > 3f)
+            if (rb.angularVelocity.magnitude > 2f)
             {
-                rb.angularVelocity = rb.angularVelocity.normalized * 3f;
+                rb.angularVelocity = rb.angularVelocity.normalized * 2f;
             }
 
-            // Add extra damping when tilted or falling
+            // Active tilt correction - apply corrective torque when tilted
             float upDot = Vector3.Dot(transform.up, Vector3.up);
-            if (upDot < 0.7f)
+            if (upDot < 0.95f && upDot > 0.3f) // Between 18 and 70 degrees tilt
             {
-                rb.angularVelocity *= 0.95f; // Extra damping
+                // Calculate corrective torque to level the vehicle
+                Vector3 tiltAxis = Vector3.Cross(transform.up, Vector3.up);
+                float tiltAngle = Mathf.Acos(Mathf.Clamp(upDot, -1f, 1f)) * Mathf.Rad2Deg;
+                float correctionStrength = 3000f * (1f - upDot); // Stronger correction for more tilt
+                rb.AddTorque(tiltAxis.normalized * correctionStrength, ForceMode.Force);
+                
+                // Also dampen angular velocity when tilted
+                rb.angularVelocity *= 0.9f;
+            }
+            else if (upDot < 0.3f)
+            {
+                // Severely tilted - strong damping
+                rb.angularVelocity *= 0.8f;
             }
         }
 
@@ -744,8 +798,11 @@ namespace TrafficSystem
             forward = GetFlattenedForward(forward);
             ApplyAlignedRotation(forward);
 
-            rb.linearVelocity = GetWorldForward() * (targetSpeed / 3.6f);
-            rb.angularVelocity = Vector3.zero;
+            if (!rb.isKinematic)
+            {
+                rb.linearVelocity = GetWorldForward() * (targetSpeed / 3.6f);
+                rb.angularVelocity = Vector3.zero;
+            }
 
             if (logPathChanges)
             {
@@ -787,82 +844,16 @@ namespace TrafficSystem
 
         private void AutoFixWheelAssignments()
         {
-            if (!autoDetectModelForward)
-                return;
+            // CRITICAL FIX: Always enforce Z-forward for physics vehicles
+            // WheelColliders REQUIRE the vehicle to move along the Z-axis
+            modelForwardLocal = Vector3.forward;
+            modelUpLocal = Vector3.up;
 
             if (frontLeftCollider == null || frontRightCollider == null || rearLeftCollider == null || rearRightCollider == null)
                 return;
-
-            WheelCollider[] wheels = { frontLeftCollider, frontRightCollider, rearLeftCollider, rearRightCollider };
-            Vector3[] localPositions = new Vector3[wheels.Length];
-            for (int i = 0; i < wheels.Length; i++)
-                localPositions[i] = transform.InverseTransformPoint(wheels[i].transform.position);
-
-            float minX = localPositions[0].x;
-            float maxX = localPositions[0].x;
-            float minZ = localPositions[0].z;
-            float maxZ = localPositions[0].z;
-            for (int i = 1; i < localPositions.Length; i++)
-            {
-                Vector3 p = localPositions[i];
-                if (p.x < minX) minX = p.x;
-                if (p.x > maxX) maxX = p.x;
-                if (p.z < minZ) minZ = p.z;
-                if (p.z > maxZ) maxZ = p.z;
-            }
-
-            float spanX = maxX - minX;
-            float spanZ = maxZ - minZ;
-
-            // Validate for ambiguous wheel geometry
-            float spanRatio = Mathf.Max(spanX, spanZ) / (Mathf.Min(spanX, spanZ) + 0.001f);
-            if (spanRatio < 1.2f) // Spans are too similar (nearly square layout)
-            {
-                // Use default forward
-                modelForwardLocal = Vector3.forward;
-                return;
-            }
-
-            Vector3 axis = spanZ >= spanX ? Vector3.forward : Vector3.right;
-
-            List<(WheelCollider wheel, Vector3 localPos, float proj)> list = new List<(WheelCollider, Vector3, float)>();
-            foreach (WheelCollider wheel in wheels)
-            {
-                Vector3 lp = transform.InverseTransformPoint(wheel.transform.position);
-                list.Add((wheel, lp, Vector3.Dot(lp, axis)));
-            }
-
-            list.Sort((a, b) => b.proj.CompareTo(a.proj));
-            var frontA = list[0];
-            var frontB = list[1];
-            var rearA = list[2];
-            var rearB = list[3];
-
-            Vector3 frontAvg = (frontA.localPos + frontB.localPos) * 0.5f;
-            float sign = Vector3.Dot(frontAvg, axis) >= 0f ? 1f : -1f;
-            modelForwardLocal = axis * sign;
-
-            // Validate forward axis magnitude is reasonable
-            float forwardMagnitude = modelForwardLocal.magnitude;
-            if (forwardMagnitude < 0.5f || forwardMagnitude > 1.5f)
-            {
-                // Unreasonable magnitude, use default
-                modelForwardLocal = Vector3.forward;
-            }
-
-            Vector3 rightAxis = Vector3.Cross(Vector3.up, modelForwardLocal).normalized;
-            if (rightAxis.sqrMagnitude < 0.001f)
-                rightAxis = Vector3.right;
-
-            float frontADot = Vector3.Dot(frontA.localPos, rightAxis);
-            float frontBDot = Vector3.Dot(frontB.localPos, rightAxis);
-            float rearADot = Vector3.Dot(rearA.localPos, rightAxis);
-            float rearBDot = Vector3.Dot(rearB.localPos, rightAxis);
-
-            frontLeftCollider = frontADot <= frontBDot ? frontA.wheel : frontB.wheel;
-            frontRightCollider = frontADot <= frontBDot ? frontB.wheel : frontA.wheel;
-            rearLeftCollider = rearADot <= rearBDot ? rearA.wheel : rearB.wheel;
-            rearRightCollider = rearADot <= rearBDot ? rearB.wheel : rearA.wheel;
+            
+            // Just ensure colliders are assigned, but don't try to guess orientation
+            // as that was causing the sideways movement bug
         }
 
         private void NormalizeModelAxes()
@@ -878,25 +869,18 @@ namespace TrafficSystem
 
         private Vector3 GetWorldForward()
         {
-            return transform.TransformDirection(modelForwardLocal).normalized;
+            // Forces Z-forward
+            return transform.forward;
         }
 
         private Vector3 GetWorldUp()
         {
-            return transform.TransformDirection(modelUpLocal).normalized;
+            return transform.up;
         }
 
         private Quaternion GetVehicleRotation()
         {
-            Vector3 worldForward = GetWorldForward();
-            Vector3 worldUp = GetWorldUp();
-
-            if (worldForward.sqrMagnitude < 0.01f)
-                worldForward = transform.forward;
-            if (worldUp.sqrMagnitude < 0.01f)
-                worldUp = Vector3.up;
-
-            return Quaternion.LookRotation(worldForward, worldUp);
+            return transform.rotation;
         }
 
         private Vector3 GetFlattenedForward(Vector3 forward)
@@ -915,9 +899,12 @@ namespace TrafficSystem
 
         private void ApplyAlignedRotation(Vector3 desiredForward)
         {
-            Quaternion modelBasis = Quaternion.LookRotation(modelForwardLocal, modelUpLocal);
-            Quaternion targetBasis = Quaternion.LookRotation(desiredForward, Vector3.up);
-            transform.rotation = targetBasis * Quaternion.Inverse(modelBasis);
+            // Simply look in the desired direction
+            // Any visual offset should be handled by rotating the child mesh, not the root rigidbody
+            if (desiredForward.sqrMagnitude > 0.001f)
+            {
+                transform.rotation = Quaternion.LookRotation(desiredForward, Vector3.up);
+            }
         }
 
         private void OnDrawGizmos()

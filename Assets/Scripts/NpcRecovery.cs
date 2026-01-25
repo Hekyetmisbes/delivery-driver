@@ -397,9 +397,9 @@ namespace TrafficSystem
         private bool IsFlipped()
         {
             float upDot = Vector3.Dot(transform.up, Vector3.up);
-            // More aggressive: flipped if upDot < 0.7 (instead of 0.5)
-            // 0.7 means ~45 degrees tilted
-            return upDot < 0.7f;
+            // Less aggressive: flipped only if upDot < 0.3 (~70 degrees tilted)
+            // This prevents false positives during normal cornering
+            return upDot < 0.3f;
         }
 
         private void OnDrawGizmos()

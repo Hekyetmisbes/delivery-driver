@@ -28706,16 +28706,18 @@ MonoBehaviour:
   m_EditorClassIdentifier: GameScripts::TrafficSystem.NpcSpawner
   roadGraphBuilder: {fileID: 1707111771}
   npcVehiclePrefabs:
-  - {fileID: 2054014984112673115, guid: ae429b4efd76fe040afa346d75f3ba4c, type: 3}
-  - {fileID: 6185590365418914730, guid: 5c2c589538a3747419c04aba8bff8b8d, type: 3}
-  - {fileID: 5598078707226957484, guid: 43bb0396666ee644987903f135a43c9d, type: 3}
-  - {fileID: 1052957806397272424, guid: 2a7925f8e7cdf194a9b7fdeae6c4550e, type: 3}
   - {fileID: 8887361605788787076, guid: 78eba1212caac454bac5b51ea9e2f4bb, type: 3}
+  - {fileID: 1052957806397272424, guid: 2a7925f8e7cdf194a9b7fdeae6c4550e, type: 3}
   spawnCount: 10
   minimumSpawnSpacing: 20
   spawnOnStart: 1
   initialSpawnDelay: 0.5
   spawnDelay: 0.3
+  spawnGroundMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  spawnRaycastHeight: 5
+  spawnRaycastDistance: 10
   enablePooling: 1
   poolExtraCount: 5
   showDebugInfo: 1
