@@ -334,8 +334,26 @@ namespace TrafficSystem
         /// </summary>
         private void FindPotentialRoadTransforms(Transform parent, List<Transform> results)
         {
-            // Special case: EasyRoads3D uses "markers" folder
-            if (parent.name.ToLower().Contains("marker") && parent.childCount >= 2)
+            string parentName = parent.name.ToLower();
+
+            // Special case 1: "Road Objects" folder - check its children directly
+            if (parentName.Contains("road") && parentName.Contains("object"))
+            {
+                Debug.Log($"[RoadGraphBuilder] Found 'Road Objects' folder: {parent.name} with {parent.childCount} children");
+                foreach (Transform child in parent)
+                {
+                    // Each child is a road (Default Road 001, etc.)
+                    if (child.name.ToLower().Contains("road"))
+                    {
+                        results.Add(child);
+                        Debug.Log($"[RoadGraphBuilder] Added road: {child.name}");
+                    }
+                }
+                return; // Don't recurse further
+            }
+
+            // Special case 2: EasyRoads3D uses "markers" folder
+            if (parentName.Contains("marker") && parent.childCount >= 2)
             {
                 // Check if children are simple markers (no mesh renderers, just position holders)
                 bool allChildrenAreMarkers = true;
@@ -417,7 +435,22 @@ namespace TrafficSystem
         {
             RoadSegment segment = new RoadSegment(segmentId, roadTransform.name);
 
-            // Get all child transforms as waypoints
+            // First, try to find mesh and sample from it
+            MeshFilter meshFilter = roadTransform.GetComponent<MeshFilter>();
+            if (meshFilter != null && meshFilter.sharedMesh != null)
+            {
+                Debug.Log($"[RoadGraphBuilder] Sampling road '{roadTransform.name}' from mesh");
+                SampleFromMesh(meshFilter, segment, segmentId);
+
+                if (segment.waypoints.Count > 0)
+                {
+                    roadGraph.roadSegments.Add(segment);
+                    Debug.Log($"[RoadGraphBuilder] Sampled road '{segment.name}' from mesh: {segment.waypoints.Count} waypoints");
+                    return;
+                }
+            }
+
+            // Fallback: Get all child transforms as waypoints
             List<Transform> children = new List<Transform>();
             foreach (Transform child in roadTransform)
             {
@@ -427,7 +460,7 @@ namespace TrafficSystem
             if (children.Count < 2)
             {
                 // Skip roads without enough markers
-                Debug.LogWarning($"[RoadGraphBuilder] Skipping '{roadTransform.name}' - needs at least 2 child markers/points");
+                Debug.LogWarning($"[RoadGraphBuilder] Skipping '{roadTransform.name}' - needs at least 2 child markers/points or mesh");
                 return;
             }
 
@@ -527,6 +560,113 @@ namespace TrafficSystem
             }
 
             Debug.Log($"[RoadGraphBuilder] Built {totalConnections} connections between road segments");
+        }
+
+        /// <summary>
+        /// Sample waypoints from road mesh centerline
+        /// </summary>
+        private void SampleFromMesh(MeshFilter meshFilter, RoadSegment segment, int segmentId)
+        {
+            Mesh mesh = meshFilter.sharedMesh;
+            Vector3[] vertices = mesh.vertices;
+            Transform transform = meshFilter.transform;
+
+            if (vertices.Length < 2)
+            {
+                Debug.LogWarning($"[RoadGraphBuilder] Mesh has too few vertices: {vertices.Length}");
+                return;
+            }
+
+            // Convert vertices to world space and find centerline
+            List<Vector3> worldVertices = new List<Vector3>();
+            foreach (Vector3 v in vertices)
+            {
+                worldVertices.Add(transform.TransformPoint(v));
+            }
+
+            // For road meshes, find the centerline by averaging left/right edge vertices
+            // Sample along the length of the road
+            List<Vector3> centerlinePoints = ExtractCenterline(worldVertices);
+
+            if (centerlinePoints.Count < 2)
+            {
+                Debug.LogWarning($"[RoadGraphBuilder] Could not extract centerline from mesh");
+                return;
+            }
+
+            // Create waypoints from centerline
+            for (int i = 0; i < centerlinePoints.Count; i++)
+            {
+                Vector3 pos = centerlinePoints[i];
+                Vector3 forward = Vector3.forward;
+
+                if (i < centerlinePoints.Count - 1)
+                {
+                    forward = (centerlinePoints[i + 1] - pos).normalized;
+                }
+                else if (i > 0)
+                {
+                    forward = (pos - centerlinePoints[i - 1]).normalized;
+                }
+
+                segment.waypoints.Add(new Waypoint(pos, forward, segmentId));
+            }
+        }
+
+        /// <summary>
+        /// Extract centerline from mesh vertices
+        /// </summary>
+        private List<Vector3> ExtractCenterline(List<Vector3> vertices)
+        {
+            List<Vector3> centerline = new List<Vector3>();
+
+            if (vertices.Count == 0) return centerline;
+
+            // Find min and max along forward direction (Z axis typically for roads)
+            float minZ = float.MaxValue;
+            float maxZ = float.MinValue;
+
+            foreach (Vector3 v in vertices)
+            {
+                if (v.z < minZ) minZ = v.z;
+                if (v.z > maxZ) maxZ = v.z;
+            }
+
+            float roadLength = maxZ - minZ;
+            int sampleCount = Mathf.Max(2, Mathf.CeilToInt(roadLength / sampleStepMeters));
+
+            // Sample points along the road
+            for (int i = 0; i < sampleCount; i++)
+            {
+                float t = (float)i / (sampleCount - 1);
+                float targetZ = Mathf.Lerp(minZ, maxZ, t);
+
+                // Find all vertices near this Z position
+                List<Vector3> nearVertices = new List<Vector3>();
+                float zTolerance = sampleStepMeters * 0.5f;
+
+                foreach (Vector3 v in vertices)
+                {
+                    if (Mathf.Abs(v.z - targetZ) < zTolerance)
+                    {
+                        nearVertices.Add(v);
+                    }
+                }
+
+                if (nearVertices.Count > 0)
+                {
+                    // Average to find centerline
+                    Vector3 center = Vector3.zero;
+                    foreach (Vector3 v in nearVertices)
+                    {
+                        center += v;
+                    }
+                    center /= nearVertices.Count;
+                    centerline.Add(center);
+                }
+            }
+
+            return centerline;
         }
 
         private int GetTotalWaypointCount()
