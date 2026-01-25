@@ -139,8 +139,10 @@ namespace TrafficSystem
         {
             rb = GetComponent<Rigidbody>();
             SetupRigidbody();
+            AutoFixWheelAssignments();
             CacheWheelGeometry();
             NormalizeModelAxes();
+            ConfigureGroundMaskIfNeeded();
         }
 
         private void Start()
@@ -632,12 +634,92 @@ namespace TrafficSystem
         private Vector3 GetGroundedPosition(Vector3 desiredPosition)
         {
             Vector3 origin = desiredPosition + Vector3.up * groundRaycastHeight;
-            if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, groundRaycastHeight + groundRaycastDistance, groundMask, QueryTriggerInteraction.Ignore))
+            float maxDistance = groundRaycastHeight + groundRaycastDistance;
+            RaycastHit[] hits = Physics.RaycastAll(origin, Vector3.down, maxDistance, groundMask, QueryTriggerInteraction.Ignore);
+            if (hits != null && hits.Length > 0)
             {
-                return hit.point + Vector3.up * GetGroundClearanceOffset();
+                System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+                foreach (RaycastHit hit in hits)
+                {
+                    if (hit.collider == null) continue;
+                    if (hit.collider.transform.IsChildOf(transform)) continue;
+                    return hit.point + Vector3.up * GetGroundClearanceOffset();
+                }
             }
 
             return desiredPosition;
+        }
+
+        private void ConfigureGroundMaskIfNeeded()
+        {
+            if (groundMask.value != ~0)
+                return;
+
+            int roadLayer = LayerMask.NameToLayer("Road");
+            if (roadLayer >= 0)
+                groundMask = 1 << roadLayer;
+        }
+
+        private void AutoFixWheelAssignments()
+        {
+            if (!autoDetectModelForward)
+                return;
+
+            if (frontLeftCollider == null || frontRightCollider == null || rearLeftCollider == null || rearRightCollider == null)
+                return;
+
+            WheelCollider[] wheels = { frontLeftCollider, frontRightCollider, rearLeftCollider, rearRightCollider };
+            Vector3[] localPositions = new Vector3[wheels.Length];
+            for (int i = 0; i < wheels.Length; i++)
+                localPositions[i] = transform.InverseTransformPoint(wheels[i].transform.position);
+
+            float minX = localPositions[0].x;
+            float maxX = localPositions[0].x;
+            float minZ = localPositions[0].z;
+            float maxZ = localPositions[0].z;
+            for (int i = 1; i < localPositions.Length; i++)
+            {
+                Vector3 p = localPositions[i];
+                if (p.x < minX) minX = p.x;
+                if (p.x > maxX) maxX = p.x;
+                if (p.z < minZ) minZ = p.z;
+                if (p.z > maxZ) maxZ = p.z;
+            }
+
+            float spanX = maxX - minX;
+            float spanZ = maxZ - minZ;
+            Vector3 axis = spanZ >= spanX ? Vector3.forward : Vector3.right;
+
+            List<(WheelCollider wheel, Vector3 localPos, float proj)> list = new List<(WheelCollider, Vector3, float)>();
+            foreach (WheelCollider wheel in wheels)
+            {
+                Vector3 lp = transform.InverseTransformPoint(wheel.transform.position);
+                list.Add((wheel, lp, Vector3.Dot(lp, axis)));
+            }
+
+            list.Sort((a, b) => b.proj.CompareTo(a.proj));
+            var frontA = list[0];
+            var frontB = list[1];
+            var rearA = list[2];
+            var rearB = list[3];
+
+            Vector3 frontAvg = (frontA.localPos + frontB.localPos) * 0.5f;
+            float sign = Vector3.Dot(frontAvg, axis) >= 0f ? 1f : -1f;
+            modelForwardLocal = axis * sign;
+
+            Vector3 rightAxis = Vector3.Cross(Vector3.up, modelForwardLocal).normalized;
+            if (rightAxis.sqrMagnitude < 0.001f)
+                rightAxis = Vector3.right;
+
+            float frontADot = Vector3.Dot(frontA.localPos, rightAxis);
+            float frontBDot = Vector3.Dot(frontB.localPos, rightAxis);
+            float rearADot = Vector3.Dot(rearA.localPos, rightAxis);
+            float rearBDot = Vector3.Dot(rearB.localPos, rightAxis);
+
+            frontLeftCollider = frontADot <= frontBDot ? frontA.wheel : frontB.wheel;
+            frontRightCollider = frontADot <= frontBDot ? frontB.wheel : frontA.wheel;
+            rearLeftCollider = rearADot <= rearBDot ? rearA.wheel : rearB.wheel;
+            rearRightCollider = rearADot <= rearBDot ? rearB.wheel : rearA.wheel;
         }
 
         private void NormalizeModelAxes()

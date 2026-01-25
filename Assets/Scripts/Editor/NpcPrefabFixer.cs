@@ -94,6 +94,7 @@ namespace TrafficSystemEditor
             SerializedProperty rearRight = so.FindProperty("rearRightCollider");
             SerializedProperty autoDetect = so.FindProperty("autoDetectModelForward");
             SerializedProperty modelForward = so.FindProperty("modelForwardLocal");
+            SerializedProperty groundMask = so.FindProperty("groundMask");
 
             WheelCollider fl = frontLeft != null ? frontLeft.objectReferenceValue as WheelCollider : null;
             WheelCollider fr = frontRight != null ? frontRight.objectReferenceValue as WheelCollider : null;
@@ -112,9 +113,24 @@ namespace TrafficSystemEditor
                 }
             }
 
+            if (ReassignWheelReferences(so, agent.transform))
+            {
+                changed = true;
+            }
+
             if (NormalizeWheelColliderHeights(agent.transform, fl, fr, rl, rr))
             {
                 changed = true;
+            }
+
+            if (groundMask != null && groundMask.intValue == ~0)
+            {
+                int roadLayer = LayerMask.NameToLayer("Road");
+                if (roadLayer >= 0)
+                {
+                    groundMask.intValue = 1 << roadLayer;
+                    changed = true;
+                }
             }
 
             if (changed)
@@ -142,6 +158,98 @@ namespace TrafficSystemEditor
                 return Vector3.forward;
 
             return localForward.normalized;
+        }
+
+        private static bool ReassignWheelReferences(SerializedObject so, Transform root)
+        {
+            SerializedProperty frontLeft = so.FindProperty("frontLeftCollider");
+            SerializedProperty frontRight = so.FindProperty("frontRightCollider");
+            SerializedProperty rearLeft = so.FindProperty("rearLeftCollider");
+            SerializedProperty rearRight = so.FindProperty("rearRightCollider");
+
+            WheelCollider fl = frontLeft != null ? frontLeft.objectReferenceValue as WheelCollider : null;
+            WheelCollider fr = frontRight != null ? frontRight.objectReferenceValue as WheelCollider : null;
+            WheelCollider rl = rearLeft != null ? rearLeft.objectReferenceValue as WheelCollider : null;
+            WheelCollider rr = rearRight != null ? rearRight.objectReferenceValue as WheelCollider : null;
+
+            if (root == null || fl == null || fr == null || rl == null || rr == null)
+                return false;
+
+            WheelCollider[] wheels = { fl, fr, rl, rr };
+            Vector3[] localPositions = new Vector3[wheels.Length];
+            for (int i = 0; i < wheels.Length; i++)
+                localPositions[i] = root.InverseTransformPoint(wheels[i].transform.position);
+
+            float minX = localPositions[0].x;
+            float maxX = localPositions[0].x;
+            float minZ = localPositions[0].z;
+            float maxZ = localPositions[0].z;
+            for (int i = 1; i < localPositions.Length; i++)
+            {
+                Vector3 p = localPositions[i];
+                if (p.x < minX) minX = p.x;
+                if (p.x > maxX) maxX = p.x;
+                if (p.z < minZ) minZ = p.z;
+                if (p.z > maxZ) maxZ = p.z;
+            }
+
+            float spanX = maxX - minX;
+            float spanZ = maxZ - minZ;
+            Vector3 axis = spanZ >= spanX ? Vector3.forward : Vector3.right;
+
+            List<(WheelCollider wheel, Vector3 localPos, float proj)> list = new List<(WheelCollider, Vector3, float)>();
+            foreach (WheelCollider wheel in wheels)
+            {
+                Vector3 lp = root.InverseTransformPoint(wheel.transform.position);
+                list.Add((wheel, lp, Vector3.Dot(lp, axis)));
+            }
+
+            list.Sort((a, b) => b.proj.CompareTo(a.proj));
+            var frontA = list[0];
+            var frontB = list[1];
+            var rearA = list[2];
+            var rearB = list[3];
+
+            Vector3 frontAvg = (frontA.localPos + frontB.localPos) * 0.5f;
+            float sign = Vector3.Dot(frontAvg, axis) >= 0f ? 1f : -1f;
+            Vector3 forwardAxis = axis * sign;
+            Vector3 rightAxis = Vector3.Cross(Vector3.up, forwardAxis).normalized;
+            if (rightAxis.sqrMagnitude < 0.001f)
+                rightAxis = Vector3.right;
+
+            float frontADot = Vector3.Dot(frontA.localPos, rightAxis);
+            float frontBDot = Vector3.Dot(frontB.localPos, rightAxis);
+            float rearADot = Vector3.Dot(rearA.localPos, rightAxis);
+            float rearBDot = Vector3.Dot(rearB.localPos, rightAxis);
+
+            WheelCollider newFrontLeft = frontADot <= frontBDot ? frontA.wheel : frontB.wheel;
+            WheelCollider newFrontRight = frontADot <= frontBDot ? frontB.wheel : frontA.wheel;
+            WheelCollider newRearLeft = rearADot <= rearBDot ? rearA.wheel : rearB.wheel;
+            WheelCollider newRearRight = rearADot <= rearBDot ? rearB.wheel : rearA.wheel;
+
+            bool changed = false;
+            if (frontLeft != null && frontLeft.objectReferenceValue != newFrontLeft)
+            {
+                frontLeft.objectReferenceValue = newFrontLeft;
+                changed = true;
+            }
+            if (frontRight != null && frontRight.objectReferenceValue != newFrontRight)
+            {
+                frontRight.objectReferenceValue = newFrontRight;
+                changed = true;
+            }
+            if (rearLeft != null && rearLeft.objectReferenceValue != newRearLeft)
+            {
+                rearLeft.objectReferenceValue = newRearLeft;
+                changed = true;
+            }
+            if (rearRight != null && rearRight.objectReferenceValue != newRearRight)
+            {
+                rearRight.objectReferenceValue = newRearRight;
+                changed = true;
+            }
+
+            return changed;
         }
 
         private static bool NormalizeWheelColliderHeights(Transform root, WheelCollider fl, WheelCollider fr, WheelCollider rl, WheelCollider rr)
