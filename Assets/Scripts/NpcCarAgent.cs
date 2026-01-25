@@ -83,15 +83,16 @@ namespace TrafficSystem
             // Random cruise speed for this NPC with larger variation
             targetSpeed = Random.Range(cruiseSpeedRange.x, cruiseSpeedRange.y);
 
-            // Add 20% random variation to make each car more unique
-            float variation = targetSpeed * Random.Range(-0.2f, 0.2f);
+            // Add 30% random variation to make each car more unique
+            float variation = targetSpeed * Random.Range(-0.3f, 0.3f);
             targetSpeed += variation;
+            targetSpeed = Mathf.Max(20f, targetSpeed); // Minimum 20 km/h
 
             // Randomize driving personality
-            lateralOffset = Random.Range(-1.5f, 1.5f); // Random lane position (-1.5 to 1.5 meters)
-            personalityLookAhead = lookAheadDistance * Random.Range(0.7f, 1.3f); // Vary lookahead 70-130%
-            personalityAcceleration = acceleration * Random.Range(0.8f, 1.2f); // Vary acceleration 80-120%
-            personalitySteerSpeed = steeringSmoothSpeed * Random.Range(0.8f, 1.2f); // Vary steering 80-120%
+            lateralOffset = Random.Range(-2.5f, 2.5f); // Random lane position (-2.5 to 2.5 meters)
+            personalityLookAhead = lookAheadDistance * Random.Range(0.6f, 1.4f); // Vary lookahead 60-140%
+            personalityAcceleration = acceleration * Random.Range(0.7f, 1.3f); // Vary acceleration 70-130%
+            personalitySteerSpeed = steeringSmoothSpeed * Random.Range(0.7f, 1.3f); // Vary steering 70-130%
 
             if (logPathChanges)
             {

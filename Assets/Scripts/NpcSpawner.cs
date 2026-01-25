@@ -19,7 +19,7 @@ namespace TrafficSystem
         [Tooltip("Number of NPCs to spawn")]
         [SerializeField] private int spawnCount = 10;
         [Tooltip("Minimum distance between spawned vehicles (meters)")]
-        [SerializeField] private float minimumSpawnSpacing = 12f;
+        [SerializeField] private float minimumSpawnSpacing = 8f;
         [Tooltip("Spawn vehicles on Start()")]
         [SerializeField] private bool spawnOnStart = true;
 
@@ -85,19 +85,24 @@ namespace TrafficSystem
             // Track spawn positions to enforce spacing
             List<Vector3> spawnPositions = new List<Vector3>();
 
-            // Track used waypoint indices to ensure distribution
-            System.Collections.Generic.Dictionary<RoadSegment, System.Collections.Generic.HashSet<int>> usedWaypoints =
-                new System.Collections.Generic.Dictionary<RoadSegment, System.Collections.Generic.HashSet<int>>();
+            // Track used segments to ensure distribution across different roads
+            System.Collections.Generic.Dictionary<RoadSegment, int> segmentUsageCount =
+                new System.Collections.Generic.Dictionary<RoadSegment, int>();
 
             int spawnedCount = 0;
             int attempts = 0;
-            int maxAttempts = spawnCount * 20; // Prevent infinite loop
+            int maxAttempts = spawnCount * 30; // Prevent infinite loop
+
+            int totalSegments = roadGraphBuilder.RoadGraph.roadSegments.Count;
+            int maxPerSegment = Mathf.CeilToInt((float)spawnCount / Mathf.Max(1, totalSegments)) + 1;
+
+            Debug.Log($"[NpcSpawner] Distributing {spawnCount} NPCs across {totalSegments} road segments (max {maxPerSegment} per segment)");
 
             while (spawnedCount < spawnCount && attempts < maxAttempts)
             {
                 attempts++;
 
-                // Get random spawn position - try to distribute evenly
+                // Get random spawn position - try to distribute evenly across segments
                 var (segment, waypointIndex) = roadGraphBuilder.RoadGraph.GetRandomWaypoint();
 
                 if (segment == null || segment.waypoints.Count == 0)
@@ -105,17 +110,18 @@ namespace TrafficSystem
                     continue;
                 }
 
-                // Try to avoid using same waypoint twice
-                if (usedWaypoints.ContainsKey(segment) && usedWaypoints[segment].Contains(waypointIndex))
+                // Enforce max spawns per segment to distribute across all roads
+                if (segmentUsageCount.ContainsKey(segment) && segmentUsageCount[segment] >= maxPerSegment)
                 {
-                    // Try different index on same segment
-                    waypointIndex = Random.Range(0, segment.waypoints.Count);
-
-                    if (usedWaypoints[segment].Contains(waypointIndex))
+                    // This segment is full, try another one
+                    if (attempts < maxAttempts - 10) // Only skip if we have attempts left
                     {
-                        continue; // Skip this attempt
+                        continue;
                     }
                 }
+
+                // Randomize waypoint index more to spread within segment
+                waypointIndex = Random.Range(0, segment.waypoints.Count);
 
                 if (segment == null || segment.waypoints.Count == 0)
                 {
@@ -206,17 +212,28 @@ namespace TrafficSystem
                 spawnPositions.Add(spawnPos);
                 activeNpcs.Add(npcVehicle);
 
-                // Mark waypoint as used
-                if (!usedWaypoints.ContainsKey(segment))
+                // Track segment usage for distribution
+                if (!segmentUsageCount.ContainsKey(segment))
                 {
-                    usedWaypoints[segment] = new System.Collections.Generic.HashSet<int>();
+                    segmentUsageCount[segment] = 0;
                 }
-                usedWaypoints[segment].Add(waypointIndex);
+                segmentUsageCount[segment]++;
 
                 spawnedCount++;
+
+                if (showDebugInfo && spawnedCount % 5 == 0)
+                {
+                    Debug.Log($"[NpcSpawner] Spawned {spawnedCount}/{spawnCount} NPCs");
+                }
             }
 
-            Debug.Log($"[NpcSpawner] Spawned {spawnedCount} NPCs (attempts: {attempts})");
+            // Log distribution summary
+            string distributionSummary = $"[NpcSpawner] Spawned {spawnedCount} NPCs across {segmentUsageCount.Count} road segments (attempts: {attempts})\n";
+            foreach (var kvp in segmentUsageCount)
+            {
+                distributionSummary += $"  - {kvp.Key.name}: {kvp.Value} NPCs\n";
+            }
+            Debug.Log(distributionSummary);
         }
 
         /// <summary>
