@@ -162,6 +162,12 @@ namespace TrafficSystem
             {
                 // Calculate snap position with height offset
                 Vector3 snapPosition = projectedPoint + Vector3.up * snapHeightOffset;
+
+                // Safe rotation with zero vector check
+                if (tangent.sqrMagnitude < 0.01f)
+                {
+                    tangent = transform.forward; // Use current forward as fallback
+                }
                 Quaternion snapRotation = Quaternion.LookRotation(tangent);
 
                 // Perform snap

@@ -307,13 +307,83 @@ namespace TrafficSystem
         private void ExtractFromChildTransforms(GameObject network)
         {
             int segmentId = 0;
-            foreach (Transform child in network.transform)
+
+            // EasyRoads3D typically has structure: Road Network → Road Objects → Individual Roads → Markers
+            // We need to search recursively for objects with multiple children (marker points)
+
+            List<Transform> potentialRoads = new List<Transform>();
+            FindPotentialRoadTransforms(network.transform, potentialRoads);
+
+            Debug.Log($"[RoadGraphBuilder] Found {potentialRoads.Count} potential road paths");
+
+            foreach (Transform roadTransform in potentialRoads)
             {
-                if (child.childCount > 0 || child.name.Contains("Road"))
+                SampleFromTransformHierarchy(roadTransform, segmentId++);
+            }
+
+            // If still no roads found, try creating a simple test path
+            if (roadGraph.roadSegments.Count == 0)
+            {
+                Debug.LogWarning("[RoadGraphBuilder] No roads found! Creating a test straight path.");
+                CreateTestRoadPath();
+            }
+        }
+
+        /// <summary>
+        /// Recursively find transforms that have multiple children (road markers)
+        /// </summary>
+        private void FindPotentialRoadTransforms(Transform parent, List<Transform> results)
+        {
+            // A road path should have multiple markers as children
+            if (parent.childCount >= 2)
+            {
+                // Check if children are simple markers (no further children)
+                bool allChildrenAreMarkers = true;
+                foreach (Transform child in parent)
                 {
-                    SampleFromTransformHierarchy(child, segmentId++);
+                    if (child.childCount > 0)
+                    {
+                        allChildrenAreMarkers = false;
+                        break;
+                    }
+                }
+
+                if (allChildrenAreMarkers)
+                {
+                    results.Add(parent);
+                    return; // Don't recurse further
                 }
             }
+
+            // Recurse into children
+            foreach (Transform child in parent)
+            {
+                FindPotentialRoadTransforms(child, results);
+            }
+        }
+
+        /// <summary>
+        /// Create a test road path for debugging when no roads are found
+        /// </summary>
+        private void CreateTestRoadPath()
+        {
+            RoadSegment testSegment = new RoadSegment(0, "Test_Straight_Road");
+
+            // Create a simple straight road with 20 waypoints
+            Vector3 startPos = Vector3.zero;
+            Vector3 direction = Vector3.forward;
+            float roadLength = 100f;
+            int waypointCount = Mathf.CeilToInt(roadLength / sampleStepMeters);
+
+            for (int i = 0; i < waypointCount; i++)
+            {
+                float t = (float)i / (waypointCount - 1);
+                Vector3 pos = startPos + direction * (roadLength * t);
+                testSegment.waypoints.Add(new Waypoint(pos, direction, 0));
+            }
+
+            roadGraph.roadSegments.Add(testSegment);
+            Debug.Log($"[RoadGraphBuilder] Created test road: {testSegment.waypoints.Count} waypoints");
         }
 
         /// <summary>
@@ -332,38 +402,49 @@ namespace TrafficSystem
 
             if (children.Count < 2)
             {
-                // Try using the road transform itself plus sample along X/Z
-                Vector3 start = roadTransform.position;
-                Vector3 end = start + roadTransform.forward * 50f; // Assume 50m road
-
-                int sampleCount = Mathf.CeilToInt(50f / sampleStepMeters);
-                for (int i = 0; i < sampleCount; i++)
-                {
-                    float t = (float)i / (sampleCount - 1);
-                    Vector3 pos = Vector3.Lerp(start, end, t);
-                    Vector3 forward = roadTransform.forward;
-                    segment.waypoints.Add(new Waypoint(pos, forward, segmentId));
-                }
+                // Skip roads without enough markers
+                Debug.LogWarning($"[RoadGraphBuilder] Skipping '{roadTransform.name}' - needs at least 2 child markers/points");
+                return;
             }
-            else
+
+            // Use child positions
+            for (int i = 0; i < children.Count; i++)
             {
-                // Use child positions
-                for (int i = 0; i < children.Count; i++)
+                Vector3 pos = children[i].position;
+                Vector3 forward = Vector3.forward;
+
+                if (i < children.Count - 1)
                 {
-                    Vector3 pos = children[i].position;
-                    Vector3 forward = Vector3.forward;
-
-                    if (i < children.Count - 1)
+                    forward = (children[i + 1].position - pos);
+                    if (forward.sqrMagnitude < 0.01f) // Too close
                     {
-                        forward = (children[i + 1].position - pos).normalized;
+                        forward = Vector3.forward;
                     }
-                    else if (i > 0)
+                    else
                     {
-                        forward = (pos - children[i - 1].position).normalized;
+                        forward.Normalize();
                     }
-
-                    segment.waypoints.Add(new Waypoint(pos, forward, segmentId));
                 }
+                else if (i > 0)
+                {
+                    forward = (pos - children[i - 1].position);
+                    if (forward.sqrMagnitude < 0.01f)
+                    {
+                        forward = Vector3.forward;
+                    }
+                    else
+                    {
+                        forward.Normalize();
+                    }
+                }
+
+                // Validate forward vector
+                if (forward.sqrMagnitude < 0.01f)
+                {
+                    forward = Vector3.forward;
+                }
+
+                segment.waypoints.Add(new Waypoint(pos, forward, segmentId));
             }
 
             if (segment.waypoints.Count > 0)

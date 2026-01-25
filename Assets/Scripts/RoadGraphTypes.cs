@@ -30,6 +30,8 @@ namespace TrafficSystem
         public int id;
         public string name;
         public List<Waypoint> waypoints = new List<Waypoint>();
+
+        [System.NonSerialized] // Prevent serialization cycle
         public List<RoadConnection> connections = new List<RoadConnection>();
 
         public RoadSegment(int segmentId, string segmentName)

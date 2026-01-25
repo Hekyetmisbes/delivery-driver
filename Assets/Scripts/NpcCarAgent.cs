@@ -50,6 +50,8 @@ namespace TrafficSystem
 
         // Runtime state
         private Rigidbody rb;
+
+        [System.NonSerialized] // Prevent serialization cycle
         private RoadSegment currentSegment;
         private int currentWaypointIndex;
         private float targetSpeed; // km/h
@@ -119,7 +121,15 @@ namespace TrafficSystem
                 // Position vehicle at waypoint
                 Waypoint wp = segment.waypoints[waypointIndex];
                 transform.position = wp.position + Vector3.up * 0.5f;
-                transform.rotation = Quaternion.LookRotation(wp.forward);
+
+                // Safe rotation
+                Vector3 forward = wp.forward;
+                if (forward.sqrMagnitude < 0.01f)
+                {
+                    forward = Vector3.forward;
+                }
+                transform.rotation = Quaternion.LookRotation(forward);
+
                 rb.linearVelocity = Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
             }

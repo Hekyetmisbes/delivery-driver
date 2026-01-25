@@ -129,7 +129,14 @@ namespace TrafficSystem
 
                 // Position and orient vehicle
                 npcVehicle.transform.position = spawnPos + Vector3.up * 0.5f;
-                npcVehicle.transform.rotation = Quaternion.LookRotation(spawnWaypoint.forward);
+
+                // Safe rotation with zero vector check
+                Vector3 forward = spawnWaypoint.forward;
+                if (forward.sqrMagnitude < 0.01f)
+                {
+                    forward = Vector3.forward;
+                }
+                npcVehicle.transform.rotation = Quaternion.LookRotation(forward);
 
                 // Initialize NPC components
                 NpcCarAgent carAgent = npcVehicle.GetComponent<NpcCarAgent>();
@@ -245,7 +252,14 @@ namespace TrafficSystem
             Waypoint wp = segment.waypoints[waypointIndex];
 
             npc.transform.position = wp.position + Vector3.up * 0.5f;
-            npc.transform.rotation = Quaternion.LookRotation(wp.forward);
+
+            // Safe rotation
+            Vector3 forward = wp.forward;
+            if (forward.sqrMagnitude < 0.01f)
+            {
+                forward = Vector3.forward;
+            }
+            npc.transform.rotation = Quaternion.LookRotation(forward);
 
             NpcCarAgent carAgent = npc.GetComponent<NpcCarAgent>();
             if (carAgent != null)
