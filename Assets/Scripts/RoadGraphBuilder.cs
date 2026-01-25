@@ -334,6 +334,30 @@ namespace TrafficSystem
         /// </summary>
         private void FindPotentialRoadTransforms(Transform parent, List<Transform> results)
         {
+            // Special case: EasyRoads3D uses "markers" folder
+            if (parent.name.ToLower().Contains("marker") && parent.childCount >= 2)
+            {
+                // Check if children are simple markers (no mesh renderers, just position holders)
+                bool allChildrenAreMarkers = true;
+                foreach (Transform child in parent)
+                {
+                    // EasyRoads3D markers typically have no children or are simple GameObjects
+                    string childName = child.name.ToLower();
+                    if (!childName.Contains("marker") && child.childCount > 1)
+                    {
+                        allChildrenAreMarkers = false;
+                        break;
+                    }
+                }
+
+                if (allChildrenAreMarkers)
+                {
+                    Debug.Log($"[RoadGraphBuilder] Found markers folder: {parent.name} with {parent.childCount} markers");
+                    results.Add(parent);
+                    return; // Don't recurse further
+                }
+            }
+
             // A road path should have multiple markers as children
             if (parent.childCount >= 2)
             {

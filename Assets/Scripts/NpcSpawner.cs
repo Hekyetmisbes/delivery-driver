@@ -85,16 +85,37 @@ namespace TrafficSystem
             // Track spawn positions to enforce spacing
             List<Vector3> spawnPositions = new List<Vector3>();
 
+            // Track used waypoint indices to ensure distribution
+            System.Collections.Generic.Dictionary<RoadSegment, System.Collections.Generic.HashSet<int>> usedWaypoints =
+                new System.Collections.Generic.Dictionary<RoadSegment, System.Collections.Generic.HashSet<int>>();
+
             int spawnedCount = 0;
             int attempts = 0;
-            int maxAttempts = spawnCount * 10; // Prevent infinite loop
+            int maxAttempts = spawnCount * 20; // Prevent infinite loop
 
             while (spawnedCount < spawnCount && attempts < maxAttempts)
             {
                 attempts++;
 
-                // Get random spawn position
+                // Get random spawn position - try to distribute evenly
                 var (segment, waypointIndex) = roadGraphBuilder.RoadGraph.GetRandomWaypoint();
+
+                if (segment == null || segment.waypoints.Count == 0)
+                {
+                    continue;
+                }
+
+                // Try to avoid using same waypoint twice
+                if (usedWaypoints.ContainsKey(segment) && usedWaypoints[segment].Contains(waypointIndex))
+                {
+                    // Try different index on same segment
+                    waypointIndex = Random.Range(0, segment.waypoints.Count);
+
+                    if (usedWaypoints[segment].Contains(waypointIndex))
+                    {
+                        continue; // Skip this attempt
+                    }
+                }
 
                 if (segment == null || segment.waypoints.Count == 0)
                 {
@@ -158,6 +179,14 @@ namespace TrafficSystem
                 // Add to tracking
                 spawnPositions.Add(spawnPos);
                 activeNpcs.Add(npcVehicle);
+
+                // Mark waypoint as used
+                if (!usedWaypoints.ContainsKey(segment))
+                {
+                    usedWaypoints[segment] = new System.Collections.Generic.HashSet<int>();
+                }
+                usedWaypoints[segment].Add(waypointIndex);
+
                 spawnedCount++;
             }
 

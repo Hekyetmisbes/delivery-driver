@@ -12,9 +12,9 @@ namespace TrafficSystem
     {
         [Header("Off-Road Detection")]
         [Tooltip("Max distance from road before considered off-road (meters)")]
-        [SerializeField] private float offRoadThreshold = 8f;
+        [SerializeField] private float offRoadThreshold = 15f; // Increased to prevent false positives
         [Tooltip("Check interval (seconds)")]
-        [SerializeField] private float checkInterval = 0.5f;
+        [SerializeField] private float checkInterval = 1f; // Check less frequently
 
         [Header("Stuck Detection")]
         [Tooltip("Minimum speed before considered stuck (km/h)")]

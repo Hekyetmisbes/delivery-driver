@@ -74,8 +74,17 @@ namespace TrafficSystem
 
         private void Start()
         {
-            // Random cruise speed for this NPC
+            // Random cruise speed for this NPC with some variation
             targetSpeed = Random.Range(cruiseSpeedRange.x, cruiseSpeedRange.y);
+
+            // Add 10% random variation to make each car unique
+            float variation = targetSpeed * Random.Range(-0.1f, 0.1f);
+            targetSpeed += variation;
+
+            if (logPathChanges)
+            {
+                Debug.Log($"[NpcCarAgent] {name} target speed: {targetSpeed:F1} km/h");
+            }
         }
 
         private void SetupRigidbody()
@@ -175,7 +184,7 @@ namespace TrafficSystem
         private void HandleEndOfSegment()
         {
             // Check for connections (intersections)
-            if (currentSegment.connections.Count > 0)
+            if (currentSegment.connections != null && currentSegment.connections.Count > 0)
             {
                 // Choose random connection
                 RoadConnection connection = currentSegment.connections[Random.Range(0, currentSegment.connections.Count)];
@@ -189,17 +198,51 @@ namespace TrafficSystem
             }
             else
             {
-                // No connections - loop back or find new segment
-                if (currentSegment.waypoints.Count > 1)
+                // No connections - randomly choose to loop or teleport
+                float choice = Random.value;
+
+                if (choice < 0.3f && currentSegment.waypoints.Count > 1) // 30% loop back
                 {
-                    // Simple loop back
                     currentWaypointIndex = 0;
+                    if (logPathChanges)
+                    {
+                        Debug.Log($"[NpcCarAgent] {name} looping back on segment '{currentSegment.name}'");
+                    }
                 }
-                else
+                else // 70% teleport to random location
                 {
-                    // Teleport to random road
-                    InitializeRandom(roadGraphBuilder);
+                    if (logPathChanges)
+                    {
+                        Debug.Log($"[NpcCarAgent] {name} teleporting to random road");
+                    }
+                    TeleportToRandomRoad();
                 }
+            }
+        }
+
+        /// <summary>
+        /// Teleport vehicle to random road position
+        /// </summary>
+        private void TeleportToRandomRoad()
+        {
+            if (roadGraphBuilder == null || roadGraphBuilder.RoadGraph == null)
+                return;
+
+            var (segment, waypointIndex) = roadGraphBuilder.RoadGraph.GetRandomWaypoint();
+            if (segment != null && segment.waypoints.Count > 0)
+            {
+                Waypoint wp = segment.waypoints[waypointIndex];
+
+                // Smooth teleport with fade
+                Vector3 newPos = wp.position + Vector3.up * 2f; // Higher spawn to avoid collision
+                Vector3 forward = wp.forward;
+                if (forward.sqrMagnitude < 0.01f)
+                {
+                    forward = Vector3.forward;
+                }
+                Quaternion newRot = Quaternion.LookRotation(forward);
+
+                ForceReposition(segment, waypointIndex, newPos, newRot);
             }
         }
 
