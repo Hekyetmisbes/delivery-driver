@@ -19,7 +19,7 @@ namespace TrafficSystem
         [Tooltip("Number of NPCs to spawn")]
         [SerializeField] private int spawnCount = 10;
         [Tooltip("Minimum distance between spawned vehicles (meters)")]
-        [SerializeField] private float minimumSpawnSpacing = 20f;
+        [SerializeField] private float minimumSpawnSpacing = 12f;
         [Tooltip("Spawn vehicles on Start()")]
         [SerializeField] private bool spawnOnStart = true;
 
@@ -182,11 +182,12 @@ namespace TrafficSystem
                 {
                     carAgent.Initialize(roadGraphBuilder, segment, waypointIndex);
 
-                    // Give initial velocity
+                    // Give random initial velocity (20-40 km/h range)
                     Rigidbody rb = npcVehicle.GetComponent<Rigidbody>();
                     if (rb != null)
                     {
-                        rb.linearVelocity = forward * 8f; // ~30 km/h initial speed
+                        float initialSpeed = Random.Range(5f, 11f); // 5-11 m/s = ~18-40 km/h
+                        rb.linearVelocity = forward * initialSpeed;
                         rb.angularVelocity = Vector3.zero;
                     }
                 }
@@ -338,11 +339,12 @@ namespace TrafficSystem
             {
                 carAgent.Initialize(roadGraphBuilder, segment, waypointIndex);
 
-                // Give initial velocity
+                // Give random initial velocity (20-40 km/h range)
                 Rigidbody rb = npc.GetComponent<Rigidbody>();
                 if (rb != null)
                 {
-                    rb.linearVelocity = forward * 8f; // ~30 km/h initial speed
+                    float initialSpeed = Random.Range(5f, 11f); // 5-11 m/s = ~18-40 km/h
+                    rb.linearVelocity = forward * initialSpeed;
                     rb.angularVelocity = Vector3.zero;
                 }
             }

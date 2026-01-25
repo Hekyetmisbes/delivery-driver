@@ -60,6 +60,12 @@ namespace TrafficSystem
         private Vector3 currentLookAheadPoint;
         private bool isObstacleDetected;
 
+        // Randomized behavior parameters
+        private float lateralOffset; // Lateral offset from centerline (for lane variation)
+        private float personalityLookAhead; // Randomized lookahead distance
+        private float personalityAcceleration; // Randomized acceleration
+        private float personalitySteerSpeed; // Randomized steering speed
+
         // Public accessors
         public RoadSegment CurrentSegment => currentSegment;
         public int CurrentWaypointIndex => currentWaypointIndex;
@@ -74,24 +80,31 @@ namespace TrafficSystem
 
         private void Start()
         {
-            // Random cruise speed for this NPC with some variation
+            // Random cruise speed for this NPC with larger variation
             targetSpeed = Random.Range(cruiseSpeedRange.x, cruiseSpeedRange.y);
 
-            // Add 10% random variation to make each car unique
-            float variation = targetSpeed * Random.Range(-0.1f, 0.1f);
+            // Add 20% random variation to make each car more unique
+            float variation = targetSpeed * Random.Range(-0.2f, 0.2f);
             targetSpeed += variation;
+
+            // Randomize driving personality
+            lateralOffset = Random.Range(-1.5f, 1.5f); // Random lane position (-1.5 to 1.5 meters)
+            personalityLookAhead = lookAheadDistance * Random.Range(0.7f, 1.3f); // Vary lookahead 70-130%
+            personalityAcceleration = acceleration * Random.Range(0.8f, 1.2f); // Vary acceleration 80-120%
+            personalitySteerSpeed = steeringSmoothSpeed * Random.Range(0.8f, 1.2f); // Vary steering 80-120%
 
             if (logPathChanges)
             {
-                Debug.Log($"[NpcCarAgent] {name} target speed: {targetSpeed:F1} km/h");
+                Debug.Log($"[NpcCarAgent] {name} - Speed: {targetSpeed:F1} km/h, Offset: {lateralOffset:F1}m, Lookahead: {personalityLookAhead:F1}m");
             }
         }
 
         private void SetupRigidbody()
         {
-            rb.mass = 1500f;
-            rb.linearDamping = 0.05f;
-            rb.angularDamping = 0.5f;
+            // Randomize physics properties slightly for variation
+            rb.mass = Random.Range(1300f, 1700f); // 1300-1700 kg
+            rb.linearDamping = Random.Range(0.04f, 0.06f);
+            rb.angularDamping = Random.Range(0.4f, 0.6f);
             rb.centerOfMass = new Vector3(0, -0.5f, 0);
         }
 
@@ -158,8 +171,9 @@ namespace TrafficSystem
                 }
                 transform.rotation = Quaternion.LookRotation(forward);
 
-                // Start with initial forward velocity
-                rb.linearVelocity = forward * (targetSpeed / 3.6f * 0.5f); // Start at 50% target speed
+                // Start with random initial forward velocity (30-70% of target speed)
+                float initialSpeedFactor = Random.Range(0.3f, 0.7f);
+                rb.linearVelocity = forward * (targetSpeed / 3.6f * initialSpeedFactor);
                 rb.angularVelocity = Vector3.zero;
             }
         }
@@ -185,8 +199,8 @@ namespace TrafficSystem
             Waypoint currentWp = currentSegment.waypoints[currentWaypointIndex];
             float distanceToWaypoint = Vector3.Distance(transform.position, currentWp.position);
 
-            // Move to next waypoint if close enough
-            if (distanceToWaypoint < lookAheadDistance * 0.5f)
+            // Move to next waypoint if close enough - use personalized lookahead for variation
+            if (distanceToWaypoint < personalityLookAhead * 0.5f)
             {
                 currentWaypointIndex++;
 
@@ -306,8 +320,8 @@ namespace TrafficSystem
             float targetSteerAngle = Mathf.Atan2(localTarget.x, localTarget.z) * Mathf.Rad2Deg;
             targetSteerAngle = Mathf.Clamp(targetSteerAngle, -maxSteerAngle, maxSteerAngle);
 
-            // Smooth steering with adaptive speed based on turn sharpness
-            float steerSpeed = steeringSmoothSpeed * (1f + Mathf.Abs(targetSteerAngle) / maxSteerAngle);
+            // Smooth steering with adaptive speed based on turn sharpness and personality
+            float steerSpeed = personalitySteerSpeed * (1f + Mathf.Abs(targetSteerAngle) / maxSteerAngle);
             currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteerAngle, Time.fixedDeltaTime * steerSpeed);
 
             // Apply to front wheels
@@ -316,16 +330,16 @@ namespace TrafficSystem
         }
 
         /// <summary>
-        /// Get lookahead point for Pure Pursuit
+        /// Get lookahead point for Pure Pursuit with lateral offset for lane variation
         /// </summary>
         private Vector3 GetLookAheadPoint()
         {
             if (currentSegment == null || currentWaypointIndex >= currentSegment.waypoints.Count)
-                return transform.position + transform.forward * lookAheadDistance;
+                return transform.position + transform.forward * personalityLookAhead;
 
             // Start from current waypoint
             Vector3 carPos = transform.position;
-            float remainingDistance = lookAheadDistance;
+            float remainingDistance = personalityLookAhead; // Use personalized lookahead
             int searchIndex = currentWaypointIndex;
 
             // Skip waypoints that are behind us
@@ -345,6 +359,7 @@ namespace TrafficSystem
             }
 
             // Find lookahead point
+            Vector3 targetPoint = Vector3.zero;
             while (searchIndex < currentSegment.waypoints.Count)
             {
                 Waypoint wp = currentSegment.waypoints[searchIndex];
@@ -352,7 +367,8 @@ namespace TrafficSystem
 
                 if (distToWaypoint >= remainingDistance)
                 {
-                    return wp.position;
+                    targetPoint = wp.position;
+                    break;
                 }
 
                 remainingDistance -= distToWaypoint;
@@ -360,13 +376,28 @@ namespace TrafficSystem
             }
 
             // Return last waypoint if we've run out
-            if (currentSegment.waypoints.Count > 0)
+            if (targetPoint == Vector3.zero)
             {
-                return currentSegment.waypoints[currentSegment.waypoints.Count - 1].position;
+                if (currentSegment.waypoints.Count > 0)
+                {
+                    targetPoint = currentSegment.waypoints[currentSegment.waypoints.Count - 1].position;
+                }
+                else
+                {
+                    // Ultimate fallback
+                    return transform.position + transform.forward * personalityLookAhead;
+                }
             }
 
-            // Ultimate fallback
-            return transform.position + transform.forward * lookAheadDistance;
+            // Apply lateral offset for lane variation
+            if (Mathf.Abs(lateralOffset) > 0.1f && searchIndex < currentSegment.waypoints.Count)
+            {
+                Waypoint wp = currentSegment.waypoints[searchIndex];
+                Vector3 right = Vector3.Cross(wp.forward, Vector3.up).normalized;
+                targetPoint += right * lateralOffset;
+            }
+
+            return targetPoint;
         }
 
         /// <summary>
@@ -408,8 +439,8 @@ namespace TrafficSystem
             // Apply motor torque or braking
             if (speedDifference > speedTolerance)
             {
-                // Need to accelerate
-                float motorTorque = acceleration * Mathf.Clamp01(speedDifference / 20f);
+                // Need to accelerate - use personalized acceleration
+                float motorTorque = personalityAcceleration * Mathf.Clamp01(speedDifference / 20f);
                 if (rearLeftCollider != null) rearLeftCollider.motorTorque = motorTorque;
                 if (rearRightCollider != null) rearRightCollider.motorTorque = motorTorque;
 
