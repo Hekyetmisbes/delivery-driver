@@ -13,6 +13,8 @@ namespace TrafficSystem
         [Header("Off-Road Detection")]
         [Tooltip("Max distance from road before considered off-road (meters)")]
         [SerializeField] private float offRoadThreshold = 15f; // Increased to prevent false positives
+        [Tooltip("Max vertical distance from road before considered off-road (meters)")]
+        [SerializeField] private float verticalOffRoadThreshold = 2f;
         [Tooltip("Check interval (seconds)")]
         [SerializeField] private float checkInterval = 1f; // Check less frequently
 
@@ -89,13 +91,13 @@ namespace TrafficSystem
         private void PerformChecks()
         {
             // Check if off-road
-            float distanceFromRoad = GetDistanceFromRoad();
+            var roadInfo = GetRoadDistanceInfo();
 
-            if (distanceFromRoad > offRoadThreshold)
+            if (roadInfo.horizontalDistance > offRoadThreshold || roadInfo.verticalDistance > verticalOffRoadThreshold)
             {
                 if (logRecoveryEvents)
                 {
-                    Debug.LogWarning($"[NpcRecovery] {name} is off-road! Distance: {distanceFromRoad:F1}m");
+                    Debug.LogWarning($"[NpcRecovery] {name} is off-road! Horizontal: {roadInfo.horizontalDistance:F1}m, Vertical: {roadInfo.verticalDistance:F1}m");
                 }
                 TriggerRecovery("Off-road");
             }
@@ -131,13 +133,21 @@ namespace TrafficSystem
         /// <summary>
         /// Get distance from nearest road point
         /// </summary>
-        private float GetDistanceFromRoad()
+        private (float horizontalDistance, float verticalDistance) GetRoadDistanceInfo()
         {
             if (roadGraphBuilder == null || roadGraphBuilder.RoadGraph == null)
-                return 0f;
+                return (0f, 0f);
 
-            var (segment, waypointIndex, distance) = roadGraphBuilder.RoadGraph.FindNearestPoint(transform.position);
-            return distance;
+            var (segment, waypointIndex, projectedPoint, tangent) = roadGraphBuilder.RoadGraph.ProjectPointOnRoad(transform.position);
+            if (segment == null)
+                return (0f, 0f);
+
+            Vector3 flatPos = transform.position;
+            flatPos.y = projectedPoint.y;
+
+            float horizontal = Vector3.Distance(flatPos, projectedPoint);
+            float vertical = Mathf.Abs(transform.position.y - projectedPoint.y);
+            return (horizontal, vertical);
         }
 
         /// <summary>
@@ -161,7 +171,11 @@ namespace TrafficSystem
             if (segment != null)
             {
                 // Use projected point directly (it's on the road)
-                Vector3 snapPosition = projectedPoint + Vector3.up * snapHeightOffset;
+                float heightOffset = snapHeightOffset;
+                if (carAgent != null)
+                    heightOffset = Mathf.Max(heightOffset, carAgent.GetGroundClearanceOffset());
+
+                Vector3 snapPosition = projectedPoint + Vector3.up * heightOffset;
 
                 // Safe rotation with zero vector check - flatten to horizontal
                 if (tangent.sqrMagnitude < 0.01f)
@@ -263,13 +277,14 @@ namespace TrafficSystem
             Vector3 screenPos = Camera.main.WorldToScreenPoint(transform.position + Vector3.up * 3f);
             if (screenPos.z > 0)
             {
-                float distance = GetDistanceFromRoad();
-                string status = distance > offRoadThreshold ? "OFF-ROAD" : "OK";
-                Color textColor = distance > offRoadThreshold ? Color.red : Color.green;
+                var roadInfo = GetRoadDistanceInfo();
+                float distance = roadInfo.horizontalDistance;
+                string status = (roadInfo.horizontalDistance > offRoadThreshold || roadInfo.verticalDistance > verticalOffRoadThreshold) ? "OFF-ROAD" : "OK";
+                Color textColor = status == "OFF-ROAD" ? Color.red : Color.green;
 
                 GUI.color = textColor;
                 GUI.Label(new Rect(screenPos.x - 50, Screen.height - screenPos.y - 20, 100, 40),
-                    $"{status}\n{distance:F1}m\nRecoveries: {recoveryCount}");
+                    $"{status}\nH {roadInfo.horizontalDistance:F1}m\nV {roadInfo.verticalDistance:F1}m\nRec: {recoveryCount}");
             }
         }
 

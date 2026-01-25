@@ -177,8 +177,15 @@ namespace TrafficSystem
                 }
 
                 // Use waypoint position directly (it's already on the road)
-                // Just add small height offset to prevent clipping through road surface
-                Vector3 finalSpawnPos = spawnPos + Vector3.up * 0.2f;
+                // Add height offset based on wheel size to prevent clipping through road surface
+                NpcCarAgent carAgent = npcVehicle.GetComponent<NpcCarAgent>();
+                float heightOffset = 0.2f;
+                if (carAgent != null)
+                {
+                    heightOffset = carAgent.GetGroundClearanceOffset();
+                }
+
+                Vector3 finalSpawnPos = spawnPos + Vector3.up * heightOffset;
                 npcVehicle.transform.position = finalSpawnPos;
 
                 if (showDebugInfo)
@@ -204,7 +211,6 @@ namespace TrafficSystem
                 npcVehicle.transform.rotation = Quaternion.LookRotation(forward);
 
                 // Initialize NPC components
-                NpcCarAgent carAgent = npcVehicle.GetComponent<NpcCarAgent>();
                 if (carAgent != null)
                 {
                     carAgent.Initialize(roadGraphBuilder, segment, waypointIndex);
@@ -348,7 +354,11 @@ namespace TrafficSystem
             Waypoint wp = segment.waypoints[waypointIndex];
 
             // Use waypoint position directly (it's already on the road)
-            npc.transform.position = wp.position + Vector3.up * 0.2f;
+            float heightOffset = 0.2f;
+            NpcCarAgent carAgent = npc.GetComponent<NpcCarAgent>();
+            if (carAgent != null)
+                heightOffset = carAgent.GetGroundClearanceOffset();
+            npc.transform.position = wp.position + Vector3.up * heightOffset;
 
             // Safe rotation - flatten to horizontal
             Vector3 forward = wp.forward;
@@ -367,7 +377,6 @@ namespace TrafficSystem
             }
             npc.transform.rotation = Quaternion.LookRotation(forward);
 
-            NpcCarAgent carAgent = npc.GetComponent<NpcCarAgent>();
             if (carAgent != null)
             {
                 carAgent.Initialize(roadGraphBuilder, segment, waypointIndex);

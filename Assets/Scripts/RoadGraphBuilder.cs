@@ -1,3 +1,5 @@
+using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
@@ -10,6 +12,10 @@ namespace TrafficSystem
     /// </summary>
     public class RoadGraphBuilder : MonoBehaviour
     {
+        private static readonly Dictionary<string, Type> TypeCache = new Dictionary<string, Type>();
+        private static readonly Dictionary<string, Type> ComponentTypeCache = new Dictionary<string, Type>();
+        private static readonly string[] RoadCollectionFieldNames = { "roads", "roadObjects" };
+
         [Header("Road Sampling Settings")]
         [Tooltip("Distance between sampled waypoints (meters)")]
         [SerializeField] private float sampleStepMeters = 5f;
@@ -104,9 +110,13 @@ namespace TrafficSystem
         /// </summary>
         private GameObject FindObjectWithComponent(string componentTypeName)
         {
+            Type type = ResolveComponentType(componentTypeName);
+            if (type == null)
+                return null;
+
             foreach (GameObject root in UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects())
             {
-                Component comp = root.GetComponentInChildren(System.Type.GetType(componentTypeName));
+                Component comp = root.GetComponentInChildren(type);
                 if (comp != null)
                     return comp.gameObject;
             }
@@ -136,45 +146,40 @@ namespace TrafficSystem
         {
             try
             {
-                // Try to get ERRoadNetwork component
-                Component roadNetwork = network.GetComponent("ERRoadNetwork");
+                Component roadNetwork = FindEasyRoadsNetworkComponent(network);
                 if (roadNetwork == null)
                 {
-                    roadNetwork = network.GetComponentInChildren(System.Type.GetType("ERRoadNetwork"));
-                }
-
-                if (roadNetwork == null)
-                {
-                    Debug.LogWarning("[RoadGraphBuilder] ERRoadNetwork component not found");
+                    Debug.LogWarning("[RoadGraphBuilder] EasyRoads3D network component not found");
                     return false;
                 }
 
                 // Try to access roads array/list
                 System.Type networkType = roadNetwork.GetType();
-                FieldInfo roadsField = networkType.GetField("roads", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                FieldInfo roadsField = null;
+                foreach (string fieldName in RoadCollectionFieldNames)
+                {
+                    roadsField = networkType.GetField(fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (roadsField != null) break;
+                }
 
                 if (roadsField == null)
                 {
-                    roadsField = networkType.GetField("roadObjects", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    foreach (string fieldName in RoadCollectionFieldNames)
+                    {
+                        PropertyInfo roadsProp = networkType.GetProperty(fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                        if (roadsProp != null)
+                        {
+                            object roadsObj = roadsProp.GetValue(roadNetwork, null);
+                            if (TrySampleRoadList(roadsObj))
+                                return true;
+                        }
+                    }
                 }
-
-                if (roadsField != null)
+                else
                 {
                     object roadsObj = roadsField.GetValue(roadNetwork);
-                    if (roadsObj is System.Collections.IList roadsList)
-                    {
-                        Debug.Log($"[RoadGraphBuilder] Found {roadsList.Count} roads via EasyRoads3D API");
-
-                        for (int i = 0; i < roadsList.Count; i++)
-                        {
-                            object roadObj = roadsList[i];
-                            if (roadObj == null) continue;
-
-                            SampleRoadObject(roadObj, i);
-                        }
-
-                        return roadGraph.roadSegments.Count > 0;
-                    }
+                    if (TrySampleRoadList(roadsObj))
+                        return true;
                 }
             }
             catch (System.Exception e)
@@ -205,6 +210,7 @@ namespace TrafficSystem
                         if (roadGO != null)
                         {
                             SampleRoadFromGameObject(roadGO, index);
+                            return;
                         }
                     }
                 }
@@ -214,8 +220,13 @@ namespace TrafficSystem
                     if (roadGO != null)
                     {
                         SampleRoadFromGameObject(roadGO, index);
+                        return;
                     }
                 }
+
+                // If no GameObject, try sampling markers directly from road object
+                if (TrySampleFromRoadObjectMarkers(roadObj, index))
+                    return;
             }
             catch (System.Exception e)
             {
@@ -228,16 +239,16 @@ namespace TrafficSystem
         /// </summary>
         private void SampleRoadFromGameObject(GameObject roadGO, int segmentId)
         {
-            // Try to get ERRoad component and sample it
-            Component erRoad = roadGO.GetComponent("ERRoad");
-            if (erRoad != null)
-            {
-                // Try to get marker positions or spline data
-                if (TrySampleFromERRoadComponent(erRoad, segmentId))
-                {
-                    return;
-                }
-            }
+            // Try to sample from any EasyRoads component on this object
+            if (TrySampleFromEasyRoadsComponent(roadGO, segmentId))
+                return;
+
+            if (TrySampleFromMarkerComponents(roadGO.transform, segmentId))
+                return;
+
+            // Avoid mesh centerline for EasyRoads roads (curved loops produce bad paths)
+            if (!IsEasyRoadsObject(roadGO) && TrySampleFromMeshHierarchy(roadGO.transform, segmentId))
+                return;
 
             // Fallback: sample from child transforms
             SampleFromTransformHierarchy(roadGO.transform, segmentId);
@@ -298,6 +309,410 @@ namespace TrafficSystem
                 Debug.LogWarning($"[RoadGraphBuilder] ERRoad sampling failed: {e.Message}");
             }
 
+            // Fallback to marker-based sampling
+            if (TrySampleFromERRoadMarkers(erRoad, segmentId))
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Try to sample waypoints from ERRoad marker data
+        /// </summary>
+        private bool TrySampleFromERRoadMarkers(Component erRoad, int segmentId)
+        {
+            List<Vector3> markerPositions = ExtractMarkerPositions(erRoad);
+            if (markerPositions == null || markerPositions.Count < 2)
+                return false;
+
+            List<Vector3> sampled = ResamplePolyline(markerPositions, sampleStepMeters);
+            if (sampled.Count < 2)
+                return false;
+
+            RoadSegment segment = new RoadSegment(segmentId, erRoad.gameObject.name);
+
+            for (int i = 0; i < sampled.Count; i++)
+            {
+                Vector3 pos = sampled[i];
+                Vector3 forward = Vector3.forward;
+
+                if (i < sampled.Count - 1)
+                    forward = (sampled[i + 1] - pos).normalized;
+                else if (i > 0)
+                    forward = (pos - sampled[i - 1]).normalized;
+
+                if (forward.sqrMagnitude < 0.01f)
+                    forward = Vector3.forward;
+
+                segment.waypoints.Add(new Waypoint(pos, forward, segmentId));
+            }
+
+            roadGraph.roadSegments.Add(segment);
+            Debug.Log($"[RoadGraphBuilder] Sampled road '{segment.name}' from markers: {segment.waypoints.Count} waypoints");
+            return true;
+        }
+
+        /// <summary>
+        /// Extract marker positions from ERRoad component using reflection
+        /// </summary>
+        private List<Vector3> ExtractMarkerPositions(Component erRoad)
+        {
+            return ExtractMarkerPositions((object)erRoad);
+        }
+
+        private List<Vector3> ExtractMarkerPositions(object roadOrMarkerContainer)
+        {
+            if (roadOrMarkerContainer == null) return null;
+
+            Type roadType = roadOrMarkerContainer.GetType();
+            List<Vector3> positions = new List<Vector3>();
+
+            // Prefer common field names first
+            string[] candidateNames =
+            {
+                "markers", "markersExt", "markerList", "markerObjects", "markerScripts",
+                "roadMarkers", "markerPositions", "markersPositions"
+            };
+
+            foreach (string name in candidateNames)
+            {
+                FieldInfo field = roadType.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (field != null && TryExtractPositionsFromValue(field.GetValue(roadOrMarkerContainer), positions))
+                    return positions;
+
+                PropertyInfo prop = roadType.GetProperty(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (prop != null && TryExtractPositionsFromValue(prop.GetValue(roadOrMarkerContainer, null), positions))
+                    return positions;
+            }
+
+            // Fallback: scan any field with "marker" in name
+            foreach (FieldInfo field in roadType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+            {
+                if (!field.Name.ToLower().Contains("marker")) continue;
+
+                if (TryExtractPositionsFromValue(field.GetValue(roadOrMarkerContainer), positions))
+                    return positions;
+            }
+
+            // Fallback: scan any property with "marker" in name
+            foreach (PropertyInfo prop in roadType.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+            {
+                if (!prop.Name.ToLower().Contains("marker")) continue;
+
+                if (TryExtractPositionsFromValue(prop.GetValue(roadOrMarkerContainer, null), positions))
+                    return positions;
+            }
+
+            return positions.Count >= 2 ? positions : null;
+        }
+
+        private bool TryExtractPositionsFromValue(object value, List<Vector3> positions)
+        {
+            if (value == null) return false;
+
+            if (value is IList list)
+            {
+                positions.Clear();
+                foreach (object item in list)
+                {
+                    if (TryGetPositionFromObject(item, out Vector3 pos))
+                        positions.Add(pos);
+                }
+                return positions.Count >= 2;
+            }
+
+            if (value is IEnumerable enumerable)
+            {
+                positions.Clear();
+                foreach (object item in enumerable)
+                {
+                    if (TryGetPositionFromObject(item, out Vector3 pos))
+                        positions.Add(pos);
+                }
+                return positions.Count >= 2;
+            }
+
+            return false;
+        }
+
+        private bool TryGetPositionFromObject(object obj, out Vector3 position)
+        {
+            position = Vector3.zero;
+            if (obj == null) return false;
+
+            if (obj is Vector3 vec)
+            {
+                position = vec;
+                return true;
+            }
+
+            if (obj is Transform t)
+            {
+                position = t.position;
+                return true;
+            }
+
+            if (obj is GameObject go)
+            {
+                position = go.transform.position;
+                return true;
+            }
+
+            if (obj is Component comp)
+            {
+                position = comp.transform.position;
+                return true;
+            }
+
+            Type objType = obj.GetType();
+            PropertyInfo posProp = objType.GetProperty("position", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (posProp != null && posProp.PropertyType == typeof(Vector3))
+            {
+                position = (Vector3)posProp.GetValue(obj, null);
+                return true;
+            }
+
+            FieldInfo posField = objType.GetField("position", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (posField != null && posField.FieldType == typeof(Vector3))
+            {
+                position = (Vector3)posField.GetValue(obj);
+                return true;
+            }
+
+            PropertyInfo trProp = objType.GetProperty("transform", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (trProp != null && typeof(Transform).IsAssignableFrom(trProp.PropertyType))
+            {
+                Transform tr = trProp.GetValue(obj, null) as Transform;
+                if (tr != null)
+                {
+                    position = tr.position;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool TrySampleFromMarkerComponents(Transform root, int segmentId)
+        {
+            Type markerType = ResolveComponentType("ERMarkerExt") ?? ResolveComponentType("EasyRoads3Dv3.ERMarkerExt");
+            if (markerType == null) return false;
+
+            Component[] markers = root.GetComponentsInChildren(markerType, true);
+            if (markers == null || markers.Length < 2) return false;
+
+            List<(float order, Vector3 pos)> ordered = new List<(float, Vector3)>();
+            foreach (Component marker in markers)
+            {
+                float order = GetMarkerOrder(marker);
+                ordered.Add((order, marker.transform.position));
+            }
+
+            ordered.Sort((a, b) => a.order.CompareTo(b.order));
+
+            List<Vector3> positions = new List<Vector3>();
+            foreach (var item in ordered)
+                positions.Add(item.pos);
+
+            List<Vector3> sampled = ResamplePolyline(positions, sampleStepMeters);
+            if (sampled.Count < 2) return false;
+
+            RoadSegment segment = new RoadSegment(segmentId, root.name);
+            for (int i = 0; i < sampled.Count; i++)
+            {
+                Vector3 pos = sampled[i];
+                Vector3 forward = Vector3.forward;
+                if (i < sampled.Count - 1) forward = (sampled[i + 1] - pos).normalized;
+                else if (i > 0) forward = (pos - sampled[i - 1]).normalized;
+
+                if (forward.sqrMagnitude < 0.01f)
+                    forward = Vector3.forward;
+
+                segment.waypoints.Add(new Waypoint(pos, forward, segmentId));
+            }
+
+            roadGraph.roadSegments.Add(segment);
+            Debug.Log($"[RoadGraphBuilder] Sampled road '{segment.name}' from marker components: {segment.waypoints.Count} waypoints");
+            return true;
+        }
+
+        private float GetMarkerOrder(Component marker)
+        {
+            if (marker == null) return float.MaxValue;
+
+            Type t = marker.GetType();
+            string[] orderFields = { "startDistance", "startSplinePoint", "markerId", "markerID", "id", "index", "order", "markerIndex", "markerIndent", "distance" };
+
+            foreach (string name in orderFields)
+            {
+                FieldInfo field = t.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (field != null)
+                {
+                    if (field.FieldType == typeof(int))
+                        return (int)field.GetValue(marker);
+                    if (field.FieldType == typeof(float))
+                        return (float)field.GetValue(marker);
+                }
+
+                PropertyInfo prop = t.GetProperty(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (prop != null)
+                {
+                    if (prop.PropertyType == typeof(int))
+                        return (int)prop.GetValue(marker, null);
+                    if (prop.PropertyType == typeof(float))
+                        return (float)prop.GetValue(marker, null);
+                }
+            }
+
+            return float.MaxValue;
+        }
+
+        private bool TrySampleFromEasyRoadsComponent(GameObject roadGO, int segmentId)
+        {
+            Component[] components = roadGO.GetComponents<Component>();
+            foreach (Component comp in components)
+            {
+                if (comp == null) continue;
+                if (!IsEasyRoadsType(comp.GetType())) continue;
+
+                if (TrySampleFromERRoadComponent(comp, segmentId))
+                    return true;
+
+                if (TrySampleFromERRoadMarkers(comp, segmentId))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private bool TrySampleFromRoadObjectMarkers(object roadObj, int segmentId)
+        {
+            List<Vector3> markerPositions = ExtractMarkerPositions(roadObj);
+            if (markerPositions == null || markerPositions.Count < 2)
+                return false;
+
+            List<Vector3> sampled = ResamplePolyline(markerPositions, sampleStepMeters);
+            if (sampled.Count < 2)
+                return false;
+
+            RoadSegment segment = new RoadSegment(segmentId, "RoadObject");
+            for (int i = 0; i < sampled.Count; i++)
+            {
+                Vector3 pos = sampled[i];
+                Vector3 forward = Vector3.forward;
+                if (i < sampled.Count - 1) forward = (sampled[i + 1] - pos).normalized;
+                else if (i > 0) forward = (pos - sampled[i - 1]).normalized;
+
+                if (forward.sqrMagnitude < 0.01f)
+                    forward = Vector3.forward;
+
+                segment.waypoints.Add(new Waypoint(pos, forward, segmentId));
+            }
+
+            roadGraph.roadSegments.Add(segment);
+            Debug.Log($"[RoadGraphBuilder] Sampled road from road object markers: {segment.waypoints.Count} waypoints");
+            return true;
+        }
+
+        private bool TrySampleRoadList(object roadsObj)
+        {
+            if (roadsObj is IList roadsList)
+            {
+                Debug.Log($"[RoadGraphBuilder] Found {roadsList.Count} roads via EasyRoads3D API");
+
+                for (int i = 0; i < roadsList.Count; i++)
+                {
+                    object roadObj = roadsList[i];
+                    if (roadObj == null) continue;
+
+                    SampleRoadObject(roadObj, i);
+                }
+
+                return roadGraph.roadSegments.Count > 0;
+            }
+
+            return false;
+        }
+
+        private Component FindEasyRoadsNetworkComponent(GameObject network)
+        {
+            Component[] components = network.GetComponentsInChildren<Component>(true);
+            foreach (Component comp in components)
+            {
+                if (comp == null) continue;
+                Type t = comp.GetType();
+                if (!IsEasyRoadsType(t)) continue;
+
+                foreach (string fieldName in RoadCollectionFieldNames)
+                {
+                    FieldInfo field = t.GetField(fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (field != null)
+                        return comp;
+
+                    PropertyInfo prop = t.GetProperty(fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (prop != null)
+                        return comp;
+                }
+            }
+
+            return null;
+        }
+
+        private bool IsEasyRoadsObject(GameObject go)
+        {
+            Component[] components = go.GetComponents<Component>();
+            foreach (Component comp in components)
+            {
+                if (comp == null) continue;
+                if (IsEasyRoadsType(comp.GetType()))
+                    return true;
+            }
+            return false;
+        }
+
+        private bool IsEasyRoadsType(Type type)
+        {
+            if (type == null) return false;
+            string asm = type.Assembly.GetName().Name;
+            if (!string.IsNullOrEmpty(asm) && asm.IndexOf("EasyRoads", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            if (!string.IsNullOrEmpty(type.FullName) && type.FullName.IndexOf("EasyRoads", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            return false;
+        }
+
+        private bool TrySampleFromMeshHierarchy(Transform root, int segmentId)
+        {
+            MeshFilter[] meshFilters = root.GetComponentsInChildren<MeshFilter>(true);
+            if (meshFilters == null || meshFilters.Length == 0) return false;
+
+            MeshFilter best = null;
+            int bestVertexCount = 0;
+            foreach (MeshFilter mf in meshFilters)
+            {
+                if (mf == null || mf.sharedMesh == null) continue;
+                int count = mf.sharedMesh.vertexCount;
+                if (count > bestVertexCount)
+                {
+                    bestVertexCount = count;
+                    best = mf;
+                }
+            }
+
+            if (best == null) return false;
+
+            RoadSegment segment = new RoadSegment(segmentId, root.name);
+            SampleFromMesh(best, segment, segmentId);
+
+            if (segment.waypoints.Count > 0)
+            {
+                roadGraph.roadSegments.Add(segment);
+                Debug.Log($"[RoadGraphBuilder] Sampled road '{segment.name}' from mesh hierarchy: {segment.waypoints.Count} waypoints");
+                return true;
+            }
+
             return false;
         }
 
@@ -318,7 +733,7 @@ namespace TrafficSystem
 
             foreach (Transform roadTransform in potentialRoads)
             {
-                SampleFromTransformHierarchy(roadTransform, segmentId++);
+                SampleRoadFromGameObject(roadTransform.gameObject, segmentId++);
             }
 
             // If still no roads found, try creating a simple test path
@@ -526,6 +941,15 @@ namespace TrafficSystem
                 Vector3 startPos = segment.waypoints[0].position;
                 Vector3 endPos = segment.waypoints[segment.waypoints.Count - 1].position;
 
+                // Self-loop connection for closed roads
+                if (Vector3.Distance(endPos, startPos) < threshold)
+                {
+                    segment.connections.Add(new RoadConnection(
+                        segment, segment,
+                        segment.waypoints.Count - 1, 0
+                    ));
+                }
+
                 foreach (var otherSegment in roadGraph.roadSegments)
                 {
                     if (otherSegment == segment || otherSegment.waypoints.Count == 0) continue;
@@ -622,24 +1046,30 @@ namespace TrafficSystem
 
             if (vertices.Count == 0) return centerline;
 
-            // Find min and max along forward direction (Z axis typically for roads)
-            float minZ = float.MaxValue;
-            float maxZ = float.MinValue;
-
+            // Find dominant axis length to avoid sampling severely curved roads
+            float minX = float.MaxValue, maxX = float.MinValue;
+            float minZ = float.MaxValue, maxZ = float.MinValue;
             foreach (Vector3 v in vertices)
             {
+                if (v.x < minX) minX = v.x;
+                if (v.x > maxX) maxX = v.x;
                 if (v.z < minZ) minZ = v.z;
                 if (v.z > maxZ) maxZ = v.z;
             }
 
-            float roadLength = maxZ - minZ;
+            float spanX = maxX - minX;
+            float spanZ = maxZ - minZ;
+            bool useZ = spanZ >= spanX;
+            float roadLength = useZ ? spanZ : spanX;
+            if (roadLength < 1f) return centerline;
+
             int sampleCount = Mathf.Max(2, Mathf.CeilToInt(roadLength / sampleStepMeters));
 
             // Sample points along the road
             for (int i = 0; i < sampleCount; i++)
             {
                 float t = (float)i / (sampleCount - 1);
-                float targetZ = Mathf.Lerp(minZ, maxZ, t);
+                float targetAxis = useZ ? Mathf.Lerp(minZ, maxZ, t) : Mathf.Lerp(minX, maxX, t);
 
                 // Find all vertices near this Z position
                 List<Vector3> nearVertices = new List<Vector3>();
@@ -647,7 +1077,8 @@ namespace TrafficSystem
 
                 foreach (Vector3 v in vertices)
                 {
-                    if (Mathf.Abs(v.z - targetZ) < zTolerance)
+                    float axisValue = useZ ? v.z : v.x;
+                    if (Mathf.Abs(axisValue - targetAxis) < zTolerance)
                     {
                         nearVertices.Add(v);
                     }
@@ -667,6 +1098,119 @@ namespace TrafficSystem
             }
 
             return centerline;
+        }
+
+        private List<Vector3> ResamplePolyline(List<Vector3> points, float step)
+        {
+            List<Vector3> result = new List<Vector3>();
+            if (points == null || points.Count == 0) return result;
+
+            if (step <= 0.01f)
+            {
+                result.AddRange(points);
+                return result;
+            }
+
+            result.Add(points[0]);
+            float remaining = step;
+
+            for (int i = 1; i < points.Count; i++)
+            {
+                Vector3 start = points[i - 1];
+                Vector3 end = points[i];
+                float dist = Vector3.Distance(start, end);
+                if (dist < 0.001f) continue;
+
+                Vector3 dir = (end - start).normalized;
+                float traveled = 0f;
+
+                while (traveled + remaining <= dist)
+                {
+                    Vector3 pos = start + dir * (traveled + remaining);
+                    result.Add(pos);
+                    traveled += remaining;
+                    remaining = step;
+                }
+
+                remaining -= (dist - traveled);
+                if (remaining < 0.001f) remaining = step;
+            }
+
+            if (Vector3.Distance(result[result.Count - 1], points[points.Count - 1]) > 0.01f)
+                result.Add(points[points.Count - 1]);
+
+            return result;
+        }
+
+        private static Type ResolveType(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName)) return null;
+
+            if (TypeCache.TryGetValue(typeName, out Type cached))
+                return cached;
+
+            Type type = Type.GetType(typeName);
+            if (type != null)
+            {
+                TypeCache[typeName] = type;
+                return type;
+            }
+
+            foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type found = null;
+                try
+                {
+                    foreach (Type t in asm.GetTypes())
+                    {
+                        if (t == null) continue;
+                        if (t.Name == typeName || t.FullName == typeName)
+                        {
+                            found = t;
+                            break;
+                        }
+                    }
+                }
+                catch (ReflectionTypeLoadException e)
+                {
+                    foreach (Type t in e.Types)
+                    {
+                        if (t == null) continue;
+                        if (t.Name == typeName || t.FullName == typeName)
+                        {
+                            found = t;
+                            break;
+                        }
+                    }
+                }
+
+                if (found != null)
+                {
+                    TypeCache[typeName] = found;
+                    return found;
+                }
+            }
+
+            TypeCache[typeName] = null;
+            return null;
+        }
+
+        private static Type ResolveComponentType(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName)) return null;
+
+            if (ComponentTypeCache.TryGetValue(typeName, out Type cached))
+                return cached;
+
+            Type type = ResolveType(typeName);
+            if (type != null && typeof(Component).IsAssignableFrom(type))
+            {
+                ComponentTypeCache[typeName] = type;
+                return type;
+            }
+
+            ComponentTypeCache[typeName] = null;
+            return null;
         }
 
         private int GetTotalWaypointCount()

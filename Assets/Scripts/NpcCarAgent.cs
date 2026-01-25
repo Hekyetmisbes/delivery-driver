@@ -23,6 +23,12 @@ namespace TrafficSystem
         [SerializeField] private float maxSteerAngle = 35f;
         [Tooltip("Steering smoothing speed")]
         [SerializeField] private float steeringSmoothSpeed = 5f;
+        [Tooltip("Model local forward axis (set if model is not +Z forward)")]
+        [SerializeField] private Vector3 modelForwardLocal = Vector3.forward;
+        [Tooltip("Model local up axis (set if model is not +Y up)")]
+        [SerializeField] private Vector3 modelUpLocal = Vector3.up;
+        [Tooltip("Auto-detect model forward axis from wheel collider layout")]
+        [SerializeField] private bool autoDetectModelForward = true;
 
         [Header("Speed Settings")]
         [Tooltip("Cruise speed range (km/h)")]
@@ -44,9 +50,29 @@ namespace TrafficSystem
         [Tooltip("Layer mask for obstacle detection")]
         [SerializeField] private LayerMask obstacleLayerMask = ~0;
 
+        [Header("Stability")]
+        [Tooltip("Enable stability helpers (turn speed limit, downforce, anti-roll)")]
+        [SerializeField] private bool enableStability = true;
+        [Tooltip("Max lateral acceleration (m/s^2) used to limit speed in turns")]
+        [SerializeField] private float maxLateralAcceleration = 6f;
+        [Tooltip("Minimum speed factor at full steering lock")]
+        [SerializeField] private float minTurnSpeedFactor = 0.35f;
+        [Tooltip("Downforce coefficient (N per (m/s)^2)")]
+        [SerializeField] private float downforceCoefficient = 50f;
+        [Tooltip("Anti-roll stiffness")]
+        [SerializeField] private float antiRollStiffness = 6000f;
+
         [Header("Debug")]
         [SerializeField] private bool showDebugGizmos = true;
         [SerializeField] private bool logPathChanges = false;
+
+        [Header("Grounding")]
+        [Tooltip("Raycast mask for grounding the vehicle to the road surface")]
+        [SerializeField] private LayerMask groundMask = ~0;
+        [Tooltip("Raycast height above target point")]
+        [SerializeField] private float groundRaycastHeight = 5f;
+        [Tooltip("Raycast distance downward")]
+        [SerializeField] private float groundRaycastDistance = 10f;
 
         // Runtime state
         private Rigidbody rb;
@@ -59,6 +85,7 @@ namespace TrafficSystem
         private bool isInitialized;
         private Vector3 currentLookAheadPoint;
         private bool isObstacleDetected;
+        private float wheelBase;
 
         // Randomized behavior parameters
         private float lateralOffset; // Lateral offset from centerline (for lane variation)
@@ -72,10 +99,48 @@ namespace TrafficSystem
         public float CurrentSpeed => rb != null ? rb.linearVelocity.magnitude * 3.6f : 0f; // km/h
         public bool IsInitialized => isInitialized;
 
+        public float GetGroundClearanceOffset()
+        {
+            float offset = 0.3f;
+            bool usedWheelOffsets = false;
+
+            offset = Mathf.Max(offset, GetWheelRootOffset(frontLeftCollider, ref usedWheelOffsets));
+            offset = Mathf.Max(offset, GetWheelRootOffset(frontRightCollider, ref usedWheelOffsets));
+            offset = Mathf.Max(offset, GetWheelRootOffset(rearLeftCollider, ref usedWheelOffsets));
+            offset = Mathf.Max(offset, GetWheelRootOffset(rearRightCollider, ref usedWheelOffsets));
+
+            if (!usedWheelOffsets)
+            {
+                offset = Mathf.Max(offset, GetWheelClearance(frontLeftCollider));
+                offset = Mathf.Max(offset, GetWheelClearance(frontRightCollider));
+                offset = Mathf.Max(offset, GetWheelClearance(rearLeftCollider));
+                offset = Mathf.Max(offset, GetWheelClearance(rearRightCollider));
+            }
+
+            return offset + 0.05f;
+        }
+
+        private float GetWheelClearance(WheelCollider wheel)
+        {
+            if (wheel == null) return 0f;
+            return wheel.radius + wheel.suspensionDistance;
+        }
+
+        private float GetWheelRootOffset(WheelCollider wheel, ref bool used)
+        {
+            if (wheel == null) return 0f;
+            Vector3 localPos = transform.InverseTransformPoint(wheel.transform.position);
+            float required = wheel.radius - localPos.y;
+            used = true;
+            return required;
+        }
+
         private void Awake()
         {
             rb = GetComponent<Rigidbody>();
             SetupRigidbody();
+            CacheWheelGeometry();
+            NormalizeModelAxes();
         }
 
         private void Start()
@@ -143,28 +208,16 @@ namespace TrafficSystem
 
                 // Position vehicle at waypoint (waypoint is already on the road)
                 Waypoint wp = segment.waypoints[waypointIndex];
-                transform.position = wp.position + Vector3.up * 0.2f;
+                Vector3 desiredPos = wp.position + Vector3.up * GetGroundClearanceOffset();
+                transform.position = GetGroundedPosition(desiredPos);
 
                 // Safe rotation - flatten to horizontal plane for road following
-                Vector3 forward = wp.forward;
-                if (forward.sqrMagnitude < 0.01f)
-                {
-                    forward = Vector3.forward;
-                }
-                forward.y = 0; // Keep car level
-                if (forward.sqrMagnitude < 0.01f)
-                {
-                    forward = Vector3.forward;
-                }
-                else
-                {
-                    forward.Normalize();
-                }
-                transform.rotation = Quaternion.LookRotation(forward);
+                Vector3 forward = GetFlattenedForward(wp.forward);
+                ApplyAlignedRotation(forward);
 
                 // Start with random initial forward velocity (30-70% of target speed)
                 float initialSpeedFactor = Random.Range(0.3f, 0.7f);
-                rb.linearVelocity = forward * (targetSpeed / 3.6f * initialSpeedFactor);
+                rb.linearVelocity = GetWorldForward() * (targetSpeed / 3.6f * initialSpeedFactor);
                 rb.angularVelocity = Vector3.zero;
             }
         }
@@ -176,6 +229,7 @@ namespace TrafficSystem
             UpdatePath();
             CheckObstacles();
             ApplySteering();
+            ApplyStability();
             ApplyThrottle();
         }
 
@@ -259,7 +313,7 @@ namespace TrafficSystem
                 Waypoint wp = segment.waypoints[waypointIndex];
 
                 // Use waypoint position directly (it's on the road)
-                Vector3 newPos = wp.position + Vector3.up * 0.2f;
+                Vector3 newPos = wp.position + Vector3.up * GetGroundClearanceOffset();
 
                 // Flatten forward direction
                 Vector3 forward = wp.forward;
@@ -299,7 +353,7 @@ namespace TrafficSystem
             flatLookAhead.y = transform.position.y;
 
             // Calculate steering angle using Pure Pursuit
-            Vector3 localTarget = transform.InverseTransformPoint(flatLookAhead);
+            Vector3 localTarget = Quaternion.Inverse(GetVehicleRotation()) * (flatLookAhead - transform.position);
             float targetSteerAngle = Mathf.Atan2(localTarget.x, localTarget.z) * Mathf.Rad2Deg;
             targetSteerAngle = Mathf.Clamp(targetSteerAngle, -maxSteerAngle, maxSteerAngle);
 
@@ -332,7 +386,7 @@ namespace TrafficSystem
                 Vector3 toWaypoint = wpPos - carPos;
 
                 // Check if waypoint is ahead of us
-                float dotProduct = Vector3.Dot(toWaypoint.normalized, transform.forward);
+                float dotProduct = Vector3.Dot(toWaypoint.normalized, GetWorldForward());
                 if (dotProduct > 0.3f) // At least somewhat in front
                 {
                     break;
@@ -409,15 +463,15 @@ namespace TrafficSystem
         private void ApplyThrottle()
         {
             float currentSpeed = CurrentSpeed;
-            float speedDifference = targetSpeed - currentSpeed;
+            float effectiveTargetSpeed = GetTurnLimitedTargetSpeed();
 
             // Reduce speed if obstacle detected
-            float effectiveTargetSpeed = targetSpeed;
             if (isObstacleDetected)
             {
                 effectiveTargetSpeed *= (1f - avoidanceBrakeStrength);
-                speedDifference = effectiveTargetSpeed - currentSpeed;
             }
+
+            float speedDifference = effectiveTargetSpeed - currentSpeed;
 
             // Apply motor torque or braking
             if (speedDifference > speedTolerance)
@@ -446,6 +500,98 @@ namespace TrafficSystem
             }
         }
 
+        private float GetTurnLimitedTargetSpeed()
+        {
+            if (!enableStability)
+                return targetSpeed;
+
+            float steerAbs = Mathf.Abs(currentSteerAngle);
+            if (steerAbs < 1f || wheelBase < 0.5f)
+                return targetSpeed;
+
+            float steerRad = Mathf.Deg2Rad * Mathf.Clamp(steerAbs, 1f, maxSteerAngle);
+            float turnRadius = wheelBase / Mathf.Tan(steerRad);
+            if (turnRadius < 0.1f) turnRadius = 0.1f;
+
+            float maxSpeedMs = Mathf.Sqrt(Mathf.Max(0.1f, maxLateralAcceleration * Mathf.Abs(turnRadius)));
+            float maxSpeedKmh = maxSpeedMs * 3.6f;
+
+            float steerFactor = Mathf.Lerp(1f, minTurnSpeedFactor, steerAbs / maxSteerAngle);
+            return Mathf.Min(targetSpeed * steerFactor, maxSpeedKmh);
+        }
+
+        private void ApplyStability()
+        {
+            if (!enableStability || rb == null) return;
+
+            float speed = rb.linearVelocity.magnitude;
+            if (speed > 1f && downforceCoefficient > 0f)
+            {
+                rb.AddForce(-transform.up * downforceCoefficient * speed * speed);
+            }
+
+            if (antiRollStiffness > 0f)
+            {
+                ApplyAntiRoll(frontLeftCollider, frontRightCollider, antiRollStiffness);
+                ApplyAntiRoll(rearLeftCollider, rearRightCollider, antiRollStiffness);
+            }
+        }
+
+        private void ApplyAntiRoll(WheelCollider left, WheelCollider right, float stiffness)
+        {
+            if (left == null || right == null) return;
+
+            bool leftGrounded = left.GetGroundHit(out WheelHit hitL);
+            bool rightGrounded = right.GetGroundHit(out WheelHit hitR);
+
+            float leftTravel = 1f;
+            float rightTravel = 1f;
+
+            if (leftGrounded)
+            {
+                Vector3 local = left.transform.InverseTransformPoint(hitL.point);
+                leftTravel = (-local.y - left.radius) / left.suspensionDistance;
+            }
+
+            if (rightGrounded)
+            {
+                Vector3 local = right.transform.InverseTransformPoint(hitR.point);
+                rightTravel = (-local.y - right.radius) / right.suspensionDistance;
+            }
+
+            float antiRollForce = (leftTravel - rightTravel) * stiffness;
+
+            if (leftGrounded)
+                rb.AddForceAtPosition(left.transform.up * -antiRollForce, left.transform.position);
+            if (rightGrounded)
+                rb.AddForceAtPosition(right.transform.up * antiRollForce, right.transform.position);
+        }
+
+        private void CacheWheelGeometry()
+        {
+            if (frontLeftCollider == null || frontRightCollider == null || rearLeftCollider == null || rearRightCollider == null)
+            {
+                wheelBase = 2.5f;
+                return;
+            }
+
+            Vector3 frontAxle = (frontLeftCollider.transform.position + frontRightCollider.transform.position) * 0.5f;
+            Vector3 rearAxle = (rearLeftCollider.transform.position + rearRightCollider.transform.position) * 0.5f;
+            wheelBase = Vector3.Distance(frontAxle, rearAxle);
+            if (wheelBase < 0.5f) wheelBase = 2.5f;
+
+            if (autoDetectModelForward)
+            {
+                Vector3 frontLocal = transform.InverseTransformPoint(frontAxle);
+                Vector3 rearLocal = transform.InverseTransformPoint(rearAxle);
+                Vector3 localForward = (frontLocal - rearLocal);
+                if (localForward.sqrMagnitude > 0.001f)
+                {
+                    modelForwardLocal = localForward.normalized;
+                }
+            }
+        }
+
         private void SetMotorTorque(float torque)
         {
             if (rearLeftCollider != null) rearLeftCollider.motorTorque = torque;
@@ -467,28 +613,86 @@ namespace TrafficSystem
         {
             currentSegment = segment;
             currentWaypointIndex = waypointIndex;
-            transform.position = position;
+            transform.position = GetGroundedPosition(position);
 
-            // Flatten rotation to keep car level
+            // Align to road forward using model axes
             Vector3 forward = rotation * Vector3.forward;
-            forward.y = 0;
-            if (forward.sqrMagnitude > 0.01f)
-            {
-                forward.Normalize();
-                transform.rotation = Quaternion.LookRotation(forward);
-            }
-            else
-            {
-                transform.rotation = rotation;
-            }
+            forward = GetFlattenedForward(forward);
+            ApplyAlignedRotation(forward);
 
-            rb.linearVelocity = transform.forward * (targetSpeed / 3.6f);
+            rb.linearVelocity = GetWorldForward() * (targetSpeed / 3.6f);
             rb.angularVelocity = Vector3.zero;
 
             if (logPathChanges)
             {
                 Debug.Log($"[NpcCarAgent] {name} force repositioned to segment '{segment.name}' at waypoint {waypointIndex}");
             }
+        }
+
+        private Vector3 GetGroundedPosition(Vector3 desiredPosition)
+        {
+            Vector3 origin = desiredPosition + Vector3.up * groundRaycastHeight;
+            if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, groundRaycastHeight + groundRaycastDistance, groundMask, QueryTriggerInteraction.Ignore))
+            {
+                return hit.point + Vector3.up * GetGroundClearanceOffset();
+            }
+
+            return desiredPosition;
+        }
+
+        private void NormalizeModelAxes()
+        {
+            if (modelForwardLocal.sqrMagnitude < 0.001f)
+                modelForwardLocal = Vector3.forward;
+            if (modelUpLocal.sqrMagnitude < 0.001f)
+                modelUpLocal = Vector3.up;
+
+            modelForwardLocal.Normalize();
+            modelUpLocal.Normalize();
+        }
+
+        private Vector3 GetWorldForward()
+        {
+            return transform.TransformDirection(modelForwardLocal).normalized;
+        }
+
+        private Vector3 GetWorldUp()
+        {
+            return transform.TransformDirection(modelUpLocal).normalized;
+        }
+
+        private Quaternion GetVehicleRotation()
+        {
+            Vector3 worldForward = GetWorldForward();
+            Vector3 worldUp = GetWorldUp();
+
+            if (worldForward.sqrMagnitude < 0.01f)
+                worldForward = transform.forward;
+            if (worldUp.sqrMagnitude < 0.01f)
+                worldUp = Vector3.up;
+
+            return Quaternion.LookRotation(worldForward, worldUp);
+        }
+
+        private Vector3 GetFlattenedForward(Vector3 forward)
+        {
+            if (forward.sqrMagnitude < 0.001f)
+                forward = Vector3.forward;
+
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.001f)
+                forward = Vector3.forward;
+            else
+                forward.Normalize();
+
+            return forward;
+        }
+
+        private void ApplyAlignedRotation(Vector3 desiredForward)
+        {
+            Quaternion modelBasis = Quaternion.LookRotation(modelForwardLocal, modelUpLocal);
+            Quaternion targetBasis = Quaternion.LookRotation(desiredForward, Vector3.up);
+            transform.rotation = targetBasis * Quaternion.Inverse(modelBasis);
         }
 
         private void OnDrawGizmos()

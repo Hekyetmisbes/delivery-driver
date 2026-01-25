@@ -106,11 +106,24 @@ namespace TrafficSystemEditor
 
         private void CreateRouteVisualization()
         {
-            if (roadGraphBuilder == null || roadGraphBuilder.RoadGraph == null)
+            if (roadGraphBuilder == null)
             {
                 EditorUtility.DisplayDialog(
                     "Error",
-                    "RoadGraphBuilder or RoadGraph is null. Make sure the road graph is built.",
+                    "RoadGraphBuilder is null. Assign a RoadGraphBuilder from the scene.",
+                    "OK"
+                );
+                return;
+            }
+
+            // Rebuild graph to ensure latest road data (works in edit mode)
+            roadGraphBuilder.BuildRoadGraph();
+
+            if (roadGraphBuilder.RoadGraph == null)
+            {
+                EditorUtility.DisplayDialog(
+                    "Error",
+                    "RoadGraph is null after build. Check RoadGraphBuilder configuration.",
                     "OK"
                 );
                 return;
