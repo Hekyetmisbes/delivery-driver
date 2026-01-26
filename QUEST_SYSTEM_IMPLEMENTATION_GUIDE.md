@@ -112,8 +112,8 @@ namespace DeliveryDriver.Quest
 ---
 
 ### Task 1.4: Create Quest Data Structure
-- [ ] Create `Assets/Scripts/Quest/QuestData.cs`
-- [ ] Add `QuestData` class with properties:
+- [x] Create `Assets/Scripts/Quest/QuestData.cs`
+- [x] Add `QuestData` class with properties:
   - `string QuestID` - Unique identifier (GUID)
   - `string QuestName` - Display name
   - `string QuestDescription` - Full description
@@ -130,11 +130,11 @@ namespace DeliveryDriver.Quest
   - `float BonusTimeThreshold` - Time under this = bonus (e.g., 50% of limit)
   - `int RequiredLevel` - Player level requirement
   - `bool IsRepeatable` - Can be done multiple times
-- [ ] Add constructor with default initialization
-- [ ] Add method: `void StartQuest()` - Sets status to Active, starts timer
-- [ ] Add method: `void UpdateTimer(float deltaTime)` - Decrements time
-- [ ] Add method: `bool IsTimeExpired()` - Returns true if time <= 0
-- [ ] Add method: `int CalculateFinalReward()` - Base + bonus logic
+- [x] Add constructor with default initialization
+- [x] Add method: `void StartQuest()` - Sets status to Active, starts timer
+- [x] Add method: `void UpdateTimer(float deltaTime)` - Decrements time
+- [x] Add method: `bool IsTimeExpired()` - Returns true if time <= 0
+- [x] Add method: `int CalculateFinalReward()` - Base + bonus logic
 
 **Reward Calculation Logic:**
 ```csharp
@@ -147,17 +147,17 @@ else
 ---
 
 ### Task 1.5: Create Quest Database ScriptableObject
-- [ ] Create `Assets/Scripts/Quest/QuestDatabase.cs`
-- [ ] Add `QuestDatabase` ScriptableObject with:
+- [x] Create `Assets/Scripts/Quest/QuestDatabase.cs`
+- [x] Add `QuestDatabase` ScriptableObject with:
   - `List<QuestTemplate> AvailableQuests` - All quest templates
   - Method: `QuestData GetQuestByID(string id)`
   - Method: `List<QuestData> GetQuestsByDifficulty(QuestDifficulty diff)`
   - Method: `QuestData GenerateRandomQuest(QuestDifficulty diff)`
-- [ ] Create `QuestTemplate` inner class:
+- [x] Create `QuestTemplate` inner class:
   - Similar to QuestData but without runtime status
   - Used as blueprint for generating QuestData instances
-- [ ] Create menu item: `Assets/Create/Quest System/Quest Database`
-- [ ] Create first database instance: `Assets/Resources/QuestDatabase.asset`
+- [x] Create menu item: `Assets/Create/Quest System/Quest Database`
+- [x] Create first database instance: `Assets/Resources/QuestDatabase.asset`
 
 **Template Examples to Pre-configure:**
 1. "Downtown Express" (Easy, Standard Delivery)
