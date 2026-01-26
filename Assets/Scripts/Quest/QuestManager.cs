@@ -47,12 +47,12 @@ namespace DeliveryDriver.Quest
 
             if (roadGraphBuilder == null)
             {
-                roadGraphBuilder = FindObjectOfType<RoadGraphBuilder>();
+                roadGraphBuilder = FindAnyObjectByType<RoadGraphBuilder>();
             }
 
             if (playerTransform == null)
             {
-                CarController controller = FindObjectOfType<CarController>();
+                CarController controller = FindAnyObjectByType<CarController>();
                 if (controller != null)
                 {
                     playerController = controller;
@@ -575,7 +575,7 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
-            UnityEngine.Object manager = FindObjectOfType(progressionType);
+            UnityEngine.Object manager = FindAnyObjectByType(progressionType);
             if (manager == null)
             {
                 Debug.Log($"[QuestManager] Reward granted: {reward} currency, {quest.XPReward} XP.");
