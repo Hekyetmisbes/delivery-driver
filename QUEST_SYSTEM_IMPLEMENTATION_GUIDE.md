@@ -506,21 +506,21 @@ if (Input.GetKeyDown(KeyCode.Q))
 ## Phase 4: Quest Zones & Triggers
 
 ### Task 4.1: Create Quest Zone Component
-- [ ] Create `Assets/Scripts/Quest/QuestZone.cs`
-- [ ] Inherit from MonoBehaviour
-- [ ] Add components:
+- [x] Create `Assets/Scripts/Quest/QuestZone.cs`
+- [x] Inherit from MonoBehaviour
+- [x] Add components:
   - `SphereCollider` or `BoxCollider` (IsTrigger = true)
   - Tag: "QuestZone"
-- [ ] Add fields:
+- [x] Add fields:
   - `QuestLocation location` - Associated location data
   - `QuestZoneType zoneType` - Enum: Pickup or Delivery
   - `bool isActive` - Whether this zone is currently valid
   - `UnityEvent<Transform> OnPlayerEntered`
   - `UnityEvent<Transform> OnPlayerExited`
-- [ ] Implement trigger methods:
+- [x] Implement trigger methods:
   - `void OnTriggerEnter(Collider other)` - Check if player, invoke event
   - `void OnTriggerExit(Collider other)` - Track exit
-- [ ] Add `void SetActive(bool active)`:
+- [x] Add `void SetActive(bool active)`:
   - Enable/disable collider
   - Show/hide visual marker
 
@@ -536,21 +536,21 @@ if (other.CompareTag("Player") && isActive)
 ---
 
 ### Task 4.2: Integrate Zones with Quest Manager
-- [ ] In `QuestManager.cs`, add fields:
+- [x] In `QuestManager.cs`, add fields:
   - `GameObject questZonePrefab` - Prefab with QuestZone component
   - `List<QuestZone> activeZones` - Currently spawned zones
-- [ ] Add `QuestZone SpawnQuestZone(QuestLocation location, QuestZoneType type)`:
+- [x] Add `QuestZone SpawnQuestZone(QuestLocation location, QuestZoneType type)`:
   - Instantiate zone prefab at location.Position
   - Set up collider size based on location.TriggerRadius
   - Attach appropriate visual marker (from Phase 3.6)
   - Add to activeZones list
   - Return zone reference
-- [ ] Add `void OnPlayerEnteredZone(QuestZone zone)`:
+- [x] Add `void OnPlayerEnteredZone(QuestZone zone)`:
   - Check if zone is pickup location → call `OnCargoPickedUp()`
   - Check if zone is delivery location → call `OnCargoDelivered()`
   - Play sound effect
   - Show UI notification
-- [ ] Add `void ClearAllZones()`:
+- [x] Add `void ClearAllZones()`:
   - Destroy all GameObjects in activeZones
   - Clear list
 

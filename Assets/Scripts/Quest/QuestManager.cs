@@ -20,6 +20,10 @@ namespace DeliveryDriver.Quest
         [SerializeField] private GameObject pickupMarkerPrefab;
         [SerializeField] private GameObject deliveryMarkerPrefab;
 
+        [Header("Quest Zones")]
+        [SerializeField] private GameObject questZonePrefab;
+        [SerializeField] private List<QuestZone> activeZones = new List<QuestZone>();
+
         [Header("Quest Lists")]
         [SerializeField] private int maxActiveQuests = 3;
         [SerializeField] private List<QuestData> activeQuests = new List<QuestData>();
@@ -177,7 +181,8 @@ namespace DeliveryDriver.Quest
             }
 
             quest.StartQuest();
-            quest.PickupLocation?.ShowMarker();
+            ClearAllZones();
+            SpawnQuestZone(quest.PickupLocation, QuestZoneType.Pickup);
             OnQuestStarted.Invoke(quest);
 
             return true;
@@ -204,6 +209,7 @@ namespace DeliveryDriver.Quest
             }
 
             CleanupQuestMarkers(quest);
+            ClearAllZones();
 
             if (quest.IsRepeatable)
             {
@@ -235,6 +241,7 @@ namespace DeliveryDriver.Quest
 
             OnQuestCompleted.Invoke(quest);
             CleanupQuestMarkers(quest);
+            ClearAllZones();
             GenerateAvailableQuests(1);
         }
 
@@ -257,6 +264,7 @@ namespace DeliveryDriver.Quest
             Debug.LogWarning($"[QuestManager] Quest failed: {quest.QuestName}. Reason: {reason}");
 
             CleanupQuestMarkers(quest);
+            ClearAllZones();
             GenerateAvailableQuests(1);
         }
 
@@ -420,11 +428,7 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
-            currentQuest.HasPickedUpCargo = true;
-            currentQuest.PickupLocation.HideMarker();
-
-            QuestLocation delivery = GetCurrentDeliveryLocation();
-            delivery?.ShowMarker();
+            OnCargoPickedUp();
         }
 
         private void CheckDeliveryProximity()
@@ -445,12 +449,136 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
-            currentDelivery.HideMarker();
+            OnCargoDelivered();
+        }
+
+        public QuestZone SpawnQuestZone(QuestLocation location, QuestZoneType type)
+        {
+            if (location == null)
+            {
+                return null;
+            }
+
+            GameObject zoneObject = questZonePrefab != null
+                ? Instantiate(questZonePrefab, location.Position, Quaternion.identity)
+                : new GameObject("QuestZone");
+
+            zoneObject.transform.position = location.Position;
+
+            QuestZone zone = zoneObject.GetComponent<QuestZone>();
+            if (zone == null)
+            {
+                zone = zoneObject.AddComponent<QuestZone>();
+            }
+
+            zone.Configure(location, type);
+
+            if (location.VisualMarker == null)
+            {
+                if (type == QuestZoneType.Pickup && pickupMarkerPrefab != null)
+                {
+                    location.VisualMarker = pickupMarkerPrefab;
+                }
+                else if (type == QuestZoneType.Delivery && deliveryMarkerPrefab != null)
+                {
+                    location.VisualMarker = deliveryMarkerPrefab;
+                }
+            }
+
+            Collider zoneCollider = zoneObject.GetComponent<Collider>();
+            if (zoneCollider == null)
+            {
+                zoneCollider = zoneObject.AddComponent<SphereCollider>();
+            }
+
+            if (zoneCollider is SphereCollider sphere)
+            {
+                sphere.isTrigger = true;
+                sphere.radius = Mathf.Max(0.1f, location.TriggerRadius);
+            }
+            else if (zoneCollider is BoxCollider box)
+            {
+                box.isTrigger = true;
+                float size = Mathf.Max(0.1f, location.TriggerRadius * 2f);
+                box.size = new Vector3(size, size, size);
+            }
+
+            zone.SetActive(true);
+            activeZones.Add(zone);
+
+            return zone;
+        }
+
+        public void OnPlayerEnteredZone(QuestZone zone)
+        {
+            if (zone == null || currentQuest == null || currentQuest.Status != QuestStatus.Active)
+            {
+                return;
+            }
+
+            if (zone.ZoneType == QuestZoneType.Pickup)
+            {
+                OnCargoPickedUp();
+            }
+            else if (zone.ZoneType == QuestZoneType.Delivery)
+            {
+                OnCargoDelivered();
+            }
+        }
+
+        public void ClearAllZones()
+        {
+            if (activeZones == null || activeZones.Count == 0)
+            {
+                return;
+            }
+
+            for (int i = activeZones.Count - 1; i >= 0; i--)
+            {
+                QuestZone zone = activeZones[i];
+                if (zone != null)
+                {
+                    Destroy(zone.gameObject);
+                }
+            }
+
+            activeZones.Clear();
+        }
+
+        private void OnCargoPickedUp()
+        {
+            if (currentQuest == null || currentQuest.HasPickedUpCargo)
+            {
+                return;
+            }
+
+            currentQuest.HasPickedUpCargo = true;
+            currentQuest.PickupLocation?.HideMarker();
+            ClearAllZones();
+
+            QuestLocation delivery = GetCurrentDeliveryLocation();
+            SpawnQuestZone(delivery, QuestZoneType.Delivery);
+        }
+
+        private void OnCargoDelivered()
+        {
+            if (currentQuest == null || !currentQuest.HasPickedUpCargo)
+            {
+                return;
+            }
+
+            QuestLocation currentDelivery = GetCurrentDeliveryLocation();
+            if (currentDelivery != null)
+            {
+                currentDelivery.HideMarker();
+            }
+
+            ClearAllZones();
 
             if (currentQuest.CurrentDeliveryIndex < currentQuest.DeliveryLocations.Count - 1)
             {
                 currentQuest.CurrentDeliveryIndex++;
-                GetCurrentDeliveryLocation()?.ShowMarker();
+                SpawnQuestZone(GetCurrentDeliveryLocation(), QuestZoneType.Delivery);
             }
             else
             {
@@ -511,6 +639,7 @@ namespace DeliveryDriver.Quest
 
         private void RestoreQuestMarkers()
         {
+            ClearAllZones();
             foreach (QuestData quest in activeQuests)
             {
                 if (quest == null)
@@ -520,12 +649,12 @@ namespace DeliveryDriver.Quest
 
                 if (!quest.HasPickedUpCargo)
                 {
-                    quest.PickupLocation?.ShowMarker();
+                    SpawnQuestZone(quest.PickupLocation, QuestZoneType.Pickup);
                 }
                 else
                 {
                     QuestLocation delivery = GetCurrentDeliveryLocation(quest);
-                    delivery?.ShowMarker();
+                    SpawnQuestZone(delivery, QuestZoneType.Delivery);
                 }
             }
         }
