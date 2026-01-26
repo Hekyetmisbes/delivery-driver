@@ -93,6 +93,101 @@ namespace DeliveryDriver.Quest
         }
 
         /// <summary>
+        /// Gets all quest templates available for the given player level
+        /// </summary>
+        /// <param name="playerLevel">Current player level</param>
+        /// <returns>List of quest templates that meet the level requirement</returns>
+        public List<QuestTemplate> GetAvailableQuestsForLevel(int playerLevel)
+        {
+            return AvailableQuests
+                .Where(q => q.RequiredLevel <= playerLevel)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Generates a random quest appropriate for the player's level
+        /// </summary>
+        /// <param name="playerLevel">Current player level</param>
+        /// <returns>A random QuestData instance appropriate for the level</returns>
+        public QuestData GenerateRandomQuestForLevel(int playerLevel)
+        {
+            List<QuestTemplate> availableTemplates = GetAvailableQuestsForLevel(playerLevel);
+
+            if (availableTemplates.Count == 0)
+            {
+                Debug.LogWarning($"No quest templates available for level {playerLevel}");
+                return null;
+            }
+
+            // Get appropriate difficulties for player level
+            List<QuestDifficulty> appropriateDifficulties = GetAppropriateDifficultiesForLevel(playerLevel);
+
+            // Filter templates by appropriate difficulties
+            List<QuestTemplate> filteredTemplates = availableTemplates
+                .Where(q => appropriateDifficulties.Contains(q.Difficulty))
+                .ToList();
+
+            // Fallback to all available templates if no filtered matches
+            if (filteredTemplates.Count == 0)
+            {
+                filteredTemplates = availableTemplates;
+            }
+
+            int randomIndex = UnityEngine.Random.Range(0, filteredTemplates.Count);
+            return filteredTemplates[randomIndex].CreateQuestData();
+        }
+
+        /// <summary>
+        /// Gets appropriate quest difficulties for the player's level
+        /// </summary>
+        /// <param name="playerLevel">Current player level</param>
+        /// <returns>List of appropriate difficulties</returns>
+        private List<QuestDifficulty> GetAppropriateDifficultiesForLevel(int playerLevel)
+        {
+            List<QuestDifficulty> difficulties = new List<QuestDifficulty>();
+
+            if (playerLevel >= 1 && playerLevel <= 5)
+            {
+                // Level 1-5: Easy and Medium quests
+                difficulties.Add(QuestDifficulty.Easy);
+                difficulties.Add(QuestDifficulty.Medium);
+            }
+            else if (playerLevel >= 6 && playerLevel <= 15)
+            {
+                // Level 6-15: Medium and Hard quests
+                difficulties.Add(QuestDifficulty.Medium);
+                difficulties.Add(QuestDifficulty.Hard);
+            }
+            else if (playerLevel >= 16 && playerLevel <= 30)
+            {
+                // Level 16-30: Hard and Expert quests
+                difficulties.Add(QuestDifficulty.Hard);
+                difficulties.Add(QuestDifficulty.Expert);
+            }
+            else if (playerLevel >= 31)
+            {
+                // Level 31+: All difficulties (all quests + special challenges)
+                difficulties.Add(QuestDifficulty.Easy);
+                difficulties.Add(QuestDifficulty.Medium);
+                difficulties.Add(QuestDifficulty.Hard);
+                difficulties.Add(QuestDifficulty.Expert);
+            }
+
+            return difficulties;
+        }
+
+        /// <summary>
+        /// Checks if a quest template is unlocked for the given player level
+        /// </summary>
+        /// <param name="template">Quest template to check</param>
+        /// <param name="playerLevel">Current player level</param>
+        /// <returns>True if quest is unlocked, false otherwise</returns>
+        public bool IsQuestUnlockedForLevel(QuestTemplate template, int playerLevel)
+        {
+            return template.RequiredLevel <= playerLevel;
+        }
+
+        /// <summary>
         /// Template class for quest data - used as blueprint for generating QuestData instances
         /// </summary>
         [System.Serializable]
@@ -155,6 +250,12 @@ namespace DeliveryDriver.Quest
             /// Player level required to accept this quest
             /// </summary>
             public int RequiredLevel;
+
+            /// <summary>
+            /// Whether this quest is unlocked for the player
+            /// </summary>
+            [System.NonSerialized]
+            public bool IsUnlocked = true;
 
             /// <summary>
             /// Whether this quest can be repeated

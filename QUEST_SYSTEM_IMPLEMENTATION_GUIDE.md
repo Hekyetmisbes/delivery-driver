@@ -988,20 +988,20 @@ int CalculateXPReward(QuestDifficulty difficulty)
 ---
 
 ### Task 7.3: Create Progression UI
-- [ ] Add UI elements to canvas:
+- [x] Add UI elements to canvas:
   - Money display (top-right): "$1,250"
   - Level display (top-right): "Level 5"
   - XP bar (top-right): Progress bar showing XP progress
-- [ ] Create `Assets/Scripts/Quest/UI/ProgressionUI.cs`:
+- [x] Create `Assets/Scripts/Quest/UI/ProgressionUI.cs`:
   - `TextMeshProUGUI moneyText`
   - `TextMeshProUGUI levelText`
   - `Image xpFillBar`
   - `Animator moneyAnimator` (for reward popup)
-- [ ] Subscribe to progression events:
+- [x] Subscribe to progression events:
   - `OnMoneyChanged` → Update money text + play coin animation
   - `OnLevelUp` → Show level up popup + particle effect
   - `OnXPGained` → Animate XP bar fill
-- [ ] Implement smooth XP bar animation:
+- [x] Implement smooth XP bar animation:
   - Use Coroutine or DOTween to lerp fill amount
 
 **Money Reward Animation:**
@@ -1017,18 +1017,18 @@ void OnMoneyChanged(int newAmount)
 ---
 
 ### Task 7.4: Implement Quest Unlock System
-- [ ] In `QuestDatabase.cs`, add to QuestTemplate:
+- [x] In `QuestDatabase.cs`, add to QuestTemplate:
   - `int requiredLevel` - Level needed to unlock
   - `bool isUnlocked` - Unlocked status
-- [ ] In `QuestManager.GenerateAvailableQuests()`:
+- [x] In `QuestManager.GenerateAvailableQuests()`:
   - Filter quests: Only include if `playerLevel >= quest.requiredLevel`
   - Prioritize mix of difficulties appropriate for level
-- [ ] Create unlock progression:
+- [x] Create unlock progression:
   - Level 1-5: Easy and Medium quests
   - Level 6-15: Medium and Hard quests
   - Level 16-30: Hard and Expert quests
   - Level 31+: All quests + special challenges
-- [ ] Show locked quests in UI (grayed out with lock icon):
+- [x] Show locked quests in UI (grayed out with lock icon):
   - Display "Requires Level X"
 
 **Quest Filtering:**

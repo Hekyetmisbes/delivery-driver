@@ -153,12 +153,23 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
-            QuestDifficulty[] difficulties = (QuestDifficulty[])Enum.GetValues(typeof(QuestDifficulty));
+            // Get player level for quest filtering
+            int playerLevel = 1;
+            if (PlayerProgressionManager.Instance != null)
+            {
+                playerLevel = PlayerProgressionManager.Instance.CurrentLevel;
+            }
 
             for (int i = 0; i < count; i++)
             {
-                QuestDifficulty difficulty = difficulties[i % difficulties.Length];
-                QuestData quest = questDatabase.GenerateRandomQuest(difficulty) ?? questDatabase.GetRandomQuest();
+                // Generate quest appropriate for player level
+                QuestData quest = questDatabase.GenerateRandomQuestForLevel(playerLevel);
+
+                // Fallback to any random quest if level-based generation fails
+                if (quest == null)
+                {
+                    quest = questDatabase.GetRandomQuest();
+                }
 
                 if (quest == null)
                 {

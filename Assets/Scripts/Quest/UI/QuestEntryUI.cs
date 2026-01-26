@@ -15,6 +15,12 @@ namespace DeliveryDriver.Quest.UI
         [Header("Visuals")]
         [SerializeField] private Image difficultyBar;
         [SerializeField] private Image typeIcon;
+        [SerializeField] private CanvasGroup questEntryCanvasGroup;
+
+        [Header("Lock UI")]
+        [SerializeField] private GameObject lockedIndicator;
+        [SerializeField] private TextMeshProUGUI lockedText;
+        [SerializeField] private Image lockIcon;
 
         [Header("Actions")]
         [SerializeField] private Button acceptButton;
@@ -36,6 +42,15 @@ namespace DeliveryDriver.Quest.UI
             {
                 return;
             }
+
+            // Check if quest is locked based on player level
+            int playerLevel = 1;
+            if (PlayerProgressionManager.Instance != null)
+            {
+                playerLevel = PlayerProgressionManager.Instance.CurrentLevel;
+            }
+
+            bool isLocked = questData.RequiredLevel > playerLevel;
 
             if (questNameText != null)
             {
@@ -68,10 +83,45 @@ namespace DeliveryDriver.Quest.UI
                 typeIcon.enabled = typeIcon.sprite != null;
             }
 
+            // Setup locked/unlocked state
+            SetLockedState(isLocked);
+
             if (acceptButton != null)
             {
                 acceptButton.onClick.RemoveAllListeners();
                 acceptButton.onClick.AddListener(HandleAcceptClicked);
+                acceptButton.interactable = !isLocked;
+            }
+        }
+
+        private void SetLockedState(bool isLocked)
+        {
+            // Show/hide lock indicator
+            if (lockedIndicator != null)
+            {
+                lockedIndicator.SetActive(isLocked);
+            }
+
+            // Update locked text
+            if (lockedText != null && isLocked)
+            {
+                lockedText.text = $"Requires Level {questData.RequiredLevel}";
+            }
+
+            // Gray out quest entry if locked
+            if (questEntryCanvasGroup != null)
+            {
+                questEntryCanvasGroup.alpha = isLocked ? 0.5f : 1f;
+            }
+            else if (isLocked)
+            {
+                // Fallback: reduce alpha of all graphics
+                CanvasGroup cg = gameObject.GetComponent<CanvasGroup>();
+                if (cg == null)
+                {
+                    cg = gameObject.AddComponent<CanvasGroup>();
+                }
+                cg.alpha = 0.5f;
             }
         }
 
