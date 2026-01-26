@@ -566,9 +566,9 @@ void OnQuestStarted(QuestData quest)
 ---
 
 ### Task 4.3: Implement Cargo Pickup Logic
-- [ ] In `QuestManager.cs`, add field:
+- [x] In `QuestManager.cs`, add field:
   - `bool hasPickedUpCargo` - Tracks if player collected cargo
-- [ ] Add `void OnCargoPickedUp()`:
+- [x] Add `void OnCargoPickedUp()`:
   - Set `hasPickedUpCargo = true`
   - Hide/destroy pickup zone marker
   - Spawn delivery zone markers
@@ -576,7 +576,7 @@ void OnQuestStarted(QuestData quest)
   - Play pickup sound/animation
   - Apply cargo weight to player vehicle (see Phase 5)
   - Show notification: "Cargo loaded! Deliver to [location]"
-- [ ] Add validation to prevent double pickup
+- [x] Add validation to prevent double pickup
 
 **UI Feedback:**
 ```csharp
@@ -586,7 +586,7 @@ activeQuestUI.UpdateObjective("Deliver cargo to " + quest.DeliveryLocation.Locat
 ---
 
 ### Task 4.4: Implement Cargo Delivery Logic
-- [ ] Add `void OnCargoDelivered()`:
+- [x] Add `void OnCargoDelivered()`:
   - For standard quest: Call `CompleteQuest(currentQuest)`
   - For multi-stop quest:
     - Increment delivery counter
@@ -596,8 +596,8 @@ activeQuestUI.UpdateObjective("Deliver cargo to " + quest.DeliveryLocation.Locat
   - Calculate final reward (base + bonus)
   - Play delivery success sound
   - Show visual feedback (particle effect at delivery zone)
-- [ ] Add validation to prevent delivery without pickup
-- [ ] Add `void OnCargoDestroyed()` (for fragile cargo):
+- [x] Add validation to prevent delivery without pickup
+- [x] Add `void OnCargoDestroyed()` (for fragile cargo):
   - Call `FailQuest(currentQuest, "Cargo destroyed")`
   - Show failure UI
 
@@ -616,11 +616,11 @@ void OnCargoDelivered()
 ---
 
 ### Task 4.5: Add Zone Visualization in Editor
-- [ ] Add `OnDrawGizmos()` to QuestZone.cs:
+- [x] Add `OnDrawGizmos()` to QuestZone.cs:
   - Draw wire sphere/cube at trigger size
   - Color based on zone type (blue=pickup, green=delivery)
   - Draw label with location name
-- [ ] Add custom inspector (optional):
+- [x] Add custom inspector (optional):
   - Create `Assets/Scripts/Quest/Editor/QuestZoneEditor.cs`
   - Show location info, zone type
   - Button to snap to nearest road waypoint

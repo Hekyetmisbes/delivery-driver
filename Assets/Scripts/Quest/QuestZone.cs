@@ -1,5 +1,8 @@
 using UnityEngine;
 using UnityEngine.Events;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace DeliveryDriver.Quest
 {
@@ -32,6 +35,11 @@ namespace DeliveryDriver.Quest
         {
             location = questLocation;
             zoneType = type;
+        }
+
+        public void SetLocation(QuestLocation questLocation)
+        {
+            location = questLocation;
         }
 
         public void SetActive(bool active)
@@ -96,5 +104,31 @@ namespace DeliveryDriver.Quest
 
             return other.CompareTag("Player");
         }
+
+#if UNITY_EDITOR
+        private void OnDrawGizmos()
+        {
+            Color color = zoneType == QuestZoneType.Pickup ? Color.cyan : Color.green;
+            Gizmos.color = color;
+
+            float radius = 0.5f;
+            Collider zoneCollider = GetComponent<Collider>();
+            if (zoneCollider is SphereCollider sphere)
+            {
+                radius = sphere.radius;
+            }
+            else if (location != null)
+            {
+                radius = location.TriggerRadius;
+            }
+
+            Gizmos.DrawWireSphere(transform.position, radius);
+
+            if (location != null && !string.IsNullOrWhiteSpace(location.LocationName))
+            {
+                Handles.Label(transform.position + Vector3.up * (radius + 0.5f), location.LocationName);
+            }
+        }
+#endif
     }
 }

@@ -24,6 +24,12 @@ namespace DeliveryDriver.Quest
         [SerializeField] private GameObject questZonePrefab;
         [SerializeField] private List<QuestZone> activeZones = new List<QuestZone>();
 
+        [Header("Quest SFX")]
+        [SerializeField] private AudioSource questSfxSource;
+        [SerializeField] private AudioClip pickupClip;
+        [SerializeField] private AudioClip deliveryClip;
+        [SerializeField] private AudioClip failureClip;
+
         [Header("Quest Lists")]
         [SerializeField] private int maxActiveQuests = 3;
         [SerializeField] private List<QuestData> activeQuests = new List<QuestData>();
@@ -265,6 +271,7 @@ namespace DeliveryDriver.Quest
 
             CleanupQuestMarkers(quest);
             ClearAllZones();
+            PlayQuestClip(failureClip);
             GenerateAvailableQuests(1);
         }
 
@@ -555,9 +562,13 @@ namespace DeliveryDriver.Quest
             currentQuest.HasPickedUpCargo = true;
             currentQuest.PickupLocation?.HideMarker();
             ClearAllZones();
+            PlayQuestClip(pickupClip);
+            TryApplyCargoWeight(currentQuest.Cargo);
 
             QuestLocation delivery = GetCurrentDeliveryLocation();
             SpawnQuestZone(delivery, QuestZoneType.Delivery);
+            OnQuestUpdated.Invoke(currentQuest);
+            Debug.Log($"[QuestManager] Cargo loaded! Deliver to {delivery?.LocationName ?? "destination"}.");
         }
 
         private void OnCargoDelivered()
@@ -579,11 +590,69 @@ namespace DeliveryDriver.Quest
             {
                 currentQuest.CurrentDeliveryIndex++;
                 SpawnQuestZone(GetCurrentDeliveryLocation(), QuestZoneType.Delivery);
+                OnQuestUpdated.Invoke(currentQuest);
             }
             else
             {
+                TryRemoveCargoWeight();
+                PlayQuestClip(deliveryClip);
                 CompleteQuest(currentQuest);
             }
+        }
+
+        public void OnCargoDestroyed()
+        {
+            if (currentQuest == null)
+            {
+                return;
+            }
+
+            TryRemoveCargoWeight();
+            FailQuest(currentQuest, "Cargo destroyed");
+        }
+
+        private void PlayQuestClip(AudioClip clip)
+        {
+            if (questSfxSource == null || clip == null)
+            {
+                return;
+            }
+
+            questSfxSource.PlayOneShot(clip);
+        }
+
+        private void TryApplyCargoWeight(CargoData cargo)
+        {
+            if (playerController == null || cargo == null)
+            {
+                return;
+            }
+
+            var method = playerController.GetType().GetMethod("AddCargoWeight", new[] { typeof(float) });
+            if (method != null)
+            {
+                method.Invoke(playerController, new object[] { cargo.Weight });
+                return;
+            }
+
+            playerController.SendMessage("AddCargoWeight", cargo.Weight, SendMessageOptions.DontRequireReceiver);
+        }
+
+        private void TryRemoveCargoWeight()
+        {
+            if (playerController == null)
+            {
+                return;
+            }
+
+            var method = playerController.GetType().GetMethod("RemoveCargoWeight", Type.EmptyTypes);
+            if (method != null)
+            {
+                method.Invoke(playerController, null);
+                return;
+            }
+
+            playerController.SendMessage("RemoveCargoWeight", SendMessageOptions.DontRequireReceiver);
         }
 
         private QuestLocation GetCurrentDeliveryLocation()
