@@ -170,9 +170,9 @@ else
 ## Phase 2: Quest Manager
 
 ### Task 2.1: Create Quest Manager Singleton
-- [ ] Create `Assets/Scripts/Quest/QuestManager.cs`
-- [ ] Implement Singleton pattern with `Instance` property
-- [ ] Add fields:
+- [x] Create `Assets/Scripts/Quest/QuestManager.cs`
+- [x] Implement Singleton pattern with `Instance` property
+- [x] Add fields:
   - `QuestDatabase questDatabase` - Reference to database
   - `List<QuestData> activeQuests` - Currently active quests (max 3-5)
   - `List<QuestData> availableQuests` - Quests player can accept
@@ -201,30 +201,30 @@ void Awake()
 ---
 
 ### Task 2.2: Implement Quest Lifecycle Methods
-- [ ] Add `void GenerateAvailableQuests(int count)`:
+- [x] Add `void GenerateAvailableQuests(int count)`:
   - Generate `count` random quests from database
   - Use RoadGraph to pick valid locations on road network
   - Add to `availableQuests` list
   - Ensure variety (different difficulties/types)
-- [ ] Add `bool AcceptQuest(string questID)`:
+- [x] Add `bool AcceptQuest(string questID)`:
   - Move quest from available to active
   - Set as `currentQuest`
   - Call `quest.StartQuest()`
   - Spawn pickup location marker
   - Invoke `OnQuestStarted` event
   - Return false if quest not found/already active
-- [ ] Add `void AbandonQuest(string questID)`:
+- [x] Add `void AbandonQuest(string questID)`:
   - Remove from active quests
   - Clear current quest if it matches
   - Clean up markers
   - Return quest to available (if repeatable)
-- [ ] Add `void CompleteQuest(QuestData quest)`:
+- [x] Add `void CompleteQuest(QuestData quest)`:
   - Add to completed list
   - Award rewards (call PlayerProgressionManager)
   - Invoke `OnQuestCompleted` event
   - Clean up markers and references
   - Generate new available quest
-- [ ] Add `void FailQuest(QuestData quest, string reason)`:
+- [x] Add `void FailQuest(QuestData quest, string reason)`:
   - Mark quest as Failed
   - Invoke `OnQuestFailed` event
   - Show failure UI message
