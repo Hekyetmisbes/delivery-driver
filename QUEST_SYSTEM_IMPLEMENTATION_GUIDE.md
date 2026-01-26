@@ -233,7 +233,7 @@ void Awake()
 ---
 
 ### Task 2.3: Implement Quest Update Loop
-- [ ] Override `void Update()`:
+- [x] Override `void Update()`:
   - Early exit if `currentQuest == null`
   - Update quest timer: `currentQuest.UpdateTimer(Time.deltaTime)`
   - Check time expiration: if `currentQuest.IsTimeExpired()` → `FailQuest()`
@@ -241,32 +241,32 @@ void Awake()
   - Check delivery location proximity (if cargo picked up)
   - Update fragile cargo health based on collision events
   - Invoke `OnQuestUpdated` event for UI refresh
-- [ ] Add `void CheckPickupProximity()`:
+- [x] Add `void CheckPickupProximity()`:
   - If player in pickup radius and hasn't picked up cargo yet
   - Call `OnCargoPickedUp()`
   - Show delivery marker
   - Hide pickup marker
-- [ ] Add `void CheckDeliveryProximity()`:
+- [x] Add `void CheckDeliveryProximity()`:
   - If player in delivery radius and has cargo
   - For multi-stop: check current delivery location, then move to next
   - If last delivery → `CompleteQuest()`
-- [ ] Add collision detection hook for fragile cargo (see Phase 5)
+- [x] Add collision detection hook for fragile cargo (see Phase 5)
 
 ---
 
 ### Task 2.4: Implement Location Generation System
-- [ ] Add `QuestLocation GenerateRandomLocation(string prefix)`:
+- [x] Add `QuestLocation GenerateRandomLocation(string prefix)`:
   - Use `RoadGraphBuilder.Instance.RoadGraph.GetRandomWaypoint()`
   - Convert waypoint to QuestLocation
   - Generate location name: `prefix + Random area name`
   - Set appropriate trigger radius (10-15m)
   - Return QuestLocation instance
-- [ ] Add `bool AreLocationsValid(QuestLocation pickup, QuestLocation delivery)`:
+- [x] Add `bool AreLocationsValid(QuestLocation pickup, QuestLocation delivery)`:
   - Calculate distance between locations
   - Ensure minimum distance (500m for Easy, 1km+ for Medium/Hard)
   - Ensure both are on valid road segments
   - Return true if valid placement
-- [ ] Add location name generator:
+- [x] Add location name generator:
   - Create string arrays: `["North", "South", "East", "West", "Central"]`
   - `["Warehouse", "Depot", "Station", "Hub", "Terminal"]`
   - Combine randomly: "North Warehouse", "Central Station", etc.
@@ -281,16 +281,16 @@ if (difficulty == QuestDifficulty.Easy && distance < 500f) return false;
 ---
 
 ### Task 2.5: Implement Quest State Persistence Hooks
-- [ ] Add `QuestSaveData GetSaveData()`:
+- [x] Add `QuestSaveData GetSaveData()`:
   - Convert active/available/completed quests to serializable format
   - Store current quest progress (time remaining, cargo health, etc.)
   - Return `QuestSaveData` object
-- [ ] Add `void LoadSaveData(QuestSaveData data)`:
+- [x] Add `void LoadSaveData(QuestSaveData data)`:
   - Reconstruct quest lists from saved data
   - Restore quest markers
   - Resume current quest if exists
   - Invoke appropriate events
-- [ ] Create `QuestSaveData` serializable class in separate file (see Phase 8)
+- [x] Create `QuestSaveData` serializable class in separate file (see Phase 8)
 
 ---
 

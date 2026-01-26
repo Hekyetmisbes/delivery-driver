@@ -49,6 +49,53 @@ namespace DeliveryDriver.Quest
             {
                 roadGraphBuilder = FindObjectOfType<RoadGraphBuilder>();
             }
+
+            if (playerTransform == null)
+            {
+                CarController controller = FindObjectOfType<CarController>();
+                if (controller != null)
+                {
+                    playerController = controller;
+                    playerTransform = controller.transform;
+                }
+            }
+        }
+
+        private void Update()
+        {
+            if (currentQuest == null || currentQuest.Status != QuestStatus.Active)
+            {
+                return;
+            }
+
+            currentQuest.UpdateTimer(Time.deltaTime);
+            if (currentQuest.IsTimeExpired())
+            {
+                FailQuest(currentQuest, "Time expired");
+                return;
+            }
+
+            if (!currentQuest.HasPickedUpCargo)
+            {
+                CheckPickupProximity();
+            }
+            else
+            {
+                CheckDeliveryProximity();
+            }
+
+            if (currentQuest == null)
+            {
+                return;
+            }
+
+            if (currentQuest.Cargo != null && currentQuest.Cargo.IsFragile && currentQuest.Cargo.IsDestroyed())
+            {
+                FailQuest(currentQuest, "Cargo destroyed");
+                return;
+            }
+
+            OnQuestUpdated.Invoke(currentQuest);
         }
 
         public void GenerateAvailableQuests(int count)
@@ -77,7 +124,13 @@ namespace DeliveryDriver.Quest
                 }
 
                 quest.Status = QuestStatus.NotStarted;
-                AssignQuestLocations(quest);
+
+                bool assigned = AssignQuestLocations(quest);
+                if (!assigned)
+                {
+                    continue;
+                }
+
                 availableQuests.Add(quest);
             }
         }
@@ -110,6 +163,11 @@ namespace DeliveryDriver.Quest
             availableQuests.Remove(quest);
             activeQuests.Add(quest);
             currentQuest = quest;
+
+            if (quest.PickupLocation == null || quest.DeliveryLocations == null || quest.DeliveryLocations.Count == 0)
+            {
+                AssignQuestLocations(quest);
+            }
 
             quest.StartQuest();
             quest.PickupLocation?.ShowMarker();
@@ -192,11 +250,21 @@ namespace DeliveryDriver.Quest
             GenerateAvailableQuests(1);
         }
 
-        private void AssignQuestLocations(QuestData quest)
+        public void ApplyCargoDamage(float amount)
+        {
+            if (currentQuest?.Cargo == null)
+            {
+                return;
+            }
+
+            currentQuest.Cargo.TakeDamage(amount);
+        }
+
+        private bool AssignQuestLocations(QuestData quest)
         {
             if (quest == null)
             {
-                return;
+                return false;
             }
 
             QuestLocation pickup = null;
@@ -207,10 +275,16 @@ namespace DeliveryDriver.Quest
                 pickup = GenerateRandomLocation("Pickup");
                 delivery = GenerateRandomLocation("Delivery");
 
-                if (pickup != null && delivery != null && pickup.Position != delivery.Position)
+                if (AreLocationsValid(pickup, delivery, quest.Difficulty))
                 {
                     break;
                 }
+            }
+
+            if (pickup == null || delivery == null)
+            {
+                Debug.LogWarning("[QuestManager] Failed to generate valid quest locations.");
+                return false;
             }
 
             quest.PickupLocation = pickup;
@@ -230,6 +304,8 @@ namespace DeliveryDriver.Quest
                     quest.DeliveryLocations.Add(extraStop);
                 }
             }
+
+            return true;
         }
 
         private QuestLocation GenerateRandomLocation(string prefix)
@@ -247,15 +323,52 @@ namespace DeliveryDriver.Quest
             }
 
             Vector3 position = segment.waypoints[waypointIndex].position;
-            string locationName = $"{prefix} {segment.name}";
+            string locationName = $"{prefix} {GenerateLocationName()}";
+            float triggerRadius = UnityEngine.Random.Range(10f, 15f);
 
-            QuestLocation location = new QuestLocation(position, locationName, 10f)
+            QuestLocation location = new QuestLocation(position, locationName, triggerRadius)
             {
                 RoadSegmentIndex = segment.id,
                 WaypointIndex = waypointIndex
             };
 
             return location;
+        }
+
+        private bool AreLocationsValid(QuestLocation pickup, QuestLocation delivery, QuestDifficulty difficulty)
+        {
+            if (pickup == null || delivery == null)
+            {
+                return false;
+            }
+
+            if (pickup.RoadSegmentIndex < 0 || delivery.RoadSegmentIndex < 0)
+            {
+                return false;
+            }
+
+            float distance = Vector3.Distance(pickup.Position, delivery.Position);
+            float minDistance = difficulty switch
+            {
+                QuestDifficulty.Easy => 500f,
+                QuestDifficulty.Medium => 1000f,
+                QuestDifficulty.Hard => 1500f,
+                QuestDifficulty.Expert => 2000f,
+                _ => 500f
+            };
+
+            return distance >= minDistance;
+        }
+
+        private string GenerateLocationName()
+        {
+            string[] directions = { "North", "South", "East", "West", "Central" };
+            string[] locationTypes = { "Warehouse", "Depot", "Station", "Hub", "Terminal" };
+
+            string direction = directions[UnityEngine.Random.Range(0, directions.Length)];
+            string locationType = locationTypes[UnityEngine.Random.Range(0, locationTypes.Length)];
+
+            return $"{direction} {locationType}";
         }
 
         private void CleanupQuestMarkers(QuestData quest)
@@ -271,6 +384,181 @@ namespace DeliveryDriver.Quest
             {
                 location?.DestroyMarker();
             }
+        }
+
+        private void CheckPickupProximity()
+        {
+            if (playerTransform == null || currentQuest?.PickupLocation == null)
+            {
+                return;
+            }
+
+            if (!currentQuest.PickupLocation.IsPlayerInRange(playerTransform))
+            {
+                return;
+            }
+
+            currentQuest.HasPickedUpCargo = true;
+            currentQuest.PickupLocation.HideMarker();
+
+            QuestLocation delivery = GetCurrentDeliveryLocation();
+            delivery?.ShowMarker();
+        }
+
+        private void CheckDeliveryProximity()
+        {
+            if (playerTransform == null)
+            {
+                return;
+            }
+
+            QuestLocation currentDelivery = GetCurrentDeliveryLocation();
+            if (currentDelivery == null)
+            {
+                return;
+            }
+
+            if (!currentDelivery.IsPlayerInRange(playerTransform))
+            {
+                return;
+            }
+
+            currentDelivery.HideMarker();
+
+            if (currentQuest.CurrentDeliveryIndex < currentQuest.DeliveryLocations.Count - 1)
+            {
+                currentQuest.CurrentDeliveryIndex++;
+                GetCurrentDeliveryLocation()?.ShowMarker();
+            }
+            else
+            {
+                CompleteQuest(currentQuest);
+            }
+        }
+
+        private QuestLocation GetCurrentDeliveryLocation()
+        {
+            if (currentQuest?.DeliveryLocations == null || currentQuest.DeliveryLocations.Count == 0)
+            {
+                return null;
+            }
+
+            int index = Mathf.Clamp(currentQuest.CurrentDeliveryIndex, 0, currentQuest.DeliveryLocations.Count - 1);
+            return currentQuest.DeliveryLocations[index];
+        }
+
+        public QuestSaveData GetSaveData()
+        {
+            QuestSaveData data = new QuestSaveData
+            {
+                ActiveQuests = ConvertQuestList(activeQuests),
+                AvailableQuests = ConvertQuestList(availableQuests),
+                CompletedQuests = ConvertQuestList(completedQuests),
+                CurrentQuestID = currentQuest?.QuestID
+            };
+
+            return data;
+        }
+
+        public void LoadSaveData(QuestSaveData data)
+        {
+            if (data == null)
+            {
+                Debug.LogWarning("[QuestManager] LoadSaveData called with null data.");
+                return;
+            }
+
+            activeQuests = ConvertQuestRecords(data.ActiveQuests);
+            availableQuests = ConvertQuestRecords(data.AvailableQuests);
+            completedQuests = ConvertQuestRecords(data.CompletedQuests);
+
+            currentQuest = null;
+            if (!string.IsNullOrWhiteSpace(data.CurrentQuestID))
+            {
+                currentQuest = activeQuests.Find(q => q.QuestID == data.CurrentQuestID);
+            }
+
+            RestoreQuestMarkers();
+
+            if (currentQuest != null)
+            {
+                OnQuestStarted.Invoke(currentQuest);
+                OnQuestUpdated.Invoke(currentQuest);
+            }
+        }
+
+        private void RestoreQuestMarkers()
+        {
+            foreach (QuestData quest in activeQuests)
+            {
+                if (quest == null)
+                {
+                    continue;
+                }
+
+                if (!quest.HasPickedUpCargo)
+                {
+                    quest.PickupLocation?.ShowMarker();
+                }
+                else
+                {
+                    QuestLocation delivery = GetCurrentDeliveryLocation(quest);
+                    delivery?.ShowMarker();
+                }
+            }
+        }
+
+        private QuestLocation GetCurrentDeliveryLocation(QuestData quest)
+        {
+            if (quest?.DeliveryLocations == null || quest.DeliveryLocations.Count == 0)
+            {
+                return null;
+            }
+
+            int index = Mathf.Clamp(quest.CurrentDeliveryIndex, 0, quest.DeliveryLocations.Count - 1);
+            return quest.DeliveryLocations[index];
+        }
+
+        private List<QuestSaveData.QuestRecord> ConvertQuestList(List<QuestData> quests)
+        {
+            List<QuestSaveData.QuestRecord> records = new List<QuestSaveData.QuestRecord>();
+            if (quests == null)
+            {
+                return records;
+            }
+
+            foreach (QuestData quest in quests)
+            {
+                if (quest == null)
+                {
+                    continue;
+                }
+
+                records.Add(QuestSaveData.QuestRecord.FromQuestData(quest));
+            }
+
+            return records;
+        }
+
+        private List<QuestData> ConvertQuestRecords(List<QuestSaveData.QuestRecord> records)
+        {
+            List<QuestData> quests = new List<QuestData>();
+            if (records == null)
+            {
+                return quests;
+            }
+
+            foreach (QuestSaveData.QuestRecord record in records)
+            {
+                if (record == null)
+                {
+                    continue;
+                }
+
+                quests.Add(record.ToQuestData());
+            }
+
+            return quests;
         }
 
         private void TryAwardRewards(QuestData quest, int reward)

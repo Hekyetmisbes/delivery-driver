@@ -98,6 +98,16 @@ namespace DeliveryDriver.Quest
         public int XPReward;
 
         /// <summary>
+        /// True if the player has picked up the cargo
+        /// </summary>
+        public bool HasPickedUpCargo;
+
+        /// <summary>
+        /// Index of the current delivery target (for multi-stop quests)
+        /// </summary>
+        public int CurrentDeliveryIndex;
+
+        /// <summary>
         /// Default constructor with default initialization
         /// </summary>
         public QuestData()
@@ -117,6 +127,8 @@ namespace DeliveryDriver.Quest
             RequiredLevel = 1;
             IsRepeatable = true;
             XPReward = 50;
+            HasPickedUpCargo = false;
+            CurrentDeliveryIndex = 0;
         }
 
         /// <summary>
@@ -132,6 +144,8 @@ namespace DeliveryDriver.Quest
 
             Status = QuestStatus.Active;
             TimeRemaining = TimeLimit;
+            HasPickedUpCargo = false;
+            CurrentDeliveryIndex = 0;
 
             // Initialize cargo health if fragile
             if (Cargo != null && Cargo.IsFragile)
