@@ -640,18 +640,18 @@ void OnDrawGizmos()
 ## Phase 5: Cargo System
 
 ### Task 5.1: Create Cargo Visual Component
-- [ ] Create `Assets/Scripts/Quest/CargoVisual.cs`
-- [ ] Design cargo model:
+- [x] Create `Assets/Scripts/Quest/CargoVisual.cs`
+- [x] Design cargo model:
   - Simple box mesh (or use existing asset)
   - Multiple variations (wooden crate, metal box, cardboard, etc.)
   - Attach to player vehicle when picked up
   - Position: Above car roof or in truck bed
-- [ ] Add fields:
+- [x] Add fields:
   - `Transform attachPoint` - Where cargo attaches (on player vehicle)
   - `GameObject[] cargoModels` - Different visual variants
   - `ParticleSystem damageEffect` - Sparks/smoke for damage
   - `AudioSource damageSound`
-- [ ] Implement methods:
+- [x] Implement methods:
   - `void AttachCargo(CargoData cargo)` - Show cargo model
   - `void DetachCargo()` - Hide cargo model
   - `void PlayDamageEffect()` - Show particles/play sound
@@ -670,17 +670,17 @@ void AttachCargo(CargoData cargo)
 ---
 
 ### Task 5.2: Implement Cargo Weight System
-- [ ] In `CarController.cs`, add fields:
+- [x] In `CarController.cs`, add fields:
   - `float baseRigidbodyMass` - Store original mass
   - `float currentCargoWeight` - Added weight from cargo
-- [ ] Add `void AddCargoWeight(float weight)`:
+- [x] Add `void AddCargoWeight(float weight)`:
   - Store in currentCargoWeight
   - Update Rigidbody.mass: `baseRigidbodyMass + weight`
   - Adjust center of mass to account for cargo (slightly higher)
-- [ ] Add `void RemoveCargoWeight()`:
+- [x] Add `void RemoveCargoWeight()`:
   - Reset mass to baseRigidbodyMass
   - Reset center of mass
-- [ ] Store baseMass in `Start()`:
+- [x] Store baseMass in `Start()`:
   - `baseRigidbodyMass = rb.mass`
 
 **Integration with Quest System:**

@@ -39,6 +39,8 @@ public class CarController : MonoBehaviour
     [SerializeField] private float handbrakeFrictionMultiplier = 2f;
     [Tooltip("Aracın ağırlık merkezi dengesi (Yere yakın olmalı).")]
     [SerializeField] private Vector3 centerOfMassOffset = new Vector3(0, -0.5f, 0.3f);
+    [Tooltip("Kargo yuklendiginde agirlik merkezine uygulanacak ek yukseklik.")]
+    [SerializeField] private float cargoCenterOfMassYOffset = 0.2f;
     
     [Header("--- DEBUG ---")]
     [SerializeField] private bool showDebugGUI = true;
@@ -50,6 +52,8 @@ public class CarController : MonoBehaviour
     private bool isBraking;
     private bool isHandbraking;
     private Vector2 moveInput;
+    private float baseRigidbodyMass;
+    private float currentCargoWeight;
     
     // Input Action References
     private InputAction moveAction;
@@ -67,10 +71,25 @@ public class CarController : MonoBehaviour
         // BUG FIX: CenterOfMass yanlışsa araba takla atar veya tekerler boşa döner.
         rb.centerOfMass = centerOfMassOffset;
         rb.mass = 1500f; // Standart bir araba ağırlığı
+        baseRigidbodyMass = rb.mass;
         rb.linearDamping = 0.05f; // Hava direnci (çok yüksek olursa araç gitmez)
         rb.angularDamping = 0.5f; 
         // BUG FIX: Uyuyan fizik motoru sorunu için
         rb.sleepThreshold = 0.0f; 
+    }
+
+    public void AddCargoWeight(float weight)
+    {
+        currentCargoWeight = Mathf.Max(0f, weight);
+        rb.mass = baseRigidbodyMass + currentCargoWeight;
+        rb.centerOfMass = centerOfMassOffset + Vector3.up * cargoCenterOfMassYOffset;
+    }
+
+    public void RemoveCargoWeight()
+    {
+        currentCargoWeight = 0f;
+        rb.mass = baseRigidbodyMass;
+        rb.centerOfMass = centerOfMassOffset;
     }
 
     private void SetupInput()

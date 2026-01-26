@@ -30,6 +30,9 @@ namespace DeliveryDriver.Quest
         [SerializeField] private AudioClip deliveryClip;
         [SerializeField] private AudioClip failureClip;
 
+        [Header("Cargo Visuals")]
+        [SerializeField] private CargoVisual cargoVisual;
+
         [Header("Quest Lists")]
         [SerializeField] private int maxActiveQuests = 3;
         [SerializeField] private List<QuestData> activeQuests = new List<QuestData>();
@@ -564,6 +567,7 @@ namespace DeliveryDriver.Quest
             ClearAllZones();
             PlayQuestClip(pickupClip);
             TryApplyCargoWeight(currentQuest.Cargo);
+            cargoVisual?.AttachCargo(currentQuest.Cargo);
 
             QuestLocation delivery = GetCurrentDeliveryLocation();
             SpawnQuestZone(delivery, QuestZoneType.Delivery);
@@ -595,6 +599,7 @@ namespace DeliveryDriver.Quest
             else
             {
                 TryRemoveCargoWeight();
+                cargoVisual?.DetachCargo();
                 PlayQuestClip(deliveryClip);
                 CompleteQuest(currentQuest);
             }
@@ -608,6 +613,7 @@ namespace DeliveryDriver.Quest
             }
 
             TryRemoveCargoWeight();
+            cargoVisual?.DetachCargo();
             FailQuest(currentQuest, "Cargo destroyed");
         }
 
