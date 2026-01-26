@@ -22,6 +22,10 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private TextMeshProUGUI lockedText;
         [SerializeField] private Image lockIcon;
 
+        [Header("Daily Challenge Indicator")]
+        [SerializeField] private GameObject dailyChallengeIndicator;
+        [SerializeField] private Image dailyChallengeIcon;
+
         [Header("Actions")]
         [SerializeField] private Button acceptButton;
 
@@ -85,6 +89,13 @@ namespace DeliveryDriver.Quest.UI
 
             // Setup locked/unlocked state
             SetLockedState(isLocked);
+
+            // Check if this is a daily challenge
+            bool isDailyChallenge = questData.QuestName.StartsWith("DAILY:");
+            if (dailyChallengeIndicator != null)
+            {
+                dailyChallengeIndicator.SetActive(isDailyChallenge);
+            }
 
             if (acceptButton != null)
             {

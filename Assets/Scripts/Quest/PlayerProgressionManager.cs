@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Events;
 
@@ -23,11 +25,19 @@ namespace DeliveryDriver.Quest
         [SerializeField] private int totalQuestsCompleted = 0;
         [SerializeField] private float totalDistanceTraveled = 0f; // In meters
         [SerializeField] private float totalTimePlayed = 0f; // In seconds
+        [SerializeField] private int speedBonusesEarned = 0;
+        [SerializeField] private int sRanksAchieved = 0;
+        [SerializeField] private float totalCargoWeightDelivered = 0f; // In kg
+        [SerializeField] private int fragileCargoDeliveredUndamaged = 0;
+
+        [Header("Achievements")]
+        [SerializeField] private List<Achievement> achievements = new List<Achievement>();
 
         [Header("Events")]
         public UnityEvent<int> OnMoneyChanged = new UnityEvent<int>();
         public UnityEvent<int> OnLevelUp = new UnityEvent<int>();
         public UnityEvent<int> OnXPGained = new UnityEvent<int>();
+        public UnityEvent<Achievement> OnAchievementUnlocked = new UnityEvent<Achievement>();
 
         // Public read-only properties
         public int CurrentMoney => currentMoney;
@@ -37,6 +47,11 @@ namespace DeliveryDriver.Quest
         public int TotalQuestsCompleted => totalQuestsCompleted;
         public float TotalDistanceTraveled => totalDistanceTraveled;
         public float TotalTimePlayed => totalTimePlayed;
+        public int SpeedBonusesEarned => speedBonusesEarned;
+        public int SRanksAchieved => sRanksAchieved;
+        public float TotalCargoWeightDelivered => totalCargoWeightDelivered;
+        public int FragileCargoDeliveredUndamaged => fragileCargoDeliveredUndamaged;
+        public IReadOnlyList<Achievement> Achievements => achievements;
 
         private void Awake()
         {
@@ -48,6 +63,9 @@ namespace DeliveryDriver.Quest
             }
 
             Instance = this;
+
+            // Initialize achievements
+            InitializeAchievements();
         }
 
         private void Update()
@@ -266,11 +284,194 @@ namespace DeliveryDriver.Quest
             totalQuestsCompleted = 0;
             totalDistanceTraveled = 0f;
             totalTimePlayed = 0f;
+            speedBonusesEarned = 0;
+            sRanksAchieved = 0;
+            totalCargoWeightDelivered = 0f;
+            fragileCargoDeliveredUndamaged = 0;
+
+            // Reset achievements
+            foreach (Achievement achievement in achievements)
+            {
+                achievement.IsUnlocked = false;
+            }
 
             OnMoneyChanged.Invoke(currentMoney);
             OnLevelUp.Invoke(currentLevel);
 
             Debug.Log("[PlayerProgressionManager] Progression reset to defaults.");
         }
+
+        #region Achievement System
+
+        /// <summary>
+        /// Initializes the achievement list with predefined achievements
+        /// </summary>
+        private void InitializeAchievements()
+        {
+            if (achievements.Count > 0)
+            {
+                // Achievements already initialized (loaded from save)
+                return;
+            }
+
+            achievements = new List<Achievement>
+            {
+                new Achievement("first_delivery", "First Delivery", "Complete your first delivery quest", 100, 25),
+                new Achievement("delivery_pro", "Delivery Pro", "Complete 10 delivery quests", 500, 100),
+                new Achievement("speed_demon", "Speed Demon", "Earn 5 speed bonuses", 300, 75),
+                new Achievement("perfect_run", "Perfect Run", "Complete a quest with S rank", 250, 50),
+                new Achievement("marathon_driver", "Marathon Driver", "Travel 100 km total", 1000, 200),
+                new Achievement("heavy_hauler", "Heavy Hauler", "Deliver 500 kg of cargo total", 750, 150),
+                new Achievement("fragile_expert", "Fragile Expert", "Deliver 10 fragile cargos undamaged", 500, 100),
+                new Achievement("veteran_driver", "Veteran Driver", "Reach level 10", 1000, 250),
+                new Achievement("wealthy_driver", "Wealthy Driver", "Earn $10,000 total", 2000, 500),
+                new Achievement("perfect_streak", "Perfect Streak", "Achieve 5 consecutive S ranks", 1500, 300)
+            };
+
+            Debug.Log($"[PlayerProgressionManager] Initialized {achievements.Count} achievements");
+        }
+
+        /// <summary>
+        /// Checks all achievements and unlocks any that meet their requirements
+        /// </summary>
+        public void CheckAchievements()
+        {
+            foreach (Achievement achievement in achievements)
+            {
+                if (achievement.IsUnlocked)
+                {
+                    continue; // Skip already unlocked achievements
+                }
+
+                bool shouldUnlock = achievement.AchievementID switch
+                {
+                    "first_delivery" => totalQuestsCompleted >= 1,
+                    "delivery_pro" => totalQuestsCompleted >= 10,
+                    "speed_demon" => speedBonusesEarned >= 5,
+                    "perfect_run" => sRanksAchieved >= 1,
+                    "marathon_driver" => totalDistanceTraveled >= 100000f, // 100 km in meters
+                    "heavy_hauler" => totalCargoWeightDelivered >= 500f,
+                    "fragile_expert" => fragileCargoDeliveredUndamaged >= 10,
+                    "veteran_driver" => currentLevel >= 10,
+                    "wealthy_driver" => currentMoney >= 10000,
+                    "perfect_streak" => sRanksAchieved >= 5,
+                    _ => false
+                };
+
+                if (shouldUnlock)
+                {
+                    UnlockAchievement(achievement.AchievementID);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Unlocks a specific achievement by ID and awards its rewards
+        /// </summary>
+        /// <param name="achievementID">The ID of the achievement to unlock</param>
+        public void UnlockAchievement(string achievementID)
+        {
+            Achievement achievement = achievements.FirstOrDefault(a => a.AchievementID == achievementID);
+
+            if (achievement == null)
+            {
+                Debug.LogWarning($"[PlayerProgressionManager] Achievement '{achievementID}' not found");
+                return;
+            }
+
+            if (achievement.IsUnlocked)
+            {
+                return; // Already unlocked
+            }
+
+            achievement.Unlock();
+
+            // Award rewards
+            if (achievement.RewardMoney > 0)
+            {
+                AwardMoney(achievement.RewardMoney);
+            }
+
+            if (achievement.RewardXP > 0)
+            {
+                AwardXP(achievement.RewardXP);
+            }
+
+            // Invoke event for UI notification
+            OnAchievementUnlocked.Invoke(achievement);
+
+            Debug.Log($"[PlayerProgressionManager] Achievement unlocked: {achievement.Name} (+${achievement.RewardMoney}, +{achievement.RewardXP} XP)");
+        }
+
+        /// <summary>
+        /// Records a quest completion and updates relevant statistics
+        /// </summary>
+        /// <param name="quest">The completed quest data</param>
+        public void RecordQuestCompletion(QuestData quest)
+        {
+            if (quest == null)
+            {
+                return;
+            }
+
+            // Update statistics based on quest performance
+            if (quest.EarnedBonus)
+            {
+                speedBonusesEarned++;
+            }
+
+            if (quest.Rating == PerformanceRating.S)
+            {
+                sRanksAchieved++;
+            }
+
+            if (quest.Cargo != null)
+            {
+                totalCargoWeightDelivered += quest.Cargo.Weight;
+
+                // Check if fragile cargo was delivered undamaged
+                if (quest.Cargo.IsFragile && quest.Cargo.CargoHealth >= 90f)
+                {
+                    fragileCargoDeliveredUndamaged++;
+                }
+            }
+
+            // Check achievements after recording stats
+            CheckAchievements();
+        }
+
+        /// <summary>
+        /// Gets the number of unlocked achievements
+        /// </summary>
+        /// <returns>Count of unlocked achievements</returns>
+        public int GetUnlockedAchievementCount()
+        {
+            return achievements.Count(a => a.IsUnlocked);
+        }
+
+        /// <summary>
+        /// Gets the total number of achievements
+        /// </summary>
+        /// <returns>Total achievement count</returns>
+        public int GetTotalAchievementCount()
+        {
+            return achievements.Count;
+        }
+
+        /// <summary>
+        /// Gets achievement progress as a percentage
+        /// </summary>
+        /// <returns>Percentage of achievements unlocked (0-1)</returns>
+        public float GetAchievementProgress()
+        {
+            if (achievements.Count == 0)
+            {
+                return 0f;
+            }
+
+            return (float)GetUnlockedAchievementCount() / achievements.Count;
+        }
+
+        #endregion
     }
 }

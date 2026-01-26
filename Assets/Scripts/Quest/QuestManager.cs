@@ -56,10 +56,16 @@ namespace DeliveryDriver.Quest
         [SerializeField] private float maxStreakMultiplier = 2.0f;
         [SerializeField] private float streakMultiplierIncrement = 0.1f;
 
+        [Header("Daily Challenge")]
+        [SerializeField] private QuestData dailyChallenge;
+        [SerializeField] private string lastDailyChallengeDate = "";
+        [SerializeField] private float dailyChallengeRewardMultiplier = 2.0f;
+
         public UnityEvent<QuestData> OnQuestStarted = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnQuestCompleted = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnQuestFailed = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnQuestUpdated = new UnityEvent<QuestData>();
+        public UnityEvent<QuestData> OnDailyChallengeGenerated = new UnityEvent<QuestData>();
 
         public QuestData CurrentQuest => currentQuest;
         public IReadOnlyList<QuestData> ActiveQuests => activeQuests;
@@ -70,6 +76,7 @@ namespace DeliveryDriver.Quest
         public int LastCompletionReward { get; private set; }
         public int ConsecutiveSuccesses => consecutiveSuccesses;
         public float StreakMultiplier => streakMultiplier;
+        public QuestData DailyChallenge => dailyChallenge;
 
         private void Awake()
         {
@@ -95,6 +102,12 @@ namespace DeliveryDriver.Quest
                     playerTransform = controller.transform;
                 }
             }
+        }
+
+        private void Start()
+        {
+            // Check and generate daily challenge if needed
+            CheckDailyChallenge();
         }
 
         private void Update()
@@ -290,6 +303,12 @@ namespace DeliveryDriver.Quest
 
             completedQuests.Add(quest);
             TryAwardRewards(quest, finalReward);
+
+            // Record quest completion for achievements and statistics
+            if (PlayerProgressionManager.Instance != null)
+            {
+                PlayerProgressionManager.Instance.RecordQuestCompletion(quest);
+            }
 
             Debug.Log($"[QuestManager] Quest completed with {quest.Rating} rank! Streak: {consecutiveSuccesses}x (Multiplier: {streakMultiplier:F1}x)");
 
@@ -955,5 +974,135 @@ namespace DeliveryDriver.Quest
                 Debug.Log($"[QuestManager] Reward granted: {reward} currency, {quest.XPReward} XP.");
             }
         }
+
+        #region Daily Challenge System
+
+        /// <summary>
+        /// Checks if a new daily challenge should be generated
+        /// </summary>
+        private void CheckDailyChallenge()
+        {
+            string todayDate = DateTime.Now.Date.ToString("yyyy-MM-dd");
+
+            // Check if we need to generate a new daily challenge
+            if (string.IsNullOrEmpty(lastDailyChallengeDate) || lastDailyChallengeDate != todayDate)
+            {
+                GenerateDailyChallenge();
+                lastDailyChallengeDate = todayDate;
+            }
+            else if (dailyChallenge != null)
+            {
+                // Daily challenge exists and is for today
+                Debug.Log($"[QuestManager] Daily challenge already available: {dailyChallenge.QuestName}");
+            }
+        }
+
+        /// <summary>
+        /// Generates a new daily challenge quest
+        /// </summary>
+        public void GenerateDailyChallenge()
+        {
+            if (questDatabase == null)
+            {
+                Debug.LogWarning("[QuestManager] Cannot generate daily challenge - QuestDatabase not assigned");
+                return;
+            }
+
+            // Get player level for appropriate difficulty
+            int playerLevel = 1;
+            if (PlayerProgressionManager.Instance != null)
+            {
+                playerLevel = PlayerProgressionManager.Instance.CurrentLevel;
+            }
+
+            // Generate a challenging quest (prefer Hard or Expert difficulty)
+            QuestDifficulty difficulty = playerLevel < 10 ? QuestDifficulty.Medium :
+                                        (playerLevel < 20 ? QuestDifficulty.Hard : QuestDifficulty.Expert);
+
+            QuestData quest = questDatabase.GenerateRandomQuest(difficulty);
+
+            if (quest == null)
+            {
+                quest = questDatabase.GetRandomQuest();
+            }
+
+            if (quest == null)
+            {
+                Debug.LogWarning("[QuestManager] Failed to generate daily challenge");
+                return;
+            }
+
+            // Assign locations
+            bool assigned = AssignQuestLocations(quest);
+            if (!assigned)
+            {
+                Debug.LogWarning("[QuestManager] Failed to assign locations for daily challenge");
+                return;
+            }
+
+            // Mark as daily challenge and enhance rewards
+            quest.QuestName = "DAILY: " + quest.QuestName;
+            quest.BaseReward = Mathf.RoundToInt(quest.BaseReward * dailyChallengeRewardMultiplier);
+            quest.BonusReward = Mathf.RoundToInt(quest.BonusReward * dailyChallengeRewardMultiplier);
+            quest.XPReward = Mathf.RoundToInt(quest.XPReward * dailyChallengeRewardMultiplier);
+
+            // Make it more challenging - tighter time limit
+            quest.TimeLimit *= 0.8f;
+            quest.TimeRemaining = quest.TimeLimit;
+
+            // Add special requirement description
+            quest.QuestDescription += "\n\nDaily Challenge - 2x Rewards! Complete before midnight.";
+
+            dailyChallenge = quest;
+
+            OnDailyChallengeGenerated.Invoke(dailyChallenge);
+
+            Debug.Log($"[QuestManager] Daily challenge generated: {dailyChallenge.QuestName} (2x rewards)");
+        }
+
+        /// <summary>
+        /// Checks if the daily challenge is available
+        /// </summary>
+        /// <returns>True if daily challenge is available and not completed</returns>
+        public bool IsDailyChallengeAvailable()
+        {
+            return dailyChallenge != null &&
+                   dailyChallenge.Status == QuestStatus.NotStarted &&
+                   !string.IsNullOrEmpty(lastDailyChallengeDate) &&
+                   lastDailyChallengeDate == DateTime.Now.Date.ToString("yyyy-MM-dd");
+        }
+
+        /// <summary>
+        /// Accepts the daily challenge quest
+        /// </summary>
+        /// <returns>True if successfully accepted</returns>
+        public bool AcceptDailyChallenge()
+        {
+            if (!IsDailyChallengeAvailable())
+            {
+                Debug.LogWarning("[QuestManager] Daily challenge is not available");
+                return false;
+            }
+
+            return AcceptQuest(dailyChallenge.QuestID);
+        }
+
+        /// <summary>
+        /// Gets the time remaining until daily challenge resets
+        /// </summary>
+        /// <returns>Formatted time string until midnight</returns>
+        public string GetTimeUntilDailyChallengeReset()
+        {
+            DateTime now = DateTime.Now;
+            DateTime midnight = now.Date.AddDays(1);
+            TimeSpan timeUntilReset = midnight - now;
+
+            int hours = timeUntilReset.Hours;
+            int minutes = timeUntilReset.Minutes;
+
+            return $"{hours:D2}:{minutes:D2}";
+        }
+
+        #endregion
     }
 }

@@ -1044,14 +1044,14 @@ List<QuestTemplate> GetAvailableQuestsForLevel(int level)
 ---
 
 ### Task 7.5: Add Achievement System (Optional)
-- [ ] Create `Assets/Scripts/Quest/Achievement.cs`:
+- [x] Create `Assets/Scripts/Quest/Achievement.cs`:
   - `string achievementID`
   - `string name`
   - `string description`
   - `Sprite icon`
   - `bool isUnlocked`
   - `int rewardMoney` - Bonus for unlocking
-- [ ] Define achievements:
+- [x] Define achievements:
   - "First Delivery" - Complete 1 quest
   - "Delivery Pro" - Complete 10 quests
   - "Speed Demon" - Earn 5 speed bonuses
@@ -1059,27 +1059,27 @@ List<QuestTemplate> GetAvailableQuestsForLevel(int level)
   - "Marathon Driver" - Travel 100 km total
   - "Heavy Hauler" - Deliver 500 kg total weight
   - "Fragile Expert" - Deliver 10 fragile cargos undamaged
-- [ ] In PlayerProgressionManager:
+- [x] In PlayerProgressionManager:
   - `List<Achievement> achievements`
   - Method: `void CheckAchievements()` - Called after each quest
   - Method: `void UnlockAchievement(string id)` - Award achievement
-- [ ] Create achievement notification popup (similar to level up)
+- [x] Create achievement notification popup (similar to level up)
 
 ---
 
 ### Task 7.6: Implement Daily Challenges (Optional)
-- [ ] In `QuestManager.cs`, add fields:
+- [x] In `QuestManager.cs`, add fields:
   - `QuestData dailyChallenge` - Special daily quest
   - `DateTime lastDailyChallengeDate` - Track reset
-- [ ] Add `void GenerateDailyChallenge()`:
+- [x] Add `void GenerateDailyChallenge()`:
   - Called once per day (check on game start)
   - Create special quest with:
     - Higher difficulty
     - 2x reward multiplier
     - Unique requirements (e.g., "No collisions allowed")
     - 24-hour availability
-- [ ] Add UI indicator for daily challenge (star icon)
-- [ ] Reset daily challenge at midnight (use DateTime.Now)
+- [x] Add UI indicator for daily challenge (star icon)
+- [x] Reset daily challenge at midnight (use DateTime.Now)
 
 **Daily Challenge Check:**
 ```csharp
