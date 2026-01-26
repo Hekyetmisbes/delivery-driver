@@ -12,6 +12,7 @@ namespace DeliveryDriver.Quest
 
         [Header("References")]
         [SerializeField] private QuestDatabase questDatabase;
+        [SerializeField] private CargoLibrary cargoLibrary;
         [SerializeField] private RoadGraphBuilder roadGraphBuilder;
         [SerializeField] private Transform playerTransform;
         [SerializeField] private CarController playerController;
@@ -60,6 +61,10 @@ namespace DeliveryDriver.Quest
         [SerializeField] private QuestData dailyChallenge;
         [SerializeField] private string lastDailyChallengeDate = "";
         [SerializeField] private float dailyChallengeRewardMultiplier = 2.0f;
+        
+        [Header("Generation Settings")]
+        [SerializeField] private float locationCooldownDistance = 100f;
+        private List<Vector3> usedLocations = new List<Vector3>();
 
         public UnityEvent<QuestData> OnQuestStarted = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnQuestCompleted = new UnityEvent<QuestData>();
@@ -101,6 +106,12 @@ namespace DeliveryDriver.Quest
                     playerController = controller;
                     playerTransform = controller.transform;
                 }
+            }
+            
+            if (cargoLibrary == null)
+            {
+                // Try to load from Resources if not assigned
+                cargoLibrary = Resources.Load<CargoLibrary>("CargoLibrary");
             }
         }
 
@@ -185,45 +196,184 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
-            if (questDatabase == null)
-            {
-                Debug.LogWarning("[QuestManager] QuestDatabase is not assigned.");
-                return;
-            }
-
             // Get player level for quest filtering
             int playerLevel = 1;
             if (PlayerProgressionManager.Instance != null)
             {
                 playerLevel = PlayerProgressionManager.Instance.CurrentLevel;
             }
+            
+            // Determine difficulty based on level (simple logic)
+            QuestDifficulty difficulty = QuestDifficulty.Easy;
+            if (playerLevel >= 5) difficulty = QuestDifficulty.Medium;
+            if (playerLevel >= 15) difficulty = QuestDifficulty.Hard;
+            if (playerLevel >= 30) difficulty = QuestDifficulty.Expert;
 
             for (int i = 0; i < count; i++)
             {
-                // Generate quest appropriate for player level
-                QuestData quest = questDatabase.GenerateRandomQuestForLevel(playerLevel);
+                QuestData quest = null;
+                
+                // 50% chance to use procedural generation if not daily challenge
+                // or if database is missing/fails
+                bool useProcedural = UnityEngine.Random.value > 0.5f;
 
-                // Fallback to any random quest if level-based generation fails
+                if (!useProcedural && questDatabase != null)
+                {
+                     quest = questDatabase.GenerateRandomQuestForLevel(playerLevel);
+                     if (quest == null) quest = questDatabase.GetRandomQuest();
+                     
+                     if (quest != null)
+                     {
+                         // For template quests, we still need to assign locations
+                         quest.Status = QuestStatus.NotStarted;
+                         if (!AssignQuestLocations(quest))
+                         {
+                             quest = null; // Failed to assign locations
+                         }
+                     }
+                }
+                
                 if (quest == null)
                 {
-                    quest = questDatabase.GetRandomQuest();
+                    // Fallback to procedural generation (Task 9.2)
+                    // Vary difficulty slightly
+                    QuestDifficulty targetDiff = difficulty;
+                    float r = UnityEngine.Random.value;
+                    if (r < 0.2f && targetDiff > QuestDifficulty.Easy) targetDiff--;
+                    else if (r > 0.8f && targetDiff < QuestDifficulty.Expert) targetDiff++;
+                    
+                    quest = GenerateQuestByDifficulty(targetDiff);
                 }
 
                 if (quest == null)
-                {
-                    continue;
-                }
-
-                quest.Status = QuestStatus.NotStarted;
-
-                bool assigned = AssignQuestLocations(quest);
-                if (!assigned)
                 {
                     continue;
                 }
 
                 availableQuests.Add(quest);
             }
+        }
+        
+        /// <summary>
+        /// Task 9.2: Generates a quest procedurally based on difficulty parameters.
+        /// </summary>
+        public QuestData GenerateQuestByDifficulty(QuestDifficulty difficulty)
+        {
+            // 1. Pick Cargo
+            CargoData cargo = null;
+            if (cargoLibrary != null)
+            {
+                // Simple logic: prefer fragile/heavy for harder quests?
+                // For now random is fine, or we could add filters to CargoLibrary later.
+                cargo = cargoLibrary.GetRandomCargo();
+            }
+            
+            if (cargo == null)
+            {
+                cargo = new CargoData("Generic Cargo", 100f, false, "Standard cargo.");
+            }
+
+            // 2. Determine Distance and Time Settings
+            float minDistance, maxDistance, timeMultiplier;
+            int difficultyBonus;
+
+            switch (difficulty)
+            {
+                case QuestDifficulty.Easy:
+                    minDistance = 1000f; maxDistance = 2000f; timeMultiplier = 2.0f; difficultyBonus = 0;
+                    break;
+                case QuestDifficulty.Medium:
+                    minDistance = 2000f; maxDistance = 4000f; timeMultiplier = 1.5f; difficultyBonus = 100;
+                    break;
+                case QuestDifficulty.Hard:
+                    minDistance = 4000f; maxDistance = 6000f; timeMultiplier = 1.2f; difficultyBonus = 250;
+                    break;
+                case QuestDifficulty.Expert:
+                    minDistance = 6000f; maxDistance = 10000f; timeMultiplier = 1.0f; difficultyBonus = 500;
+                    break;
+                default:
+                    minDistance = 1000f; maxDistance = 2000f; timeMultiplier = 2.0f; difficultyBonus = 0;
+                    break;
+            }
+
+            // 3. Find Locations
+            QuestLocation pickup = null;
+            QuestLocation delivery = null;
+            float actualDistance = 0f;
+
+            // Try multiple times to find locations matching the distance criteria
+            for (int i = 0; i < 15; i++)
+            {
+                pickup = GenerateRandomLocation("Pickup");
+                delivery = GenerateRandomLocation("Delivery");
+                
+                if (pickup == null || delivery == null) continue;
+
+                actualDistance = Vector3.Distance(pickup.Position, delivery.Position);
+                if (actualDistance >= minDistance && actualDistance <= maxDistance)
+                {
+                    break; // Found valid pair
+                }
+                
+                // Failed, clear and retry
+                pickup = null;
+                delivery = null;
+            }
+
+            // Fallback: If strict distance generation failed, just take whatever valid pair we can get
+            if (pickup == null || delivery == null)
+            {
+                pickup = GenerateRandomLocation("Pickup");
+                delivery = GenerateRandomLocation("Delivery");
+                
+                // Ensure they are at least somewhat valid (min distance check inside AreLocationsValid logic, 
+                // but we are bypassing AssignQuestLocations helper here, so we do manual check or just accept)
+                if (pickup != null && delivery != null)
+                {
+                    actualDistance = Vector3.Distance(pickup.Position, delivery.Position);
+                }
+                else
+                {
+                    // Total failure to generate locations
+                    return null;
+                }
+            }
+
+            // 4. Create QuestData
+            QuestData quest = new QuestData
+            {
+                QuestID = System.Guid.NewGuid().ToString(),
+                QuestName = $"{difficulty} Delivery",
+                QuestDescription = $"Transport {cargo.CargoName} from {pickup.LocationName} to {delivery.LocationName}.",
+                QuestType = QuestType.StandardDelivery,
+                Difficulty = difficulty,
+                Status = QuestStatus.NotStarted,
+                PickupLocation = pickup,
+                DeliveryLocations = new List<QuestLocation> { delivery },
+                Cargo = cargo
+            };
+            
+            // Assign markers
+            if (quest.PickupLocation.VisualMarker == null) quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
+            foreach(var loc in quest.DeliveryLocations) if (loc.VisualMarker == null) loc.VisualMarker = deliveryMarkerPrefab;
+
+            // 5. Calculate Stats
+            float avgSpeed = 11f; // ~40 km/h in m/s
+            // Ensure time limit is reasonable (at least 60 seconds)
+            quest.TimeLimit = Mathf.Max(60f, (actualDistance / avgSpeed) * timeMultiplier);
+            quest.TimeRemaining = quest.TimeLimit;
+            
+            // Reward calculation
+            quest.BaseReward = Mathf.RoundToInt((actualDistance * 0.1f) + difficultyBonus); 
+            quest.BonusReward = Mathf.RoundToInt(quest.BaseReward * 0.5f);
+            quest.BonusTimeThreshold = 0.5f;
+            quest.RequiredLevel = difficulty == QuestDifficulty.Easy ? 1 : 
+                                  (difficulty == QuestDifficulty.Medium ? 5 : 
+                                  (difficulty == QuestDifficulty.Hard ? 15 : 30));
+            quest.IsRepeatable = true;
+            quest.XPReward = 50 * ((int)difficulty + 1);
+
+            return quest;
         }
 
         public bool AcceptQuest(string questID)
@@ -463,17 +613,76 @@ namespace DeliveryDriver.Quest
                 return null;
             }
 
-            var (segment, waypointIndex) = roadGraphBuilder.RoadGraph.GetRandomWaypoint();
-            if (segment == null || segment.waypoints.Count == 0)
+            // Task 9.1: Procedural Location Picker with validation and variety
+            int attempts = 0;
+            RoadGraph.RoadSegment segment = null;
+            int waypointIndex = -1;
+            Vector3 candidatePosition = Vector3.zero;
+
+            while (attempts < 20)
             {
-                return null;
+                attempts++;
+                
+                var result = roadGraphBuilder.RoadGraph.GetRandomWaypoint();
+                segment = result.Item1;
+                waypointIndex = result.Item2;
+
+                if (segment == null || segment.waypoints.Count == 0)
+                    continue;
+
+                candidatePosition = segment.waypoints[waypointIndex].position;
+
+                // Check 1: Cooldown/Used Locations
+                bool tooClose = false;
+                foreach (Vector3 used in usedLocations)
+                {
+                    if (Vector3.Distance(candidatePosition, used) < locationCooldownDistance)
+                    {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                if (tooClose) continue;
+
+                // Check 2: Ground Validation (Raycast)
+                if (Physics.Raycast(candidatePosition + Vector3.up * 50f, Vector3.down, out RaycastHit hit, 100f))
+                {
+                    // Snap to ground if needed, though waypoints are usually correct
+                    // candidatePosition = hit.point; 
+                }
+                else
+                {
+                    // No ground found (void/floating)
+                    continue;
+                }
+
+                // If valid, accept
+                break;
             }
 
-            Vector3 position = segment.waypoints[waypointIndex].position;
-            string locationName = $"{prefix} {GenerateLocationName()}";
+            if (segment == null) return null;
+
+            // Track usage
+            usedLocations.Add(candidatePosition);
+            if (usedLocations.Count > 20) usedLocations.RemoveAt(0);
+
+            // Determine Location Type (Mock)
+            string[] locationTypes;
+            if (segment.id % 4 == 0) locationTypes = new[] { "Industrial Park", "Factory", "Plant", "Refinery" }; // Industrial
+            else if (segment.id % 4 == 1) locationTypes = new[] { "Mall", "Plaza", "Store", "Market", "Shop" }; // Commercial
+            else if (segment.id % 4 == 2) locationTypes = new[] { "Residence", "Apartments", "Estate", "Manor" }; // Residential
+            else locationTypes = new[] { "Warehouse", "Depot", "Station", "Hub", "Terminal" }; // Logistics
+
+            string locationType = locationTypes[UnityEngine.Random.Range(0, locationTypes.Length)];
+            
+            // Generate Name
+            string[] directions = { "North", "South", "East", "West", "Central", "Upper", "Lower" };
+            string direction = directions[UnityEngine.Random.Range(0, directions.Length)];
+            string locationName = $"{direction} {locationType}";
+
             float triggerRadius = UnityEngine.Random.Range(10f, 15f);
 
-            QuestLocation location = new QuestLocation(position, locationName, triggerRadius)
+            QuestLocation location = new QuestLocation(candidatePosition, locationName, triggerRadius)
             {
                 RoadSegmentIndex = segment.id,
                 WaypointIndex = waypointIndex

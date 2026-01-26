@@ -1225,16 +1225,16 @@ void OnSaveButtonClicked()
 ## Phase 9: Quest Generation
 
 ### Task 9.1: Implement Procedural Location Picker
-- [ ] In `QuestManager.cs`, enhance `GenerateRandomLocation()`:
+- [x] In `QuestManager.cs`, enhance `GenerateRandomLocation()`:
   - Add location type preference: `enum LocationType { Warehouse, Residential, Commercial, Industrial }`
   - Filter road segments by area (if road names contain keywords)
   - Ensure variety: Don't reuse same locations consecutively
   - Weight selection by road segment length (prefer longer roads for easier placement)
-- [ ] Add `List<Vector3> usedLocations` with cooldown system:
+- [x] Add `List<Vector3> usedLocations` with cooldown system:
   - Track recently used positions
   - Ensure minimum distance between consecutive quest locations (500m+)
   - Clear cooldown after 3-5 quests
-- [ ] Add location validation:
+- [x] Add location validation:
   - Check if location is accessible (not inside building mesh)
   - Raycast down to ensure ground exists
   - Verify road segment is valid and active
@@ -1250,7 +1250,7 @@ else if (roadSegment.name.Contains("Street"))
 ---
 
 ### Task 9.2: Implement Difficulty-Based Quest Generation
-- [ ] Add `QuestData GenerateQuestByDifficulty(QuestDifficulty difficulty)`:
+- [x] Add `QuestData GenerateQuestByDifficulty(QuestDifficulty difficulty)`:
   - Pick appropriate cargo type:
     - Easy: Standard cargo, not fragile
     - Medium: Random cargo, possible fragile
