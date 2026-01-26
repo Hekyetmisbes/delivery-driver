@@ -1095,25 +1095,25 @@ void Start()
 ## Phase 8: Save/Load System
 
 ### Task 8.1: Create Save Data Structures
-- [ ] Create `Assets/Scripts/Quest/SaveSystem/SaveData.cs`
-- [ ] Define `GameSaveData` class (mark `[System.Serializable]`):
+- [x] Create `Assets/Scripts/Quest/SaveSystem/SaveData.cs`
+- [x] Define `GameSaveData` class (mark `[System.Serializable]`):
   - `PlayerProgressionData playerData`
   - `QuestSaveData questData`
   - `string saveDate` - Timestamp
   - `int saveVersion` - For backwards compatibility
-- [ ] Define `PlayerProgressionData`:
+- [x] Define `PlayerProgressionData`:
   - `int money`
   - `int level`
   - `int xp`
   - `int totalQuestsCompleted`
   - `float totalDistanceTraveled`
   - `List<string> unlockedAchievements`
-- [ ] Define `QuestSaveData`:
+- [x] Define `QuestSaveData`:
   - `List<SerializedQuest> activeQuests`
   - `List<SerializedQuest> availableQuests`
   - `List<string> completedQuestIDs` - History
   - `SerializedQuest currentQuest` - In-progress quest
-- [ ] Define `SerializedQuest`:
+- [x] Define `SerializedQuest`:
   - All QuestData fields but simplified (no Unity references)
   - Use Vector3Serializable for positions
 
@@ -1131,24 +1131,24 @@ public struct Vector3Serializable
 ---
 
 ### Task 8.2: Implement Save System
-- [ ] Create `Assets/Scripts/Quest/SaveSystem/SaveManager.cs`
-- [ ] Implement singleton pattern
-- [ ] Add fields:
+- [x] Create `Assets/Scripts/Quest/SaveSystem/SaveManager.cs`
+- [x] Implement singleton pattern
+- [x] Add fields:
   - `string saveFilePath` - Default: Application.persistentDataPath + "/savegame.json"
   - `GameSaveData currentSaveData`
-- [ ] Add method: `void SaveGame()`:
+- [x] Add method: `void SaveGame()`:
   - Gather data from PlayerProgressionManager
   - Gather data from QuestManager
   - Create GameSaveData instance
   - Serialize to JSON using JsonUtility or Newtonsoft.Json
   - Write to file using File.WriteAllText()
   - Show "Game Saved" notification
-- [ ] Add method: `GameSaveData LoadGame()`:
+- [x] Add method: `GameSaveData LoadGame()`:
   - Check if save file exists
   - Read file using File.ReadAllText()
   - Deserialize JSON to GameSaveData
   - Return data (or null if no save)
-- [ ] Add auto-save triggers:
+- [x] Add auto-save triggers:
   - After quest completion
   - On application quit
   - Every 5 minutes (optional)

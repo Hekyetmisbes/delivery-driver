@@ -473,5 +473,50 @@ namespace DeliveryDriver.Quest
         }
 
         #endregion
+
+        #region Save/Load System
+
+        /// <summary>
+        /// Loads player progression data from save
+        /// </summary>
+        /// <param name="data">Player progression data to load</param>
+        public void LoadSaveData(PlayerProgressionData data)
+        {
+            if (data == null)
+            {
+                Debug.LogWarning("[PlayerProgressionManager] LoadSaveData called with null data.");
+                return;
+            }
+
+            currentMoney = data.Money;
+            currentLevel = data.Level;
+            currentXP = data.XP;
+            xpToNextLevel = data.XPToNextLevel;
+            totalQuestsCompleted = data.TotalQuestsCompleted;
+            totalDistanceTraveled = data.TotalDistanceTraveled;
+            totalTimePlayed = data.TotalTimePlayed;
+            speedBonusesEarned = data.SpeedBonusesEarned;
+            sRanksAchieved = data.SRanksAchieved;
+            totalCargoWeightDelivered = data.TotalCargoWeightDelivered;
+            fragileCargoDeliveredUndamaged = data.FragileCargoDeliveredUndamaged;
+
+            // Load unlocked achievements
+            foreach (string achievementID in data.UnlockedAchievements)
+            {
+                Achievement achievement = achievements.FirstOrDefault(a => a.AchievementID == achievementID);
+                if (achievement != null && !achievement.IsUnlocked)
+                {
+                    achievement.IsUnlocked = true;
+                }
+            }
+
+            // Invoke events to update UI
+            OnMoneyChanged.Invoke(currentMoney);
+            OnLevelUp.Invoke(currentLevel);
+
+            Debug.Log($"[PlayerProgressionManager] Loaded save data: Level {currentLevel}, ${currentMoney}, {currentXP}/{xpToNextLevel} XP");
+        }
+
+        #endregion
     }
 }

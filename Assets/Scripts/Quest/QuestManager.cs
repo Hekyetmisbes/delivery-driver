@@ -316,6 +316,12 @@ namespace DeliveryDriver.Quest
             CleanupQuestMarkers(quest);
             ClearAllZones();
             GenerateAvailableQuests(1);
+
+            // Trigger auto-save after quest completion
+            if (SaveManager.Instance != null)
+            {
+                SaveManager.Instance.TriggerAutoSave();
+            }
         }
 
         public void FailQuest(QuestData quest, string reason)
