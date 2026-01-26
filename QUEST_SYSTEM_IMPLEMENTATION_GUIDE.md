@@ -297,13 +297,13 @@ if (difficulty == QuestDifficulty.Easy && distance < 500f) return false;
 ## Phase 3: UI System
 
 ### Task 3.1: Create Quest UI Canvas Structure
-- [ ] Create Canvas GameObject in scene: `QuestUICanvas`
-- [ ] Set Canvas properties:
+- [x] Create Canvas GameObject in scene: `QuestUICanvas`
+- [x] Set Canvas properties:
   - Render Mode: Screen Space - Overlay
   - Canvas Scaler: Scale With Screen Size (1920x1080 reference)
   - Pixel Perfect: Disabled
-- [ ] Add EventSystem if not present
-- [ ] Create main UI panels as children:
+- [x] Add EventSystem if not present
+- [x] Create main UI panels as children:
   - `QuestListPanel` (shows available quests)
   - `ActiveQuestPanel` (shows current quest info)
   - `QuestCompletePanel` (completion/failure popup)
@@ -321,18 +321,18 @@ QuestUICanvas
 ---
 
 ### Task 3.2: Create Quest List Panel UI
-- [ ] Create `Assets/Scripts/Quest/UI/QuestListUI.cs`
-- [ ] Design panel layout (anchored left side):
+- [x] Create `Assets/Scripts/Quest/UI/QuestListUI.cs`
+- [x] Design panel layout (anchored left side):
   - Header: "Available Deliveries"
   - Scroll View with Vertical Layout Group
   - Quest entry prefab template (see next task)
   - Toggle button to show/hide panel (Q key)
-- [ ] Add script fields:
+- [x] Add script fields:
   - `GameObject questEntryPrefab` - Prefab for each quest entry
   - `Transform questEntriesContainer` - Parent for spawned entries
   - `Button closeButton`
   - `Animator panelAnimator` (for slide in/out)
-- [ ] Implement methods:
+- [x] Implement methods:
   - `void PopulateQuestList(List<QuestData> quests)` - Create entry for each quest
   - `void ClearQuestList()` - Destroy all entries
   - `void TogglePanel()` - Show/hide with animation
