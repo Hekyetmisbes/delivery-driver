@@ -68,6 +68,32 @@ namespace DeliveryDriver.Quest
             InitializeAchievements();
         }
 
+        private void Start()
+        {
+            // Try to load saved game
+            if (SaveManager.Instance != null)
+            {
+                GameSaveData saveData = SaveManager.Instance.LoadGame();
+
+                if (saveData != null && saveData.PlayerData != null)
+                {
+                    // Load player progression from save
+                    LoadSaveData(saveData.PlayerData);
+                    Debug.Log("[PlayerProgressionManager] Loaded player data from save file.");
+                }
+                else
+                {
+                    // No save found - use defaults (level 1, $500 starting money)
+                    Debug.Log("[PlayerProgressionManager] No save found. Starting with default values.");
+                    // Default values are already set in the serialized fields
+                }
+            }
+            else
+            {
+                Debug.LogWarning("[PlayerProgressionManager] SaveManager not found. Starting with default values.");
+            }
+        }
+
         private void Update()
         {
             // Track total time played

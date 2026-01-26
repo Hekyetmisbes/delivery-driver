@@ -1162,17 +1162,17 @@ File.WriteAllText(saveFilePath, json);
 ---
 
 ### Task 8.3: Implement Load System
-- [ ] In `QuestManager.Start()`:
+- [x] In `QuestManager.Start()`:
   - Check if save exists: `SaveManager.Instance.LoadGame()`
   - If save exists:
     - Call `LoadSaveData(saveData.questData)`
     - Restore active quests and markers
   - If no save:
     - Generate initial available quests
-- [ ] In `PlayerProgressionManager.Start()`:
+- [x] In `PlayerProgressionManager.Start()`:
   - Load player progression from save
   - If no save: Initialize to default (level 1, $500 starting money)
-- [ ] Add `void LoadSaveData(QuestSaveData data)` to QuestManager:
+- [x] Add `void LoadSaveData(QuestSaveData data)` to QuestManager:
   - Reconstruct QuestData objects from SerializedQuest
   - Respawn quest zones if quest was in progress
   - Resume timer for current quest
@@ -1184,18 +1184,18 @@ File.WriteAllText(saveFilePath, json);
 ---
 
 ### Task 8.4: Add Save/Load UI
-- [ ] Add buttons to pause menu (if exists) or settings:
+- [x] Add buttons to pause menu (if exists) or settings:
   - "Save Game" button
   - "Load Game" button (restart to last save)
-- [ ] Create `Assets/Scripts/Quest/UI/SaveLoadUI.cs`:
+- [x] Create `Assets/Scripts/Quest/UI/SaveLoadUI.cs`:
   - `Button saveButton`
   - `Button loadButton`
   - `TextMeshProUGUI statusText` - "Last saved: [time]"
-- [ ] Add button listeners:
+- [x] Add button listeners:
   - Save → Call SaveManager.SaveGame() → Show confirmation
   - Load → Call SaveManager.LoadGame() → Reload scene with loaded data
-- [ ] Display last save time in UI
-- [ ] Add "New Game" option that deletes save file
+- [x] Display last save time in UI
+- [x] Add "New Game" option that deletes save file
 
 **Save Confirmation:**
 ```csharp

@@ -106,6 +106,31 @@ namespace DeliveryDriver.Quest
 
         private void Start()
         {
+            // Try to load saved game
+            if (SaveManager.Instance != null)
+            {
+                GameSaveData saveData = SaveManager.Instance.LoadGame();
+
+                if (saveData != null && saveData.QuestData != null)
+                {
+                    // Load quest data from save
+                    LoadSaveData(saveData.QuestData);
+                    Debug.Log("[QuestManager] Loaded quest data from save file.");
+                }
+                else
+                {
+                    // No save found - generate initial quests
+                    Debug.Log("[QuestManager] No save found. Generating initial quests.");
+                    GenerateAvailableQuests(5);
+                }
+            }
+            else
+            {
+                // SaveManager not found - generate initial quests
+                Debug.LogWarning("[QuestManager] SaveManager not found. Generating initial quests.");
+                GenerateAvailableQuests(5);
+            }
+
             // Check and generate daily challenge if needed
             CheckDailyChallenge();
         }
