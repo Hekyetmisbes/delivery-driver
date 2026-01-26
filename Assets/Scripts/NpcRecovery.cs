@@ -288,7 +288,7 @@ namespace TrafficSystem
                 // Use projected point directly (it's on the road)
                 float heightOffset = snapHeightOffset;
                 if (carAgent != null)
-                    heightOffset = Mathf.Max(heightOffset, carAgent.GetGroundClearanceOffset());
+                    heightOffset = carAgent.GetGroundClearanceOffset();
 
                 Vector3 snapBase = GetGroundedPoint(projectedPoint);
                 Vector3 snapPosition = snapBase + Vector3.up * heightOffset;

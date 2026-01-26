@@ -17,6 +17,16 @@ namespace TrafficSystem
         [SerializeField] private WheelCollider rearLeftCollider;
         [SerializeField] private WheelCollider rearRightCollider;
 
+        [Header("Wheel Visuals")]
+        [SerializeField] private Transform frontLeftWheelVisual;
+        [SerializeField] private Transform frontRightWheelVisual;
+        [SerializeField] private Transform rearLeftWheelVisual;
+        [SerializeField] private Transform rearRightWheelVisual;
+        [Tooltip("Auto-assign wheel visuals by searching children")]
+        [SerializeField] private bool autoSetupWheelVisuals = true;
+        [Tooltip("If a wheel collider shares a mesh, create a visual child at runtime")]
+        [SerializeField] private bool autoCreateWheelVisualsIfMissing = true;
+
         [Header("Steering Settings")]
         [Tooltip("Lookahead distance for Pure Pursuit (meters)")]
         [SerializeField] private float lookAheadDistance = 10f;
@@ -119,18 +129,20 @@ namespace TrafficSystem
 
         public float GetGroundClearanceOffset()
         {
-            // Start with minimal offset
-            float offset = 0.1f;
+            float offset = minGroundClearance;
+            bool used = false;
 
-            // Use wheel radius only (suspension will compress when grounded)
-            // But cap it at 0.4m to prevent spawning too high
-            if (frontLeftCollider != null) offset = Mathf.Max(offset, Mathf.Min(frontLeftCollider.radius, 0.4f));
-            if (frontRightCollider != null) offset = Mathf.Max(offset, Mathf.Min(frontRightCollider.radius, 0.4f));
-            if (rearLeftCollider != null) offset = Mathf.Max(offset, Mathf.Min(rearLeftCollider.radius, 0.4f));
-            if (rearRightCollider != null) offset = Mathf.Max(offset, Mathf.Min(rearRightCollider.radius, 0.4f));
+            offset = Mathf.Max(offset, GetWheelRootOffset(frontLeftCollider, ref used));
+            offset = Mathf.Max(offset, GetWheelRootOffset(frontRightCollider, ref used));
+            offset = Mathf.Max(offset, GetWheelRootOffset(rearLeftCollider, ref used));
+            offset = Mathf.Max(offset, GetWheelRootOffset(rearRightCollider, ref used));
 
-            // CRITICAL: Clamp to very low values
-            offset = Mathf.Clamp(offset, 0.1f, 0.5f);
+            if (!used)
+            {
+                offset = Mathf.Max(offset, Mathf.Clamp(GetBoundsClearance(), minGroundClearance, maxGroundClearance));
+            }
+
+            offset = Mathf.Clamp(offset, minGroundClearance, maxGroundClearance);
 
             Debug.Log($"[NpcCarAgent] {name} - Ground clearance: {offset:F2}m");
             return offset;
@@ -142,19 +154,19 @@ namespace TrafficSystem
             return wheel.radius; // Just radius, suspension will compress
         }
 
-        private float GetWheelRootOffsetSafe(WheelCollider wheel, ref bool used)
+        private float GetWheelRootOffset(WheelCollider wheel, ref bool used)
         {
             if (wheel == null) return 0f;
             Vector3 localPos = transform.InverseTransformPoint(wheel.transform.position);
             float required = wheel.radius - localPos.y;
             used = true;
-            float clearance = wheel.radius + wheel.suspensionDistance;
-            float maxReasonable = Mathf.Max(1.5f, wheel.radius * 4f + 0.2f);
-            if (required < 0.05f || required > maxReasonable)
-            {
-                return clearance;
-            }
-            return required;
+            if (float.IsNaN(required) || float.IsInfinity(required))
+                return 0f;
+
+            if (required < minGroundClearance)
+                return minGroundClearance;
+
+            return Mathf.Clamp(required, minGroundClearance, maxGroundClearance);
         }
 
         private float GetBoundsClearance()
@@ -204,6 +216,7 @@ namespace TrafficSystem
             CacheWheelGeometry();
             NormalizeModelAxes();
             ConfigureGroundMaskIfNeeded();
+            SetupWheelVisuals();
         }
 
         private void ConfigureSuspension()
@@ -272,6 +285,7 @@ namespace TrafficSystem
             rb.linearDamping = Random.Range(0.04f, 0.06f);
             rb.angularDamping = Random.Range(1.0f, 1.5f); // Higher for better stability
             rb.centerOfMass = new Vector3(0, -0.8f, 0); // Lower center of mass prevents rollovers
+            rb.sleepThreshold = 0.0f; // Prevent stutter from sleeping rigidbodies
 
             rb.interpolation = rbInterpolation;
             rb.collisionDetectionMode = rbCollisionDetection;
@@ -337,6 +351,11 @@ namespace TrafficSystem
             ApplySteering();
             ApplyStability();
             ApplyThrottle();
+        }
+
+        private void LateUpdate()
+        {
+            UpdateWheelVisuals();
         }
 
         /// <summary>
@@ -905,6 +924,74 @@ namespace TrafficSystem
             {
                 transform.rotation = Quaternion.LookRotation(desiredForward, Vector3.up);
             }
+        }
+
+        private void SetupWheelVisuals()
+        {
+            if (!autoSetupWheelVisuals) return;
+
+            frontLeftWheelVisual = GetWheelVisualTransform(frontLeftCollider, frontLeftWheelVisual);
+            frontRightWheelVisual = GetWheelVisualTransform(frontRightCollider, frontRightWheelVisual);
+            rearLeftWheelVisual = GetWheelVisualTransform(rearLeftCollider, rearLeftWheelVisual);
+            rearRightWheelVisual = GetWheelVisualTransform(rearRightCollider, rearRightWheelVisual);
+        }
+
+        private Transform GetWheelVisualTransform(WheelCollider wheel, Transform currentVisual)
+        {
+            if (currentVisual != null) return currentVisual;
+            if (wheel == null) return null;
+
+            Transform wheelRoot = wheel.transform;
+
+            // Prefer a child mesh (so we don't rotate the collider transform)
+            for (int i = 0; i < wheelRoot.childCount; i++)
+            {
+                Transform child = wheelRoot.GetChild(i);
+                if (child.GetComponent<MeshRenderer>() != null)
+                    return child;
+            }
+
+            // If collider shares the mesh, create a visual proxy child at runtime
+            if (autoCreateWheelVisualsIfMissing)
+            {
+                MeshRenderer renderer = wheelRoot.GetComponent<MeshRenderer>();
+                MeshFilter filter = wheelRoot.GetComponent<MeshFilter>();
+                if (renderer != null && filter != null && filter.sharedMesh != null)
+                {
+                    GameObject visual = new GameObject("WheelVisual");
+                    visual.transform.SetParent(wheelRoot, false);
+                    visual.transform.localPosition = Vector3.zero;
+                    visual.transform.localRotation = Quaternion.identity;
+                    visual.transform.localScale = Vector3.one;
+
+                    MeshFilter visualFilter = visual.AddComponent<MeshFilter>();
+                    MeshRenderer visualRenderer = visual.AddComponent<MeshRenderer>();
+                    visualFilter.sharedMesh = filter.sharedMesh;
+                    visualRenderer.sharedMaterials = renderer.sharedMaterials;
+
+                    renderer.enabled = false;
+                    return visual.transform;
+                }
+            }
+
+            return null;
+        }
+
+        private void UpdateWheelVisuals()
+        {
+            UpdateSingleWheelVisual(frontLeftCollider, frontLeftWheelVisual);
+            UpdateSingleWheelVisual(frontRightCollider, frontRightWheelVisual);
+            UpdateSingleWheelVisual(rearLeftCollider, rearLeftWheelVisual);
+            UpdateSingleWheelVisual(rearRightCollider, rearRightWheelVisual);
+        }
+
+        private void UpdateSingleWheelVisual(WheelCollider wheelCollider, Transform wheelVisual)
+        {
+            if (wheelCollider == null || wheelVisual == null) return;
+
+            wheelCollider.GetWorldPose(out Vector3 pos, out Quaternion rot);
+            wheelVisual.position = pos;
+            wheelVisual.rotation = rot;
         }
 
         private void OnDrawGizmos()

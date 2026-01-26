@@ -28708,6 +28708,10 @@ MonoBehaviour:
   npcVehiclePrefabs:
   - {fileID: 8887361605788787076, guid: 78eba1212caac454bac5b51ea9e2f4bb, type: 3}
   - {fileID: 1052957806397272424, guid: 2a7925f8e7cdf194a9b7fdeae6c4550e, type: 3}
+  - {fileID: 1052957806397272424, guid: 42ab1667e23940e9bd92c106ef238d41, type: 3}
+  - {fileID: 1052957806397272424, guid: d364416b520a4dc6be41059d930a89cb, type: 3}
+  - {fileID: 1052957806397272424, guid: f3f03d3a36694baaa484594a04e3aa6b, type: 3}
+  - {fileID: 1052957806397272424, guid: ecbac1e39b8f4b399567caca6feb3b9c, type: 3}
   spawnCount: 10
   minimumSpawnSpacing: 20
   spawnOnStart: 1
