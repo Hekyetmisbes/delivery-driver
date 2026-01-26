@@ -73,12 +73,20 @@ namespace DeliveryDriver.Quest.UI
                 GameObject entry = Instantiate(questEntryPrefab, questEntriesContainer);
                 spawnedEntries.Add(entry);
 
-                entry.SendMessage("Initialize", quest, SendMessageOptions.DontRequireReceiver);
-
-                Button[] buttons = entry.GetComponentsInChildren<Button>(true);
-                foreach (Button button in buttons)
+                QuestEntryUI entryUI = entry.GetComponent<QuestEntryUI>();
+                if (entryUI != null)
                 {
-                    button.onClick.AddListener(() => OnQuestEntryClicked(quest));
+                    entryUI.Initialize(quest);
+                }
+                else
+                {
+                    entry.SendMessage("Initialize", quest, SendMessageOptions.DontRequireReceiver);
+
+                    Button[] buttons = entry.GetComponentsInChildren<Button>(true);
+                    foreach (Button button in buttons)
+                    {
+                        button.onClick.AddListener(() => OnQuestEntryClicked(quest));
+                    }
                 }
             }
         }

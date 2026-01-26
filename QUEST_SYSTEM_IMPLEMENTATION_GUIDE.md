@@ -346,8 +346,8 @@ QuestUICanvas
 ---
 
 ### Task 3.3: Create Quest Entry Prefab
-- [ ] Create prefab: `Assets/Prefabs/UI/QuestEntryPrefab.prefab`
-- [ ] Layout (using Horizontal/Vertical Layout Groups):
+- [x] Create prefab: `Assets/Prefabs/UI/QuestEntryPrefab.prefab`
+- [x] Layout (using Horizontal/Vertical Layout Groups):
   - Difficulty indicator (colored bar: green/yellow/orange/red)
   - Quest name (bold TextMeshPro)
   - Quest type icon (sprite: box/clock/fragile icons)
@@ -355,7 +355,7 @@ QuestUICanvas
   - Time limit ("5:00")
   - Reward amount ("$500")
   - Accept button
-- [ ] Create `Assets/Scripts/Quest/UI/QuestEntryUI.cs`:
+- [x] Create `Assets/Scripts/Quest/UI/QuestEntryUI.cs`:
   - `TextMeshProUGUI questNameText`
   - `TextMeshProUGUI distanceText`
   - `TextMeshProUGUI timeText`
@@ -364,7 +364,7 @@ QuestUICanvas
   - `Image typeIcon`
   - `Button acceptButton`
   - `QuestData questData` - Reference to represented quest
-- [ ] Implement `void Initialize(QuestData quest)`:
+- [x] Implement `void Initialize(QuestData quest)`:
   - Populate all UI fields from quest data
   - Set difficulty bar color based on difficulty
   - Set type icon based on quest type
@@ -379,8 +379,8 @@ QuestUICanvas
 ---
 
 ### Task 3.4: Create Active Quest Panel UI
-- [ ] Create panel anchored to top-right corner
-- [ ] Layout components:
+- [x] Create panel anchored to top-right corner
+- [x] Layout components:
   - Quest objective text (e.g., "Deliver to Central Station")
   - Progress indicator:
     - If not picked up: "Go to pickup location"
@@ -389,14 +389,14 @@ QuestUICanvas
   - Distance to next objective
   - Cargo health bar (only for fragile cargo)
   - Mini-map/compass indicator (optional, advanced)
-- [ ] Create `Assets/Scripts/Quest/UI/ActiveQuestUI.cs`:
+- [x] Create `Assets/Scripts/Quest/UI/ActiveQuestUI.cs`:
   - `TextMeshProUGUI objectiveText`
   - `TextMeshProUGUI timerText`
   - `TextMeshProUGUI distanceText`
   - `Image cargoHealthFill`
   - `GameObject cargoHealthPanel` (hidden if not fragile)
   - `QuestData currentQuest` - Reference
-- [ ] Implement methods:
+- [x] Implement methods:
   - `void UpdateQuestDisplay(QuestData quest)` - Refresh all fields
   - `void UpdateTimer(float timeRemaining, float timeLimit)` - Format and color timer
   - `void UpdateDistance(float distance)` - Show distance to objective
