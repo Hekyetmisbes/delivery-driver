@@ -924,9 +924,9 @@ resultText.text = $"DELIVERY COMPLETE\nRank: {rating}";
 ## Phase 7: Rewards & Progression
 
 ### Task 7.1: Create Player Progression Manager
-- [ ] Create `Assets/Scripts/Quest/PlayerProgressionManager.cs`
-- [ ] Implement Singleton pattern
-- [ ] Add fields:
+- [x] Create `Assets/Scripts/Quest/PlayerProgressionManager.cs`
+- [x] Implement Singleton pattern
+- [x] Add fields:
   - `int currentMoney` - Player currency
   - `int currentLevel` - Player level (1-50)
   - `int currentXP` - Experience points
@@ -934,7 +934,7 @@ resultText.text = $"DELIVERY COMPLETE\nRank: {rating}";
   - `int totalQuestsCompleted` - Statistics
   - `int totalDistanceTraveled` - Statistics
   - `float totalTimePlayed` - Statistics
-- [ ] Add Unity events:
+- [x] Add Unity events:
   - `UnityEvent<int> OnMoneyChanged`
   - `UnityEvent<int> OnLevelUp`
   - `UnityEvent<int> OnXPGained`
@@ -950,7 +950,7 @@ int CalculateXPForLevel(int level)
 ---
 
 ### Task 7.2: Implement Reward System
-- [ ] Add methods to PlayerProgressionManager:
+- [x] Add methods to PlayerProgressionManager:
   - `void AwardMoney(int amount)`:
     - Add to currentMoney
     - Invoke OnMoneyChanged event
@@ -967,7 +967,7 @@ int CalculateXPForLevel(int level)
     - Invoke OnLevelUp event
     - Show level up UI/animation
     - Unlock new content (harder quests)
-- [ ] In `QuestManager.CompleteQuest()`:
+- [x] In `QuestManager.CompleteQuest()`:
   - Call `PlayerProgressionManager.Instance.AwardMoney(finalReward)`
   - Call `PlayerProgressionManager.Instance.AwardXP(quest.XPReward)`
 

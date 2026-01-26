@@ -891,6 +891,17 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
+            // Try to use PlayerProgressionManager directly via singleton
+            if (PlayerProgressionManager.Instance != null)
+            {
+                PlayerProgressionManager.Instance.AwardMoney(reward);
+                PlayerProgressionManager.Instance.AwardXP(quest.XPReward);
+                PlayerProgressionManager.Instance.IncrementQuestsCompleted();
+                PlayerProgressionManager.Instance.AddDistanceTraveled(quest.TotalDistanceTraveled);
+                return;
+            }
+
+            // Fallback to reflection for backwards compatibility
             Type progressionType = Type.GetType("PlayerProgressionManager");
             if (progressionType == null)
             {
