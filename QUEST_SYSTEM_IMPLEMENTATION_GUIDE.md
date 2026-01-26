@@ -413,8 +413,8 @@ else color = Color.red; // Urgent!
 ---
 
 ### Task 3.5: Create Quest Complete/Failed Popup
-- [ ] Create centered popup panel: `QuestCompletePanel`
-- [ ] Layout (vertical):
+- [x] Create centered popup panel: `QuestCompletePanel`
+- [x] Layout (vertical):
   - Large result text ("DELIVERY COMPLETE" or "DELIVERY FAILED")
   - Quest name
   - Statistics section:
@@ -423,7 +423,7 @@ else color = Color.red; // Urgent!
     - Cargo condition (if fragile)
   - Reward earned ("+ $500" with bonus indicator)
   - Continue button ("OK" / "Next Delivery")
-- [ ] Create `Assets/Scripts/Quest/UI/QuestCompleteUI.cs`:
+- [x] Create `Assets/Scripts/Quest/UI/QuestCompleteUI.cs`:
   - `GameObject completedPanel` / `GameObject failedPanel`
   - `TextMeshProUGUI resultText`
   - `TextMeshProUGUI questNameText`
@@ -431,11 +431,11 @@ else color = Color.red; // Urgent!
   - `TextMeshProUGUI rewardText`
   - `Button continueButton`
   - `AudioSource successSound` / `AudioSource failureSound`
-- [ ] Implement methods:
+- [x] Implement methods:
   - `void ShowCompleteScreen(QuestData quest, int reward)`
   - `void ShowFailedScreen(QuestData quest, string reason)`
   - `void Hide()`
-- [ ] Add button listener to close popup and refresh available quests
+- [x] Add button listener to close popup and refresh available quests
 
 **Popup Animation:**
 - Fade in background overlay (black, alpha 0.7)
@@ -445,26 +445,26 @@ else color = Color.red; // Urgent!
 ---
 
 ### Task 3.6: Create World-Space Quest Markers
-- [ ] Create prefab: `Assets/Prefabs/Quest/QuestMarkerPickup.prefab`
+- [x] Create prefab: `Assets/Prefabs/Quest/QuestMarkerPickup.prefab`
   - Cylinder or beacon model (colored, emissive material)
   - Particle effect (glowing particles rising)
   - Rotating animation (slow Y-axis rotation)
   - Optional: Vertical oscillating animation (bob up/down)
   - Scale: ~3m tall, visible from distance
   - Color: Blue/Cyan for pickup
-- [ ] Create prefab: `Assets/Prefabs/Quest/QuestMarkerDelivery.prefab`
+- [x] Create prefab: `Assets/Prefabs/Quest/QuestMarkerDelivery.prefab`
   - Similar to pickup but different color (Green/Yellow)
   - Larger particle effect
-- [ ] Create `Assets/Scripts/Quest/QuestMarker.cs`:
+- [x] Create `Assets/Scripts/Quest/QuestMarker.cs`:
   - `Transform target` - Position to mark
   - `float bobSpeed` - Oscillation speed
   - `float bobHeight` - Oscillation amplitude
   - `float rotationSpeed` - Y-axis rotation speed
   - `ParticleSystem particles`
-- [ ] Implement `Update()`:
+- [x] Implement `Update()`:
   - Rotate around Y-axis
   - Bob up/down using `Mathf.Sin(Time.time)`
-- [ ] Add minimap icon support (optional, advanced):
+- [x] Add minimap icon support (optional, advanced):
   - UI Image that tracks world position
   - Distance indicator
 
@@ -476,22 +476,22 @@ else color = Color.red; // Urgent!
 ---
 
 ### Task 3.7: Create Quest Manager UI Controller
-- [ ] Create `Assets/Scripts/Quest/UI/QuestUIManager.cs`
-- [ ] Add singleton pattern
-- [ ] Add references to all UI panels:
+- [x] Create `Assets/Scripts/Quest/UI/QuestUIManager.cs`
+- [x] Add singleton pattern
+- [x] Add references to all UI panels:
   - `QuestListUI questListUI`
   - `ActiveQuestUI activeQuestUI`
   - `QuestCompleteUI questCompleteUI`
-- [ ] Subscribe to QuestManager events in `Start()`:
+- [x] Subscribe to QuestManager events in `Start()`:
   - `OnQuestStarted` → Hide quest list, show active quest panel
   - `OnQuestCompleted` → Show complete screen, award rewards
   - `OnQuestFailed` → Show failed screen
   - `OnQuestUpdated` → Refresh active quest display
-- [ ] Implement `void Update()`:
+- [x] Implement `void Update()`:
   - Toggle quest list with Q key
   - Update active quest distance calculation
   - Update cargo health display
-- [ ] Add methods:
+- [x] Add methods:
   - `void RefreshQuestList()` - Calls QuestListUI to repopulate
   - `void ShowQuestDetails(QuestData quest)` - Optional detailed view
 

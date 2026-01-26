@@ -16,6 +16,10 @@ namespace DeliveryDriver.Quest
         [SerializeField] private Transform playerTransform;
         [SerializeField] private CarController playerController;
 
+        [Header("Marker Prefabs")]
+        [SerializeField] private GameObject pickupMarkerPrefab;
+        [SerializeField] private GameObject deliveryMarkerPrefab;
+
         [Header("Quest Lists")]
         [SerializeField] private int maxActiveQuests = 3;
         [SerializeField] private List<QuestData> activeQuests = new List<QuestData>();
@@ -34,6 +38,9 @@ namespace DeliveryDriver.Quest
         public IReadOnlyList<QuestData> ActiveQuests => activeQuests;
         public IReadOnlyList<QuestData> AvailableQuests => availableQuests;
         public IReadOnlyList<QuestData> CompletedQuests => completedQuests;
+        public Transform PlayerTransform => playerTransform;
+        public string LastFailureReason { get; private set; } = string.Empty;
+        public int LastCompletionReward { get; private set; }
 
         private void Awake()
         {
@@ -222,6 +229,8 @@ namespace DeliveryDriver.Quest
             completedQuests.Add(quest);
 
             int reward = quest.CalculateFinalReward();
+            LastCompletionReward = reward;
+            LastFailureReason = string.Empty;
             TryAwardRewards(quest, reward);
 
             OnQuestCompleted.Invoke(quest);
@@ -243,6 +252,7 @@ namespace DeliveryDriver.Quest
             }
 
             quest.Status = QuestStatus.Failed;
+            LastFailureReason = reason ?? string.Empty;
             OnQuestFailed.Invoke(quest);
             Debug.LogWarning($"[QuestManager] Quest failed: {quest.QuestName}. Reason: {reason}");
 
@@ -288,11 +298,19 @@ namespace DeliveryDriver.Quest
             }
 
             quest.PickupLocation = pickup;
+            if (quest.PickupLocation != null && quest.PickupLocation.VisualMarker == null && pickupMarkerPrefab != null)
+            {
+                quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
+            }
             quest.DeliveryLocations ??= new List<QuestLocation>();
             quest.DeliveryLocations.Clear();
 
             if (delivery != null)
             {
+                if (delivery.VisualMarker == null && deliveryMarkerPrefab != null)
+                {
+                    delivery.VisualMarker = deliveryMarkerPrefab;
+                }
                 quest.DeliveryLocations.Add(delivery);
             }
 
@@ -301,6 +319,10 @@ namespace DeliveryDriver.Quest
                 QuestLocation extraStop = GenerateRandomLocation("Delivery");
                 if (extraStop != null)
                 {
+                    if (extraStop.VisualMarker == null && deliveryMarkerPrefab != null)
+                    {
+                        extraStop.VisualMarker = deliveryMarkerPrefab;
+                    }
                     quest.DeliveryLocations.Add(extraStop);
                 }
             }

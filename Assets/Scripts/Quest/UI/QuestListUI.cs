@@ -1,9 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
-#if ENABLE_INPUT_SYSTEM
-using UnityEngine.InputSystem;
-#endif
 
 namespace DeliveryDriver.Quest.UI
 {
@@ -39,20 +36,7 @@ namespace DeliveryDriver.Quest.UI
             }
         }
 
-        private void Update()
-        {
-#if ENABLE_INPUT_SYSTEM
-            if (Keyboard.current != null && Keyboard.current.qKey.wasPressedThisFrame)
-            {
-                TogglePanel();
-            }
-#else
-            if (Input.GetKeyDown(KeyCode.Q))
-            {
-                TogglePanel();
-            }
-#endif
-        }
+        public bool IsOpen => isOpen;
 
         public void PopulateQuestList(List<QuestData> quests)
         {
@@ -118,6 +102,12 @@ namespace DeliveryDriver.Quest.UI
         public void TogglePanel()
         {
             isOpen = !isOpen;
+            ApplyPanelState();
+        }
+
+        public void SetOpen(bool open)
+        {
+            isOpen = open;
             ApplyPanelState();
         }
 
