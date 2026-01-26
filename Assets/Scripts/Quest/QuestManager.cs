@@ -103,6 +103,12 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
+            // Track distance if cargo has been picked up
+            if (currentQuest.HasPickedUpCargo && playerTransform != null)
+            {
+                currentQuest.UpdateDistanceTracking(playerTransform.position);
+            }
+
             if (!currentQuest.HasPickedUpCargo)
             {
                 CheckPickupProximity();
@@ -577,6 +583,12 @@ namespace DeliveryDriver.Quest
             TryApplyCargoWeight(currentQuest.Cargo);
             cargoVisual?.AttachCargo(currentQuest.Cargo);
 
+            // Initialize distance tracking starting position
+            if (playerTransform != null)
+            {
+                currentQuest.LastPosition = playerTransform.position;
+            }
+
             QuestLocation delivery = GetCurrentDeliveryLocation();
             SpawnQuestZone(delivery, QuestZoneType.Delivery);
             OnQuestUpdated.Invoke(currentQuest);
@@ -633,11 +645,6 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
-            if (currentQuest.Cargo == null || !currentQuest.Cargo.IsFragile)
-            {
-                return;
-            }
-
             if (Time.time - lastCollisionTime < collisionDamageCooldown)
             {
                 return;
@@ -650,16 +657,29 @@ namespace DeliveryDriver.Quest
             }
 
             lastCollisionTime = Time.time;
-            float damage = (force - collisionDamageThreshold) / collisionDamageDivider;
-            currentQuest.Cargo.TakeDamage(damage);
-            cargoVisual?.PlayDamageEffect();
-            PlayQuestClip(damageClip);
-            OnQuestUpdated.Invoke(currentQuest);
 
-            if (currentQuest.Cargo.IsDestroyed())
+            // Record collision for penalty calculation
+            bool isNpcCollision = collision.gameObject.CompareTag("NPC") ||
+                                  collision.gameObject.CompareTag("Traffic") ||
+                                  collision.gameObject.layer == LayerMask.NameToLayer("NPC");
+            currentQuest.RecordCollision(isNpcCollision);
+
+            // Apply damage to fragile cargo
+            if (currentQuest.Cargo != null && currentQuest.Cargo.IsFragile)
             {
-                OnCargoDestroyed();
+                float damage = (force - collisionDamageThreshold) / collisionDamageDivider;
+                currentQuest.Cargo.TakeDamage(damage);
+                cargoVisual?.PlayDamageEffect();
+                PlayQuestClip(damageClip);
+
+                if (currentQuest.Cargo.IsDestroyed())
+                {
+                    OnCargoDestroyed();
+                    return;
+                }
             }
+
+            OnQuestUpdated.Invoke(currentQuest);
         }
 
         private void PlayQuestClip(AudioClip clip)

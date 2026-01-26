@@ -128,6 +128,27 @@ namespace DeliveryDriver.Quest
         public bool EarnedBonus { get; private set; }
 
         /// <summary>
+        /// Total distance traveled during quest (in meters)
+        /// </summary>
+        public float TotalDistanceTraveled;
+
+        /// <summary>
+        /// Last recorded player position (for distance tracking)
+        /// </summary>
+        [System.NonSerialized]
+        public Vector3 LastPosition;
+
+        /// <summary>
+        /// Total number of collisions during quest
+        /// </summary>
+        public int CollisionCount;
+
+        /// <summary>
+        /// Number of collisions with NPC vehicles
+        /// </summary>
+        public int NpcCollisionCount;
+
+        /// <summary>
         /// Default constructor with default initialization
         /// </summary>
         public QuestData()
@@ -153,6 +174,10 @@ namespace DeliveryDriver.Quest
             PausedTime = 0f;
             IsPaused = false;
             EarnedBonus = false;
+            TotalDistanceTraveled = 0f;
+            LastPosition = Vector3.zero;
+            CollisionCount = 0;
+            NpcCollisionCount = 0;
         }
 
         /// <summary>
@@ -174,6 +199,10 @@ namespace DeliveryDriver.Quest
             PausedTime = 0f;
             IsPaused = false;
             EarnedBonus = false;
+            TotalDistanceTraveled = 0f;
+            LastPosition = Vector3.zero;
+            CollisionCount = 0;
+            NpcCollisionCount = 0;
 
             // Initialize cargo health if fragile
             if (Cargo != null && Cargo.IsFragile)
@@ -244,6 +273,8 @@ namespace DeliveryDriver.Quest
         /// <returns>Total reward amount including bonus if applicable</returns>
         public int CalculateFinalReward()
         {
+            int totalReward = BaseReward;
+
             // Calculate completion percentage
             float completionPercent = 0f;
             if (TimeLimit > 0f)
@@ -251,7 +282,7 @@ namespace DeliveryDriver.Quest
                 completionPercent = TimeRemaining / TimeLimit;
             }
 
-            // Determine if bonus was earned
+            // Determine if time bonus was earned
             if (completionPercent >= BonusTimeThreshold)
             {
                 EarnedBonus = true;
@@ -270,13 +301,25 @@ namespace DeliveryDriver.Quest
                 }
 
                 int bonusAmount = Mathf.RoundToInt(BonusReward * bonusMultiplier);
-                return BaseReward + bonusAmount;
+                totalReward += bonusAmount;
             }
             else
             {
                 EarnedBonus = false;
-                return BaseReward;
             }
+
+            // Perfect delivery bonus (no collisions)
+            if (CollisionCount == 0)
+            {
+                totalReward += 200; // $200 perfect delivery bonus
+            }
+
+            // Apply collision penalties
+            int penalty = (CollisionCount * 10) + (NpcCollisionCount * 100);
+            totalReward -= penalty;
+
+            // Ensure reward is never negative
+            return Mathf.Max(0, totalReward);
         }
 
         /// <summary>
@@ -310,6 +353,82 @@ namespace DeliveryDriver.Quest
         public bool WillEarnBonus()
         {
             return TimeRemaining > TimeLimit * BonusTimeThreshold;
+        }
+
+        /// <summary>
+        /// Updates distance tracking based on player position
+        /// </summary>
+        /// <param name="currentPosition">Current player position</param>
+        public void UpdateDistanceTracking(Vector3 currentPosition)
+        {
+            if (LastPosition == Vector3.zero)
+            {
+                LastPosition = currentPosition;
+                return;
+            }
+
+            float distance = Vector3.Distance(currentPosition, LastPosition);
+            TotalDistanceTraveled += distance;
+            LastPosition = currentPosition;
+        }
+
+        /// <summary>
+        /// Gets the total distance traveled formatted in kilometers
+        /// </summary>
+        /// <returns>Formatted distance string (e.g., "2.3 km")</returns>
+        public string GetFormattedDistance()
+        {
+            float distanceKm = TotalDistanceTraveled / 1000f;
+            return $"{distanceKm:F1} km";
+        }
+
+        /// <summary>
+        /// Calculates the straight-line distance from pickup to delivery
+        /// </summary>
+        /// <returns>Distance in meters</returns>
+        public float GetOptimalRouteDistance()
+        {
+            if (PickupLocation == null || DeliveryLocations == null || DeliveryLocations.Count == 0)
+            {
+                return 0f;
+            }
+
+            float totalDistance = 0f;
+            Vector3 currentPos = PickupLocation.Position;
+
+            foreach (QuestLocation delivery in DeliveryLocations)
+            {
+                if (delivery != null)
+                {
+                    totalDistance += Vector3.Distance(currentPos, delivery.Position);
+                    currentPos = delivery.Position;
+                }
+            }
+
+            // Account for road network (straight line * 1.5 approximation)
+            return totalDistance * 1.5f;
+        }
+
+        /// <summary>
+        /// Increments collision count
+        /// </summary>
+        /// <param name="isNpcCollision">True if collision was with an NPC vehicle</param>
+        public void RecordCollision(bool isNpcCollision = false)
+        {
+            CollisionCount++;
+            if (isNpcCollision)
+            {
+                NpcCollisionCount++;
+            }
+        }
+
+        /// <summary>
+        /// Gets whether this delivery was perfect (no collisions)
+        /// </summary>
+        /// <returns>True if no collisions occurred</returns>
+        public bool IsPerfectDelivery()
+        {
+            return CollisionCount == 0;
         }
     }
 }

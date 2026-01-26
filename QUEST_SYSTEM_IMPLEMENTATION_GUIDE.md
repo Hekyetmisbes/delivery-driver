@@ -844,15 +844,15 @@ if (quest.EarnedBonus)
 ---
 
 ### Task 6.3: Implement Distance Tracking
-- [ ] In `QuestData.cs`, add fields:
+- [x] In `QuestData.cs`, add fields:
   - `float totalDistanceTraveled` - For statistics
   - `Vector3 lastPosition` - Track movement
-- [ ] In `QuestManager.Update()`:
+- [x] In `QuestManager.Update()`:
   - If quest active and cargo picked up:
     - Calculate distance: `Vector3.Distance(playerTransform.position, currentQuest.lastPosition)`
     - Add to `totalDistanceTraveled`
     - Update `lastPosition`
-- [ ] Display in completion screen:
+- [x] Display in completion screen:
   - "Distance: 2.3 km"
   - Optional: Compare to optimal route distance (straight line * 1.5)
   - Bonus for efficient routing (optional, advanced)
@@ -866,22 +866,22 @@ statsText.text += $"\nDistance: {distanceKm:F1} km";
 ---
 
 ### Task 6.4: Implement Collision Penalty System (Optional)
-- [ ] In `QuestData.cs`, add fields:
+- [x] In `QuestData.cs`, add fields:
   - `int collisionCount` - Number of collisions
   - `int npcCollisionCount` - Collisions with NPC vehicles
-- [ ] In `QuestManager.OnVehicleCollision()`:
+- [x] In `QuestManager.OnVehicleCollision()`:
   - Increment collision counters
   - Apply reward penalty:
     - -$10 per minor collision (< 30 km/h)
     - -$50 per major collision (> 30 km/h)
     - -$100 per NPC collision (traffic violation)
-- [ ] Deduct penalties from final reward in `CalculateFinalReward()`:
+- [x] Deduct penalties from final reward in `CalculateFinalReward()`:
   - `int penalty = (collisionCount * 10) + (npcCollisionCount * 100)`
   - `return Mathf.Max(0, baseReward - penalty)`
-- [ ] Display in completion screen
+- [x] Display in completion screen
 
 **Clean Delivery Bonus (Optional):**
-- If `collisionCount == 0`: +$200 "PERFECT DELIVERY" bonus
+- [x] If `collisionCount == 0`: +$200 "PERFECT DELIVERY" bonus
 
 ---
 
