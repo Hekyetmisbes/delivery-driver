@@ -29,9 +29,17 @@ namespace DeliveryDriver.Quest
         [SerializeField] private AudioClip pickupClip;
         [SerializeField] private AudioClip deliveryClip;
         [SerializeField] private AudioClip failureClip;
+        [SerializeField] private AudioClip damageClip;
+        [SerializeField] private AudioClip destroyedClip;
 
         [Header("Cargo Visuals")]
         [SerializeField] private CargoVisual cargoVisual;
+
+        [Header("Fragile Cargo Damage")]
+        [SerializeField] private float collisionDamageThreshold = 10000f;
+        [SerializeField] private float collisionDamageDivider = 1000f;
+        [SerializeField] private float collisionDamageCooldown = 0.25f;
+        private float lastCollisionTime;
 
         [Header("Quest Lists")]
         [SerializeField] private int maxActiveQuests = 3;
@@ -614,7 +622,44 @@ namespace DeliveryDriver.Quest
 
             TryRemoveCargoWeight();
             cargoVisual?.DetachCargo();
+            PlayQuestClip(destroyedClip);
             FailQuest(currentQuest, "Cargo destroyed");
+        }
+
+        public void OnVehicleCollision(Collision collision)
+        {
+            if (currentQuest == null || currentQuest.Status != QuestStatus.Active)
+            {
+                return;
+            }
+
+            if (currentQuest.Cargo == null || !currentQuest.Cargo.IsFragile)
+            {
+                return;
+            }
+
+            if (Time.time - lastCollisionTime < collisionDamageCooldown)
+            {
+                return;
+            }
+
+            float force = collision.impulse.magnitude / Time.fixedDeltaTime;
+            if (force < collisionDamageThreshold)
+            {
+                return;
+            }
+
+            lastCollisionTime = Time.time;
+            float damage = (force - collisionDamageThreshold) / collisionDamageDivider;
+            currentQuest.Cargo.TakeDamage(damage);
+            cargoVisual?.PlayDamageEffect();
+            PlayQuestClip(damageClip);
+            OnQuestUpdated.Invoke(currentQuest);
+
+            if (currentQuest.Cargo.IsDestroyed())
+            {
+                OnCargoDestroyed();
+            }
         }
 
         private void PlayQuestClip(AudioClip clip)

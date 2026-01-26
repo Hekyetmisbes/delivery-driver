@@ -697,12 +697,12 @@ playerController.AddCargoWeight(currentQuest.Cargo.Weight);
 ---
 
 ### Task 5.3: Implement Fragile Cargo Damage System
-- [ ] In `QuestManager.cs`, add field:
+- [x] In `QuestManager.cs`, add field:
   - `float lastCollisionTime` - Debounce collision damage
-- [ ] Hook into CarController collision detection:
+- [x] Hook into CarController collision detection:
   - Option A: Add collision forwarding in CarController
   - Option B: Add separate collision detector component to player vehicle
-- [ ] Add `void OnVehicleCollision(Collision collision)`:
+- [x] Add `void OnVehicleCollision(Collision collision)`:
   - Early exit if current quest is null or cargo not fragile
   - Calculate collision force: `collision.impulse.magnitude / Time.fixedDeltaTime`
   - If force exceeds threshold (e.g., 10000):
@@ -711,7 +711,7 @@ playerController.AddCargoWeight(currentQuest.Cargo.Weight);
     - Play damage effect via CargoVisual
     - Update cargo health UI
     - If cargo destroyed → `FailQuest()`
-- [ ] Add damage threshold multipliers:
+- [x] Add damage threshold multipliers:
   - Low speed collision (< 20 km/h): No damage
   - Medium (20-40 km/h): 10-30% damage
   - High (> 40 km/h): 50-100% damage (instant fail)
@@ -728,18 +728,18 @@ void OnCollisionEnter(Collision collision)
 ---
 
 ### Task 5.4: Add Cargo Sound Effects
-- [ ] Create audio files or use asset store sounds:
+- [x] Create audio files or use asset store sounds:
   - `CargoPickup.wav` - Cargo loading sound (beep, hydraulic)
   - `CargoDeliver.wav` - Delivery success sound (chime, beep)
   - `CargoDamage.wav` - Damage sound (crash, breaking glass)
   - `CargoDestroyed.wav` - Failure sound (alarm, explosion)
-- [ ] In `QuestManager.cs`, add AudioSource component:
+- [x] In `QuestManager.cs`, add AudioSource component:
   - `AudioSource questAudioSource`
   - `AudioClip pickupSound`
   - `AudioClip deliverSound`
   - `AudioClip damageSound`
   - `AudioClip destroyedSound`
-- [ ] Play sounds at appropriate events:
+- [x] Play sounds at appropriate events:
   - `OnCargoPickedUp()` → Play pickupSound
   - `OnCargoDelivered()` → Play deliverSound
   - `OnVehicleCollision()` (if damage) → Play damageSound
@@ -753,11 +753,11 @@ void OnCollisionEnter(Collision collision)
 ---
 
 ### Task 5.5: Create Cargo Type Variants
-- [ ] Create `Assets/Scripts/Quest/CargoLibrary.cs` ScriptableObject:
+- [x] Create `Assets/Scripts/Quest/CargoLibrary.cs` ScriptableObject:
   - `List<CargoData> cargoTypes` - Predefined cargo types
   - Method: `CargoData GetRandomCargo()`
   - Method: `CargoData GetCargoByName(string name)`
-- [ ] Define cargo variants:
+- [x] Define cargo variants:
   1. **Standard Boxes**:
      - Weight: 100-200 kg
      - Fragile: false
@@ -780,8 +780,8 @@ void OnCollisionEnter(Collision collision)
      - Weight: 100 kg
      - Fragile: true (very high damage, breaks easily)
      - Icon: Wine glass sprite
-- [ ] Create menu item: `Assets/Create/Quest System/Cargo Library`
-- [ ] Create instance: `Assets/Resources/CargoLibrary.asset`
+- [x] Create menu item: `Assets/Create/Quest System/Cargo Library`
+- [x] Create instance: `Assets/Resources/CargoLibrary.asset`
 
 **Cargo Assignment in Quest Generation:**
 ```csharp

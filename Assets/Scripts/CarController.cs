@@ -261,4 +261,9 @@ public class CarController : MonoBehaviour
             Gizmos.DrawLine(transform.TransformPoint(rb.centerOfMass), transform.TransformPoint(rb.centerOfMass) + transform.forward);
         }
     }
+    private void OnCollisionEnter(Collision collision)
+    {
+        DeliveryDriver.Quest.QuestManager.Instance?.OnVehicleCollision(collision);
+    }
+
 }
