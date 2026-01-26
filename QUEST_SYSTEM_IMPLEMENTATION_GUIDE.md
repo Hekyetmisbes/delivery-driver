@@ -72,17 +72,17 @@ namespace DeliveryDriver.Quest
 ---
 
 ### Task 1.2: Create Quest Location Data Structure
-- [ ] Create `Assets/Scripts/Quest/QuestLocation.cs`
-- [ ] Add `QuestLocation` class with properties:
+- [x] Create `Assets/Scripts/Quest/QuestLocation.cs`
+- [x] Add `QuestLocation` class with properties:
   - `Vector3 Position` - World position
   - `string LocationName` - Display name (e.g., "Downtown Warehouse")
   - `int RoadSegmentIndex` - Reference to road segment
   - `int WaypointIndex` - Reference to specific waypoint
   - `float TriggerRadius` - Detection radius (default: 10m)
   - `GameObject VisualMarker` - Optional 3D marker prefab reference
-- [ ] Add constructor: `QuestLocation(Vector3 pos, string name, float radius)`
-- [ ] Add method: `bool IsPlayerInRange(Transform playerTransform)`
-- [ ] Add method: `void ShowMarker()` / `void HideMarker()`
+- [x] Add constructor: `QuestLocation(Vector3 pos, string name, float radius)`
+- [x] Add method: `bool IsPlayerInRange(Transform playerTransform)`
+- [x] Add method: `void ShowMarker()` / `void HideMarker()`
 
 **Implementation Details:**
 - Use `Vector3.Distance()` for range checking
