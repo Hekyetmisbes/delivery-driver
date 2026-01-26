@@ -92,16 +92,16 @@ namespace DeliveryDriver.Quest
 ---
 
 ### Task 1.3: Create Cargo Data Structure
-- [ ] Create `Assets/Scripts/Quest/CargoData.cs`
-- [ ] Add `CargoData` class with properties:
+- [x] Create `Assets/Scripts/Quest/CargoData.cs`
+- [x] Add `CargoData` class with properties:
   - `string CargoName` - Display name (e.g., "Medical Supplies", "Electronics")
   - `float Weight` - Affects vehicle handling (0-500 kg)
   - `bool IsFragile` - If true, collisions reduce cargo health
   - `float CargoHealth` - Current health (0-100, only for fragile)
   - `Sprite CargoIcon` - UI display icon
   - `string Description` - Flavor text
-- [ ] Add method: `void TakeDamage(float amount)` - Reduces health
-- [ ] Add method: `bool IsDestroyed()` - Returns true if health <= 0
+- [x] Add method: `void TakeDamage(float amount)` - Reduces health
+- [x] Add method: `bool IsDestroyed()` - Returns true if health <= 0
 
 **Cargo Types to Support:**
 1. Standard Boxes (not fragile)
