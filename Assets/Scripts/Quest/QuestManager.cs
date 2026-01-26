@@ -50,6 +50,12 @@ namespace DeliveryDriver.Quest
         [Header("Runtime State")]
         [SerializeField] private QuestData currentQuest;
 
+        [Header("Streak System")]
+        [SerializeField] private int consecutiveSuccesses = 0;
+        [SerializeField] private float streakMultiplier = 1.0f;
+        [SerializeField] private float maxStreakMultiplier = 2.0f;
+        [SerializeField] private float streakMultiplierIncrement = 0.1f;
+
         public UnityEvent<QuestData> OnQuestStarted = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnQuestCompleted = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnQuestFailed = new UnityEvent<QuestData>();
@@ -62,6 +68,8 @@ namespace DeliveryDriver.Quest
         public Transform PlayerTransform => playerTransform;
         public string LastFailureReason { get; private set; } = string.Empty;
         public int LastCompletionReward { get; private set; }
+        public int ConsecutiveSuccesses => consecutiveSuccesses;
+        public float StreakMultiplier => streakMultiplier;
 
         private void Awake()
         {
@@ -255,12 +263,24 @@ namespace DeliveryDriver.Quest
             }
 
             quest.Status = QuestStatus.Completed;
-            completedQuests.Add(quest);
 
-            int reward = quest.CalculateFinalReward();
-            LastCompletionReward = reward;
+            // Calculate performance rating
+            quest.CalculateRating();
+
+            // Increment streak
+            consecutiveSuccesses++;
+            streakMultiplier = Mathf.Min(1.0f + (consecutiveSuccesses * streakMultiplierIncrement), maxStreakMultiplier);
+
+            // Calculate base reward and apply streak multiplier
+            int baseReward = quest.CalculateFinalReward();
+            int finalReward = Mathf.RoundToInt(baseReward * streakMultiplier);
+            LastCompletionReward = finalReward;
             LastFailureReason = string.Empty;
-            TryAwardRewards(quest, reward);
+
+            completedQuests.Add(quest);
+            TryAwardRewards(quest, finalReward);
+
+            Debug.Log($"[QuestManager] Quest completed with {quest.Rating} rank! Streak: {consecutiveSuccesses}x (Multiplier: {streakMultiplier:F1}x)");
 
             OnQuestCompleted.Invoke(quest);
             CleanupQuestMarkers(quest);
@@ -282,6 +302,18 @@ namespace DeliveryDriver.Quest
             }
 
             quest.Status = QuestStatus.Failed;
+
+            // Calculate rating (will be F for failed quests)
+            quest.CalculateRating();
+
+            // Reset streak on failure
+            if (consecutiveSuccesses > 0)
+            {
+                Debug.Log($"[QuestManager] Streak broken! Lost {consecutiveSuccesses}x streak.");
+            }
+            consecutiveSuccesses = 0;
+            streakMultiplier = 1.0f;
+
             LastFailureReason = reason ?? string.Empty;
             OnQuestFailed.Invoke(quest);
             Debug.LogWarning($"[QuestManager] Quest failed: {quest.QuestName}. Reason: {reason}");

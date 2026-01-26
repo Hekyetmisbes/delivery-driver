@@ -87,4 +87,40 @@ namespace DeliveryDriver.Quest
         /// </summary>
         Expert
     }
+
+    /// <summary>
+    /// Defines the performance rating for a completed quest
+    /// </summary>
+    public enum PerformanceRating
+    {
+        /// <summary>
+        /// Failed quest
+        /// </summary>
+        F,
+
+        /// <summary>
+        /// Cargo damaged significantly
+        /// </summary>
+        D,
+
+        /// <summary>
+        /// Completed barely (less than 10% time remaining)
+        /// </summary>
+        C,
+
+        /// <summary>
+        /// Completed with time remaining
+        /// </summary>
+        B,
+
+        /// <summary>
+        /// Bonus earned with less than 2 collisions
+        /// </summary>
+        A,
+
+        /// <summary>
+        /// Perfect: Bonus earned, zero collisions, cargo health above 90%
+        /// </summary>
+        S
+    }
 }

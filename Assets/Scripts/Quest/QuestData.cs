@@ -149,6 +149,11 @@ namespace DeliveryDriver.Quest
         public int NpcCollisionCount;
 
         /// <summary>
+        /// Performance rating for this quest
+        /// </summary>
+        public PerformanceRating Rating { get; private set; }
+
+        /// <summary>
         /// Default constructor with default initialization
         /// </summary>
         public QuestData()
@@ -178,6 +183,7 @@ namespace DeliveryDriver.Quest
             LastPosition = Vector3.zero;
             CollisionCount = 0;
             NpcCollisionCount = 0;
+            Rating = PerformanceRating.C;
         }
 
         /// <summary>
@@ -429,6 +435,71 @@ namespace DeliveryDriver.Quest
         public bool IsPerfectDelivery()
         {
             return CollisionCount == 0;
+        }
+
+        /// <summary>
+        /// Calculates the performance rating based on quest completion quality
+        /// </summary>
+        /// <returns>Performance rating from F to S</returns>
+        public PerformanceRating CalculateRating()
+        {
+            // Failed quests always get F rank
+            if (Status == QuestStatus.Failed)
+            {
+                Rating = PerformanceRating.F;
+                return Rating;
+            }
+
+            // Check cargo health percentage (if fragile cargo exists)
+            float cargoHealthPercent = 100f;
+            if (Cargo != null && Cargo.IsFragile)
+            {
+                cargoHealthPercent = Cargo.CargoHealth;
+            }
+
+            // Calculate time remaining percentage
+            float timePercent = GetTimeRemainingPercentage();
+
+            // S Rank: Bonus earned + zero collisions + cargo health > 90%
+            if (EarnedBonus && CollisionCount == 0 && cargoHealthPercent > 90f)
+            {
+                Rating = PerformanceRating.S;
+            }
+            // A Rank: Bonus earned + less than 2 collisions
+            else if (EarnedBonus && CollisionCount < 2)
+            {
+                Rating = PerformanceRating.A;
+            }
+            // B Rank: Completed with time remaining (>10%)
+            else if (timePercent > 0.1f)
+            {
+                Rating = PerformanceRating.B;
+            }
+            // C Rank: Completed barely (< 10% time remaining)
+            else if (Status == QuestStatus.Completed)
+            {
+                Rating = PerformanceRating.C;
+            }
+            // D Rank: Cargo damaged significantly
+            else if (cargoHealthPercent < 50f)
+            {
+                Rating = PerformanceRating.D;
+            }
+            else
+            {
+                Rating = PerformanceRating.C;
+            }
+
+            return Rating;
+        }
+
+        /// <summary>
+        /// Gets the rating as a display string with color indicator
+        /// </summary>
+        /// <returns>Formatted rating string</returns>
+        public string GetRatingDisplay()
+        {
+            return Rating.ToString();
         }
     }
 }

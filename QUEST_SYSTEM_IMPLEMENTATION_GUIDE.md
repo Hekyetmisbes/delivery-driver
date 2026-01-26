@@ -886,18 +886,18 @@ statsText.text += $"\nDistance: {distanceKm:F1} km";
 ---
 
 ### Task 6.5: Implement Scoring Tiers
-- [ ] In `QuestData.cs`, add rating system:
+- [x] In `QuestData.cs`, add rating system:
   - `enum PerformanceRating { F, D, C, B, A, S }`
   - `PerformanceRating rating { get; private set; }`
-- [ ] Add `CalculateRating()` method:
+- [x] Add `CalculateRating()` method:
   - S Rank: Bonus earned + zero collisions + cargo health > 90%
   - A Rank: Bonus earned + < 2 collisions
   - B Rank: Completed with time remaining
   - C Rank: Completed barely (< 10% time remaining)
   - D Rank: Cargo damaged significantly
   - F Rank: Failed
-- [ ] Call in `CompleteQuest()` and display in UI
-- [ ] Store ratings in quest history for statistics
+- [x] Call in `CompleteQuest()` and display in UI
+- [x] Store ratings in quest history for statistics
 
 **Rating Display:**
 ```csharp
@@ -909,15 +909,15 @@ resultText.text = $"DELIVERY COMPLETE\nRank: {rating}";
 ---
 
 ### Task 6.6: Add Combo/Streak System (Optional Enhancement)
-- [ ] In `QuestManager.cs`, add fields:
+- [x] In `QuestManager.cs`, add fields:
   - `int consecutiveSuccesses` - Streak counter
   - `float streakMultiplier` - Reward multiplier
-- [ ] Increment on successful completion:
+- [x] Increment on successful completion:
   - Each consecutive success: `streakMultiplier += 0.1` (max 2.0x)
-- [ ] Reset streak on failure
-- [ ] Apply multiplier to rewards:
+- [x] Reset streak on failure
+- [x] Apply multiplier to rewards:
   - `finalReward = baseReward * streakMultiplier`
-- [ ] Display streak in UI: "5 Streak! 1.5x Reward Multiplier"
+- [x] Display streak in UI: "5 Streak! 1.5x Reward Multiplier"
 
 ---
 
