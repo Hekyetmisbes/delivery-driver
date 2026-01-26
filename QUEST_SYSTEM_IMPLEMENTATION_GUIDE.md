@@ -795,14 +795,14 @@ if (questType == QuestType.FragileDelivery)
 ## Phase 6: Timer & Scoring
 
 ### Task 6.1: Implement Quest Timer System
-- [ ] In `QuestData.cs`, enhance timer logic:
+- [x] In `QuestData.cs`, enhance timer logic:
   - `float startTime` - When quest was accepted (Time.time)
   - `float pausedTime` - Accumulated pause time (optional)
-- [ ] In `QuestManager.Update()`:
+- [x] In `QuestManager.Update()`:
   - Call `currentQuest.UpdateTimer(Time.deltaTime)`
   - Check `if (currentQuest.IsTimeExpired())` → `FailQuest()`
   - Calculate time remaining percentage for UI color coding
-- [ ] Add pause functionality (optional):
+- [x] Add pause functionality (optional):
   - `void PauseQuest()` - Stops timer (for pause menu)
   - `void ResumeQuest()` - Resumes timer
   - Store pause start time and accumulate when resumed
@@ -820,16 +820,16 @@ string FormatTime(float seconds)
 ---
 
 ### Task 6.2: Implement Bonus Time Calculation
-- [ ] In `QuestData.cs`, add property:
+- [x] In `QuestData.cs`, add property:
   - `bool EarnedBonus { get; private set; }`
-- [ ] In `CalculateFinalReward()`:
+- [x] In `CalculateFinalReward()`:
   - Calculate completion percentage: `completionPercent = TimeRemaining / TimeLimit`
   - If `completionPercent >= BonusTimeThreshold` (default 0.5 = 50%):
     - Set `EarnedBonus = true`
     - Return `BaseReward + BonusReward`
   - Else:
     - Return `BaseReward`
-- [ ] Add speed bonus multiplier (optional):
+- [x] Add speed bonus multiplier (optional):
   - Very fast (75%+ time left): 1.5x bonus
   - Fast (50-75% time left): 1.0x bonus
   - Normal (< 50% time left): No bonus

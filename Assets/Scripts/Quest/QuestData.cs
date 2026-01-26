@@ -108,6 +108,26 @@ namespace DeliveryDriver.Quest
         public int CurrentDeliveryIndex;
 
         /// <summary>
+        /// Time when quest was started (Time.time)
+        /// </summary>
+        public float StartTime;
+
+        /// <summary>
+        /// Accumulated pause time (for pause menu support)
+        /// </summary>
+        public float PausedTime;
+
+        /// <summary>
+        /// Whether the timer is currently paused
+        /// </summary>
+        public bool IsPaused;
+
+        /// <summary>
+        /// True if the player earned the bonus reward
+        /// </summary>
+        public bool EarnedBonus { get; private set; }
+
+        /// <summary>
         /// Default constructor with default initialization
         /// </summary>
         public QuestData()
@@ -129,6 +149,10 @@ namespace DeliveryDriver.Quest
             XPReward = 50;
             HasPickedUpCargo = false;
             CurrentDeliveryIndex = 0;
+            StartTime = 0f;
+            PausedTime = 0f;
+            IsPaused = false;
+            EarnedBonus = false;
         }
 
         /// <summary>
@@ -146,6 +170,10 @@ namespace DeliveryDriver.Quest
             TimeRemaining = TimeLimit;
             HasPickedUpCargo = false;
             CurrentDeliveryIndex = 0;
+            StartTime = Time.time;
+            PausedTime = 0f;
+            IsPaused = false;
+            EarnedBonus = false;
 
             // Initialize cargo health if fragile
             if (Cargo != null && Cargo.IsFragile)
@@ -167,8 +195,38 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
+            // Don't decrement timer if paused
+            if (IsPaused)
+            {
+                return;
+            }
+
             TimeRemaining -= deltaTime;
             TimeRemaining = Mathf.Max(0f, TimeRemaining);
+        }
+
+        /// <summary>
+        /// Pauses the quest timer (for pause menu)
+        /// </summary>
+        public void PauseQuest()
+        {
+            if (Status == QuestStatus.Active && !IsPaused)
+            {
+                IsPaused = true;
+                Debug.Log($"Quest '{QuestName}' paused.");
+            }
+        }
+
+        /// <summary>
+        /// Resumes the quest timer after pause
+        /// </summary>
+        public void ResumeQuest()
+        {
+            if (Status == QuestStatus.Active && IsPaused)
+            {
+                IsPaused = false;
+                Debug.Log($"Quest '{QuestName}' resumed.");
+            }
         }
 
         /// <summary>
@@ -186,13 +244,37 @@ namespace DeliveryDriver.Quest
         /// <returns>Total reward amount including bonus if applicable</returns>
         public int CalculateFinalReward()
         {
-            // Check if player earned the time bonus
-            if (TimeRemaining > TimeLimit * BonusTimeThreshold)
+            // Calculate completion percentage
+            float completionPercent = 0f;
+            if (TimeLimit > 0f)
             {
-                return BaseReward + BonusReward;
+                completionPercent = TimeRemaining / TimeLimit;
+            }
+
+            // Determine if bonus was earned
+            if (completionPercent >= BonusTimeThreshold)
+            {
+                EarnedBonus = true;
+
+                // Speed bonus multiplier tiers
+                float bonusMultiplier = 1.0f;
+                if (completionPercent >= 0.75f)
+                {
+                    // Very fast completion (75%+ time left): 1.5x bonus
+                    bonusMultiplier = 1.5f;
+                }
+                else if (completionPercent >= 0.5f)
+                {
+                    // Fast completion (50-75% time left): 1.0x bonus
+                    bonusMultiplier = 1.0f;
+                }
+
+                int bonusAmount = Mathf.RoundToInt(BonusReward * bonusMultiplier);
+                return BaseReward + bonusAmount;
             }
             else
             {
+                EarnedBonus = false;
                 return BaseReward;
             }
         }
