@@ -220,6 +220,17 @@ namespace DeliveryDriver.Quest
             // Invoke level up event
             OnLevelUp.Invoke(currentLevel);
 
+            // Task 10.1 & 10.2: Play level up sound and particle effect
+            if (QuestManager.Instance != null)
+            {
+                QuestManager.Instance.PlayLevelUpSound();
+
+                if (QuestManager.Instance.PlayerTransform != null)
+                {
+                    QuestManager.Instance.PlayLevelUpEffect(QuestManager.Instance.PlayerTransform.position);
+                }
+            }
+
             Debug.Log($"[PlayerProgressionManager] LEVEL UP! Now level {currentLevel}. Next level requires {xpToNextLevel} XP.");
         }
 

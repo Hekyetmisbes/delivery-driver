@@ -1384,20 +1384,20 @@ string GenerateQuestName(QuestType type, QuestLocation delivery)
 ## Phase 10: Polish & Integration
 
 ### Task 10.1: Add Audio & Music
-- [ ] Create audio sources in QuestManager:
+- [x] Create audio sources in QuestManager:
   - `AudioSource musicSource` - Background music
   - `AudioSource sfxSource` - Quest sound effects
-- [ ] Add sound effects:
+- [x] Add sound effects:
   - Quest accepted: Confirmation beep
   - Quest completed: Success fanfare
   - Quest failed: Failure buzzer
   - Time warning: Alarm when < 30 seconds
   - Level up: Victory jingle
-- [ ] Add background music system (optional):
+- [x] Add background music system (optional):
   - Calm music during exploration
   - Intense music during active delivery
   - Transition smoothly between tracks
-- [ ] Add music volume controls in settings
+- [x] Add music volume controls in settings
 
 **Time Warning Audio:**
 ```csharp
@@ -1414,16 +1414,16 @@ void Update()
 ---
 
 ### Task 10.2: Add Particle Effects
-- [ ] Create particle effects:
+- [x] Create particle effects:
   - **Quest marker particles**: Glowing rising particles at pickup/delivery zones
   - **Pickup effect**: Burst of particles when cargo loaded
   - **Delivery effect**: Confetti/fireworks when delivery successful
   - **Damage effect**: Sparks/smoke when fragile cargo damaged
   - **Level up effect**: Golden particle burst
-- [ ] Integrate effects with quest events:
+- [x] Integrate effects with quest events:
   - Instantiate at appropriate positions
   - Use object pooling for performance (reuse particle systems)
-- [ ] Add trail effect to quest markers for visibility
+- [x] Add trail effect to quest markers for visibility
 
 **Particle System Setup:**
 - Use UnityEngine.ParticleSystem

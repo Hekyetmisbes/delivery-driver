@@ -33,8 +33,29 @@ namespace DeliveryDriver.Quest
         [SerializeField] private AudioClip damageClip;
         [SerializeField] private AudioClip destroyedClip;
 
+        [Header("Task 10.1: Additional Audio")]
+        [SerializeField] private AudioSource musicSource;
+        [SerializeField] private AudioClip questAcceptedClip;
+        [SerializeField] private AudioClip timeWarningClip;
+        [SerializeField] private AudioClip levelUpClip;
+        [SerializeField] private AudioClip explorationMusicClip;
+        [SerializeField] private AudioClip deliveryMusicClip;
+        [SerializeField] private float timeWarningThreshold = 30f;
+        [SerializeField] private float musicCrossfadeDuration = 2f;
+        private bool timeWarningPlayed = false;
+        private bool isCrossfading = false;
+
         [Header("Cargo Visuals")]
         [SerializeField] private CargoVisual cargoVisual;
+
+        [Header("Task 10.2: Particle Effects")]
+        [SerializeField] private GameObject questMarkerParticlePrefab;
+        [SerializeField] private GameObject pickupEffectPrefab;
+        [SerializeField] private GameObject deliveryEffectPrefab;
+        [SerializeField] private GameObject damageEffectPrefab;
+        [SerializeField] private GameObject levelUpEffectPrefab;
+        [SerializeField] private int particlePoolSize = 10;
+        private Queue<GameObject> particlePool = new Queue<GameObject>();
 
         [Header("Fragile Cargo Damage")]
         [SerializeField] private float collisionDamageThreshold = 10000f;
@@ -124,6 +145,17 @@ namespace DeliveryDriver.Quest
 
         private void Start()
         {
+            // Task 10.2: Initialize particle pool
+            InitializeParticlePool();
+
+            // Task 10.1: Start exploration music
+            if (musicSource != null && explorationMusicClip != null)
+            {
+                musicSource.clip = explorationMusicClip;
+                musicSource.loop = true;
+                musicSource.Play();
+            }
+
             // Try to load saved game
             if (SaveManager.Instance != null)
             {
@@ -169,6 +201,14 @@ namespace DeliveryDriver.Quest
             }
 
             currentQuest.UpdateTimer(Time.deltaTime);
+
+            // Task 10.1: Time Warning Audio
+            if (currentQuest.TimeRemaining < timeWarningThreshold && !timeWarningPlayed)
+            {
+                PlayTimeWarning();
+                timeWarningPlayed = true;
+            }
+
             if (currentQuest.IsTimeExpired())
             {
                 FailQuest(currentQuest, "Time expired");
@@ -428,6 +468,14 @@ namespace DeliveryDriver.Quest
             quest.StartQuest();
             ClearAllZones();
             SpawnQuestZone(quest.PickupLocation, QuestZoneType.Pickup);
+
+            // Task 10.1: Play quest accepted sound and switch music
+            PlayQuestClip(questAcceptedClip);
+            SwitchToDeliveryMusic();
+
+            // Reset time warning flag
+            timeWarningPlayed = false;
+
             OnQuestStarted.Invoke(quest);
 
             return true;
@@ -502,6 +550,18 @@ namespace DeliveryDriver.Quest
 
             Debug.Log($"[QuestManager] Quest completed with {quest.Rating} rank! Streak: {consecutiveSuccesses}x (Multiplier: {streakMultiplier:F1}x)");
 
+            // Task 10.1: Play success sound
+            PlayQuestClip(deliveryClip);
+
+            // Task 10.2: Play delivery particle effect
+            if (playerTransform != null)
+            {
+                PlayParticleEffect(deliveryEffectPrefab, playerTransform.position);
+            }
+
+            // Task 10.1: Switch back to exploration music
+            SwitchToExplorationMusic();
+
             OnQuestCompleted.Invoke(quest);
             CleanupQuestMarkers(quest);
             ClearAllZones();
@@ -547,6 +607,10 @@ namespace DeliveryDriver.Quest
             CleanupQuestMarkers(quest);
             ClearAllZones();
             PlayQuestClip(failureClip);
+
+            // Task 10.1: Switch back to exploration music
+            SwitchToExplorationMusic();
+
             GenerateAvailableQuests(1);
         }
 
@@ -847,6 +911,9 @@ namespace DeliveryDriver.Quest
             zone.SetActive(true);
             activeZones.Add(zone);
 
+            // Task 10.2: Spawn marker particles at quest zone
+            SpawnMarkerParticles(location.Position);
+
             return zone;
         }
 
@@ -897,6 +964,13 @@ namespace DeliveryDriver.Quest
             currentQuest.PickupLocation?.HideMarker();
             ClearAllZones();
             PlayQuestClip(pickupClip);
+
+            // Task 10.2: Play pickup particle effect
+            if (playerTransform != null)
+            {
+                PlayParticleEffect(pickupEffectPrefab, playerTransform.position);
+            }
+
             TryApplyCargoWeight(currentQuest.Cargo);
             cargoVisual?.AttachCargo(currentQuest.Cargo);
 
@@ -988,6 +1062,12 @@ namespace DeliveryDriver.Quest
                 currentQuest.Cargo.TakeDamage(damage);
                 cargoVisual?.PlayDamageEffect();
                 PlayQuestClip(damageClip);
+
+                // Task 10.2: Play damage particle effect
+                if (playerTransform != null)
+                {
+                    PlayParticleEffect(damageEffectPrefab, playerTransform.position);
+                }
 
                 if (currentQuest.Cargo.IsDestroyed())
                 {
@@ -1229,6 +1309,246 @@ namespace DeliveryDriver.Quest
                 Debug.Log($"[QuestManager] Reward granted: {reward} currency, {quest.XPReward} XP.");
             }
         }
+
+        #region Task 10.1: Audio & Music System
+
+        /// <summary>
+        /// Task 10.1: Plays the time warning sound effect
+        /// </summary>
+        private void PlayTimeWarning()
+        {
+            if (questSfxSource != null && timeWarningClip != null)
+            {
+                questSfxSource.PlayOneShot(timeWarningClip);
+                Debug.Log("[QuestManager] Time warning! Less than 30 seconds remaining!");
+            }
+        }
+
+        /// <summary>
+        /// Task 10.1: Switches background music to delivery mode (intense)
+        /// </summary>
+        private void SwitchToDeliveryMusic()
+        {
+            if (musicSource == null || deliveryMusicClip == null)
+            {
+                return;
+            }
+
+            if (musicSource.clip == deliveryMusicClip)
+            {
+                return; // Already playing delivery music
+            }
+
+            StartCoroutine(CrossfadeMusic(deliveryMusicClip));
+        }
+
+        /// <summary>
+        /// Task 10.1: Switches background music to exploration mode (calm)
+        /// </summary>
+        private void SwitchToExplorationMusic()
+        {
+            if (musicSource == null || explorationMusicClip == null)
+            {
+                return;
+            }
+
+            if (musicSource.clip == explorationMusicClip)
+            {
+                return; // Already playing exploration music
+            }
+
+            StartCoroutine(CrossfadeMusic(explorationMusicClip));
+        }
+
+        /// <summary>
+        /// Task 10.1: Crossfades between music tracks smoothly
+        /// </summary>
+        private System.Collections.IEnumerator CrossfadeMusic(AudioClip newClip)
+        {
+            if (isCrossfading)
+            {
+                yield break; // Don't interrupt existing crossfade
+            }
+
+            isCrossfading = true;
+            float startVolume = musicSource.volume;
+
+            // Fade out current music
+            float elapsed = 0f;
+            while (elapsed < musicCrossfadeDuration / 2f)
+            {
+                elapsed += Time.deltaTime;
+                musicSource.volume = Mathf.Lerp(startVolume, 0f, elapsed / (musicCrossfadeDuration / 2f));
+                yield return null;
+            }
+
+            // Switch clip
+            musicSource.clip = newClip;
+            musicSource.Play();
+
+            // Fade in new music
+            elapsed = 0f;
+            while (elapsed < musicCrossfadeDuration / 2f)
+            {
+                elapsed += Time.deltaTime;
+                musicSource.volume = Mathf.Lerp(0f, startVolume, elapsed / (musicCrossfadeDuration / 2f));
+                yield return null;
+            }
+
+            musicSource.volume = startVolume;
+            isCrossfading = false;
+        }
+
+        /// <summary>
+        /// Task 10.1: Plays a level up sound effect (can be called from PlayerProgressionManager)
+        /// </summary>
+        public void PlayLevelUpSound()
+        {
+            if (questSfxSource != null && levelUpClip != null)
+            {
+                questSfxSource.PlayOneShot(levelUpClip);
+            }
+        }
+
+        /// <summary>
+        /// Task 10.1: Sets the music volume (0-1)
+        /// </summary>
+        public void SetMusicVolume(float volume)
+        {
+            if (musicSource != null)
+            {
+                musicSource.volume = Mathf.Clamp01(volume);
+            }
+        }
+
+        /// <summary>
+        /// Task 10.1: Sets the SFX volume (0-1)
+        /// </summary>
+        public void SetSFXVolume(float volume)
+        {
+            if (questSfxSource != null)
+            {
+                questSfxSource.volume = Mathf.Clamp01(volume);
+            }
+        }
+
+        #endregion
+
+        #region Task 10.2: Particle Effects System
+
+        /// <summary>
+        /// Task 10.2: Initializes the particle effect object pool
+        /// </summary>
+        private void InitializeParticlePool()
+        {
+            particlePool.Clear();
+
+            // Pre-instantiate particle effects for pooling
+            GameObject[] prefabs = { pickupEffectPrefab, deliveryEffectPrefab, damageEffectPrefab, levelUpEffectPrefab };
+
+            foreach (GameObject prefab in prefabs)
+            {
+                if (prefab == null) continue;
+
+                for (int i = 0; i < particlePoolSize / prefabs.Length; i++)
+                {
+                    GameObject particle = Instantiate(prefab);
+                    particle.SetActive(false);
+                    particlePool.Enqueue(particle);
+                }
+            }
+
+            Debug.Log($"[QuestManager] Particle pool initialized with {particlePool.Count} objects.");
+        }
+
+        /// <summary>
+        /// Task 10.2: Plays a particle effect at the specified position
+        /// </summary>
+        private void PlayParticleEffect(GameObject effectPrefab, Vector3 position)
+        {
+            if (effectPrefab == null)
+            {
+                return;
+            }
+
+            GameObject effect = null;
+
+            // Try to get from pool first
+            if (particlePool.Count > 0)
+            {
+                effect = particlePool.Dequeue();
+            }
+
+            // If pool is empty, instantiate new one
+            if (effect == null)
+            {
+                effect = Instantiate(effectPrefab, position, Quaternion.identity);
+            }
+            else
+            {
+                effect.transform.position = position;
+                effect.transform.rotation = Quaternion.identity;
+                effect.SetActive(true);
+            }
+
+            // Get particle system and play
+            ParticleSystem ps = effect.GetComponent<ParticleSystem>();
+            if (ps != null)
+            {
+                ps.Play();
+
+                // Return to pool after particle duration
+                float duration = ps.main.duration + ps.main.startLifetime.constantMax;
+                StartCoroutine(ReturnParticleToPool(effect, duration));
+            }
+            else
+            {
+                // If no particle system, just destroy after 5 seconds
+                StartCoroutine(ReturnParticleToPool(effect, 5f));
+            }
+        }
+
+        /// <summary>
+        /// Task 10.2: Returns a particle effect to the pool after duration
+        /// </summary>
+        private System.Collections.IEnumerator ReturnParticleToPool(GameObject particle, float delay)
+        {
+            yield return new System.WaitForSeconds(delay);
+
+            if (particle != null)
+            {
+                particle.SetActive(false);
+                particlePool.Enqueue(particle);
+            }
+        }
+
+        /// <summary>
+        /// Task 10.2: Plays a level up particle effect (can be called from PlayerProgressionManager)
+        /// </summary>
+        public void PlayLevelUpEffect(Vector3 position)
+        {
+            PlayParticleEffect(levelUpEffectPrefab, position);
+        }
+
+        /// <summary>
+        /// Task 10.2: Spawns marker particles at quest zone locations
+        /// </summary>
+        private void SpawnMarkerParticles(Vector3 position)
+        {
+            if (questMarkerParticlePrefab == null)
+            {
+                return;
+            }
+
+            GameObject markerParticle = Instantiate(questMarkerParticlePrefab, position, Quaternion.identity);
+            ParticleSystem ps = markerParticle.GetComponent<ParticleSystem>();
+            if (ps != null)
+            {
+                ps.Play();
+            }
+        }
+
+        #endregion
 
         #region Task 9.5: Quest Pool Refresh System
 
