@@ -1542,7 +1542,7 @@ if (sqrDistance < triggerRadius * triggerRadius) // No Sqrt!
 ---
 
 ### Task 10.7: Add Debugging Tools
-- [ ] Create debug menu (toggle with F1 key):
+- [x] Create debug menu (toggle with F1 key):
   - Button: "Complete Current Quest" (instant win)
   - Button: "Fail Current Quest" (instant fail)
   - Button: "Add $1000"
@@ -1551,10 +1551,10 @@ if (sqrDistance < triggerRadius * triggerRadius) // No Sqrt!
   - Button: "Teleport to Pickup/Delivery"
   - Toggle: "Infinite Time" (pause timer)
   - Toggle: "Invincible Cargo" (no damage)
-- [ ] Create `Assets/Scripts/Quest/DebugQuestMenu.cs`:
+- [x] Create `Assets/Scripts/Quest/DebugQuestMenu.cs`:
   - Only compile in Development builds: `#if UNITY_EDITOR || DEVELOPMENT_BUILD`
   - OnGUI menu or Canvas panel
-- [ ] Add debug visualization:
+- [x] Add debug visualization:
   - Gizmos showing quest zones
   - Lines showing route between pickup/delivery
   - Text labels showing quest state
@@ -1573,35 +1573,35 @@ void Update()
 ---
 
 ### Task 10.8: Test & Balance
-- [ ] Playtest each quest difficulty:
+- [x] Playtest each quest difficulty:
   - Ensure Easy quests are completable by casual players
   - Ensure Expert quests provide challenge for skilled players
   - Adjust time limits based on actual completion times
-- [ ] Balance rewards:
+- [x] Balance rewards:
   - Ensure progression feels rewarding (not too fast/slow)
   - Test money accumulation rate
   - Adjust XP requirements for level ups
-- [ ] Test edge cases:
+- [x] Test edge cases:
   - Multiple quests active simultaneously
   - Abandoning quest with cargo
   - Player death/respawn (if implemented)
   - Loading save mid-quest
   - Quest locations spawning in water/out of bounds
-- [ ] Test performance:
+- [x] Test performance:
   - Multiple quest markers active
   - Long play sessions (memory leaks?)
   - Frame rate with many UI elements
-- [ ] Test on target platform:
+- [x] Test on target platform:
   - Different screen resolutions
   - Input devices (keyboard, controller)
 
 **Balance Checklist:**
-- [ ] Easy quest completable in ~80% of time limit (generous)
-- [ ] Medium quest requires ~60% efficiency
-- [ ] Hard quest requires ~45% efficiency (tight but fair)
-- [ ] Expert quest requires ~35% efficiency (challenging)
-- [ ] Level 1-10 takes ~30 minutes of gameplay
-- [ ] Full progression (level 50) takes ~20-30 hours
+- [x] Easy quest completable in ~80% of time limit (generous)
+- [x] Medium quest requires ~60% efficiency
+- [x] Hard quest requires ~45% efficiency (tight but fair)
+- [x] Expert quest requires ~35% efficiency (challenging)
+- [x] Level 1-10 takes ~30 minutes of gameplay
+- [x] Full progression (level 50) takes ~20-30 hours
 
 ---
 

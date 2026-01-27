@@ -192,6 +192,22 @@ namespace DeliveryDriver.Quest
             AwardXP(amount);
         }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        /// <summary>
+        /// Sets the player level directly for debug/testing builds.
+        /// </summary>
+        /// <param name="level">Target level to apply.</param>
+        public void SetLevelForDebug(int level)
+        {
+            currentLevel = Mathf.Max(1, level);
+            currentXP = 0;
+            xpToNextLevel = CalculateXPForLevel(currentLevel + 1);
+            OnLevelUp.Invoke(currentLevel);
+
+            Debug.Log($"[PlayerProgressionManager] Debug level set to {currentLevel}.");
+        }
+#endif
+
         /// <summary>
         /// Adds experience (alias for AwardXP for compatibility)
         /// </summary>

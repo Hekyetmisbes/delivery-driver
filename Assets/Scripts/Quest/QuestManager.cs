@@ -76,6 +76,18 @@ namespace DeliveryDriver.Quest
         [Header("Runtime State")]
         [SerializeField] private QuestData currentQuest;
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        [Header("Task 10.7: Debug Tools")]
+        [SerializeField] private bool debugInfiniteTime = false;
+        [SerializeField] private bool debugInvincibleCargo = false;
+        [SerializeField] private bool debugDrawGizmos = true;
+        [SerializeField] private bool debugDrawRoute = true;
+        [SerializeField] private bool debugDrawLabels = true;
+        [SerializeField] private Color debugPickupColor = new Color(0.2f, 0.9f, 1f, 0.9f);
+        [SerializeField] private Color debugDeliveryColor = new Color(0.3f, 1f, 0.5f, 0.9f);
+        [SerializeField] private Color debugRouteColor = new Color(1f, 0.85f, 0.2f, 0.9f);
+#endif
+
         [Header("Streak System")]
         [SerializeField] private int consecutiveSuccesses = 0;
         [SerializeField] private float streakMultiplier = 1.0f;
@@ -121,6 +133,14 @@ namespace DeliveryDriver.Quest
         public int ConsecutiveSuccesses => consecutiveSuccesses;
         public float StreakMultiplier => streakMultiplier;
         public QuestData DailyChallenge => dailyChallenge;
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        public bool DebugInfiniteTimeEnabled => debugInfiniteTime;
+        public bool DebugInvincibleCargoEnabled => debugInvincibleCargo;
+        public bool DebugDrawGizmosEnabled => debugDrawGizmos;
+        public bool DebugDrawRouteEnabled => debugDrawRoute;
+        public bool DebugDrawLabelsEnabled => debugDrawLabels;
+#endif
 
         private void Awake()
         {
@@ -227,16 +247,31 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (!debugInfiniteTime)
+            {
+                currentQuest.UpdateTimer(Time.deltaTime);
+            }
+#else
             currentQuest.UpdateTimer(Time.deltaTime);
+#endif
 
             // Task 10.1: Time Warning Audio
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (!debugInfiniteTime && currentQuest.TimeRemaining < timeWarningThreshold && !timeWarningPlayed)
+#else
             if (currentQuest.TimeRemaining < timeWarningThreshold && !timeWarningPlayed)
+#endif
             {
                 PlayTimeWarning();
                 timeWarningPlayed = true;
             }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (!debugInfiniteTime && currentQuest.IsTimeExpired())
+#else
             if (currentQuest.IsTimeExpired())
+#endif
             {
                 FailQuest(currentQuest, "Time expired");
                 return;
@@ -262,7 +297,11 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (!debugInvincibleCargo && currentQuest.Cargo != null && currentQuest.Cargo.IsFragile && currentQuest.Cargo.IsDestroyed())
+#else
             if (currentQuest.Cargo != null && currentQuest.Cargo.IsFragile && currentQuest.Cargo.IsDestroyed())
+#endif
             {
                 FailQuest(currentQuest, "Cargo destroyed");
                 return;
@@ -651,6 +690,12 @@ namespace DeliveryDriver.Quest
 
         public void ApplyCargoDamage(float amount)
         {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (debugInvincibleCargo)
+            {
+                return;
+            }
+#endif
             if (currentQuest?.Cargo == null)
             {
                 return;
@@ -1106,7 +1151,11 @@ namespace DeliveryDriver.Quest
             currentQuest.RecordCollision(isNpcCollision);
 
             // Apply damage to fragile cargo
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (currentQuest.Cargo != null && currentQuest.Cargo.IsFragile && !debugInvincibleCargo)
+#else
             if (currentQuest.Cargo != null && currentQuest.Cargo.IsFragile)
+#endif
             {
                 float damage = (force - collisionDamageThreshold) / collisionDamageDivider;
                 currentQuest.Cargo.TakeDamage(damage);
@@ -1128,6 +1177,182 @@ namespace DeliveryDriver.Quest
 
             MarkQuestUiDirty();
         }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        /// <summary>
+        /// Enables or disables infinite quest time for debug builds.
+        /// </summary>
+        /// <param name="enabled">True to pause the quest timer, false to resume normal timing.</param>
+        public void SetDebugInfiniteTime(bool enabled)
+        {
+            debugInfiniteTime = enabled;
+        }
+
+        /// <summary>
+        /// Enables or disables fragile cargo damage in debug builds.
+        /// </summary>
+        /// <param name="enabled">True to ignore cargo damage, false to apply damage.</param>
+        public void SetDebugInvincibleCargo(bool enabled)
+        {
+            debugInvincibleCargo = enabled;
+        }
+
+        /// <summary>
+        /// Enables or disables quest gizmo rendering in debug builds.
+        /// </summary>
+        /// <param name="enabled">True to render gizmos, false to hide them.</param>
+        public void SetDebugDrawGizmos(bool enabled)
+        {
+            debugDrawGizmos = enabled;
+        }
+
+        /// <summary>
+        /// Enables or disables route line rendering in debug builds.
+        /// </summary>
+        /// <param name="enabled">True to render route lines, false to hide them.</param>
+        public void SetDebugDrawRoute(bool enabled)
+        {
+            debugDrawRoute = enabled;
+        }
+
+        /// <summary>
+        /// Enables or disables debug labels in debug builds.
+        /// </summary>
+        /// <param name="enabled">True to render labels, false to hide them.</param>
+        public void SetDebugDrawLabels(bool enabled)
+        {
+            debugDrawLabels = enabled;
+        }
+
+        /// <summary>
+        /// Teleports the player to the current quest objective for debug testing.
+        /// </summary>
+        public void TeleportToActiveObjective()
+        {
+            if (currentQuest == null)
+            {
+                return;
+            }
+
+            QuestLocation target = currentQuest.HasPickedUpCargo ? GetCurrentDeliveryLocation() : currentQuest.PickupLocation;
+            TeleportPlayerToLocation(target);
+        }
+
+        /// <summary>
+        /// Teleports the player to the pickup location for debug testing.
+        /// </summary>
+        public void TeleportToPickup()
+        {
+            TeleportPlayerToLocation(currentQuest?.PickupLocation);
+        }
+
+        /// <summary>
+        /// Teleports the player to the current delivery location for debug testing.
+        /// </summary>
+        public void TeleportToDelivery()
+        {
+            TeleportPlayerToLocation(GetCurrentDeliveryLocation());
+        }
+
+        private void TeleportPlayerToLocation(QuestLocation location)
+        {
+            if (location == null || playerTransform == null)
+            {
+                return;
+            }
+
+            Vector3 targetPosition = location.Position + Vector3.up * 1.5f;
+            playerTransform.position = targetPosition;
+
+            Rigidbody rb = playerTransform.GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
+        }
+
+        private void OnDrawGizmos()
+        {
+            if (!debugDrawGizmos)
+            {
+                return;
+            }
+
+            QuestData quest = currentQuest;
+            if (quest == null)
+            {
+                return;
+            }
+
+            DrawLocationGizmo(quest.PickupLocation, debugPickupColor, "Pickup");
+
+            if (quest.DeliveryLocations != null)
+            {
+                foreach (QuestLocation delivery in quest.DeliveryLocations)
+                {
+                    DrawLocationGizmo(delivery, debugDeliveryColor, "Delivery");
+                }
+            }
+
+            if (debugDrawRoute)
+            {
+                DrawRouteGizmos(quest);
+            }
+
+#if UNITY_EDITOR
+            if (debugDrawLabels)
+            {
+                Vector3 labelAnchor = quest.PickupLocation != null ? quest.PickupLocation.Position : transform.position;
+                string status = $"{quest.QuestName} [{quest.Status}]";
+                string timeInfo = debugInfiniteTime ? "Time: Infinite" : $"Time: {quest.GetFormattedTimeRemaining()}";
+                UnityEditor.Handles.Label(labelAnchor + Vector3.up * 4f, $"{status}\n{timeInfo}");
+            }
+#endif
+        }
+
+        private void DrawLocationGizmo(QuestLocation location, Color color, string labelPrefix)
+        {
+            if (location == null)
+            {
+                return;
+            }
+
+            Gizmos.color = color;
+            float radius = Mathf.Max(0.5f, location.TriggerRadius);
+            Gizmos.DrawWireSphere(location.Position, radius);
+
+#if UNITY_EDITOR
+            if (debugDrawLabels && !string.IsNullOrWhiteSpace(location.LocationName))
+            {
+                string label = $"{labelPrefix}: {location.LocationName}";
+                UnityEditor.Handles.Label(location.Position + Vector3.up * (radius + 0.5f), label);
+            }
+#endif
+        }
+
+        private void DrawRouteGizmos(QuestData quest)
+        {
+            if (quest.PickupLocation == null || quest.DeliveryLocations == null || quest.DeliveryLocations.Count == 0)
+            {
+                return;
+            }
+
+            Gizmos.color = debugRouteColor;
+            Vector3 current = quest.PickupLocation.Position;
+
+            foreach (QuestLocation delivery in quest.DeliveryLocations)
+            {
+                if (delivery == null)
+                {
+                    continue;
+                }
+
+                Gizmos.DrawLine(current, delivery.Position);
+                current = delivery.Position;
+            }
+        }
+#endif
 
         private void PlayQuestClip(AudioClip clip)
         {
