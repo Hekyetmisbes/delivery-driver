@@ -615,7 +615,7 @@ namespace DeliveryDriver.Quest
 
             // Task 9.1: Procedural Location Picker with validation and variety
             int attempts = 0;
-            RoadGraph.RoadSegment segment = null;
+            RoadSegment segment = null;
             int waypointIndex = -1;
             Vector3 candidatePosition = Vector3.zero;
 
@@ -1214,6 +1214,490 @@ namespace DeliveryDriver.Quest
                 Debug.Log($"[QuestManager] Reward granted: {reward} currency, {quest.XPReward} XP.");
             }
         }
+
+        #region Task 9.3: Multi-Stop Quest Generation
+
+        /// <summary>
+        /// Task 9.3: Generates a multi-stop delivery quest with route optimization
+        /// </summary>
+        public QuestData GenerateMultiStopQuest(int stopCount, QuestDifficulty difficulty)
+        {
+            if (stopCount < 2 || stopCount > 4)
+            {
+                Debug.LogWarning($"[QuestManager] Invalid stop count {stopCount}. Must be 2-4.");
+                return null;
+            }
+
+            // Pick cargo
+            CargoData cargo = null;
+            if (cargoLibrary != null)
+            {
+                cargo = cargoLibrary.GetRandomCargo();
+            }
+            if (cargo == null)
+            {
+                cargo = new CargoData("Generic Cargo", 100f, false, "Standard cargo for multi-stop delivery.");
+            }
+
+            // Generate pickup location
+            QuestLocation pickup = GenerateRandomLocation("Pickup");
+            if (pickup == null)
+            {
+                Debug.LogWarning("[QuestManager] Failed to generate pickup location for multi-stop quest.");
+                return null;
+            }
+
+            // Generate delivery locations
+            List<QuestLocation> deliveryLocations = new List<QuestLocation>();
+            for (int i = 0; i < stopCount; i++)
+            {
+                QuestLocation delivery = GenerateRandomLocation($"Delivery {i + 1}");
+                if (delivery != null)
+                {
+                    if (delivery.VisualMarker == null && deliveryMarkerPrefab != null)
+                    {
+                        delivery.VisualMarker = deliveryMarkerPrefab;
+                    }
+                    deliveryLocations.Add(delivery);
+                }
+            }
+
+            if (deliveryLocations.Count < stopCount)
+            {
+                Debug.LogWarning($"[QuestManager] Only generated {deliveryLocations.Count} of {stopCount} delivery locations.");
+                // Continue with fewer stops if we got at least one
+                if (deliveryLocations.Count == 0)
+                {
+                    return null;
+                }
+            }
+
+            // Optimize route using nearest-neighbor algorithm
+            List<QuestLocation> optimizedRoute = OptimizeRoute(pickup, deliveryLocations);
+
+            // Calculate total route distance
+            float totalDistance = 0f;
+            Vector3 lastPos = pickup.Position;
+            foreach (QuestLocation loc in optimizedRoute)
+            {
+                totalDistance += Vector3.Distance(lastPos, loc.Position);
+                lastPos = loc.Position;
+            }
+
+            // Create quest
+            QuestData quest = new QuestData
+            {
+                QuestID = System.Guid.NewGuid().ToString(),
+                QuestName = $"Multi-Stop: {optimizedRoute.Count} Deliveries",
+                QuestDescription = $"Transport {cargo.CargoName} to {optimizedRoute.Count} locations. Complete all deliveries in order.",
+                QuestType = QuestType.MultiStopDelivery,
+                Difficulty = difficulty,
+                Status = QuestStatus.NotStarted,
+                PickupLocation = pickup,
+                DeliveryLocations = optimizedRoute,
+                Cargo = cargo
+            };
+
+            // Assign markers
+            if (quest.PickupLocation.VisualMarker == null) quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
+
+            // Calculate time and rewards scaled for multi-stop
+            float avgSpeed = 11f; // ~40 km/h in m/s
+            float timeMultiplier = difficulty switch
+            {
+                QuestDifficulty.Easy => 2.0f,
+                QuestDifficulty.Medium => 1.5f,
+                QuestDifficulty.Hard => 1.2f,
+                QuestDifficulty.Expert => 1.0f,
+                _ => 1.5f
+            };
+
+            // Scale time limit: baseTime * stopCount * 1.5
+            quest.TimeLimit = Mathf.Max(120f, ((totalDistance / avgSpeed) * timeMultiplier * optimizedRoute.Count * 1.5f));
+            quest.TimeRemaining = quest.TimeLimit;
+
+            // Scale reward: baseReward * stopCount * 1.8
+            int difficultyBonus = difficulty switch
+            {
+                QuestDifficulty.Easy => 0,
+                QuestDifficulty.Medium => 100,
+                QuestDifficulty.Hard => 250,
+                QuestDifficulty.Expert => 500,
+                _ => 0
+            };
+
+            int baseRewardPerStop = Mathf.RoundToInt((totalDistance * 0.1f) + difficultyBonus);
+            quest.BaseReward = Mathf.RoundToInt(baseRewardPerStop * optimizedRoute.Count * 1.8f);
+            quest.BonusReward = Mathf.RoundToInt(quest.BaseReward * 0.5f);
+            quest.BonusTimeThreshold = 0.5f;
+            quest.RequiredLevel = difficulty == QuestDifficulty.Easy ? 1 :
+                                  (difficulty == QuestDifficulty.Medium ? 5 :
+                                  (difficulty == QuestDifficulty.Hard ? 15 : 30));
+            quest.IsRepeatable = true;
+            quest.XPReward = 50 * ((int)difficulty + 1) * optimizedRoute.Count;
+
+            Debug.Log($"[QuestManager] Generated multi-stop quest: {optimizedRoute.Count} stops, {totalDistance:F0}m total distance");
+
+            return quest;
+        }
+
+        /// <summary>
+        /// Optimizes route using nearest-neighbor algorithm
+        /// </summary>
+        private List<QuestLocation> OptimizeRoute(QuestLocation start, List<QuestLocation> stops)
+        {
+            List<QuestLocation> optimized = new List<QuestLocation>();
+            List<QuestLocation> remaining = new List<QuestLocation>(stops);
+            QuestLocation current = start;
+
+            while (remaining.Count > 0)
+            {
+                QuestLocation nearest = FindNearest(current, remaining);
+                if (nearest != null)
+                {
+                    optimized.Add(nearest);
+                    remaining.Remove(nearest);
+                    current = nearest;
+                }
+                else
+                {
+                    // Fallback: just add the first remaining
+                    optimized.Add(remaining[0]);
+                    remaining.RemoveAt(0);
+                }
+            }
+
+            return optimized;
+        }
+
+        /// <summary>
+        /// Finds nearest location from a list
+        /// </summary>
+        private QuestLocation FindNearest(QuestLocation current, List<QuestLocation> candidates)
+        {
+            if (candidates == null || candidates.Count == 0 || current == null)
+            {
+                return null;
+            }
+
+            QuestLocation nearest = null;
+            float minDistance = float.MaxValue;
+
+            foreach (QuestLocation candidate in candidates)
+            {
+                if (candidate == null) continue;
+
+                float distance = Vector3.Distance(current.Position, candidate.Position);
+                if (distance < minDistance)
+                {
+                    minDistance = distance;
+                    nearest = candidate;
+                }
+            }
+
+            return nearest;
+        }
+
+        #endregion
+
+        #region Task 9.4: Special Quest Types
+
+        /// <summary>
+        /// Task 9.4: Generates an express delivery quest with tight time limit and high reward
+        /// </summary>
+        public QuestData GenerateExpressDelivery()
+        {
+            // Pick difficulty weighted toward medium/hard
+            QuestDifficulty difficulty = UnityEngine.Random.value < 0.5f ? QuestDifficulty.Medium : QuestDifficulty.Hard;
+
+            // Pick cargo (any type)
+            CargoData cargo = null;
+            if (cargoLibrary != null)
+            {
+                cargo = cargoLibrary.GetRandomCargo();
+            }
+            if (cargo == null)
+            {
+                cargo = new CargoData("Express Package", 50f, false, "Time-critical express delivery.");
+            }
+
+            // Generate locations
+            float minDistance = difficulty == QuestDifficulty.Medium ? 2000f : 3000f;
+            float maxDistance = difficulty == QuestDifficulty.Medium ? 4000f : 6000f;
+
+            QuestLocation pickup = null;
+            QuestLocation delivery = null;
+            float actualDistance = 0f;
+
+            for (int i = 0; i < 15; i++)
+            {
+                pickup = GenerateRandomLocation("Express Pickup");
+                delivery = GenerateRandomLocation("Express Delivery");
+
+                if (pickup == null || delivery == null) continue;
+
+                actualDistance = Vector3.Distance(pickup.Position, delivery.Position);
+                if (actualDistance >= minDistance && actualDistance <= maxDistance)
+                {
+                    break;
+                }
+
+                pickup = null;
+                delivery = null;
+            }
+
+            if (pickup == null || delivery == null)
+            {
+                Debug.LogWarning("[QuestManager] Failed to generate express delivery locations.");
+                return null;
+            }
+
+            // Create quest
+            QuestData quest = new QuestData
+            {
+                QuestID = System.Guid.NewGuid().ToString(),
+                QuestName = $"EXPRESS: Rush Delivery",
+                QuestDescription = $"Express delivery of {cargo.CargoName}. Very tight deadline - drive fast!",
+                QuestType = QuestType.ExpressDelivery,
+                Difficulty = difficulty,
+                Status = QuestStatus.NotStarted,
+                PickupLocation = pickup,
+                DeliveryLocations = new List<QuestLocation> { delivery },
+                Cargo = cargo
+            };
+
+            // Assign markers
+            if (quest.PickupLocation.VisualMarker == null) quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
+            if (delivery.VisualMarker == null) delivery.VisualMarker = deliveryMarkerPrefab;
+
+            // Time limit = 0.6x normal (very tight)
+            float avgSpeed = 11f; // ~40 km/h in m/s
+            float normalTimeMultiplier = difficulty == QuestDifficulty.Medium ? 1.5f : 1.2f;
+            quest.TimeLimit = Mathf.Max(60f, ((actualDistance / avgSpeed) * normalTimeMultiplier * 0.6f));
+            quest.TimeRemaining = quest.TimeLimit;
+
+            // Reward = 2.0x normal
+            int difficultyBonus = difficulty == QuestDifficulty.Medium ? 100 : 250;
+            int baseReward = Mathf.RoundToInt((actualDistance * 0.1f) + difficultyBonus);
+            quest.BaseReward = Mathf.RoundToInt(baseReward * 2.0f);
+            quest.BonusReward = Mathf.RoundToInt(quest.BaseReward * 0.5f);
+            quest.BonusTimeThreshold = 0.5f;
+            quest.RequiredLevel = difficulty == QuestDifficulty.Medium ? 5 : 15;
+            quest.IsRepeatable = true;
+            quest.XPReward = 50 * ((int)difficulty + 1);
+
+            Debug.Log($"[QuestManager] Generated EXPRESS delivery: {actualDistance:F0}m, {quest.TimeLimit:F0}s, ${quest.BaseReward}");
+
+            return quest;
+        }
+
+        /// <summary>
+        /// Task 9.4: Generates a fragile delivery quest with damage penalties
+        /// </summary>
+        public QuestData GenerateFragileDelivery()
+        {
+            // Pick difficulty
+            QuestDifficulty difficulty = UnityEngine.Random.value < 0.5f ? QuestDifficulty.Easy : QuestDifficulty.Medium;
+
+            // Force fragile cargo selection
+            CargoData cargo = null;
+            if (cargoLibrary != null)
+            {
+                cargo = cargoLibrary.GetCargoByFragility(true);
+            }
+            if (cargo == null)
+            {
+                cargo = new CargoData("Fragile Electronics", 80f, true, "Handle with extreme care - easily damaged.");
+                cargo.CargoHealth = 100f;
+            }
+
+            // Generate locations
+            float minDistance = difficulty == QuestDifficulty.Easy ? 1000f : 2000f;
+            float maxDistance = difficulty == QuestDifficulty.Easy ? 2000f : 4000f;
+
+            QuestLocation pickup = null;
+            QuestLocation delivery = null;
+            float actualDistance = 0f;
+
+            for (int i = 0; i < 15; i++)
+            {
+                pickup = GenerateRandomLocation("Fragile Pickup");
+                delivery = GenerateRandomLocation("Fragile Delivery");
+
+                if (pickup == null || delivery == null) continue;
+
+                actualDistance = Vector3.Distance(pickup.Position, delivery.Position);
+                if (actualDistance >= minDistance && actualDistance <= maxDistance)
+                {
+                    break;
+                }
+
+                pickup = null;
+                delivery = null;
+            }
+
+            if (pickup == null || delivery == null)
+            {
+                Debug.LogWarning("[QuestManager] Failed to generate fragile delivery locations.");
+                return null;
+            }
+
+            // Create quest
+            QuestData quest = new QuestData
+            {
+                QuestID = System.Guid.NewGuid().ToString(),
+                QuestName = $"FRAGILE: Handle With Care",
+                QuestDescription = $"Delicate {cargo.CargoName} - avoid collisions! Bonus for zero damage.",
+                QuestType = QuestType.FragileDelivery,
+                Difficulty = difficulty,
+                Status = QuestStatus.NotStarted,
+                PickupLocation = pickup,
+                DeliveryLocations = new List<QuestLocation> { delivery },
+                Cargo = cargo
+            };
+
+            // Assign markers
+            if (quest.PickupLocation.VisualMarker == null) quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
+            if (delivery.VisualMarker == null) delivery.VisualMarker = deliveryMarkerPrefab;
+
+            // Slightly longer time limit (player must drive carefully)
+            float avgSpeed = 11f; // ~40 km/h in m/s
+            float timeMultiplier = difficulty == QuestDifficulty.Easy ? 2.5f : 1.8f;
+            quest.TimeLimit = Mathf.Max(90f, ((actualDistance / avgSpeed) * timeMultiplier));
+            quest.TimeRemaining = quest.TimeLimit;
+
+            // Bonus for zero damage: +50% reward
+            int difficultyBonus = difficulty == QuestDifficulty.Easy ? 0 : 100;
+            int baseReward = Mathf.RoundToInt((actualDistance * 0.1f) + difficultyBonus);
+            quest.BaseReward = baseReward;
+            quest.BonusReward = Mathf.RoundToInt(baseReward * 0.5f); // Will be awarded if cargo health > 90%
+            quest.BonusTimeThreshold = 0.5f;
+            quest.RequiredLevel = difficulty == QuestDifficulty.Easy ? 1 : 5;
+            quest.IsRepeatable = true;
+            quest.XPReward = 50 * ((int)difficulty + 1);
+
+            Debug.Log($"[QuestManager] Generated FRAGILE delivery: {actualDistance:F0}m, fragile cargo with health bonus");
+
+            return quest;
+        }
+
+        /// <summary>
+        /// Task 9.4: Generates a time trial quest with very tight time limit
+        /// </summary>
+        public QuestData GenerateTimeTrial()
+        {
+            // Time trials are challenging
+            QuestDifficulty difficulty = UnityEngine.Random.value < 0.5f ? QuestDifficulty.Hard : QuestDifficulty.Expert;
+
+            // Pick light cargo
+            CargoData cargo = new CargoData("Time Trial Package", 50f, false, "Speed is everything!");
+
+            // Generate locations
+            float minDistance = difficulty == QuestDifficulty.Hard ? 4000f : 6000f;
+            float maxDistance = difficulty == QuestDifficulty.Hard ? 6000f : 10000f;
+
+            QuestLocation pickup = null;
+            QuestLocation delivery = null;
+            float actualDistance = 0f;
+
+            for (int i = 0; i < 15; i++)
+            {
+                pickup = GenerateRandomLocation("Trial Start");
+                delivery = GenerateRandomLocation("Trial Finish");
+
+                if (pickup == null || delivery == null) continue;
+
+                actualDistance = Vector3.Distance(pickup.Position, delivery.Position);
+                if (actualDistance >= minDistance && actualDistance <= maxDistance)
+                {
+                    break;
+                }
+
+                pickup = null;
+                delivery = null;
+            }
+
+            if (pickup == null || delivery == null)
+            {
+                Debug.LogWarning("[QuestManager] Failed to generate time trial locations.");
+                return null;
+            }
+
+            // Create quest
+            QuestData quest = new QuestData
+            {
+                QuestID = System.Guid.NewGuid().ToString(),
+                QuestName = $"TIME TRIAL: Speed Run",
+                QuestDescription = $"Pure speed challenge - complete the delivery as fast as possible! Reward scales with remaining time.",
+                QuestType = QuestType.TimeTrial,
+                Difficulty = difficulty,
+                Status = QuestStatus.NotStarted,
+                PickupLocation = pickup,
+                DeliveryLocations = new List<QuestLocation> { delivery },
+                Cargo = cargo
+            };
+
+            // Assign markers
+            if (quest.PickupLocation.VisualMarker == null) quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
+            if (delivery.VisualMarker == null) delivery.VisualMarker = deliveryMarkerPrefab;
+
+            // Very short time limit (0.5x normal)
+            float avgSpeed = 11f; // ~40 km/h in m/s
+            float timeMultiplier = difficulty == QuestDifficulty.Hard ? 1.2f : 1.0f;
+            quest.TimeLimit = Mathf.Max(60f, ((actualDistance / avgSpeed) * timeMultiplier * 0.5f));
+            quest.TimeRemaining = quest.TimeLimit;
+
+            // Reward scales with remaining time (more time = more money)
+            int difficultyBonus = difficulty == QuestDifficulty.Hard ? 250 : 500;
+            quest.BaseReward = Mathf.RoundToInt((actualDistance * 0.15f) + difficultyBonus);
+            quest.BonusReward = Mathf.RoundToInt(quest.BaseReward * 1.0f); // 100% bonus for fast completion
+            quest.BonusTimeThreshold = 0.5f;
+            quest.RequiredLevel = difficulty == QuestDifficulty.Hard ? 15 : 30;
+            quest.IsRepeatable = true;
+            quest.XPReward = 50 * ((int)difficulty + 1);
+
+            Debug.Log($"[QuestManager] Generated TIME TRIAL: {actualDistance:F0}m, extreme time pressure!");
+
+            return quest;
+        }
+
+        /// <summary>
+        /// Task 9.4: Generates a quest with weighted quest type selection
+        /// </summary>
+        public QuestData GenerateRandomQuestWithTypes(QuestDifficulty difficulty)
+        {
+            float typeRoll = UnityEngine.Random.value;
+
+            // Quest type selection logic:
+            // 60% Standard Delivery
+            // 20% Express Delivery
+            // 15% Fragile Delivery
+            // 5% Multi-Stop
+
+            if (typeRoll < 0.60f)
+            {
+                // Standard Delivery (use existing GenerateQuestByDifficulty)
+                return GenerateQuestByDifficulty(difficulty);
+            }
+            else if (typeRoll < 0.80f)
+            {
+                // Express Delivery (20%)
+                return GenerateExpressDelivery();
+            }
+            else if (typeRoll < 0.95f)
+            {
+                // Fragile Delivery (15%)
+                return GenerateFragileDelivery();
+            }
+            else
+            {
+                // Multi-Stop Delivery (5%)
+                int stopCount = UnityEngine.Random.Range(2, 4); // 2-3 stops
+                return GenerateMultiStopQuest(stopCount, difficulty);
+            }
+        }
+
+        #endregion
 
         #region Daily Challenge System
 

@@ -1286,13 +1286,13 @@ for (int attempt = 0; attempt < 10; attempt++)
 ---
 
 ### Task 9.3: Implement Multi-Stop Quest Generation
-- [ ] Add `QuestData GenerateMultiStopQuest(int stopCount, QuestDifficulty difficulty)`:
+- [x] Add `QuestData GenerateMultiStopQuest(int stopCount, QuestDifficulty difficulty)`:
   - Generate 2-4 delivery locations (for stopCount > 1)
   - Create logical route (attempt to order locations by proximity)
   - Calculate total route distance
   - Scale time limit: `baseTimeLimit * stopCount * 1.5`
   - Scale reward: `baseReward * stopCount * 1.8`
-- [ ] Add route optimization (optional):
+- [x] Add route optimization (optional):
   - Use simple nearest-neighbor algorithm to order stops
   - Minimize total distance while maintaining start/end
 - [ ] Add visual route preview on map (if minimap exists)
@@ -1319,22 +1319,22 @@ List<QuestLocation> OptimizeRoute(QuestLocation start, List<QuestLocation> stops
 ---
 
 ### Task 9.4: Implement Special Quest Types
-- [ ] Add `QuestData GenerateExpressDelivery()`:
+- [x] Add `QuestData GenerateExpressDelivery()`:
   - Standard single-stop delivery
   - Time limit = 0.6x normal (very tight)
   - Reward = 2.0x normal
   - Name prefix: "EXPRESS:"
-- [ ] Add `QuestData GenerateFragileDelivery()`:
+- [x] Add `QuestData GenerateFragileDelivery()`:
   - Force fragile cargo selection
   - Slightly longer time limit (player must drive carefully)
   - Bonus for zero damage: +50% reward
   - Name prefix: "FRAGILE:"
-- [ ] Add `QuestData GenerateTimeTrial()`:
+- [x] Add `QuestData GenerateTimeTrial()`:
   - Very short time limit (0.5x normal)
   - Reward scales with remaining time (more time = more money)
   - Name prefix: "TIME TRIAL:"
   - Optional: Remove traffic for pure speed challenge
-- [ ] Add quest type selection logic:
+- [x] Add quest type selection logic:
   - 60% Standard Delivery
   - 20% Express Delivery
   - 15% Fragile Delivery

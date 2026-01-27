@@ -45,8 +45,6 @@ namespace TrafficSystem
         [SerializeField] private float snapHeightOffset = 1f;
         [Tooltip("Speed after recovery (km/h)")]
         [SerializeField] private float recoverySpeed = 20f;
-        [Tooltip("Smooth recovery rotation speed")]
-        [SerializeField] private float recoveryRotationSpeed = 5f;
         [Tooltip("Raycast mask for snapping to road/ground")]
         [SerializeField] private LayerMask snapGroundMask = ~0;
         [Tooltip("Raycast height above snap point")]
