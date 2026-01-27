@@ -66,6 +66,13 @@ namespace DeliveryDriver.Quest
         [SerializeField] private float locationCooldownDistance = 100f;
         private List<Vector3> usedLocations = new List<Vector3>();
 
+        [Header("Quest Pool Refresh")]
+        [SerializeField] private float questRefreshInterval = 300f; // 5 minutes
+        [SerializeField] private float manualRefreshCooldown = 30f; // 30 seconds
+        [SerializeField] private int targetQuestPoolSize = 5;
+        private float timeSinceLastRefresh = 0f;
+        private float lastManualRefreshTime = -999f;
+
         public UnityEvent<QuestData> OnQuestStarted = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnQuestCompleted = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnQuestFailed = new UnityEvent<QuestData>();
@@ -148,6 +155,14 @@ namespace DeliveryDriver.Quest
 
         private void Update()
         {
+            // Task 9.5: Quest Pool Refresh Timer
+            timeSinceLastRefresh += Time.deltaTime;
+            if (timeSinceLastRefresh >= questRefreshInterval)
+            {
+                RefreshAvailableQuests();
+                timeSinceLastRefresh = 0f;
+            }
+
             if (currentQuest == null || currentQuest.Status != QuestStatus.Active)
             {
                 return;
@@ -1214,6 +1229,86 @@ namespace DeliveryDriver.Quest
                 Debug.Log($"[QuestManager] Reward granted: {reward} currency, {quest.XPReward} XP.");
             }
         }
+
+        #region Task 9.5: Quest Pool Refresh System
+
+        /// <summary>
+        /// Task 9.5: Refreshes the available quest pool by removing old quests and generating new ones
+        /// </summary>
+        public void RefreshAvailableQuests()
+        {
+            // Remove old quests that haven't been accepted
+            int removedCount = availableQuests.Count;
+            availableQuests.Clear();
+
+            // Calculate how many quests to generate to reach target pool size
+            int questsToGenerate = targetQuestPoolSize;
+
+            Debug.Log($"[QuestManager] Refreshing quest pool. Removed {removedCount} old quests. Generating {questsToGenerate} new quests.");
+
+            // Generate new quests with variety
+            GenerateAvailableQuests(questsToGenerate);
+
+            // Notify player
+            Debug.Log("[QuestManager] New deliveries available!");
+
+            // You can invoke an event here for UI notification if needed
+            // OnQuestPoolRefreshed?.Invoke();
+        }
+
+        /// <summary>
+        /// Task 9.5: Manually refreshes the quest pool (with cooldown to prevent spam)
+        /// </summary>
+        /// <returns>True if refresh was successful, false if on cooldown</returns>
+        public bool ManualRefreshQuests()
+        {
+            float timeSinceLastManualRefresh = Time.time - lastManualRefreshTime;
+
+            if (timeSinceLastManualRefresh < manualRefreshCooldown)
+            {
+                float remainingCooldown = manualRefreshCooldown - timeSinceLastManualRefresh;
+                Debug.LogWarning($"[QuestManager] Manual refresh on cooldown. Wait {remainingCooldown:F0} seconds.");
+                return false;
+            }
+
+            lastManualRefreshTime = Time.time;
+            RefreshAvailableQuests();
+
+            // Reset the automatic refresh timer
+            timeSinceLastRefresh = 0f;
+
+            Debug.Log("[QuestManager] Quest pool manually refreshed.");
+            return true;
+        }
+
+        /// <summary>
+        /// Gets the remaining cooldown time for manual refresh
+        /// </summary>
+        /// <returns>Seconds remaining, or 0 if ready</returns>
+        public float GetManualRefreshCooldown()
+        {
+            float timeSinceLastManualRefresh = Time.time - lastManualRefreshTime;
+            float remaining = Mathf.Max(0f, manualRefreshCooldown - timeSinceLastManualRefresh);
+            return remaining;
+        }
+
+        /// <summary>
+        /// Checks if manual refresh is available (not on cooldown)
+        /// </summary>
+        public bool CanManuallyRefresh()
+        {
+            return GetManualRefreshCooldown() <= 0f;
+        }
+
+        /// <summary>
+        /// Gets the time remaining until automatic refresh
+        /// </summary>
+        public float GetTimeUntilAutoRefresh()
+        {
+            return Mathf.Max(0f, questRefreshInterval - timeSinceLastRefresh);
+        }
+
+        #endregion
 
         #region Task 9.3: Multi-Stop Quest Generation
 

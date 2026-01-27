@@ -1359,18 +1359,18 @@ string GenerateQuestName(QuestType type, QuestLocation delivery)
 ---
 
 ### Task 9.5: Implement Quest Pool Refresh System
-- [ ] In `QuestManager.cs`, add field:
+- [x] In `QuestManager.cs`, add field:
   - `float questRefreshInterval` - Time between refresh (default: 300s = 5 min)
   - `float timeSinceLastRefresh`
-- [ ] In `Update()`:
+- [x] In `Update()`:
   - Increment `timeSinceLastRefresh`
   - If interval reached: Call `RefreshAvailableQuests()`
-- [ ] Add `void RefreshAvailableQuests()`:
+- [x] Add `void RefreshAvailableQuests()`:
   - Remove old quests that haven't been accepted
   - Generate new quests to maintain pool size (e.g., always 5 available)
   - Ensure variety in new quests
   - Notify player: "New deliveries available!"
-- [ ] Add manual refresh option:
+- [x] Add manual refresh option:
   - Button in quest list UI: "Refresh Deliveries"
   - Cooldown to prevent spam (30 seconds)
 
