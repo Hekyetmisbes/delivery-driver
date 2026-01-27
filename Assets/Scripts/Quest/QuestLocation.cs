@@ -79,8 +79,9 @@ namespace DeliveryDriver.Quest
                 return false;
             }
 
-            float distance = Vector3.Distance(Position, playerTransform.position);
-            return distance <= TriggerRadius;
+            Vector3 delta = Position - playerTransform.position;
+            float triggerRadiusSqr = TriggerRadius * TriggerRadius;
+            return delta.sqrMagnitude <= triggerRadiusSqr;
         }
 
         /// <summary>
@@ -101,9 +102,20 @@ namespace DeliveryDriver.Quest
             }
             else
             {
-                // Instantiate the marker at this location
-                instantiatedMarker = Object.Instantiate(VisualMarker, Position, Quaternion.identity);
-                instantiatedMarker.name = $"QuestMarker_{LocationName}";
+                QuestMarkerPool pool = QuestMarkerPool.Instance;
+                if (pool != null)
+                {
+                    instantiatedMarker = pool.GetMarker(VisualMarker, Position, Quaternion.identity);
+                }
+                else
+                {
+                    instantiatedMarker = Object.Instantiate(VisualMarker, Position, Quaternion.identity);
+                }
+
+                if (instantiatedMarker != null)
+                {
+                    instantiatedMarker.name = $"QuestMarker_{LocationName}";
+                }
             }
         }
 
@@ -125,7 +137,16 @@ namespace DeliveryDriver.Quest
         {
             if (instantiatedMarker != null)
             {
-                Object.Destroy(instantiatedMarker);
+                QuestMarkerPool pool = QuestMarkerPool.Instance;
+                if (pool != null)
+                {
+                    pool.ReturnMarker(instantiatedMarker);
+                }
+                else
+                {
+                    Object.Destroy(instantiatedMarker);
+                }
+
                 instantiatedMarker = null;
             }
         }

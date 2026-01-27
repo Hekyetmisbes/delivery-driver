@@ -17,9 +17,12 @@ namespace DeliveryDriver.Quest.UI
 
         [Header("Player")]
         [SerializeField] private Transform playerTransform;
+        [SerializeField] private float distanceUpdateThresholdMeters = 1f;
 
         private QuestManager questManager;
         private bool isSubscribed;
+        private float lastDistanceSqr = -1f;
+        private QuestLocation lastObjective;
 
         private void Awake()
         {
@@ -155,6 +158,8 @@ namespace DeliveryDriver.Quest.UI
             {
                 activeQuestUI.Show();
                 activeQuestUI.UpdateQuestDisplay(quest);
+                lastDistanceSqr = -1f;
+                lastObjective = null;
                 UpdateActiveQuestDistance(quest);
                 UpdateCargoHealth(quest);
             }
@@ -200,8 +205,6 @@ namespace DeliveryDriver.Quest.UI
             }
 
             activeQuestUI.UpdateQuestDisplay(quest);
-            UpdateActiveQuestDistance(quest);
-            UpdateCargoHealth(quest);
         }
 
         private void HandleContinue()
@@ -240,11 +243,22 @@ namespace DeliveryDriver.Quest.UI
             if (target == null)
             {
                 activeQuestUI.UpdateDistance(0f);
+                lastDistanceSqr = -1f;
+                lastObjective = null;
                 return;
             }
 
-            float distance = Vector3.Distance(playerTransform.position, target.Position);
-            activeQuestUI.UpdateDistance(distance);
+            Vector3 delta = playerTransform.position - target.Position;
+            float distanceSqr = delta.sqrMagnitude;
+            float thresholdSqr = distanceUpdateThresholdMeters * distanceUpdateThresholdMeters;
+
+            if (target != lastObjective || lastDistanceSqr < 0f || Mathf.Abs(distanceSqr - lastDistanceSqr) >= thresholdSqr)
+            {
+                float distance = Mathf.Sqrt(distanceSqr);
+                activeQuestUI.UpdateDistance(distance);
+                lastDistanceSqr = distanceSqr;
+                lastObjective = target;
+            }
         }
 
         private void UpdateCargoHealth(QuestData quest)

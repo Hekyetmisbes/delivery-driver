@@ -21,6 +21,10 @@ namespace DeliveryDriver.Quest
         [SerializeField] private GameObject pickupMarkerPrefab;
         [SerializeField] private GameObject deliveryMarkerPrefab;
 
+        [Header("Task 10.6: Marker Pool")]
+        [SerializeField] private QuestMarkerPool markerPool;
+        [SerializeField] private int markerPoolSize = 10;
+
         [Header("Quest Zones")]
         [SerializeField] private GameObject questZonePrefab;
         [SerializeField] private List<QuestZone> activeZones = new List<QuestZone>();
@@ -94,6 +98,13 @@ namespace DeliveryDriver.Quest
         private float timeSinceLastRefresh = 0f;
         private float lastManualRefreshTime = -999f;
 
+        private int lastTimeRemainingSeconds = -1;
+        private int lastDeliveryIndex = -1;
+        private bool lastHasPickedUpCargo = false;
+        private float lastCargoHealth = -1f;
+        private string lastQuestId = string.Empty;
+        private bool questUiDirty = true;
+
         public UnityEvent<QuestData> OnQuestStarted = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnQuestCompleted = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnQuestFailed = new UnityEvent<QuestData>();
@@ -141,12 +152,28 @@ namespace DeliveryDriver.Quest
                 // Try to load from Resources if not assigned
                 cargoLibrary = Resources.Load<CargoLibrary>("CargoLibrary");
             }
+
+            if (markerPool == null)
+            {
+                markerPool = FindAnyObjectByType<QuestMarkerPool>();
+                if (markerPool == null)
+                {
+                    GameObject poolObject = new GameObject("QuestMarkerPool");
+                    markerPool = poolObject.AddComponent<QuestMarkerPool>();
+                }
+            }
         }
 
         private void Start()
         {
             // Task 10.2: Initialize particle pool
             InitializeParticlePool();
+
+            if (markerPool != null)
+            {
+                markerPool.Prewarm(pickupMarkerPrefab, markerPoolSize);
+                markerPool.Prewarm(deliveryMarkerPrefab, markerPoolSize);
+            }
 
             // Task 10.1: Start exploration music
             if (musicSource != null && explorationMusicClip != null)
@@ -241,7 +268,7 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
-            OnQuestUpdated.Invoke(currentQuest);
+            TryNotifyQuestUpdated();
         }
 
         public void GenerateAvailableQuests(int count)
@@ -260,9 +287,16 @@ namespace DeliveryDriver.Quest
             
             // Determine difficulty based on level (simple logic)
             QuestDifficulty difficulty = QuestDifficulty.Easy;
-            if (playerLevel >= 5) difficulty = QuestDifficulty.Medium;
-            if (playerLevel >= 15) difficulty = QuestDifficulty.Hard;
-            if (playerLevel >= 30) difficulty = QuestDifficulty.Expert;
+            if (GameSettings.Instance != null)
+            {
+                difficulty = GameSettings.Instance.ResolveQuestDifficulty(playerLevel);
+            }
+            else
+            {
+                if (playerLevel >= 5) difficulty = QuestDifficulty.Medium;
+                if (playerLevel >= 15) difficulty = QuestDifficulty.Hard;
+                if (playerLevel >= 30) difficulty = QuestDifficulty.Expert;
+            }
 
             for (int i = 0; i < count; i++)
             {
@@ -475,6 +509,7 @@ namespace DeliveryDriver.Quest
 
             // Reset time warning flag
             timeWarningPlayed = false;
+            MarkQuestUiDirty();
 
             OnQuestStarted.Invoke(quest);
 
@@ -715,7 +750,8 @@ namespace DeliveryDriver.Quest
                 bool tooClose = false;
                 foreach (Vector3 used in usedLocations)
                 {
-                    if (Vector3.Distance(candidatePosition, used) < locationCooldownDistance)
+                    Vector3 delta = candidatePosition - used;
+                    if (delta.sqrMagnitude < locationCooldownDistance * locationCooldownDistance)
                     {
                         tooClose = true;
                         break;
@@ -782,7 +818,8 @@ namespace DeliveryDriver.Quest
                 return false;
             }
 
-            float distance = Vector3.Distance(pickup.Position, delivery.Position);
+            Vector3 delta = pickup.Position - delivery.Position;
+            float distanceSqr = delta.sqrMagnitude;
             float minDistance = difficulty switch
             {
                 QuestDifficulty.Easy => 500f,
@@ -792,7 +829,7 @@ namespace DeliveryDriver.Quest
                 _ => 500f
             };
 
-            return distance >= minDistance;
+            return distanceSqr >= minDistance * minDistance;
         }
 
         private string GenerateLocationName()
@@ -982,7 +1019,7 @@ namespace DeliveryDriver.Quest
 
             QuestLocation delivery = GetCurrentDeliveryLocation();
             SpawnQuestZone(delivery, QuestZoneType.Delivery);
-            OnQuestUpdated.Invoke(currentQuest);
+            MarkQuestUiDirty();
             Debug.Log($"[QuestManager] Cargo loaded! Deliver to {delivery?.LocationName ?? "destination"}.");
 
             // Task 10.4: Tutorial integration
@@ -1011,7 +1048,7 @@ namespace DeliveryDriver.Quest
             {
                 currentQuest.CurrentDeliveryIndex++;
                 SpawnQuestZone(GetCurrentDeliveryLocation(), QuestZoneType.Delivery);
-                OnQuestUpdated.Invoke(currentQuest);
+                MarkQuestUiDirty();
             }
             else
             {
@@ -1089,7 +1126,7 @@ namespace DeliveryDriver.Quest
                 }
             }
 
-            OnQuestUpdated.Invoke(currentQuest);
+            MarkQuestUiDirty();
         }
 
         private void PlayQuestClip(AudioClip clip)
@@ -1147,6 +1184,54 @@ namespace DeliveryDriver.Quest
             return currentQuest.DeliveryLocations[index];
         }
 
+        private void MarkQuestUiDirty()
+        {
+            questUiDirty = true;
+        }
+
+        private void TryNotifyQuestUpdated()
+        {
+            if (currentQuest == null)
+            {
+                return;
+            }
+
+            int timeRemainingSeconds = Mathf.CeilToInt(currentQuest.TimeRemaining);
+            float cargoHealth = currentQuest.Cargo != null && currentQuest.Cargo.IsFragile
+                ? currentQuest.Cargo.CargoHealth
+                : -1f;
+
+            bool isDirty = questUiDirty ||
+                           !string.Equals(currentQuest.QuestID, lastQuestId, StringComparison.Ordinal) ||
+                           timeRemainingSeconds != lastTimeRemainingSeconds ||
+                           currentQuest.CurrentDeliveryIndex != lastDeliveryIndex ||
+                           currentQuest.HasPickedUpCargo != lastHasPickedUpCargo ||
+                           Mathf.Abs(cargoHealth - lastCargoHealth) > 0.1f;
+
+            if (!isDirty)
+            {
+                return;
+            }
+
+            CacheQuestUiState(currentQuest);
+            OnQuestUpdated.Invoke(currentQuest);
+        }
+
+        private void CacheQuestUiState(QuestData quest)
+        {
+            if (quest == null)
+            {
+                return;
+            }
+
+            lastQuestId = quest.QuestID ?? string.Empty;
+            lastTimeRemainingSeconds = Mathf.CeilToInt(quest.TimeRemaining);
+            lastDeliveryIndex = quest.CurrentDeliveryIndex;
+            lastHasPickedUpCargo = quest.HasPickedUpCargo;
+            lastCargoHealth = quest.Cargo != null && quest.Cargo.IsFragile ? quest.Cargo.CargoHealth : -1f;
+            questUiDirty = false;
+        }
+
         public QuestSaveData GetSaveData()
         {
             QuestSaveData data = new QuestSaveData
@@ -1183,6 +1268,7 @@ namespace DeliveryDriver.Quest
             if (currentQuest != null)
             {
                 OnQuestStarted.Invoke(currentQuest);
+                CacheQuestUiState(currentQuest);
                 OnQuestUpdated.Invoke(currentQuest);
             }
         }

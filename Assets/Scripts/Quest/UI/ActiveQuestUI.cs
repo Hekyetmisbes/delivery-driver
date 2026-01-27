@@ -1,3 +1,4 @@
+using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -16,6 +17,13 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private GameObject cargoHealthPanel;
 
         private QuestData currentQuest;
+        private string lastObjectiveText = string.Empty;
+        private int lastTimerSeconds = -1;
+        private Color lastTimerColor = Color.clear;
+        private string lastDistanceText = string.Empty;
+        private float lastCargoHealth = -1f;
+        private bool lastCargoPanelActive = false;
+        private readonly StringBuilder objectiveBuilder = new StringBuilder(64);
 
         public void UpdateQuestDisplay(QuestData quest)
         {
@@ -27,9 +35,11 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            if (objectiveText != null)
+            string objective = BuildObjectiveText(currentQuest);
+            if (objectiveText != null && !string.Equals(lastObjectiveText, objective, System.StringComparison.Ordinal))
             {
-                objectiveText.text = BuildObjectiveText(currentQuest);
+                lastObjectiveText = objective;
+                objectiveText.text = objective;
             }
 
             UpdateTimer(currentQuest.TimeRemaining, currentQuest.TimeLimit);
@@ -39,14 +49,22 @@ namespace DeliveryDriver.Quest.UI
                 UpdateCargoHealth(currentQuest.Cargo.CargoHealth);
                 if (cargoHealthPanel != null)
                 {
-                    cargoHealthPanel.SetActive(true);
+                    if (!lastCargoPanelActive)
+                    {
+                        cargoHealthPanel.SetActive(true);
+                        lastCargoPanelActive = true;
+                    }
                 }
             }
             else
             {
                 if (cargoHealthPanel != null)
                 {
-                    cargoHealthPanel.SetActive(false);
+                    if (lastCargoPanelActive)
+                    {
+                        cargoHealthPanel.SetActive(false);
+                        lastCargoPanelActive = false;
+                    }
                 }
             }
         }
@@ -58,8 +76,19 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            timerText.text = FormatTime(timeRemaining);
-            timerText.color = GetTimerColor(timeRemaining, timeLimit);
+            int seconds = Mathf.CeilToInt(timeRemaining);
+            if (seconds != lastTimerSeconds)
+            {
+                timerText.text = FormatTime(seconds);
+                lastTimerSeconds = seconds;
+            }
+
+            Color color = GetTimerColor(timeRemaining, timeLimit);
+            if (color != lastTimerColor)
+            {
+                timerText.color = color;
+                lastTimerColor = color;
+            }
         }
 
         public void UpdateDistance(float distanceMeters)
@@ -69,7 +98,12 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            distanceText.text = FormatDistance(distanceMeters);
+            string formatted = FormatDistance(distanceMeters);
+            if (!string.Equals(lastDistanceText, formatted, System.StringComparison.Ordinal))
+            {
+                lastDistanceText = formatted;
+                distanceText.text = formatted;
+            }
         }
 
         public void UpdateCargoHealth(float health)
@@ -80,7 +114,11 @@ namespace DeliveryDriver.Quest.UI
             }
 
             float normalized = Mathf.Clamp01(health / 100f);
-            cargoHealthFill.fillAmount = normalized;
+            if (Mathf.Abs(normalized - lastCargoHealth) > 0.001f)
+            {
+                cargoHealthFill.fillAmount = normalized;
+                lastCargoHealth = normalized;
+            }
         }
 
         public void Hide()
@@ -115,9 +153,16 @@ namespace DeliveryDriver.Quest.UI
             {
                 cargoHealthPanel.SetActive(false);
             }
+
+            lastObjectiveText = string.Empty;
+            lastTimerSeconds = -1;
+            lastTimerColor = Color.clear;
+            lastDistanceText = string.Empty;
+            lastCargoHealth = -1f;
+            lastCargoPanelActive = false;
         }
 
-        private static string BuildObjectiveText(QuestData quest)
+        private string BuildObjectiveText(QuestData quest)
         {
             if (quest == null)
             {
@@ -127,7 +172,9 @@ namespace DeliveryDriver.Quest.UI
             if (!quest.HasPickedUpCargo)
             {
                 string pickupName = quest.PickupLocation != null ? quest.PickupLocation.LocationName : "pickup";
-                return $"Go to {pickupName}\nPick up cargo";
+                objectiveBuilder.Clear();
+                objectiveBuilder.Append("Go to ").Append(pickupName).Append('\n').Append("Pick up cargo");
+                return objectiveBuilder.ToString();
             }
 
             QuestLocation delivery = GetCurrentDeliveryLocation(quest);
@@ -137,10 +184,19 @@ namespace DeliveryDriver.Quest.UI
 
             if (totalStops > 1)
             {
-                return $"Deliver cargo ({currentStop}/{totalStops})\n{deliveryName}";
+                objectiveBuilder.Clear();
+                objectiveBuilder.Append("Deliver cargo (")
+                    .Append(currentStop)
+                    .Append('/')
+                    .Append(totalStops)
+                    .Append(")\n")
+                    .Append(deliveryName);
+                return objectiveBuilder.ToString();
             }
 
-            return $"Deliver to {deliveryName}";
+            objectiveBuilder.Clear();
+            objectiveBuilder.Append("Deliver to ").Append(deliveryName);
+            return objectiveBuilder.ToString();
         }
 
         private static QuestLocation GetCurrentDeliveryLocation(QuestData quest)
@@ -154,10 +210,10 @@ namespace DeliveryDriver.Quest.UI
             return quest.DeliveryLocations[index];
         }
 
-        private static string FormatTime(float timeSeconds)
+        private static string FormatTime(int timeSeconds)
         {
             int minutes = Mathf.Max(0, Mathf.FloorToInt(timeSeconds / 60f));
-            int seconds = Mathf.Max(0, Mathf.FloorToInt(timeSeconds % 60f));
+            int seconds = Mathf.Max(0, timeSeconds % 60);
             return $"{minutes:00}:{seconds:00}";
         }
 

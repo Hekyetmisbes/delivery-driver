@@ -1491,17 +1491,17 @@ void Start()
 ---
 
 ### Task 10.5: Add Settings & Options
-- [ ] Create settings menu UI panel:
+- [x] Create settings menu UI panel:
   - Audio volume sliders (Master, Music, SFX)
   - Quest difficulty preference (affect generation)
   - UI scale slider
   - Control rebinding (if custom input)
   - Save/Load options
-- [ ] Create `Assets/Scripts/Quest/GameSettings.cs`:
+- [x] Create `Assets/Scripts/Quest/GameSettings.cs`:
   - Save settings to PlayerPrefs
   - Apply settings on load
   - Default values
-- [ ] Add pause menu integration:
+- [x] Add pause menu integration:
   - Access settings during gameplay
   - Pause quest timer when paused
 
@@ -1515,20 +1515,20 @@ PlayerPrefs.Save();
 ---
 
 ### Task 10.6: Optimize Performance
-- [ ] Implement object pooling for quest markers:
+- [x] Implement object pooling for quest markers:
   - Reuse marker GameObjects instead of Instantiate/Destroy
   - Pool size: 10 markers (more than enough)
-- [ ] Optimize UI updates:
+- [x] Optimize UI updates:
   - Only update active quest UI when values change (use dirty flag)
   - Cache UI component references
   - Use StringBuilder for string concatenation
-- [ ] Optimize quest distance calculations:
+- [x] Optimize quest distance calculations:
   - Calculate distance once per frame, not per UI element
   - Use sqrMagnitude where possible (avoid Sqrt)
-- [ ] Add LOD for quest markers:
+- [x] Add LOD for quest markers:
   - Simple billboard sprite when far away
   - Full 3D model when nearby
-- [ ] Profile and optimize hotspots:
+- [x] Profile and optimize hotspots:
   - Use Unity Profiler to identify bottlenecks
   - Optimize any Update() methods with frequent calls
 
