@@ -1433,20 +1433,20 @@ void Update()
 ---
 
 ### Task 10.3: Add Minimap/Compass Integration (Optional)
-- [ ] Create minimap UI (circular or rectangular):
+- [x] Create minimap UI (circular or rectangular):
   - Canvas with RawImage showing top-down camera
   - Position: Bottom-right corner
   - Size: 200x200 pixels
-- [ ] Add minimap camera:
+- [x] Add minimap camera:
   - Orthographic camera above player
   - Follows player position (X,Z) only
   - Fixed Y rotation (top-down view)
   - Renders to RenderTexture
-- [ ] Add quest markers to minimap:
+- [x] Add quest markers to minimap:
   - Pickup location: Blue icon
   - Delivery location: Green icon
   - Distance indicators
-- [ ] Add compass HUD element:
+- [x] Add compass HUD element:
   - Shows direction to next objective
   - Rotates based on player heading
 
@@ -1461,21 +1461,21 @@ minimapCamera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
 ---
 
 ### Task 10.4: Add Tutorial System
-- [ ] Create `Assets/Scripts/Quest/TutorialManager.cs`
-- [ ] Add tutorial steps:
+- [x] Create `Assets/Scripts/Quest/TutorialManager.cs`
+- [x] Add tutorial steps:
   1. "Welcome to Delivery Driver! Press Q to open quest menu."
   2. "Select a delivery to begin."
   3. "Drive to the blue marker to pick up cargo."
   4. "Now deliver to the green marker before time runs out!"
   5. "Complete deliveries to earn money and level up."
-- [ ] Implement tutorial overlay:
+- [x] Implement tutorial overlay:
   - Semi-transparent panel with instructions
   - Arrow pointing to relevant UI elements
   - "Next" button or auto-advance on action completion
-- [ ] Track tutorial progress:
+- [x] Track tutorial progress:
   - Save tutorial completion in PlayerPrefs
   - Option to replay tutorial in settings
-- [ ] Add tooltips to UI elements:
+- [x] Add tooltips to UI elements:
   - Hover over quest entries to see details
   - Hover over rewards to see breakdown
 

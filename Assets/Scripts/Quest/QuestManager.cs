@@ -984,6 +984,12 @@ namespace DeliveryDriver.Quest
             SpawnQuestZone(delivery, QuestZoneType.Delivery);
             OnQuestUpdated.Invoke(currentQuest);
             Debug.Log($"[QuestManager] Cargo loaded! Deliver to {delivery?.LocationName ?? "destination"}.");
+
+            // Task 10.4: Tutorial integration
+            if (TutorialManager.Instance != null)
+            {
+                TutorialManager.Instance.OnCargoPickedUp();
+            }
         }
 
         private void OnCargoDelivered()
@@ -1012,6 +1018,13 @@ namespace DeliveryDriver.Quest
                 TryRemoveCargoWeight();
                 cargoVisual?.DetachCargo();
                 PlayQuestClip(deliveryClip);
+
+                // Task 10.4: Tutorial integration
+                if (TutorialManager.Instance != null)
+                {
+                    TutorialManager.Instance.OnCargoDelivered();
+                }
+
                 CompleteQuest(currentQuest);
             }
         }
