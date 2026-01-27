@@ -24,6 +24,14 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private GameObject deliveryMarkerPrefab;
         [SerializeField] private GameObject playerMarkerPrefab;
 
+        [Header("Route Preview")]
+        [SerializeField] private bool showRoutePreview = true;
+        [SerializeField] private bool includePlayerInRoute = true;
+        [SerializeField] private Color routeLineColor = new Color(0.2f, 0.8f, 1f, 0.8f);
+        [SerializeField] private float routeLineWidth = 2f;
+        [SerializeField] private float routeRefreshInterval = 0.25f;
+        [SerializeField] private RouteLineGraphic routeLine;
+
         [Header("Settings")]
         [SerializeField] private bool showMinimap = true;
         [SerializeField] private Vector2 minimapSize = new Vector2(200f, 200f);
@@ -32,6 +40,8 @@ namespace DeliveryDriver.Quest.UI
         private List<GameObject> currentDeliveryMarkers = new List<GameObject>();
         private GameObject playerMarker;
         private Transform playerTransform;
+        private QuestData currentQuest;
+        private float routeRefreshTimer;
 
         private void Awake()
         {
@@ -61,6 +71,16 @@ namespace DeliveryDriver.Quest.UI
             {
                 UpdatePlayerMarkerRotation();
             }
+
+            if (showRoutePreview && includePlayerInRoute && currentQuest != null)
+            {
+                routeRefreshTimer += Time.deltaTime;
+                if (routeRefreshTimer >= routeRefreshInterval)
+                {
+                    UpdateRoutePreview(currentQuest);
+                    routeRefreshTimer = 0f;
+                }
+            }
         }
 
         private void SetupMinimap()
@@ -86,7 +106,32 @@ namespace DeliveryDriver.Quest.UI
                 minimapContainer.sizeDelta = minimapSize;
             }
 
+            SetupRoutePreview();
             SetMinimapVisible(showMinimap);
+        }
+
+        private void SetupRoutePreview()
+        {
+            if (!showRoutePreview || minimapContainer == null)
+            {
+                return;
+            }
+
+            if (routeLine == null)
+            {
+                GameObject routeObject = new GameObject("RoutePreview");
+                routeObject.transform.SetParent(minimapContainer, false);
+                routeLine = routeObject.AddComponent<RouteLineGraphic>();
+            }
+
+            routeLine.color = routeLineColor;
+            routeLine.SetLineWidth(routeLineWidth);
+
+            RectTransform rectTransform = routeLine.rectTransform;
+            rectTransform.anchorMin = Vector2.zero;
+            rectTransform.anchorMax = Vector2.one;
+            rectTransform.offsetMin = Vector2.zero;
+            rectTransform.offsetMax = Vector2.zero;
         }
 
         private void SubscribeToQuestEvents()
@@ -118,9 +163,11 @@ namespace DeliveryDriver.Quest.UI
         private void HandleQuestStarted(QuestData quest)
         {
             ClearAllMarkers();
+            currentQuest = quest;
 
             if (quest == null)
             {
+                ClearRoutePreview();
                 return;
             }
 
@@ -134,14 +181,20 @@ namespace DeliveryDriver.Quest.UI
             {
                 ShowDeliveryMarkers(quest);
             }
+
+            UpdateRoutePreview(quest);
         }
 
         private void HandleQuestUpdated(QuestData quest)
         {
             if (quest == null)
             {
+                currentQuest = null;
+                ClearRoutePreview();
                 return;
             }
+
+            currentQuest = quest;
 
             // Update markers based on quest progress
             if (quest.HasPickedUpCargo && currentPickupMarker != null)
@@ -151,16 +204,22 @@ namespace DeliveryDriver.Quest.UI
                 currentPickupMarker = null;
                 ShowDeliveryMarkers(quest);
             }
+
+            UpdateRoutePreview(quest);
         }
 
         private void HandleQuestCompleted(QuestData quest)
         {
             ClearAllMarkers();
+            currentQuest = null;
+            ClearRoutePreview();
         }
 
         private void HandleQuestFailed(QuestData quest)
         {
             ClearAllMarkers();
+            currentQuest = null;
+            ClearRoutePreview();
         }
 
         private void ShowPickupMarker(Vector3 worldPosition)
@@ -230,6 +289,85 @@ namespace DeliveryDriver.Quest.UI
             // Rotate player marker to match player's heading
             float yRotation = playerTransform.eulerAngles.y;
             playerMarker.transform.rotation = Quaternion.Euler(0f, 0f, -yRotation);
+        }
+
+        private void UpdateRoutePreview(QuestData quest)
+        {
+            if (!showRoutePreview || routeLine == null || cameraComponent == null || minimapContainer == null)
+            {
+                return;
+            }
+
+            if (quest == null)
+            {
+                ClearRoutePreview();
+                return;
+            }
+
+            List<Vector3> worldPoints = BuildRoutePoints(quest);
+            if (includePlayerInRoute && playerTransform != null)
+            {
+                worldPoints.Insert(0, playerTransform.position);
+            }
+
+            if (worldPoints.Count < 2)
+            {
+                ClearRoutePreview();
+                return;
+            }
+
+            Rect rect = minimapContainer.rect;
+            List<Vector2> localPoints = new List<Vector2>(worldPoints.Count);
+            for (int i = 0; i < worldPoints.Count; i++)
+            {
+                Vector3 viewport = cameraComponent.WorldToViewportPoint(worldPoints[i]);
+                Vector2 local = new Vector2(
+                    (viewport.x - 0.5f) * rect.width,
+                    (viewport.y - 0.5f) * rect.height
+                );
+                localPoints.Add(local);
+            }
+
+            routeLine.color = routeLineColor;
+            routeLine.SetLineWidth(routeLineWidth);
+            routeLine.SetPoints(localPoints);
+        }
+
+        private List<Vector3> BuildRoutePoints(QuestData quest)
+        {
+            List<Vector3> points = new List<Vector3>();
+            if (quest == null)
+            {
+                return points;
+            }
+
+            if (!quest.HasPickedUpCargo && quest.PickupLocation != null)
+            {
+                points.Add(quest.PickupLocation.Position);
+            }
+
+            if (quest.DeliveryLocations != null)
+            {
+                int startIndex = quest.HasPickedUpCargo ? quest.CurrentDeliveryIndex : 0;
+                for (int i = startIndex; i < quest.DeliveryLocations.Count; i++)
+                {
+                    QuestLocation location = quest.DeliveryLocations[i];
+                    if (location != null)
+                    {
+                        points.Add(location.Position);
+                    }
+                }
+            }
+
+            return points;
+        }
+
+        private void ClearRoutePreview()
+        {
+            if (routeLine != null)
+            {
+                routeLine.Clear();
+            }
         }
 
         private void ResolvePlayerTransform()

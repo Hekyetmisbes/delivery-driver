@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using TMPro;
 using UnityEngine;
 
@@ -11,6 +14,13 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private GameObject statsPanel;
         [SerializeField] private TextMeshProUGUI statsText;
         [SerializeField] private bool refreshOnEnable = true;
+        [SerializeField] private bool showCharts = true;
+
+        [Header("Charts")]
+        [SerializeField] private SimpleBarChart cargoChart;
+        [SerializeField] private SimpleBarChart dailyChart;
+        [SerializeField] private int maxCargoEntries = 5;
+        [SerializeField] private int maxDailyEntries = 7;
 
         private void OnEnable()
         {
@@ -73,6 +83,72 @@ namespace DeliveryDriver.Quest.UI
                 $"Perfect Deliveries (S): {manager.SRanksAchieved}",
                 $"Favorite Cargo: {manager.GetFavoriteCargoType()}"
             });
+
+            UpdateCharts(manager);
+        }
+
+        private void UpdateCharts(PlayerProgressionManager manager)
+        {
+            if (!showCharts || manager == null)
+            {
+                return;
+            }
+
+            if (cargoChart != null)
+            {
+                List<SimpleBarChart.ChartPoint> cargoPoints = manager.CargoTypeStats
+                    .OrderByDescending(stat => stat.Count)
+                    .Take(maxCargoEntries)
+                    .Select(stat => new SimpleBarChart.ChartPoint(ShortenLabel(stat.CargoName, 10), stat.Count))
+                    .ToList();
+
+                cargoChart.Render(cargoPoints);
+            }
+
+            if (dailyChart != null)
+            {
+                List<PlayerProgressionManager.DailyStat> ordered = manager.DailyStats
+                    .OrderBy(stat => stat.Date)
+                    .ToList();
+
+                int skip = Mathf.Max(0, ordered.Count - maxDailyEntries);
+                List<SimpleBarChart.ChartPoint> dailyPoints = ordered
+                    .Skip(skip)
+                    .Select(stat => new SimpleBarChart.ChartPoint(FormatDailyLabel(stat.Date), stat.QuestsCompleted))
+                    .ToList();
+
+                dailyChart.Render(dailyPoints);
+            }
+        }
+
+        private static string ShortenLabel(string label, int maxLength)
+        {
+            if (string.IsNullOrEmpty(label) || label.Length <= maxLength)
+            {
+                return label;
+            }
+
+            if (maxLength <= 3)
+            {
+                return label.Substring(0, maxLength);
+            }
+
+            return label.Substring(0, maxLength - 3) + "...";
+        }
+
+        private static string FormatDailyLabel(string dateText)
+        {
+            if (DateTime.TryParse(dateText, out DateTime parsed))
+            {
+                return parsed.ToString("MM/dd");
+            }
+
+            if (string.IsNullOrEmpty(dateText) || dateText.Length <= 5)
+            {
+                return dateText;
+            }
+
+            return dateText.Substring(dateText.Length - 5);
         }
     }
 }

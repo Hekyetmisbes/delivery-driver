@@ -1295,7 +1295,7 @@ for (int attempt = 0; attempt < 10; attempt++)
 - [x] Add route optimization (optional):
   - Use simple nearest-neighbor algorithm to order stops
   - Minimize total distance while maintaining start/end
-- [ ] Add visual route preview on map (if minimap exists)
+- [x] Add visual route preview on map (if minimap exists)
 
 **Route Optimization:**
 ```csharp
@@ -1617,7 +1617,7 @@ void Update()
   - Favorite cargo type
 - [x] Track detailed statistics in PlayerProgressionManager
 - [x] Display in main menu or pause menu
-- [ ] Add graphs/charts (optional, advanced):
+- [x] Add graphs/charts (optional, advanced):
   - Quest completion over time
   - Money earned per day
   - Level progression curve
