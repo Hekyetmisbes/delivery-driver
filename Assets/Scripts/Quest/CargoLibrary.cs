@@ -28,5 +28,23 @@ namespace DeliveryDriver.Quest
 
             return cargoTypes.Find(cargo => cargo != null && cargo.CargoName == name);
         }
+
+        public CargoData GetCargoByFragility(bool isFragile)
+        {
+            if (cargoTypes == null || cargoTypes.Count == 0)
+            {
+                return null;
+            }
+
+            List<CargoData> filtered = cargoTypes.FindAll(cargo => cargo != null && cargo.IsFragile == isFragile);
+
+            if (filtered.Count == 0)
+            {
+                return null;
+            }
+
+            int index = Random.Range(0, filtered.Count);
+            return filtered[index];
+        }
     }
 }

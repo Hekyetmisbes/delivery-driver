@@ -117,7 +117,7 @@ namespace DeliveryDriver.Quest.UI
             }
 
             // Try to find CarController
-            TrafficSystem.CarController controller = FindAnyObjectByType<TrafficSystem.CarController>();
+            CarController controller = FindAnyObjectByType<CarController>();
             if (controller != null)
             {
                 playerTransform = controller.transform;

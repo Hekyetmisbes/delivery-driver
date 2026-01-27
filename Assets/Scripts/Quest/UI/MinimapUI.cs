@@ -245,7 +245,7 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            TrafficSystem.CarController controller = FindAnyObjectByType<TrafficSystem.CarController>();
+            CarController controller = FindAnyObjectByType<CarController>();
             if (controller != null)
             {
                 playerTransform = controller.transform;
