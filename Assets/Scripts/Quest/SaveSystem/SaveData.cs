@@ -20,7 +20,7 @@ namespace DeliveryDriver.Quest
             PlayerData = new PlayerProgressionData();
             QuestData = new QuestSaveData();
             SaveDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-            SaveVersion = 1;
+            SaveVersion = 2;
         }
     }
 
@@ -35,12 +35,20 @@ namespace DeliveryDriver.Quest
         public int XP;
         public int XPToNextLevel;
         public int TotalQuestsCompleted;
+        public int TotalQuestsAttempted;
+        public int TotalQuestsFailed;
+        public int TotalMoneyEarned;
         public float TotalDistanceTraveled;
         public float TotalTimePlayed;
+        public float TotalDeliveryTimeSeconds;
+        public float FastestDeliveryTimeSeconds;
         public int SpeedBonusesEarned;
         public int SRanksAchieved;
         public float TotalCargoWeightDelivered;
         public int FragileCargoDeliveredUndamaged;
+        public List<PlayerProgressionManager.CargoTypeStat> CargoTypeStats = new List<PlayerProgressionManager.CargoTypeStat>();
+        public List<PlayerProgressionManager.DailyStat> DailyStats = new List<PlayerProgressionManager.DailyStat>();
+        public List<PlayerProgressionManager.LevelSnapshot> LevelSnapshots = new List<PlayerProgressionManager.LevelSnapshot>();
         public List<string> UnlockedAchievements = new List<string>();
 
         /// <summary>
@@ -60,12 +68,20 @@ namespace DeliveryDriver.Quest
                 XP = manager.CurrentXP,
                 XPToNextLevel = manager.XPToNextLevel,
                 TotalQuestsCompleted = manager.TotalQuestsCompleted,
+                TotalQuestsAttempted = manager.TotalQuestsAttempted,
+                TotalQuestsFailed = manager.TotalQuestsFailed,
+                TotalMoneyEarned = manager.TotalMoneyEarned,
                 TotalDistanceTraveled = manager.TotalDistanceTraveled,
                 TotalTimePlayed = manager.TotalTimePlayed,
+                TotalDeliveryTimeSeconds = manager.TotalDeliveryTimeSeconds,
+                FastestDeliveryTimeSeconds = manager.FastestDeliveryTimeSeconds,
                 SpeedBonusesEarned = manager.SpeedBonusesEarned,
                 SRanksAchieved = manager.SRanksAchieved,
                 TotalCargoWeightDelivered = manager.TotalCargoWeightDelivered,
                 FragileCargoDeliveredUndamaged = manager.FragileCargoDeliveredUndamaged,
+                CargoTypeStats = new List<PlayerProgressionManager.CargoTypeStat>(manager.CargoTypeStats),
+                DailyStats = new List<PlayerProgressionManager.DailyStat>(manager.DailyStats),
+                LevelSnapshots = new List<PlayerProgressionManager.LevelSnapshot>(manager.LevelSnapshots),
                 UnlockedAchievements = new List<string>()
             };
 

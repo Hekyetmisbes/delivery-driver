@@ -17,6 +17,9 @@ namespace DeliveryDriver.Quest
         [SerializeField] private Transform playerTransform;
         [SerializeField] private CarController playerController;
 
+        [Header("Configuration")]
+        [SerializeField] private QuestSystemSettings questSystemSettings;
+
         [Header("Marker Prefabs")]
         [SerializeField] private GameObject pickupMarkerPrefab;
         [SerializeField] private GameObject deliveryMarkerPrefab;
@@ -151,6 +154,11 @@ namespace DeliveryDriver.Quest
             }
 
             Instance = this;
+
+            if (questSystemSettings != null)
+            {
+                QuestLogger.EnableLogs = questSystemSettings.EnableDebugLogging;
+            }
 
             if (roadGraphBuilder == null)
             {
@@ -402,27 +410,24 @@ namespace DeliveryDriver.Quest
             }
 
             // 2. Determine Distance and Time Settings
-            float minDistance, maxDistance, timeMultiplier;
-            int difficultyBonus;
-
-            switch (difficulty)
-            {
-                case QuestDifficulty.Easy:
-                    minDistance = 1000f; maxDistance = 2000f; timeMultiplier = 2.0f; difficultyBonus = 0;
-                    break;
-                case QuestDifficulty.Medium:
-                    minDistance = 2000f; maxDistance = 4000f; timeMultiplier = 1.5f; difficultyBonus = 100;
-                    break;
-                case QuestDifficulty.Hard:
-                    minDistance = 4000f; maxDistance = 6000f; timeMultiplier = 1.2f; difficultyBonus = 250;
-                    break;
-                case QuestDifficulty.Expert:
-                    minDistance = 6000f; maxDistance = 10000f; timeMultiplier = 1.0f; difficultyBonus = 500;
-                    break;
-                default:
-                    minDistance = 1000f; maxDistance = 2000f; timeMultiplier = 2.0f; difficultyBonus = 0;
-                    break;
-            }
+            Vector2 distanceRange = questSystemSettings != null
+                ? questSystemSettings.GetDistanceRange(difficulty)
+                : (difficulty == QuestDifficulty.Medium ? new Vector2(2000f, 4000f) :
+                   difficulty == QuestDifficulty.Hard ? new Vector2(4000f, 6000f) :
+                   difficulty == QuestDifficulty.Expert ? new Vector2(6000f, 10000f) :
+                   new Vector2(1000f, 2000f));
+            float minDistance = distanceRange.x;
+            float maxDistance = distanceRange.y;
+            float timeMultiplier = questSystemSettings != null
+                ? questSystemSettings.GetTimeMultiplier(difficulty)
+                : (difficulty == QuestDifficulty.Easy ? 2.0f :
+                   difficulty == QuestDifficulty.Medium ? 1.5f :
+                   difficulty == QuestDifficulty.Hard ? 1.2f : 1.0f);
+            int difficultyBonus = questSystemSettings != null
+                ? questSystemSettings.GetDifficultyBonus(difficulty)
+                : (difficulty == QuestDifficulty.Medium ? 100 :
+                   difficulty == QuestDifficulty.Hard ? 250 :
+                   difficulty == QuestDifficulty.Expert ? 500 : 0);
 
             // 3. Find Locations
             QuestLocation pickup = null;
@@ -488,12 +493,15 @@ namespace DeliveryDriver.Quest
             // 5. Calculate Stats
             float avgSpeed = 11f; // ~40 km/h in m/s
             // Ensure time limit is reasonable (at least 60 seconds)
-            quest.TimeLimit = Mathf.Max(60f, (actualDistance / avgSpeed) * timeMultiplier);
+            float minTimeLimit = questSystemSettings != null ? questSystemSettings.MinimumTimeLimit : 60f;
+            quest.TimeLimit = Mathf.Max(minTimeLimit, (actualDistance / avgSpeed) * timeMultiplier);
             quest.TimeRemaining = quest.TimeLimit;
             
             // Reward calculation
-            quest.BaseReward = Mathf.RoundToInt((actualDistance * 0.1f) + difficultyBonus); 
-            quest.BonusReward = Mathf.RoundToInt(quest.BaseReward * 0.5f);
+            float rewardPerMeter = questSystemSettings != null ? questSystemSettings.BaseRewardPerMeter : 0.1f;
+            float bonusMultiplier = questSystemSettings != null ? questSystemSettings.BonusRewardMultiplier : 0.5f;
+            quest.BaseReward = Mathf.RoundToInt((actualDistance * rewardPerMeter) + difficultyBonus); 
+            quest.BonusReward = Mathf.RoundToInt(quest.BaseReward * bonusMultiplier);
             quest.BonusTimeThreshold = 0.5f;
             quest.RequiredLevel = difficulty == QuestDifficulty.Easy ? 1 : 
                                   (difficulty == QuestDifficulty.Medium ? 5 : 
@@ -542,6 +550,11 @@ namespace DeliveryDriver.Quest
             ClearAllZones();
             SpawnQuestZone(quest.PickupLocation, QuestZoneType.Pickup);
 
+            if (PlayerProgressionManager.Instance != null)
+            {
+                PlayerProgressionManager.Instance.RecordQuestAttempt(quest);
+            }
+
             // Task 10.1: Play quest accepted sound and switch music
             PlayQuestClip(questAcceptedClip);
             SwitchToDeliveryMusic();
@@ -583,6 +596,11 @@ namespace DeliveryDriver.Quest
                 quest.Status = QuestStatus.NotStarted;
                 availableQuests.Add(quest);
             }
+
+            if (PlayerProgressionManager.Instance != null)
+            {
+                PlayerProgressionManager.Instance.RecordQuestFailure(quest);
+            }
         }
 
         public void CompleteQuest(QuestData quest)
@@ -612,6 +630,7 @@ namespace DeliveryDriver.Quest
             int finalReward = Mathf.RoundToInt(baseReward * streakMultiplier);
             LastCompletionReward = finalReward;
             LastFailureReason = string.Empty;
+            float completionTimeSeconds = Mathf.Max(0f, quest.TimeLimit - quest.TimeRemaining);
 
             completedQuests.Add(quest);
             TryAwardRewards(quest, finalReward);
@@ -619,7 +638,7 @@ namespace DeliveryDriver.Quest
             // Record quest completion for achievements and statistics
             if (PlayerProgressionManager.Instance != null)
             {
-                PlayerProgressionManager.Instance.RecordQuestCompletion(quest);
+                PlayerProgressionManager.Instance.RecordQuestCompletion(quest, finalReward, completionTimeSeconds);
             }
 
             Debug.Log($"[QuestManager] Quest completed with {quest.Rating} rank! Streak: {consecutiveSuccesses}x (Multiplier: {streakMultiplier:F1}x)");
@@ -677,6 +696,11 @@ namespace DeliveryDriver.Quest
             LastFailureReason = reason ?? string.Empty;
             OnQuestFailed.Invoke(quest);
             Debug.LogWarning($"[QuestManager] Quest failed: {quest.QuestName}. Reason: {reason}");
+
+            if (PlayerProgressionManager.Instance != null)
+            {
+                PlayerProgressionManager.Instance.RecordQuestFailure(quest);
+            }
 
             CleanupQuestMarkers(quest);
             ClearAllZones();
@@ -2042,32 +2066,30 @@ namespace DeliveryDriver.Quest
 
             // Calculate time and rewards scaled for multi-stop
             float avgSpeed = 11f; // ~40 km/h in m/s
-            float timeMultiplier = difficulty switch
-            {
-                QuestDifficulty.Easy => 2.0f,
-                QuestDifficulty.Medium => 1.5f,
-                QuestDifficulty.Hard => 1.2f,
-                QuestDifficulty.Expert => 1.0f,
-                _ => 1.5f
-            };
+            float timeMultiplier = questSystemSettings != null
+                ? questSystemSettings.GetTimeMultiplier(difficulty)
+                : (difficulty == QuestDifficulty.Easy ? 2.0f :
+                   difficulty == QuestDifficulty.Medium ? 1.5f :
+                   difficulty == QuestDifficulty.Hard ? 1.2f : 1.0f);
 
             // Scale time limit: baseTime * stopCount * 1.5
-            quest.TimeLimit = Mathf.Max(120f, ((totalDistance / avgSpeed) * timeMultiplier * optimizedRoute.Count * 1.5f));
+            float multiStopScale = questSystemSettings != null ? questSystemSettings.MultiStopTimeScale : 1.5f;
+            float minMultiStopTime = questSystemSettings != null ? questSystemSettings.MinimumMultiStopTimeLimit : 120f;
+            quest.TimeLimit = Mathf.Max(minMultiStopTime, ((totalDistance / avgSpeed) * timeMultiplier * optimizedRoute.Count * multiStopScale));
             quest.TimeRemaining = quest.TimeLimit;
 
             // Scale reward: baseReward * stopCount * 1.8
-            int difficultyBonus = difficulty switch
-            {
-                QuestDifficulty.Easy => 0,
-                QuestDifficulty.Medium => 100,
-                QuestDifficulty.Hard => 250,
-                QuestDifficulty.Expert => 500,
-                _ => 0
-            };
-
-            int baseRewardPerStop = Mathf.RoundToInt((totalDistance * 0.1f) + difficultyBonus);
-            quest.BaseReward = Mathf.RoundToInt(baseRewardPerStop * optimizedRoute.Count * 1.8f);
-            quest.BonusReward = Mathf.RoundToInt(quest.BaseReward * 0.5f);
+            int difficultyBonus = questSystemSettings != null
+                ? questSystemSettings.GetDifficultyBonus(difficulty)
+                : (difficulty == QuestDifficulty.Medium ? 100 :
+                   difficulty == QuestDifficulty.Hard ? 250 :
+                   difficulty == QuestDifficulty.Expert ? 500 : 0);
+            float rewardPerMeter = questSystemSettings != null ? questSystemSettings.BaseRewardPerMeter : 0.1f;
+            float multiStopRewardScale = questSystemSettings != null ? questSystemSettings.MultiStopRewardScale : 1.8f;
+            float bonusMultiplier = questSystemSettings != null ? questSystemSettings.BonusRewardMultiplier : 0.5f;
+            int baseRewardPerStop = Mathf.RoundToInt((totalDistance * rewardPerMeter) + difficultyBonus);
+            quest.BaseReward = Mathf.RoundToInt(baseRewardPerStop * optimizedRoute.Count * multiStopRewardScale);
+            quest.BonusReward = Mathf.RoundToInt(quest.BaseReward * bonusMultiplier);
             quest.BonusTimeThreshold = 0.5f;
             quest.RequiredLevel = difficulty == QuestDifficulty.Easy ? 1 :
                                   (difficulty == QuestDifficulty.Medium ? 5 :
@@ -2075,7 +2097,7 @@ namespace DeliveryDriver.Quest
             quest.IsRepeatable = true;
             quest.XPReward = 50 * ((int)difficulty + 1) * optimizedRoute.Count;
 
-            Debug.Log($"[QuestManager] Generated multi-stop quest: {optimizedRoute.Count} stops, {totalDistance:F0}m total distance");
+            QuestLogger.Log($"[QuestManager] Generated multi-stop quest: {optimizedRoute.Count} stops, {totalDistance:F0}m total distance");
 
             return quest;
         }
@@ -2211,21 +2233,30 @@ namespace DeliveryDriver.Quest
 
             // Time limit = 0.6x normal (very tight)
             float avgSpeed = 11f; // ~40 km/h in m/s
-            float normalTimeMultiplier = difficulty == QuestDifficulty.Medium ? 1.5f : 1.2f;
-            quest.TimeLimit = Mathf.Max(60f, ((actualDistance / avgSpeed) * normalTimeMultiplier * 0.6f));
+            float normalTimeMultiplier = questSystemSettings != null
+                ? questSystemSettings.GetTimeMultiplier(difficulty)
+                : (difficulty == QuestDifficulty.Medium ? 1.5f : 1.2f);
+            float expressScale = questSystemSettings != null ? questSystemSettings.ExpressTimeScale : 0.6f;
+            float minTimeLimit = questSystemSettings != null ? questSystemSettings.MinimumTimeLimit : 60f;
+            quest.TimeLimit = Mathf.Max(minTimeLimit, ((actualDistance / avgSpeed) * normalTimeMultiplier * expressScale));
             quest.TimeRemaining = quest.TimeLimit;
 
             // Reward = 2.0x normal
-            int difficultyBonus = difficulty == QuestDifficulty.Medium ? 100 : 250;
-            int baseReward = Mathf.RoundToInt((actualDistance * 0.1f) + difficultyBonus);
-            quest.BaseReward = Mathf.RoundToInt(baseReward * 2.0f);
-            quest.BonusReward = Mathf.RoundToInt(quest.BaseReward * 0.5f);
+            int difficultyBonus = questSystemSettings != null
+                ? questSystemSettings.GetDifficultyBonus(difficulty)
+                : (difficulty == QuestDifficulty.Medium ? 100 : 250);
+            float rewardPerMeter = questSystemSettings != null ? questSystemSettings.BaseRewardPerMeter : 0.1f;
+            float expressRewardMultiplier = questSystemSettings != null ? questSystemSettings.ExpressRewardMultiplier : 2.0f;
+            float bonusMultiplier = questSystemSettings != null ? questSystemSettings.BonusRewardMultiplier : 0.5f;
+            int baseReward = Mathf.RoundToInt((actualDistance * rewardPerMeter) + difficultyBonus);
+            quest.BaseReward = Mathf.RoundToInt(baseReward * expressRewardMultiplier);
+            quest.BonusReward = Mathf.RoundToInt(quest.BaseReward * bonusMultiplier);
             quest.BonusTimeThreshold = 0.5f;
             quest.RequiredLevel = difficulty == QuestDifficulty.Medium ? 5 : 15;
             quest.IsRepeatable = true;
             quest.XPReward = 50 * ((int)difficulty + 1);
 
-            Debug.Log($"[QuestManager] Generated EXPRESS delivery: {actualDistance:F0}m, {quest.TimeLimit:F0}s, ${quest.BaseReward}");
+            QuestLogger.Log($"[QuestManager] Generated EXPRESS delivery: {actualDistance:F0}m, {quest.TimeLimit:F0}s, ${quest.BaseReward}");
 
             return quest;
         }
@@ -2301,21 +2332,30 @@ namespace DeliveryDriver.Quest
 
             // Slightly longer time limit (player must drive carefully)
             float avgSpeed = 11f; // ~40 km/h in m/s
-            float timeMultiplier = difficulty == QuestDifficulty.Easy ? 2.5f : 1.8f;
-            quest.TimeLimit = Mathf.Max(90f, ((actualDistance / avgSpeed) * timeMultiplier));
+            float timeMultiplier = questSystemSettings != null
+                ? (difficulty == QuestDifficulty.Easy
+                    ? questSystemSettings.FragileEasyTimeMultiplier
+                    : questSystemSettings.FragileMediumTimeMultiplier)
+                : (difficulty == QuestDifficulty.Easy ? 2.5f : 1.8f);
+            float minTimeLimit = questSystemSettings != null ? Mathf.Max(90f, questSystemSettings.MinimumTimeLimit) : 90f;
+            quest.TimeLimit = Mathf.Max(minTimeLimit, ((actualDistance / avgSpeed) * timeMultiplier));
             quest.TimeRemaining = quest.TimeLimit;
 
             // Bonus for zero damage: +50% reward
-            int difficultyBonus = difficulty == QuestDifficulty.Easy ? 0 : 100;
-            int baseReward = Mathf.RoundToInt((actualDistance * 0.1f) + difficultyBonus);
+            int difficultyBonus = questSystemSettings != null
+                ? questSystemSettings.GetDifficultyBonus(difficulty)
+                : (difficulty == QuestDifficulty.Easy ? 0 : 100);
+            float rewardPerMeter = questSystemSettings != null ? questSystemSettings.BaseRewardPerMeter : 0.1f;
+            float bonusMultiplier = questSystemSettings != null ? questSystemSettings.BonusRewardMultiplier : 0.5f;
+            int baseReward = Mathf.RoundToInt((actualDistance * rewardPerMeter) + difficultyBonus);
             quest.BaseReward = baseReward;
-            quest.BonusReward = Mathf.RoundToInt(baseReward * 0.5f); // Will be awarded if cargo health > 90%
+            quest.BonusReward = Mathf.RoundToInt(baseReward * bonusMultiplier); // Will be awarded if cargo health > 90%
             quest.BonusTimeThreshold = 0.5f;
             quest.RequiredLevel = difficulty == QuestDifficulty.Easy ? 1 : 5;
             quest.IsRepeatable = true;
             quest.XPReward = 50 * ((int)difficulty + 1);
 
-            Debug.Log($"[QuestManager] Generated FRAGILE delivery: {actualDistance:F0}m, fragile cargo with health bonus");
+            QuestLogger.Log($"[QuestManager] Generated FRAGILE delivery: {actualDistance:F0}m, fragile cargo with health bonus");
 
             return quest;
         }
@@ -2382,20 +2422,29 @@ namespace DeliveryDriver.Quest
 
             // Very short time limit (0.5x normal)
             float avgSpeed = 11f; // ~40 km/h in m/s
-            float timeMultiplier = difficulty == QuestDifficulty.Hard ? 1.2f : 1.0f;
-            quest.TimeLimit = Mathf.Max(60f, ((actualDistance / avgSpeed) * timeMultiplier * 0.5f));
+            float timeMultiplier = questSystemSettings != null
+                ? questSystemSettings.GetTimeMultiplier(difficulty)
+                : (difficulty == QuestDifficulty.Hard ? 1.2f : 1.0f);
+            float timeTrialScale = questSystemSettings != null ? questSystemSettings.TimeTrialTimeScale : 0.5f;
+            float minTimeLimit = questSystemSettings != null ? questSystemSettings.MinimumTimeLimit : 60f;
+            quest.TimeLimit = Mathf.Max(minTimeLimit, ((actualDistance / avgSpeed) * timeMultiplier * timeTrialScale));
             quest.TimeRemaining = quest.TimeLimit;
 
             // Reward scales with remaining time (more time = more money)
-            int difficultyBonus = difficulty == QuestDifficulty.Hard ? 250 : 500;
-            quest.BaseReward = Mathf.RoundToInt((actualDistance * 0.15f) + difficultyBonus);
-            quest.BonusReward = Mathf.RoundToInt(quest.BaseReward * 1.0f); // 100% bonus for fast completion
+            int difficultyBonus = questSystemSettings != null
+                ? questSystemSettings.GetDifficultyBonus(difficulty)
+                : (difficulty == QuestDifficulty.Hard ? 250 : 500);
+            float rewardPerMeter = questSystemSettings != null ? questSystemSettings.BaseRewardPerMeter : 0.15f;
+            float timeTrialRewardMultiplier = questSystemSettings != null ? questSystemSettings.TimeTrialRewardMultiplier : 1.0f;
+            float bonusMultiplier = questSystemSettings != null ? questSystemSettings.BonusRewardMultiplier : 1.0f;
+            quest.BaseReward = Mathf.RoundToInt(((actualDistance * rewardPerMeter) + difficultyBonus) * timeTrialRewardMultiplier);
+            quest.BonusReward = Mathf.RoundToInt(quest.BaseReward * bonusMultiplier);
             quest.BonusTimeThreshold = 0.5f;
             quest.RequiredLevel = difficulty == QuestDifficulty.Hard ? 15 : 30;
             quest.IsRepeatable = true;
             quest.XPReward = 50 * ((int)difficulty + 1);
 
-            Debug.Log($"[QuestManager] Generated TIME TRIAL: {actualDistance:F0}m, extreme time pressure!");
+            QuestLogger.Log($"[QuestManager] Generated TIME TRIAL: {actualDistance:F0}m, extreme time pressure!");
 
             return quest;
         }

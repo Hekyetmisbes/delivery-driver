@@ -9,7 +9,9 @@ namespace DeliveryDriver.Quest.UI
     {
         [SerializeField] private GameObject pausePanel;
         [SerializeField] private SettingsMenuUI settingsMenu;
+        [SerializeField] private QuestStatisticsUI statisticsMenu;
         [SerializeField] private bool pauseTimeScale = true;
+        [SerializeField] private bool showStatsOnPause = true;
 
         private bool isPaused;
 
@@ -55,6 +57,11 @@ namespace DeliveryDriver.Quest.UI
             if (settingsMenu != null)
             {
                 settingsMenu.SetOpen(paused);
+            }
+
+            if (statisticsMenu != null && showStatsOnPause)
+            {
+                statisticsMenu.SetVisible(paused);
             }
 
             if (pauseTimeScale)

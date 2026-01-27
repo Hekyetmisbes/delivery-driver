@@ -17,7 +17,7 @@ namespace DeliveryDriver.Quest
             QuestManager manager = QuestManager.Instance;
             if (manager == null)
             {
-                Debug.LogWarning("[QuestBalanceTester] QuestManager not found.");
+                QuestLogger.Warn("[QuestBalanceTester] QuestManager not found.");
                 return;
             }
 
@@ -38,14 +38,14 @@ namespace DeliveryDriver.Quest
             QuestManager manager = QuestManager.Instance;
             if (manager == null)
             {
-                Debug.LogWarning("[QuestBalanceTester] QuestManager not found.");
+                QuestLogger.Warn("[QuestBalanceTester] QuestManager not found.");
                 return;
             }
 
             QuestData quest = manager.CurrentQuest;
             if (quest == null)
             {
-                Debug.LogWarning("[QuestBalanceTester] No active quest to validate.");
+                QuestLogger.Warn("[QuestBalanceTester] No active quest to validate.");
                 return;
             }
 
@@ -59,7 +59,7 @@ namespace DeliveryDriver.Quest
                 }
             }
 
-            Debug.Log($"[QuestBalanceTester] Edge case check complete for '{quest.QuestName}'. Status: {quest.Status}");
+            QuestLogger.Log($"[QuestBalanceTester] Edge case check complete for '{quest.QuestName}'. Status: {quest.Status}");
         }
 
         private void RunDifficultyReport(QuestManager manager, QuestDifficulty difficulty)
@@ -87,7 +87,7 @@ namespace DeliveryDriver.Quest
 
             if (samples == 0)
             {
-                Debug.LogWarning($"[QuestBalanceTester] No quests generated for {difficulty}.");
+                QuestLogger.Warn($"[QuestBalanceTester] No quests generated for {difficulty}.");
                 return;
             }
 
@@ -96,7 +96,7 @@ namespace DeliveryDriver.Quest
             int avgReward = Mathf.RoundToInt((float)totalReward / samples);
             int avgBonus = Mathf.RoundToInt((float)totalBonus / samples);
 
-            Debug.Log($"[QuestBalanceTester] {difficulty}: avg distance {avgDistance:F0}m, avg time {avgTime:F0}s, avg reward ${avgReward}, avg bonus ${avgBonus}.");
+            QuestLogger.Log($"[QuestBalanceTester] {difficulty}: avg distance {avgDistance:F0}m, avg time {avgTime:F0}s, avg reward ${avgReward}, avg bonus ${avgBonus}.");
         }
 
         private void RunSpecialQuestReport(QuestManager manager)
@@ -114,28 +114,28 @@ namespace DeliveryDriver.Quest
         {
             if (quest == null)
             {
-                Debug.LogWarning($"[QuestBalanceTester] {label} quest generation failed.");
+                QuestLogger.Warn($"[QuestBalanceTester] {label} quest generation failed.");
                 return;
             }
 
-            Debug.Log($"[QuestBalanceTester] {label}: {quest.Difficulty}, {quest.TimeLimit:F0}s, reward ${quest.BaseReward}, bonus ${quest.BonusReward}.");
+            QuestLogger.Log($"[QuestBalanceTester] {label}: {quest.Difficulty}, {quest.TimeLimit:F0}s, reward ${quest.BaseReward}, bonus ${quest.BonusReward}.");
         }
 
         private void ValidateLocation(string label, QuestLocation location)
         {
             if (location == null)
             {
-                Debug.LogWarning($"[QuestBalanceTester] Missing {label} location.");
+                QuestLogger.Warn($"[QuestBalanceTester] Missing {label} location.");
                 return;
             }
 
             if (!Physics.Raycast(location.Position + Vector3.up * 50f, Vector3.down, out _, 100f))
             {
-                Debug.LogWarning($"[QuestBalanceTester] {label} location has no ground hit: {location.LocationName}");
+                QuestLogger.Warn($"[QuestBalanceTester] {label} location has no ground hit: {location.LocationName}");
                 return;
             }
 
-            Debug.Log($"[QuestBalanceTester] {label} location OK: {location.LocationName}");
+            QuestLogger.Log($"[QuestBalanceTester] {label} location OK: {location.LocationName}");
         }
     }
 }

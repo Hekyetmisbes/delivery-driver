@@ -23,12 +23,20 @@ namespace DeliveryDriver.Quest
 
         [Header("Statistics")]
         [SerializeField] private int totalQuestsCompleted = 0;
+        [SerializeField] private int totalQuestsAttempted = 0;
+        [SerializeField] private int totalQuestsFailed = 0;
+        [SerializeField] private int totalMoneyEarned = 0;
         [SerializeField] private float totalDistanceTraveled = 0f; // In meters
         [SerializeField] private float totalTimePlayed = 0f; // In seconds
+        [SerializeField] private float totalDeliveryTimeSeconds = 0f;
+        [SerializeField] private float fastestDeliveryTimeSeconds = 0f;
         [SerializeField] private int speedBonusesEarned = 0;
         [SerializeField] private int sRanksAchieved = 0;
         [SerializeField] private float totalCargoWeightDelivered = 0f; // In kg
         [SerializeField] private int fragileCargoDeliveredUndamaged = 0;
+        [SerializeField] private List<CargoTypeStat> cargoTypeStats = new List<CargoTypeStat>();
+        [SerializeField] private List<DailyStat> dailyStats = new List<DailyStat>();
+        [SerializeField] private List<LevelSnapshot> levelSnapshots = new List<LevelSnapshot>();
 
         [Header("Achievements")]
         [SerializeField] private List<Achievement> achievements = new List<Achievement>();
@@ -45,13 +53,43 @@ namespace DeliveryDriver.Quest
         public int CurrentXP => currentXP;
         public int XPToNextLevel => xpToNextLevel;
         public int TotalQuestsCompleted => totalQuestsCompleted;
+        public int TotalQuestsAttempted => totalQuestsAttempted;
+        public int TotalQuestsFailed => totalQuestsFailed;
+        public int TotalMoneyEarned => totalMoneyEarned;
         public float TotalDistanceTraveled => totalDistanceTraveled;
         public float TotalTimePlayed => totalTimePlayed;
+        public float TotalDeliveryTimeSeconds => totalDeliveryTimeSeconds;
+        public float FastestDeliveryTimeSeconds => fastestDeliveryTimeSeconds;
         public int SpeedBonusesEarned => speedBonusesEarned;
         public int SRanksAchieved => sRanksAchieved;
         public float TotalCargoWeightDelivered => totalCargoWeightDelivered;
         public int FragileCargoDeliveredUndamaged => fragileCargoDeliveredUndamaged;
         public IReadOnlyList<Achievement> Achievements => achievements;
+        public IReadOnlyList<CargoTypeStat> CargoTypeStats => cargoTypeStats;
+        public IReadOnlyList<DailyStat> DailyStats => dailyStats;
+        public IReadOnlyList<LevelSnapshot> LevelSnapshots => levelSnapshots;
+
+        [Serializable]
+        public class CargoTypeStat
+        {
+            public string CargoName;
+            public int Count;
+        }
+
+        [Serializable]
+        public class DailyStat
+        {
+            public string Date;
+            public int QuestsCompleted;
+            public int MoneyEarned;
+        }
+
+        [Serializable]
+        public class LevelSnapshot
+        {
+            public string DateTime;
+            public int Level;
+        }
 
         private void Awake()
         {
@@ -113,6 +151,8 @@ namespace DeliveryDriver.Quest
             }
 
             currentMoney += amount;
+            totalMoneyEarned += amount;
+            RecordDailyMoney(amount);
             OnMoneyChanged.Invoke(currentMoney);
 
             Debug.Log($"[PlayerProgressionManager] Awarded ${amount}. Total: ${currentMoney}");
@@ -203,6 +243,7 @@ namespace DeliveryDriver.Quest
             currentXP = 0;
             xpToNextLevel = CalculateXPForLevel(currentLevel + 1);
             OnLevelUp.Invoke(currentLevel);
+            RecordLevelSnapshot(currentLevel);
 
             Debug.Log($"[PlayerProgressionManager] Debug level set to {currentLevel}.");
         }
@@ -235,6 +276,7 @@ namespace DeliveryDriver.Quest
 
             // Invoke level up event
             OnLevelUp.Invoke(currentLevel);
+            RecordLevelSnapshot(currentLevel);
 
             // Task 10.1 & 10.2: Play level up sound and particle effect
             if (QuestManager.Instance != null)
@@ -326,6 +368,130 @@ namespace DeliveryDriver.Quest
         }
 
         /// <summary>
+        /// Gets the success rate as a percentage (0-100).
+        /// </summary>
+        /// <returns>Success rate percentage.</returns>
+        public float GetSuccessRatePercentage()
+        {
+            if (totalQuestsAttempted <= 0)
+            {
+                return 0f;
+            }
+
+            return Mathf.Clamp01((float)totalQuestsCompleted / totalQuestsAttempted) * 100f;
+        }
+
+        /// <summary>
+        /// Gets the average delivery time in seconds.
+        /// </summary>
+        /// <returns>Average delivery time in seconds.</returns>
+        public float GetAverageDeliveryTimeSeconds()
+        {
+            if (totalQuestsCompleted <= 0)
+            {
+                return 0f;
+            }
+
+            return totalDeliveryTimeSeconds / totalQuestsCompleted;
+        }
+
+        /// <summary>
+        /// Gets the fastest delivery time in seconds.
+        /// </summary>
+        /// <returns>Fastest delivery time in seconds.</returns>
+        public float GetFastestDeliveryTimeSeconds()
+        {
+            return fastestDeliveryTimeSeconds;
+        }
+
+        /// <summary>
+        /// Gets the most frequently delivered cargo name.
+        /// </summary>
+        /// <returns>Favorite cargo name or "N/A" if no data.</returns>
+        public string GetFavoriteCargoType()
+        {
+            if (cargoTypeStats == null || cargoTypeStats.Count == 0)
+            {
+                return "N/A";
+            }
+
+            CargoTypeStat top = cargoTypeStats.OrderByDescending(stat => stat.Count).FirstOrDefault();
+            return top != null && !string.IsNullOrWhiteSpace(top.CargoName) ? top.CargoName : "N/A";
+        }
+
+        /// <summary>
+        /// Formats a duration in seconds as MM:SS.
+        /// </summary>
+        /// <param name="seconds">Duration in seconds.</param>
+        /// <returns>Formatted time string.</returns>
+        public string FormatDuration(float seconds)
+        {
+            if (seconds <= 0f)
+            {
+                return "00:00";
+            }
+
+            int minutes = Mathf.FloorToInt(seconds / 60f);
+            int remainingSeconds = Mathf.FloorToInt(seconds % 60f);
+            return $"{minutes:00}:{remainingSeconds:00}";
+        }
+
+        private void UpdateCargoTypeStats(string cargoName)
+        {
+            if (string.IsNullOrWhiteSpace(cargoName))
+            {
+                return;
+            }
+
+            CargoTypeStat stat = cargoTypeStats.FirstOrDefault(entry => entry.CargoName == cargoName);
+            if (stat == null)
+            {
+                stat = new CargoTypeStat { CargoName = cargoName, Count = 0 };
+                cargoTypeStats.Add(stat);
+            }
+
+            stat.Count++;
+        }
+
+        private void RecordDailyMoney(int amount)
+        {
+            if (amount <= 0)
+            {
+                return;
+            }
+
+            DailyStat stat = GetOrCreateDailyStat(DateTime.Now.Date.ToString("yyyy-MM-dd"));
+            stat.MoneyEarned += amount;
+        }
+
+        private void RecordDailyQuestCompletion()
+        {
+            DailyStat stat = GetOrCreateDailyStat(DateTime.Now.Date.ToString("yyyy-MM-dd"));
+            stat.QuestsCompleted++;
+        }
+
+        private void RecordLevelSnapshot(int level)
+        {
+            levelSnapshots.Add(new LevelSnapshot
+            {
+                DateTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                Level = level
+            });
+        }
+
+        private DailyStat GetOrCreateDailyStat(string dateKey)
+        {
+            DailyStat stat = dailyStats.FirstOrDefault(entry => entry.Date == dateKey);
+            if (stat == null)
+            {
+                stat = new DailyStat { Date = dateKey, QuestsCompleted = 0, MoneyEarned = 0 };
+                dailyStats.Add(stat);
+            }
+
+            return stat;
+        }
+
+        /// <summary>
         /// Resets progression data (for new game)
         /// </summary>
         public void ResetProgression()
@@ -335,12 +501,23 @@ namespace DeliveryDriver.Quest
             currentXP = 0;
             xpToNextLevel = CalculateXPForLevel(2);
             totalQuestsCompleted = 0;
+            totalQuestsAttempted = 0;
+            totalQuestsFailed = 0;
+            totalMoneyEarned = 0;
             totalDistanceTraveled = 0f;
             totalTimePlayed = 0f;
+            totalDeliveryTimeSeconds = 0f;
+            fastestDeliveryTimeSeconds = 0f;
             speedBonusesEarned = 0;
             sRanksAchieved = 0;
             totalCargoWeightDelivered = 0f;
             fragileCargoDeliveredUndamaged = 0;
+            cargoTypeStats ??= new List<CargoTypeStat>();
+            dailyStats ??= new List<DailyStat>();
+            levelSnapshots ??= new List<LevelSnapshot>();
+            cargoTypeStats.Clear();
+            dailyStats.Clear();
+            levelSnapshots.Clear();
 
             // Reset achievements
             foreach (Achievement achievement in achievements)
@@ -457,10 +634,40 @@ namespace DeliveryDriver.Quest
         }
 
         /// <summary>
-        /// Records a quest completion and updates relevant statistics
+        /// Records a quest attempt when the player accepts a quest.
         /// </summary>
-        /// <param name="quest">The completed quest data</param>
-        public void RecordQuestCompletion(QuestData quest)
+        /// <param name="quest">The accepted quest data.</param>
+        public void RecordQuestAttempt(QuestData quest)
+        {
+            if (quest == null)
+            {
+                return;
+            }
+
+            totalQuestsAttempted++;
+        }
+
+        /// <summary>
+        /// Records a quest failure for analytics tracking.
+        /// </summary>
+        /// <param name="quest">The failed quest data.</param>
+        public void RecordQuestFailure(QuestData quest)
+        {
+            if (quest == null)
+            {
+                return;
+            }
+
+            totalQuestsFailed++;
+        }
+
+        /// <summary>
+        /// Records a quest completion and updates relevant statistics.
+        /// </summary>
+        /// <param name="quest">The completed quest data.</param>
+        /// <param name="reward">Final reward awarded for the quest.</param>
+        /// <param name="completionTimeSeconds">Completion time in seconds.</param>
+        public void RecordQuestCompletion(QuestData quest, int reward, float completionTimeSeconds)
         {
             if (quest == null)
             {
@@ -481,6 +688,7 @@ namespace DeliveryDriver.Quest
             if (quest.Cargo != null)
             {
                 totalCargoWeightDelivered += quest.Cargo.Weight;
+                UpdateCargoTypeStats(quest.Cargo.CargoName);
 
                 // Check if fragile cargo was delivered undamaged
                 if (quest.Cargo.IsFragile && quest.Cargo.CargoHealth >= 90f)
@@ -488,6 +696,18 @@ namespace DeliveryDriver.Quest
                     fragileCargoDeliveredUndamaged++;
                 }
             }
+
+            float clampedCompletionTime = Mathf.Max(0f, completionTimeSeconds);
+            if (clampedCompletionTime > 0f)
+            {
+                totalDeliveryTimeSeconds += clampedCompletionTime;
+                if (fastestDeliveryTimeSeconds <= 0f || clampedCompletionTime < fastestDeliveryTimeSeconds)
+                {
+                    fastestDeliveryTimeSeconds = clampedCompletionTime;
+                }
+            }
+
+            RecordDailyQuestCompletion();
 
             // Check achievements after recording stats
             CheckAchievements();
@@ -546,12 +766,20 @@ namespace DeliveryDriver.Quest
             currentXP = data.XP;
             xpToNextLevel = data.XPToNextLevel;
             totalQuestsCompleted = data.TotalQuestsCompleted;
+            totalQuestsAttempted = data.TotalQuestsAttempted;
+            totalQuestsFailed = data.TotalQuestsFailed;
+            totalMoneyEarned = data.TotalMoneyEarned;
             totalDistanceTraveled = data.TotalDistanceTraveled;
             totalTimePlayed = data.TotalTimePlayed;
+            totalDeliveryTimeSeconds = data.TotalDeliveryTimeSeconds;
+            fastestDeliveryTimeSeconds = data.FastestDeliveryTimeSeconds;
             speedBonusesEarned = data.SpeedBonusesEarned;
             sRanksAchieved = data.SRanksAchieved;
             totalCargoWeightDelivered = data.TotalCargoWeightDelivered;
             fragileCargoDeliveredUndamaged = data.FragileCargoDeliveredUndamaged;
+            cargoTypeStats = data.CargoTypeStats ?? new List<CargoTypeStat>();
+            dailyStats = data.DailyStats ?? new List<DailyStat>();
+            levelSnapshots = data.LevelSnapshots ?? new List<LevelSnapshot>();
 
             // Load unlocked achievements
             foreach (string achievementID in data.UnlockedAchievements)
