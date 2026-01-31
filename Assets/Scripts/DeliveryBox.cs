@@ -140,34 +140,8 @@ public class DeliveryBox : MonoBehaviour
         isPickedUp = true;
         playerTransform = player;
 
-        // Hide the box visually (like it's loaded in the car)
-        if (meshRenderers != null)
-        {
-            foreach (MeshRenderer renderer in meshRenderers)
-            {
-                renderer.enabled = false;
-            }
-        }
-
-        // Disable physics
-        if (rb != null)
-        {
-            rb.isKinematic = true;
-            rb.detectCollisions = false;
-        }
-
-        // Disable colliders
-        Collider[] colliders = GetComponentsInChildren<Collider>();
-        foreach (Collider col in colliders)
-        {
-            col.enabled = false;
-        }
-
-        // Hide indicator
-        if (pickupIndicator != null)
-        {
-            pickupIndicator.SetActive(false);
-        }
+        // Completely hide the box gameobject
+        gameObject.SetActive(false);
 
         // Notify delivery manager
         DeliveryManager deliveryManager = FindFirstObjectByType<DeliveryManager>();

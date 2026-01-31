@@ -94,12 +94,28 @@ namespace DeliveryDriver.Quest.UI
 #if ENABLE_INPUT_SYSTEM
             if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame)
             {
-                questListUI?.TogglePanel();
+                if (questListUI != null)
+                {
+                    Debug.Log("[QuestUIManager] Tab pressed - Toggling quest list");
+                    questListUI.TogglePanel();
+                }
+                else
+                {
+                    Debug.LogWarning("[QuestUIManager] questListUI is null!");
+                }
             }
 #else
             if (Input.GetKeyDown(KeyCode.Tab))
             {
-                questListUI?.TogglePanel();
+                if (questListUI != null)
+                {
+                    Debug.Log("[QuestUIManager] Tab pressed - Toggling quest list");
+                    questListUI.TogglePanel();
+                }
+                else
+                {
+                    Debug.LogWarning("[QuestUIManager] questListUI is null!");
+                }
             }
 #endif
         }

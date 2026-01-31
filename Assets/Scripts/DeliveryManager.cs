@@ -38,6 +38,7 @@ public class DeliveryManager : MonoBehaviour
     private DeliveryBox currentBox;
     private GameObject currentPickupIndicator;
     private GameObject currentDeliveryIndicator;
+    private GameObject currentDeliveryPreview; // Ghost box at delivery location
     private Vector3 currentPickupPoint;
     private Vector3 currentDeliveryPoint;
     private bool isDeliveryActive = false;
@@ -288,6 +289,9 @@ public class DeliveryManager : MonoBehaviour
             CreateDefaultDeliveryIndicator();
         }
 
+        // Create ghost box preview at delivery location
+        CreateDeliveryPreview();
+
         // Update quest with delivery location
         if (useQuestSystem)
         {
@@ -330,6 +334,58 @@ public class DeliveryManager : MonoBehaviour
         DeliveryIndicator script = indicator.AddComponent<DeliveryIndicator>();
 
         currentDeliveryIndicator = indicator;
+    }
+
+    /// <summary>
+    /// Create ghost box preview at delivery location
+    /// </summary>
+    private void CreateDeliveryPreview()
+    {
+        if (boxPrefab == null || currentBox == null) return;
+
+        // Instantiate ghost box
+        currentDeliveryPreview = Instantiate(boxPrefab, currentDeliveryPoint, Quaternion.identity);
+        currentDeliveryPreview.name = "DeliveryPreview_GhostBox";
+
+        // Remove scripts and physics
+        DeliveryBox previewBox = currentDeliveryPreview.GetComponent<DeliveryBox>();
+        if (previewBox != null) Destroy(previewBox);
+
+        Rigidbody previewRb = currentDeliveryPreview.GetComponent<Rigidbody>();
+        if (previewRb != null) Destroy(previewRb);
+
+        Collider[] previewColliders = currentDeliveryPreview.GetComponentsInChildren<Collider>();
+        foreach (Collider col in previewColliders)
+        {
+            Destroy(col);
+        }
+
+        // Make it transparent/ghost-like
+        MeshRenderer[] renderers = currentDeliveryPreview.GetComponentsInChildren<MeshRenderer>();
+        foreach (MeshRenderer renderer in renderers)
+        {
+            foreach (Material mat in renderer.materials)
+            {
+                // Make transparent
+                mat.SetFloat("_Surface", 1); // Transparent mode
+                mat.SetFloat("_AlphaClip", 0);
+
+                Color color = mat.color;
+                color.a = 0.3f; // 30% opacity
+                mat.color = color;
+
+                // Enable transparency
+                mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                mat.SetInt("_ZWrite", 0);
+                mat.renderQueue = 3000;
+            }
+        }
+
+        if (showDebugInfo)
+        {
+            Debug.Log($"[DeliveryManager] Created ghost box preview at {currentDeliveryPoint}");
+        }
     }
 
     /// <summary>
@@ -389,11 +445,20 @@ public class DeliveryManager : MonoBehaviour
             Destroy(currentDeliveryIndicator);
         }
 
+        // Destroy ghost box preview
+        if (currentDeliveryPreview != null)
+        {
+            Destroy(currentDeliveryPreview);
+        }
+
         // Destroy box
         if (currentBox != null)
         {
             Destroy(currentBox.gameObject);
         }
+
+        // Show quest complete UI
+        ShowQuestCompleteUI();
 
         if (showDebugInfo)
         {
@@ -496,6 +561,27 @@ public class DeliveryManager : MonoBehaviour
         }
 
         currentDeliveryQuest = null;
+    }
+
+    /// <summary>
+    /// Show quest complete UI
+    /// </summary>
+    private void ShowQuestCompleteUI()
+    {
+        // Try to find and use the quest complete UI
+        if (QuestUIManager.Instance != null)
+        {
+            var questCompleteUI = FindFirstObjectByType<DeliveryDriver.Quest.UI.QuestCompleteUI>();
+            if (questCompleteUI != null && currentDeliveryQuest != null)
+            {
+                questCompleteUI.Show(currentDeliveryQuest);
+            }
+        }
+        else
+        {
+            // Fallback: simple debug message
+            Debug.Log("=== QUEST COMPLETED ===");
+        }
     }
 
     /// <summary>
