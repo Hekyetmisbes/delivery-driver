@@ -45,8 +45,6 @@ namespace TrafficSystem
         [SerializeField] private float snapHeightOffset = 1f;
         [Tooltip("Speed after recovery (km/h)")]
         [SerializeField] private float recoverySpeed = 20f;
-        [Tooltip("Smooth recovery rotation speed")]
-        [SerializeField] private float recoveryRotationSpeed = 5f;
         [Tooltip("Raycast mask for snapping to road/ground")]
         [SerializeField] private LayerMask snapGroundMask = ~0;
         [Tooltip("Raycast height above snap point")]
@@ -288,7 +286,7 @@ namespace TrafficSystem
                 // Use projected point directly (it's on the road)
                 float heightOffset = snapHeightOffset;
                 if (carAgent != null)
-                    heightOffset = Mathf.Max(heightOffset, carAgent.GetGroundClearanceOffset());
+                    heightOffset = carAgent.GetGroundClearanceOffset();
 
                 Vector3 snapBase = GetGroundedPoint(projectedPoint);
                 Vector3 snapPosition = snapBase + Vector3.up * heightOffset;

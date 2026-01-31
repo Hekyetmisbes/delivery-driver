@@ -1,0 +1,625 @@
+using System.Collections.Generic;
+using UnityEngine;
+using DeliveryDriver.Quest;
+using DeliveryDriver.Quest.UI;
+
+/// <summary>
+/// Manages delivery missions - spawning boxes and delivery points
+/// Integrates with Quest system to show missions in UI
+/// </summary>
+public class DeliveryManager : MonoBehaviour
+{
+    [Header("Prefabs")]
+    [SerializeField] private GameObject boxPrefab;
+    [SerializeField] private GameObject pickupIndicatorPrefab;
+    [SerializeField] private GameObject deliveryIndicatorPrefab;
+
+    [Header("Spawn Settings")]
+    [SerializeField] private Transform[] spawnPoints;
+    [SerializeField] private float spawnHeight = 0.5f;
+    [SerializeField] private float minDistanceBetweenPoints = 20f;
+    [SerializeField] private LayerMask groundMask = ~0;
+
+    [Header("Delivery Settings")]
+    [SerializeField] private float deliveryRadius = 5f;
+    [SerializeField] private bool autoGenerateSpawnPoints = true;
+    [SerializeField] private int numberOfAutoSpawnPoints = 10;
+    [SerializeField] private Vector2 spawnAreaMin = new Vector2(-50, -50);
+    [SerializeField] private Vector2 spawnAreaMax = new Vector2(50, 50);
+    [SerializeField] private float raycastStartHeight = 300f;
+    [SerializeField] private float raycastMaxDistance = 400f;
+
+    [Header("Quest Integration")]
+    [SerializeField] private bool useQuestSystem = true;
+    [SerializeField] private CargoLibrary cargoLibrary;
+
+    [Header("Debug")]
+    [SerializeField] private bool showDebugInfo = true;
+
+    private DeliveryBox currentBox;
+    private GameObject currentPickupIndicator;
+    private GameObject currentDeliveryIndicator;
+    private GameObject currentDeliveryPreview; // Ghost box at delivery location
+    private Vector3 currentPickupPoint;
+    private Vector3 currentDeliveryPoint;
+    private bool isDeliveryActive = false;
+    private List<Vector3> availableSpawnPoints = new List<Vector3>();
+    private DeliveryUI deliveryUI;
+    private QuestData currentDeliveryQuest;
+
+    public bool IsDeliveryActive => isDeliveryActive;
+    public Vector3 CurrentDeliveryPoint => currentDeliveryPoint;
+    public Vector3 CurrentPickupPoint => currentPickupPoint;
+
+    private void Start()
+    {
+        deliveryUI = FindFirstObjectByType<DeliveryUI>();
+        GenerateSpawnPoints();
+        SpawnNewBox();
+    }
+
+    private void Update()
+    {
+        // Check delivery proximity
+        if (isDeliveryActive && currentBox != null && currentBox.IsPickedUp)
+        {
+            Transform player = GameObject.FindGameObjectWithTag("Player")?.transform;
+            if (player == null)
+            {
+                // Try to find CarController
+                CarController car = FindFirstObjectByType<CarController>();
+                if (car != null) player = car.transform;
+            }
+
+            if (player != null)
+            {
+                float distance = Vector3.Distance(player.position, currentDeliveryPoint);
+
+                // Update UI with distance
+                if (deliveryUI != null)
+                {
+                    deliveryUI.UpdateDistance(distance);
+                }
+
+                if (distance < deliveryRadius)
+                {
+                    CompleteDelivery();
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Generate spawn points across the map
+    /// </summary>
+    private void GenerateSpawnPoints()
+    {
+        availableSpawnPoints.Clear();
+
+        // Use manual spawn points if available
+        if (spawnPoints != null && spawnPoints.Length > 0 && !autoGenerateSpawnPoints)
+        {
+            foreach (Transform point in spawnPoints)
+            {
+                if (point != null)
+                {
+                    availableSpawnPoints.Add(point.position);
+                }
+            }
+        }
+        else
+        {
+            // Auto-generate spawn points
+            for (int i = 0; i < numberOfAutoSpawnPoints; i++)
+            {
+                Vector3 randomPoint = GetRandomGroundPosition();
+                availableSpawnPoints.Add(randomPoint);
+            }
+        }
+
+        if (showDebugInfo)
+        {
+            Debug.Log($"[DeliveryManager] Generated {availableSpawnPoints.Count} spawn points");
+        }
+    }
+
+    /// <summary>
+    /// Get random position on ground with proper ground detection
+    /// </summary>
+    private Vector3 GetRandomGroundPosition()
+    {
+        int maxAttempts = 30;
+        for (int i = 0; i < maxAttempts; i++)
+        {
+            float x = Random.Range(spawnAreaMin.x, spawnAreaMax.x);
+            float z = Random.Range(spawnAreaMin.y, spawnAreaMax.y);
+            Vector3 position = new Vector3(x, raycastStartHeight, z);
+
+            // Raycast down to find ground
+            if (Physics.Raycast(position, Vector3.down, out RaycastHit hit, raycastMaxDistance, groundMask, QueryTriggerInteraction.Ignore))
+            {
+                // Make sure it's not too steep and not a trigger
+                if (Vector3.Dot(hit.normal, Vector3.up) > 0.7f && !hit.collider.isTrigger)
+                {
+                    Vector3 spawnPos = hit.point + Vector3.up * spawnHeight;
+
+                    // Validate spawn position with sphere check (ensure there's space)
+                    if (!Physics.CheckSphere(spawnPos, 1f, groundMask, QueryTriggerInteraction.Ignore))
+                    {
+                        if (showDebugInfo && i > 0)
+                        {
+                            Debug.Log($"[DeliveryManager] Found valid spawn point at {spawnPos} (attempt {i + 1})");
+                        }
+                        return spawnPos;
+                    }
+                }
+            }
+        }
+
+        // Fallback - use player position if available
+        GameObject player = GameObject.FindGameObjectWithTag("Player");
+        if (player == null)
+        {
+            CarController car = FindFirstObjectByType<CarController>();
+            if (car != null) player = car.gameObject;
+        }
+
+        if (player != null)
+        {
+            Vector3 playerPos = player.transform.position;
+            Vector3 offset = Random.insideUnitCircle * 20f;
+            Vector3 fallbackPos = new Vector3(playerPos.x + offset.x, raycastStartHeight, playerPos.z + offset.y);
+
+            if (Physics.Raycast(fallbackPos, Vector3.down, out RaycastHit hit, raycastMaxDistance, groundMask, QueryTriggerInteraction.Ignore))
+            {
+                Debug.LogWarning($"[DeliveryManager] Using fallback spawn near player at {hit.point}");
+                return hit.point + Vector3.up * spawnHeight;
+            }
+        }
+
+        Debug.LogError("[DeliveryManager] Failed to find valid spawn position! Using fallback.");
+        return new Vector3(0, 10f, 0);
+    }
+
+    /// <summary>
+    /// Spawn a new delivery box at random location
+    /// </summary>
+    private void SpawnNewBox()
+    {
+        if (boxPrefab == null)
+        {
+            Debug.LogError("[DeliveryManager] Box prefab is not assigned!");
+            return;
+        }
+
+        // Get random spawn point
+        Vector3 spawnPos = availableSpawnPoints.Count > 0 ?
+            availableSpawnPoints[Random.Range(0, availableSpawnPoints.Count)] :
+            GetRandomGroundPosition();
+
+        // Spawn box with slight rotation variation
+        Quaternion rotation = Quaternion.Euler(0, Random.Range(0f, 360f), 0);
+        GameObject boxObj = Instantiate(boxPrefab, spawnPos, rotation);
+
+        currentBox = boxObj.GetComponent<DeliveryBox>();
+        if (currentBox == null)
+        {
+            currentBox = boxObj.AddComponent<DeliveryBox>();
+        }
+
+        // Setup colliders
+        Collider[] existingColliders = boxObj.GetComponentsInChildren<Collider>();
+        bool hasMainCollider = false;
+        bool hasTriggerCollider = false;
+
+        foreach (Collider col in existingColliders)
+        {
+            if (col.isTrigger) hasTriggerCollider = true;
+            else hasMainCollider = true;
+        }
+
+        // Add main collider if missing
+        if (!hasMainCollider)
+        {
+            BoxCollider collider = boxObj.AddComponent<BoxCollider>();
+            collider.isTrigger = false;
+            collider.size = new Vector3(1f, 1f, 1f);
+        }
+
+        // Add trigger collider for pickup if missing
+        if (!hasTriggerCollider)
+        {
+            BoxCollider triggerCollider = boxObj.AddComponent<BoxCollider>();
+            triggerCollider.isTrigger = true;
+            triggerCollider.center = Vector3.zero;
+            triggerCollider.size = new Vector3(3f, 3f, 3f); // Large pickup area
+        }
+
+        // Ensure rigidbody exists
+        Rigidbody boxRb = boxObj.GetComponent<Rigidbody>();
+        if (boxRb == null)
+        {
+            boxRb = boxObj.AddComponent<Rigidbody>();
+            boxRb.mass = 5f;
+            boxRb.linearDamping = 0.5f;
+            boxRb.angularDamping = 0.5f;
+        }
+        boxRb.isKinematic = true; // Start kinematic
+
+        // Spawn pickup indicator
+        if (pickupIndicatorPrefab != null)
+        {
+            currentPickupIndicator = Instantiate(pickupIndicatorPrefab, spawnPos + Vector3.up * 2f, Quaternion.identity);
+            currentPickupIndicator.transform.SetParent(currentBox.transform);
+        }
+
+        // Store pickup point
+        currentPickupPoint = spawnPos;
+
+        // Create quest in quest system
+        if (useQuestSystem)
+        {
+            CreateDeliveryQuest(spawnPos);
+        }
+
+        if (showDebugInfo)
+        {
+            Debug.Log($"[DeliveryManager] Spawned box at {spawnPos}");
+        }
+    }
+
+    /// <summary>
+    /// Called when player picks up the box
+    /// </summary>
+    public void OnBoxPickedUp(DeliveryBox box)
+    {
+        if (box != currentBox) return;
+
+        // Generate delivery point (different from pickup)
+        currentDeliveryPoint = GetDeliveryPoint(box.transform.position);
+        isDeliveryActive = true;
+
+        // Spawn delivery indicator
+        if (deliveryIndicatorPrefab != null)
+        {
+            currentDeliveryIndicator = Instantiate(deliveryIndicatorPrefab, currentDeliveryPoint + Vector3.up * 2f, Quaternion.identity);
+        }
+        else
+        {
+            // Create default delivery indicator
+            CreateDefaultDeliveryIndicator();
+        }
+
+        // Create ghost box preview at delivery location
+        CreateDeliveryPreview();
+
+        // Update quest with delivery location
+        if (useQuestSystem)
+        {
+            UpdateQuestWithDelivery(currentDeliveryPoint);
+        }
+
+        // Notify UI
+        if (deliveryUI != null)
+        {
+            deliveryUI.OnBoxPickedUp(currentDeliveryPoint);
+        }
+
+        if (showDebugInfo)
+        {
+            float distance = Vector3.Distance(box.transform.position, currentDeliveryPoint);
+            Debug.Log($"[DeliveryManager] Delivery point set at {currentDeliveryPoint} (Distance: {distance:F1}m)");
+        }
+    }
+
+    /// <summary>
+    /// Create default delivery indicator if none assigned
+    /// </summary>
+    private void CreateDefaultDeliveryIndicator()
+    {
+        // Create a tall cylinder
+        GameObject indicator = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        indicator.name = "DeliveryIndicator";
+        indicator.transform.position = currentDeliveryPoint + Vector3.up * 2f;
+        indicator.transform.localScale = new Vector3(2f, 3f, 2f);
+
+        // Remove collider
+        Destroy(indicator.GetComponent<Collider>());
+
+        // Create glowing material
+        Material indicatorMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+        indicatorMat.color = new Color(1f, 0.8f, 0f, 1f); // Yellow-orange
+        indicator.GetComponent<MeshRenderer>().material = indicatorMat;
+
+        // Add rotation script
+        DeliveryIndicator script = indicator.AddComponent<DeliveryIndicator>();
+
+        currentDeliveryIndicator = indicator;
+    }
+
+    /// <summary>
+    /// Create ghost box preview at delivery location
+    /// </summary>
+    private void CreateDeliveryPreview()
+    {
+        if (boxPrefab == null || currentBox == null) return;
+
+        // Instantiate ghost box
+        currentDeliveryPreview = Instantiate(boxPrefab, currentDeliveryPoint, Quaternion.identity);
+        currentDeliveryPreview.name = "DeliveryPreview_GhostBox";
+
+        // Remove scripts and physics
+        DeliveryBox previewBox = currentDeliveryPreview.GetComponent<DeliveryBox>();
+        if (previewBox != null) Destroy(previewBox);
+
+        Rigidbody previewRb = currentDeliveryPreview.GetComponent<Rigidbody>();
+        if (previewRb != null) Destroy(previewRb);
+
+        Collider[] previewColliders = currentDeliveryPreview.GetComponentsInChildren<Collider>();
+        foreach (Collider col in previewColliders)
+        {
+            Destroy(col);
+        }
+
+        // Make it transparent/ghost-like
+        MeshRenderer[] renderers = currentDeliveryPreview.GetComponentsInChildren<MeshRenderer>();
+        foreach (MeshRenderer renderer in renderers)
+        {
+            foreach (Material mat in renderer.materials)
+            {
+                // Make transparent
+                mat.SetFloat("_Surface", 1); // Transparent mode
+                mat.SetFloat("_AlphaClip", 0);
+
+                Color color = mat.color;
+                color.a = 0.3f; // 30% opacity
+                mat.color = color;
+
+                // Enable transparency
+                mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                mat.SetInt("_ZWrite", 0);
+                mat.renderQueue = 3000;
+            }
+        }
+
+        if (showDebugInfo)
+        {
+            Debug.Log($"[DeliveryManager] Created ghost box preview at {currentDeliveryPoint}");
+        }
+    }
+
+    /// <summary>
+    /// Get delivery point far from pickup location
+    /// </summary>
+    private Vector3 GetDeliveryPoint(Vector3 pickupPoint)
+    {
+        Vector3 deliveryPoint;
+        int maxAttempts = 20;
+        int attempts = 0;
+
+        do
+        {
+            deliveryPoint = availableSpawnPoints.Count > 0 ?
+                availableSpawnPoints[Random.Range(0, availableSpawnPoints.Count)] :
+                GetRandomGroundPosition();
+
+            attempts++;
+        }
+        while (Vector3.Distance(pickupPoint, deliveryPoint) < minDistanceBetweenPoints && attempts < maxAttempts);
+
+        return deliveryPoint;
+    }
+
+    /// <summary>
+    /// Called when box is delivered
+    /// </summary>
+    public void OnBoxDelivered(DeliveryBox box)
+    {
+        CompleteDelivery();
+    }
+
+    /// <summary>
+    /// Complete current delivery and spawn new box
+    /// </summary>
+    private void CompleteDelivery()
+    {
+        if (!isDeliveryActive) return;
+
+        isDeliveryActive = false;
+
+        QuestData questToShow = currentDeliveryQuest;
+
+        // Complete quest
+        if (useQuestSystem)
+        {
+            CompleteDeliveryQuest();
+        }
+
+        // Notify UI
+        if (deliveryUI != null)
+        {
+            deliveryUI.OnDeliveryComplete();
+        }
+
+        // Destroy indicators
+        if (currentDeliveryIndicator != null)
+        {
+            Destroy(currentDeliveryIndicator);
+        }
+
+        // Destroy ghost box preview
+        if (currentDeliveryPreview != null)
+        {
+            Destroy(currentDeliveryPreview);
+        }
+
+        // Destroy box
+        if (currentBox != null)
+        {
+            Destroy(currentBox.gameObject);
+        }
+
+        // Show quest complete UI
+        ShowQuestCompleteUI(questToShow);
+
+        currentDeliveryQuest = null;
+
+        if (showDebugInfo)
+        {
+            Debug.Log("[DeliveryManager] Delivery completed! Spawning new box...");
+        }
+
+        // Spawn new box after delay
+        Invoke(nameof(SpawnNewBox), 2f);
+    }
+
+    /// <summary>
+    /// Create a delivery quest in the quest system
+    /// </summary>
+    private void CreateDeliveryQuest(Vector3 pickupPos)
+    {
+        if (QuestManager.Instance == null)
+        {
+            Debug.LogWarning("[DeliveryManager] QuestManager not found! Quest will not be created.");
+            return;
+        }
+
+        // Create quest data
+        currentDeliveryQuest = new QuestData
+        {
+            QuestID = System.Guid.NewGuid().ToString(),
+            QuestName = "Package Delivery",
+            QuestDescription = $"Pick up package at {FormatCoordinates(pickupPos)}",
+            QuestType = QuestType.StandardDelivery,
+            Difficulty = QuestDifficulty.Easy,
+            Status = QuestStatus.NotStarted,
+            TimeLimit = 300f, // 5 minutes
+            TimeRemaining = 300f,
+            BaseReward = 100,
+            BonusReward = 50,
+            PickupLocation = new QuestLocation(pickupPos, $"Pickup: {FormatCoordinates(pickupPos)}", deliveryRadius),
+            DeliveryLocations = new List<QuestLocation>()
+        };
+
+        // Add cargo if available
+        if (cargoLibrary != null)
+        {
+            CargoData randomCargo = cargoLibrary.GetRandomCargo();
+            if (randomCargo != null)
+            {
+                currentDeliveryQuest.Cargo = randomCargo;
+            }
+        }
+
+        // Add quest to QuestManager
+        QuestManager.Instance.AddAvailableQuest(currentDeliveryQuest);
+        QuestManager.Instance.StartQuest(currentDeliveryQuest);
+
+        if (showDebugInfo)
+        {
+            Debug.Log($"[DeliveryManager] Created delivery quest: {currentDeliveryQuest.QuestName}");
+        }
+    }
+
+    /// <summary>
+    /// Update quest with delivery location
+    /// </summary>
+    private void UpdateQuestWithDelivery(Vector3 deliveryPos)
+    {
+        if (currentDeliveryQuest == null) return;
+
+        // Add delivery location
+        QuestLocation deliveryLocation = new QuestLocation(
+            deliveryPos,
+            $"Delivery: {FormatCoordinates(deliveryPos)}",
+            deliveryRadius
+        );
+
+        currentDeliveryQuest.DeliveryLocations.Add(deliveryLocation);
+        currentDeliveryQuest.QuestDescription = $"Deliver package to {FormatCoordinates(deliveryPos)}";
+        currentDeliveryQuest.Status = QuestStatus.Active;
+
+        // Show marker
+        deliveryLocation.VisualMarker = deliveryIndicatorPrefab;
+        deliveryLocation.ShowMarker();
+
+        if (showDebugInfo)
+        {
+            Debug.Log($"[DeliveryManager] Updated quest with delivery location: {FormatCoordinates(deliveryPos)}");
+        }
+    }
+
+    /// <summary>
+    /// Complete the current delivery quest
+    /// </summary>
+    private void CompleteDeliveryQuest()
+    {
+        if (currentDeliveryQuest == null || QuestManager.Instance == null) return;
+
+        currentDeliveryQuest.Status = QuestStatus.Completed;
+        QuestManager.Instance.CompleteQuest(currentDeliveryQuest);
+
+        if (showDebugInfo)
+        {
+            Debug.Log($"[DeliveryManager] Completed delivery quest!");
+        }
+
+    }
+
+    /// <summary>
+    /// Show quest complete UI
+    /// </summary>
+    private void ShowQuestCompleteUI(QuestData quest)
+    {
+        // Try to find and use the quest complete UI
+        if (QuestUIManager.Instance != null)
+        {
+            QuestCompleteUI questCompleteUI = FindFirstObjectByType<QuestCompleteUI>();
+            if (questCompleteUI != null)
+            {
+                int reward = QuestManager.Instance != null ? QuestManager.Instance.LastCompletionReward : 0;
+                questCompleteUI.ShowCompleteScreen(quest, reward);
+            }
+        }
+        else
+        {
+            // Fallback: simple debug message
+            Debug.Log("=== QUEST COMPLETED ===");
+        }
+    }
+
+    /// <summary>
+    /// Format coordinates for display
+    /// </summary>
+    private string FormatCoordinates(Vector3 position)
+    {
+        return $"({position.x:F0}, {position.z:F0})";
+    }
+
+    private void OnDrawGizmos()
+    {
+        if (!showDebugInfo) return;
+
+        // Draw spawn points
+        Gizmos.color = Color.green;
+        foreach (Vector3 point in availableSpawnPoints)
+        {
+            Gizmos.DrawWireSphere(point, 2f);
+        }
+
+        // Draw pickup point
+        if (currentBox != null && !currentBox.IsPickedUp)
+        {
+            Gizmos.color = Color.cyan;
+            Gizmos.DrawWireSphere(currentPickupPoint, deliveryRadius);
+        }
+
+        // Draw delivery point
+        if (isDeliveryActive)
+        {
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawWireSphere(currentDeliveryPoint, deliveryRadius);
+        }
+    }
+}

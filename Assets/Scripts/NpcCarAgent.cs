@@ -17,6 +17,16 @@ namespace TrafficSystem
         [SerializeField] private WheelCollider rearLeftCollider;
         [SerializeField] private WheelCollider rearRightCollider;
 
+        [Header("Wheel Visuals")]
+        [SerializeField] private Transform frontLeftWheelVisual;
+        [SerializeField] private Transform frontRightWheelVisual;
+        [SerializeField] private Transform rearLeftWheelVisual;
+        [SerializeField] private Transform rearRightWheelVisual;
+        [Tooltip("Auto-assign wheel visuals by searching children")]
+        [SerializeField] private bool autoSetupWheelVisuals = true;
+        [Tooltip("If a wheel collider shares a mesh, create a visual child at runtime")]
+        [SerializeField] private bool autoCreateWheelVisualsIfMissing = true;
+
         [Header("Steering Settings")]
         [Tooltip("Lookahead distance for Pure Pursuit (meters)")]
         [SerializeField] private float lookAheadDistance = 10f;
@@ -42,12 +52,24 @@ namespace TrafficSystem
         [SerializeField] private float speedTolerance = 5f;
 
         [Header("Obstacle Avoidance")]
-        [Tooltip("Enable simple raycast obstacle detection")]
+        [Tooltip("Enable advanced obstacle detection and avoidance")]
         [SerializeField] private bool enableObstacleAvoidance = true;
         [Tooltip("Forward raycast distance (meters)")]
         [SerializeField] private float avoidanceRayDistance = 15f;
+        [Tooltip("Side raycast distance for lane checking (meters)")]
+        [SerializeField] private float sideRayDistance = 10f;
+        [Tooltip("Lateral offset for side raycasts (meters)")]
+        [SerializeField] private float sideRayOffset = 1.5f;
+        [Tooltip("Safe following distance (meters)")]
+        [SerializeField] private float safeFollowingDistance = 8f;
+        [Tooltip("Critical braking distance (meters)")]
+        [SerializeField] private float criticalBrakingDistance = 4f;
         [Tooltip("Brake strength when obstacle detected (0-1)")]
         [SerializeField] private float avoidanceBrakeStrength = 0.7f;
+        [Tooltip("Enable lane changing to avoid obstacles")]
+        [SerializeField] private bool enableLaneChange = true;
+        [Tooltip("Lane change speed (how fast to move laterally)")]
+        [SerializeField] private float laneChangeSpeed = 2f;
         [Tooltip("Layer mask for obstacle detection")]
         [SerializeField] private LayerMask obstacleLayerMask = ~0;
 
@@ -102,8 +124,15 @@ namespace TrafficSystem
         private bool isInitialized;
         private Vector3 currentLookAheadPoint;
         private bool isObstacleDetected;
+        private float obstacleDistance;
         private bool isPotentiallyOffRoad;
         private float wheelBase;
+
+        // Advanced obstacle avoidance state
+        private bool leftLaneClear;
+        private bool rightLaneClear;
+        private float targetLateralOffset;
+        private float currentLateralOffset;
 
         // Randomized behavior parameters
         private float lateralOffset; // Lateral offset from centerline (for lane variation)
@@ -119,18 +148,20 @@ namespace TrafficSystem
 
         public float GetGroundClearanceOffset()
         {
-            // Start with minimal offset
-            float offset = 0.1f;
+            float offset = minGroundClearance;
+            bool used = false;
 
-            // Use wheel radius only (suspension will compress when grounded)
-            // But cap it at 0.4m to prevent spawning too high
-            if (frontLeftCollider != null) offset = Mathf.Max(offset, Mathf.Min(frontLeftCollider.radius, 0.4f));
-            if (frontRightCollider != null) offset = Mathf.Max(offset, Mathf.Min(frontRightCollider.radius, 0.4f));
-            if (rearLeftCollider != null) offset = Mathf.Max(offset, Mathf.Min(rearLeftCollider.radius, 0.4f));
-            if (rearRightCollider != null) offset = Mathf.Max(offset, Mathf.Min(rearRightCollider.radius, 0.4f));
+            offset = Mathf.Max(offset, GetWheelRootOffset(frontLeftCollider, ref used));
+            offset = Mathf.Max(offset, GetWheelRootOffset(frontRightCollider, ref used));
+            offset = Mathf.Max(offset, GetWheelRootOffset(rearLeftCollider, ref used));
+            offset = Mathf.Max(offset, GetWheelRootOffset(rearRightCollider, ref used));
 
-            // CRITICAL: Clamp to very low values
-            offset = Mathf.Clamp(offset, 0.1f, 0.5f);
+            if (!used)
+            {
+                offset = Mathf.Max(offset, Mathf.Clamp(GetBoundsClearance(), minGroundClearance, maxGroundClearance));
+            }
+
+            offset = Mathf.Clamp(offset, minGroundClearance, maxGroundClearance);
 
             Debug.Log($"[NpcCarAgent] {name} - Ground clearance: {offset:F2}m");
             return offset;
@@ -142,19 +173,19 @@ namespace TrafficSystem
             return wheel.radius; // Just radius, suspension will compress
         }
 
-        private float GetWheelRootOffsetSafe(WheelCollider wheel, ref bool used)
+        private float GetWheelRootOffset(WheelCollider wheel, ref bool used)
         {
             if (wheel == null) return 0f;
             Vector3 localPos = transform.InverseTransformPoint(wheel.transform.position);
             float required = wheel.radius - localPos.y;
             used = true;
-            float clearance = wheel.radius + wheel.suspensionDistance;
-            float maxReasonable = Mathf.Max(1.5f, wheel.radius * 4f + 0.2f);
-            if (required < 0.05f || required > maxReasonable)
-            {
-                return clearance;
-            }
-            return required;
+            if (float.IsNaN(required) || float.IsInfinity(required))
+                return 0f;
+
+            if (required < minGroundClearance)
+                return minGroundClearance;
+
+            return Mathf.Clamp(required, minGroundClearance, maxGroundClearance);
         }
 
         private float GetBoundsClearance()
@@ -204,6 +235,7 @@ namespace TrafficSystem
             CacheWheelGeometry();
             NormalizeModelAxes();
             ConfigureGroundMaskIfNeeded();
+            SetupWheelVisuals();
         }
 
         private void ConfigureSuspension()
@@ -255,6 +287,8 @@ namespace TrafficSystem
 
             // Randomize driving personality
             lateralOffset = Random.Range(-2.5f, 2.5f); // Random lane position (-2.5 to 2.5 meters)
+            targetLateralOffset = lateralOffset; // Initialize target
+            currentLateralOffset = lateralOffset;
             personalityLookAhead = lookAheadDistance * Random.Range(0.6f, 1.4f); // Vary lookahead 60-140%
             personalityAcceleration = acceleration * Random.Range(0.7f, 1.3f); // Vary acceleration 70-130%
             personalitySteerSpeed = steeringSmoothSpeed * Random.Range(0.7f, 1.3f); // Vary steering 70-130%
@@ -272,6 +306,7 @@ namespace TrafficSystem
             rb.linearDamping = Random.Range(0.04f, 0.06f);
             rb.angularDamping = Random.Range(1.0f, 1.5f); // Higher for better stability
             rb.centerOfMass = new Vector3(0, -0.8f, 0); // Lower center of mass prevents rollovers
+            rb.sleepThreshold = 0.0f; // Prevent stutter from sleeping rigidbodies
 
             rb.interpolation = rbInterpolation;
             rb.collisionDetectionMode = rbCollisionDetection;
@@ -334,9 +369,38 @@ namespace TrafficSystem
             UpdatePath();
             UpdateOffRoadStatus();
             CheckObstacles();
+            UpdateLaneChange();
             ApplySteering();
             ApplyStability();
             ApplyThrottle();
+        }
+
+        /// <summary>
+        /// Smoothly update lateral offset for lane changes
+        /// </summary>
+        private void UpdateLaneChange()
+        {
+            if (!enableLaneChange) return;
+
+            // Smoothly transition to target lateral offset
+            lateralOffset = Mathf.Lerp(lateralOffset, targetLateralOffset, Time.fixedDeltaTime * laneChangeSpeed);
+
+            // Reset to original lane if no obstacle and lane change complete
+            if (!isObstacleDetected && Mathf.Abs(lateralOffset - targetLateralOffset) < 0.1f)
+            {
+                // Gradually return to center/original position
+                if (Mathf.Abs(currentLateralOffset) > 0.1f)
+                {
+                    targetLateralOffset = Mathf.Lerp(targetLateralOffset, 0f, Time.fixedDeltaTime * 0.5f);
+                }
+            }
+
+            currentLateralOffset = lateralOffset;
+        }
+
+        private void LateUpdate()
+        {
+            UpdateWheelVisuals();
         }
 
         /// <summary>
@@ -579,37 +643,154 @@ namespace TrafficSystem
         }
 
         /// <summary>
-        /// Simple raycast obstacle detection
+        /// Advanced obstacle detection with multiple raycasts
         /// </summary>
         private void CheckObstacles()
         {
             isObstacleDetected = false;
+            leftLaneClear = true;
+            rightLaneClear = true;
+            obstacleDistance = float.MaxValue;
 
             if (!enableObstacleAvoidance) return;
 
-            // Forward raycast
-            if (Physics.Raycast(transform.position + Vector3.up, transform.forward, out RaycastHit hit, avoidanceRayDistance, obstacleLayerMask))
+            Vector3 rayOrigin = transform.position + Vector3.up * 0.5f;
+            Vector3 forward = transform.forward;
+            Vector3 right = transform.right;
+
+            // Center raycast - main forward detection
+            if (Physics.Raycast(rayOrigin, forward, out RaycastHit centerHit, avoidanceRayDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore))
             {
-                // Check if we hit another vehicle or obstacle
-                if (hit.collider.GetComponent<NpcCarAgent>() != null || hit.collider.GetComponent<CarController>() != null)
+                if (IsVehicleCollider(centerHit.collider))
                 {
                     isObstacleDetected = true;
+                    obstacleDistance = centerHit.distance;
+
+                    // Decide lane change direction if enabled
+                    if (enableLaneChange && obstacleDistance < safeFollowingDistance)
+                    {
+                        CheckLaneAvailability(rayOrigin, forward, right);
+                        DecideLaneChange();
+                    }
+                }
+            }
+
+            // Left raycast - check left lane
+            Vector3 leftOrigin = rayOrigin - right * sideRayOffset;
+            if (Physics.Raycast(leftOrigin, forward, out RaycastHit leftHit, sideRayDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore))
+            {
+                if (IsVehicleCollider(leftHit.collider))
+                {
+                    leftLaneClear = false;
+                }
+            }
+
+            // Right raycast - check right lane
+            Vector3 rightOrigin = rayOrigin + right * sideRayOffset;
+            if (Physics.Raycast(rightOrigin, forward, out RaycastHit rightHit, sideRayDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore))
+            {
+                if (IsVehicleCollider(rightHit.collider))
+                {
+                    rightLaneClear = false;
                 }
             }
         }
 
         /// <summary>
-        /// Apply throttle and braking based on target speed
+        /// Check if collider belongs to a vehicle
+        /// </summary>
+        private bool IsVehicleCollider(Collider collider)
+        {
+            if (collider == null) return false;
+
+            // Check self
+            if (collider.transform.IsChildOf(transform)) return false;
+
+            return collider.GetComponent<NpcCarAgent>() != null ||
+                   collider.GetComponentInParent<NpcCarAgent>() != null ||
+                   collider.GetComponent<CarController>() != null ||
+                   collider.GetComponentInParent<CarController>() != null ||
+                   (collider.attachedRigidbody != null && !collider.attachedRigidbody.isKinematic);
+        }
+
+        /// <summary>
+        /// Check lane availability with additional side checks
+        /// </summary>
+        private void CheckLaneAvailability(Vector3 origin, Vector3 forward, Vector3 right)
+        {
+            // Additional side checks for safer lane changes
+            float checkDistance = 5f;
+
+            // Check left-forward diagonal
+            Vector3 leftForward = (forward - right * 0.5f).normalized;
+            if (Physics.Raycast(origin - right * sideRayOffset, leftForward, checkDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore))
+            {
+                leftLaneClear = false;
+            }
+
+            // Check right-forward diagonal
+            Vector3 rightForward = (forward + right * 0.5f).normalized;
+            if (Physics.Raycast(origin + right * sideRayOffset, rightForward, checkDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore))
+            {
+                rightLaneClear = false;
+            }
+        }
+
+        /// <summary>
+        /// Decide which direction to change lane
+        /// </summary>
+        private void DecideLaneChange()
+        {
+            // If already changing lane, continue
+            if (Mathf.Abs(targetLateralOffset - lateralOffset) > 0.5f)
+                return;
+
+            // Try to move to clearer lane
+            if (leftLaneClear && !rightLaneClear)
+            {
+                targetLateralOffset = Mathf.Clamp(lateralOffset - 2f, -3.5f, 3.5f);
+            }
+            else if (rightLaneClear && !leftLaneClear)
+            {
+                targetLateralOffset = Mathf.Clamp(lateralOffset + 2f, -3.5f, 3.5f);
+            }
+            else if (leftLaneClear && rightLaneClear)
+            {
+                // Both clear, choose randomly
+                targetLateralOffset = Random.value > 0.5f ?
+                    Mathf.Clamp(lateralOffset - 2f, -3.5f, 3.5f) :
+                    Mathf.Clamp(lateralOffset + 2f, -3.5f, 3.5f);
+            }
+        }
+
+        /// <summary>
+        /// Apply throttle and braking based on target speed and obstacles
         /// </summary>
         private void ApplyThrottle()
         {
             float currentSpeed = CurrentSpeed;
             float effectiveTargetSpeed = GetTurnLimitedTargetSpeed();
 
-            // Reduce speed if obstacle detected
+            // Advanced obstacle-based speed adjustment
             if (isObstacleDetected)
             {
-                effectiveTargetSpeed *= (1f - avoidanceBrakeStrength);
+                if (obstacleDistance < criticalBrakingDistance)
+                {
+                    // Emergency braking - very close obstacle
+                    effectiveTargetSpeed = Mathf.Min(effectiveTargetSpeed * 0.2f, 10f);
+                }
+                else if (obstacleDistance < safeFollowingDistance)
+                {
+                    // Maintain safe following distance
+                    float distanceFactor = (obstacleDistance - criticalBrakingDistance) /
+                                          (safeFollowingDistance - criticalBrakingDistance);
+                    effectiveTargetSpeed *= Mathf.Lerp(0.3f, 0.7f, distanceFactor);
+                }
+                else
+                {
+                    // Obstacle ahead but at safe distance - slight speed reduction
+                    effectiveTargetSpeed *= 0.85f;
+                }
             }
 
             float speedDifference = effectiveTargetSpeed - currentSpeed;
@@ -628,7 +809,20 @@ namespace TrafficSystem
             else if (speedDifference < -speedTolerance || isObstacleDetected)
             {
                 // Need to slow down
-                float brakeTorque = isObstacleDetected ? braking * avoidanceBrakeStrength : braking * 0.3f;
+                float brakeTorque;
+                if (isObstacleDetected && obstacleDistance < criticalBrakingDistance)
+                {
+                    // Emergency braking
+                    brakeTorque = braking * 1.2f;
+                }
+                else if (isObstacleDetected)
+                {
+                    brakeTorque = braking * avoidanceBrakeStrength;
+                }
+                else
+                {
+                    brakeTorque = braking * 0.3f;
+                }
 
                 SetMotorTorque(0f);
                 SetBrakeTorque(brakeTorque);
@@ -907,6 +1101,74 @@ namespace TrafficSystem
             }
         }
 
+        private void SetupWheelVisuals()
+        {
+            if (!autoSetupWheelVisuals) return;
+
+            frontLeftWheelVisual = GetWheelVisualTransform(frontLeftCollider, frontLeftWheelVisual);
+            frontRightWheelVisual = GetWheelVisualTransform(frontRightCollider, frontRightWheelVisual);
+            rearLeftWheelVisual = GetWheelVisualTransform(rearLeftCollider, rearLeftWheelVisual);
+            rearRightWheelVisual = GetWheelVisualTransform(rearRightCollider, rearRightWheelVisual);
+        }
+
+        private Transform GetWheelVisualTransform(WheelCollider wheel, Transform currentVisual)
+        {
+            if (currentVisual != null) return currentVisual;
+            if (wheel == null) return null;
+
+            Transform wheelRoot = wheel.transform;
+
+            // Prefer a child mesh (so we don't rotate the collider transform)
+            for (int i = 0; i < wheelRoot.childCount; i++)
+            {
+                Transform child = wheelRoot.GetChild(i);
+                if (child.GetComponent<MeshRenderer>() != null)
+                    return child;
+            }
+
+            // If collider shares the mesh, create a visual proxy child at runtime
+            if (autoCreateWheelVisualsIfMissing)
+            {
+                MeshRenderer renderer = wheelRoot.GetComponent<MeshRenderer>();
+                MeshFilter filter = wheelRoot.GetComponent<MeshFilter>();
+                if (renderer != null && filter != null && filter.sharedMesh != null)
+                {
+                    GameObject visual = new GameObject("WheelVisual");
+                    visual.transform.SetParent(wheelRoot, false);
+                    visual.transform.localPosition = Vector3.zero;
+                    visual.transform.localRotation = Quaternion.identity;
+                    visual.transform.localScale = Vector3.one;
+
+                    MeshFilter visualFilter = visual.AddComponent<MeshFilter>();
+                    MeshRenderer visualRenderer = visual.AddComponent<MeshRenderer>();
+                    visualFilter.sharedMesh = filter.sharedMesh;
+                    visualRenderer.sharedMaterials = renderer.sharedMaterials;
+
+                    renderer.enabled = false;
+                    return visual.transform;
+                }
+            }
+
+            return null;
+        }
+
+        private void UpdateWheelVisuals()
+        {
+            UpdateSingleWheelVisual(frontLeftCollider, frontLeftWheelVisual);
+            UpdateSingleWheelVisual(frontRightCollider, frontRightWheelVisual);
+            UpdateSingleWheelVisual(rearLeftCollider, rearLeftWheelVisual);
+            UpdateSingleWheelVisual(rearRightCollider, rearRightWheelVisual);
+        }
+
+        private void UpdateSingleWheelVisual(WheelCollider wheelCollider, Transform wheelVisual)
+        {
+            if (wheelCollider == null || wheelVisual == null) return;
+
+            wheelCollider.GetWorldPose(out Vector3 pos, out Quaternion rot);
+            wheelVisual.position = pos;
+            wheelVisual.rotation = rot;
+        }
+
         private void OnDrawGizmos()
         {
             if (!showDebugGizmos || !isInitialized) return;
@@ -925,11 +1187,33 @@ namespace TrafficSystem
                 Gizmos.DrawLine(transform.position, currentLookAheadPoint);
             }
 
-            // Draw obstacle detection ray
+            // Draw obstacle detection rays
             if (enableObstacleAvoidance)
             {
+                Vector3 rayOrigin = transform.position + Vector3.up * 0.5f;
+                Vector3 forward = transform.forward;
+                Vector3 right = transform.right;
+
+                // Center ray
                 Gizmos.color = isObstacleDetected ? Color.red : Color.blue;
-                Gizmos.DrawLine(transform.position + Vector3.up, transform.position + Vector3.up + transform.forward * avoidanceRayDistance);
+                Gizmos.DrawLine(rayOrigin, rayOrigin + forward * avoidanceRayDistance);
+
+                // Left ray
+                Gizmos.color = leftLaneClear ? Color.green : Color.yellow;
+                Vector3 leftOrigin = rayOrigin - right * sideRayOffset;
+                Gizmos.DrawLine(leftOrigin, leftOrigin + forward * sideRayDistance);
+
+                // Right ray
+                Gizmos.color = rightLaneClear ? Color.green : Color.yellow;
+                Vector3 rightOrigin = rayOrigin + right * sideRayOffset;
+                Gizmos.DrawLine(rightOrigin, rightOrigin + forward * sideRayDistance);
+
+                // Draw obstacle distance indicator
+                if (isObstacleDetected && obstacleDistance < float.MaxValue)
+                {
+                    Gizmos.color = Color.red;
+                    Gizmos.DrawWireSphere(rayOrigin + forward * obstacleDistance, 0.5f);
+                }
             }
         }
     }

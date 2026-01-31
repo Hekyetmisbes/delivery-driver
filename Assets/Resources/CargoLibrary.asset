@@ -1,0 +1,45 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6f2080b45f3d4f44a0a282289420b91f, type: 3}
+  m_Name: CargoLibrary
+  m_EditorClassIdentifier:
+  cargoTypes:
+  - CargoName: Standard Boxes
+    Weight: 150
+    IsFragile: 0
+    CargoHealth: 100
+    CargoIcon: {fileID: 0}
+    Description: Standard cardboard boxes containing general goods.
+  - CargoName: Electronics
+    Weight: 80
+    IsFragile: 1
+    CargoHealth: 100
+    CargoIcon: {fileID: 0}
+    Description: Sensitive electronic equipment packed with care.
+  - CargoName: Medical Supplies
+    Weight: 100
+    IsFragile: 1
+    CargoHealth: 100
+    CargoIcon: {fileID: 0}
+    Description: Fragile medical gear that must arrive quickly.
+  - CargoName: Heavy Machinery
+    Weight: 400
+    IsFragile: 0
+    CargoHealth: 100
+    CargoIcon: {fileID: 0}
+    Description: Heavy equipment that affects vehicle handling.
+  - CargoName: Fragile Glass
+    Weight: 100
+    IsFragile: 1
+    CargoHealth: 100
+    CargoIcon: {fileID: 0}
+    Description: Extremely delicate glass cargo that breaks easily.
