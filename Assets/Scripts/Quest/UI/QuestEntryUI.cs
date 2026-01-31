@@ -58,7 +58,16 @@ namespace DeliveryDriver.Quest.UI
 
             if (questNameText != null)
             {
-                questNameText.text = questData.QuestName;
+                // Show quest name with location coordinates
+                string locationInfo = GetLocationInfo(questData);
+                if (!string.IsNullOrEmpty(locationInfo))
+                {
+                    questNameText.text = $"{questData.QuestName}\n<size=70%>{locationInfo}</size>";
+                }
+                else
+                {
+                    questNameText.text = questData.QuestName;
+                }
             }
 
             if (distanceText != null)
@@ -147,6 +156,41 @@ namespace DeliveryDriver.Quest.UI
             {
                 QuestManager.Instance.AcceptQuest(questData.QuestID);
             }
+        }
+
+        private string GetLocationInfo(QuestData quest)
+        {
+            if (quest == null)
+            {
+                return "";
+            }
+
+            QuestLocation pickup = quest.PickupLocation;
+            QuestLocation delivery = null;
+
+            if (quest.DeliveryLocations != null && quest.DeliveryLocations.Count > 0)
+            {
+                delivery = quest.DeliveryLocations[0];
+            }
+
+            // Show pickup location if no delivery yet (quest not accepted)
+            if (pickup != null && delivery == null)
+            {
+                return $"📍 Pickup: {FormatCoordinates(pickup.Position)}";
+            }
+
+            // Show delivery location if quest is active
+            if (delivery != null)
+            {
+                return $"📦 Deliver to: {FormatCoordinates(delivery.Position)}";
+            }
+
+            return "";
+        }
+
+        private string FormatCoordinates(Vector3 position)
+        {
+            return $"({position.x:F0}, {position.z:F0})";
         }
 
         private float GetQuestDistance(QuestData quest)

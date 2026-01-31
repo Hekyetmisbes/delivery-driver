@@ -92,12 +92,12 @@ namespace DeliveryDriver.Quest.UI
         private void HandleQuestListToggleInput()
         {
 #if ENABLE_INPUT_SYSTEM
-            if (Keyboard.current != null && Keyboard.current.qKey.wasPressedThisFrame)
+            if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame)
             {
                 questListUI?.TogglePanel();
             }
 #else
-            if (Input.GetKeyDown(KeyCode.Q))
+            if (Input.GetKeyDown(KeyCode.Tab))
             {
                 questListUI?.TogglePanel();
             }
