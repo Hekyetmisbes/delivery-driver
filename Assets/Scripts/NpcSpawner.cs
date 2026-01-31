@@ -20,6 +20,10 @@ namespace TrafficSystem
         [SerializeField] private int spawnCount = 10;
         [Tooltip("Minimum distance between spawned vehicles (meters)")]
         [SerializeField] private float minimumSpawnSpacing = 8f;
+        [Tooltip("Check radius for existing vehicles/obstacles at spawn point (meters)")]
+        [SerializeField] private float spawnCheckRadius = 3f;
+        [Tooltip("Layer mask for checking obstacles at spawn point")]
+        [SerializeField] private LayerMask spawnObstacleCheckMask = ~0;
         [Tooltip("Spawn vehicles on Start()")]
         [SerializeField] private bool spawnOnStart = true;
         [Tooltip("Initial delay before starting spawn (seconds, to let road graph build)")]
@@ -160,7 +164,7 @@ namespace TrafficSystem
                     continue;
                 }
 
-                // Check spacing with existing spawns
+                // Check spacing with previously spawned vehicles in this batch
                 bool validSpacing = true;
                 foreach (Vector3 existingPos in spawnPositions)
                 {
@@ -173,6 +177,29 @@ namespace TrafficSystem
 
                 if (!validSpacing)
                     continue;
+
+                // Check spacing with all active vehicles (including already spawned ones)
+                foreach (GameObject activeNpc in activeNpcs)
+                {
+                    if (activeNpc != null && Vector3.Distance(spawnPos, activeNpc.transform.position) < minimumSpawnSpacing)
+                    {
+                        validSpacing = false;
+                        break;
+                    }
+                }
+
+                if (!validSpacing)
+                    continue;
+
+                // Check if spawn position is clear of physical obstacles
+                if (!IsSpawnPositionClear(spawnPos))
+                {
+                    if (showDebugInfo && attempts % 10 == 0)
+                    {
+                        Debug.LogWarning($"[NpcSpawner] Spawn position {spawnPos} blocked by obstacles, trying another location");
+                    }
+                    continue;
+                }
 
                 // Spawn NPC
                 GameObject npcVehicle = GetOrCreateNpc();
@@ -353,58 +380,96 @@ namespace TrafficSystem
         /// </summary>
         public GameObject SpawnSingleNpc()
         {
-            var (segment, waypointIndex) = roadGraphBuilder.RoadGraph.GetRandomWaypoint();
-            if (segment == null) return null;
+            int maxAttempts = 30;
+            int attempts = 0;
 
-            GameObject npc = GetOrCreateNpc();
-            Waypoint wp = segment.waypoints[waypointIndex];
-
-            // Use waypoint position directly (it's already on the road)
-            float heightOffset = 0.2f;
-            NpcCarAgent carAgent = npc.GetComponent<NpcCarAgent>();
-            if (carAgent != null)
-                heightOffset = carAgent.GetGroundClearanceOffset();
-            npc.transform.position = GetGroundedSpawnPosition(wp.position, heightOffset);
-
-            // Safe rotation - flatten to horizontal
-            Vector3 forward = wp.forward;
-            if (forward.sqrMagnitude < 0.01f)
+            while (attempts < maxAttempts)
             {
-                forward = Vector3.forward;
-            }
-            forward.y = 0; // Keep car level
-            if (forward.sqrMagnitude < 0.01f)
-            {
-                forward = Vector3.forward;
-            }
-            else
-            {
-                forward.Normalize();
-            }
-            npc.transform.rotation = Quaternion.LookRotation(forward);
+                attempts++;
 
-            if (carAgent != null)
-            {
-                carAgent.Initialize(roadGraphBuilder, segment, waypointIndex);
+                var (segment, waypointIndex) = roadGraphBuilder.RoadGraph.GetRandomWaypoint();
+                if (segment == null) continue;
 
-                // Give random initial velocity (20-40 km/h range)
-                Rigidbody rb = npc.GetComponent<Rigidbody>();
-                if (rb != null)
+                Waypoint wp = segment.waypoints[waypointIndex];
+                Vector3 spawnPos = wp.position;
+
+                // Check spacing with all active vehicles
+                bool validSpacing = true;
+                foreach (GameObject activeNpc in activeNpcs)
                 {
-                    float initialSpeed = Random.Range(5f, 11f); // 5-11 m/s = ~18-40 km/h
-                    rb.linearVelocity = forward * initialSpeed;
-                    rb.angularVelocity = Vector3.zero;
+                    if (activeNpc != null && Vector3.Distance(spawnPos, activeNpc.transform.position) < minimumSpawnSpacing)
+                    {
+                        validSpacing = false;
+                        break;
+                    }
                 }
+
+                if (!validSpacing)
+                    continue;
+
+                // Check if spawn position is clear
+                if (!IsSpawnPositionClear(spawnPos))
+                    continue;
+
+                // Valid spawn position found
+                GameObject npc = GetOrCreateNpc();
+
+                // Use waypoint position directly (it's already on the road)
+                float heightOffset = 0.2f;
+                NpcCarAgent carAgent = npc.GetComponent<NpcCarAgent>();
+                if (carAgent != null)
+                    heightOffset = carAgent.GetGroundClearanceOffset();
+                npc.transform.position = GetGroundedSpawnPosition(wp.position, heightOffset);
+
+                // Safe rotation - flatten to horizontal
+                Vector3 forward = wp.forward;
+                if (forward.sqrMagnitude < 0.01f)
+                {
+                    forward = Vector3.forward;
+                }
+                forward.y = 0; // Keep car level
+                if (forward.sqrMagnitude < 0.01f)
+                {
+                    forward = Vector3.forward;
+                }
+                else
+                {
+                    forward.Normalize();
+                }
+                npc.transform.rotation = Quaternion.LookRotation(forward);
+
+                if (carAgent != null)
+                {
+                    carAgent.Initialize(roadGraphBuilder, segment, waypointIndex);
+
+                    // Give random initial velocity (20-40 km/h range)
+                    Rigidbody rb = npc.GetComponent<Rigidbody>();
+                    if (rb != null)
+                    {
+                        float initialSpeed = Random.Range(5f, 11f); // 5-11 m/s = ~18-40 km/h
+                        rb.linearVelocity = forward * initialSpeed;
+                        rb.angularVelocity = Vector3.zero;
+                    }
+                }
+
+                NpcRecovery recovery = npc.GetComponent<NpcRecovery>();
+                if (recovery != null)
+                {
+                    recovery.Initialize(roadGraphBuilder);
+                }
+
+                activeNpcs.Add(npc);
+
+                if (showDebugInfo)
+                {
+                    Debug.Log($"[NpcSpawner] Spawned single NPC at {npc.transform.position} (attempts: {attempts})");
+                }
+
+                return npc;
             }
 
-            NpcRecovery recovery = npc.GetComponent<NpcRecovery>();
-            if (recovery != null)
-            {
-                recovery.Initialize(roadGraphBuilder);
-            }
-
-            activeNpcs.Add(npc);
-            return npc;
+            Debug.LogWarning($"[NpcSpawner] Failed to find valid spawn position after {maxAttempts} attempts");
+            return null;
         }
 
         /// <summary>
@@ -460,6 +525,47 @@ namespace TrafficSystem
                 ClearAllNpcs();
             }
             GUILayout.EndArea();
+        }
+
+        /// <summary>
+        /// Check if spawn position is clear of obstacles using sphere overlap
+        /// </summary>
+        private bool IsSpawnPositionClear(Vector3 position)
+        {
+            // Check for colliders in the spawn radius
+            Collider[] colliders = Physics.OverlapSphere(position, spawnCheckRadius, spawnObstacleCheckMask, QueryTriggerInteraction.Ignore);
+
+            if (colliders == null || colliders.Length == 0)
+                return true;
+
+            // Filter out ground/road colliders - only care about vehicles and obstacles
+            foreach (Collider col in colliders)
+            {
+                if (col == null) continue;
+
+                // Check if it's a vehicle (NPC or player)
+                if (col.GetComponent<NpcCarAgent>() != null ||
+                    col.GetComponentInParent<NpcCarAgent>() != null ||
+                    col.GetComponent<CarController>() != null ||
+                    col.GetComponentInParent<CarController>() != null)
+                {
+                    return false;
+                }
+
+                // Check if it's a rigidbody vehicle (dynamic obstacles)
+                Rigidbody rb = col.attachedRigidbody;
+                if (rb != null && !rb.isKinematic)
+                {
+                    // Exclude ground/terrain rigidbodies
+                    if (col.gameObject.layer != LayerMask.NameToLayer("Road") &&
+                        col.gameObject.layer != LayerMask.NameToLayer("Ground"))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
         }
 
         private Vector3 GetGroundedSpawnPosition(Vector3 basePosition, float heightOffset)
