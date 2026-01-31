@@ -13,8 +13,9 @@ public class DeliveryManager : MonoBehaviour
 
     [Header("Spawn Settings")]
     [SerializeField] private Transform[] spawnPoints;
-    [SerializeField] private float spawnHeight = 1f;
+    [SerializeField] private float spawnHeight = 0.5f;
     [SerializeField] private float minDistanceBetweenPoints = 20f;
+    [SerializeField] private LayerMask groundMask = ~0;
 
     [Header("Delivery Settings")]
     [SerializeField] private float deliveryRadius = 5f;
@@ -32,9 +33,14 @@ public class DeliveryManager : MonoBehaviour
     private Vector3 currentDeliveryPoint;
     private bool isDeliveryActive = false;
     private List<Vector3> availableSpawnPoints = new List<Vector3>();
+    private DeliveryUI deliveryUI;
+
+    public bool IsDeliveryActive => isDeliveryActive;
+    public Vector3 CurrentDeliveryPoint => currentDeliveryPoint;
 
     private void Start()
     {
+        deliveryUI = FindFirstObjectByType<DeliveryUI>();
         GenerateSpawnPoints();
         SpawnNewBox();
     }
@@ -55,6 +61,13 @@ public class DeliveryManager : MonoBehaviour
             if (player != null)
             {
                 float distance = Vector3.Distance(player.position, currentDeliveryPoint);
+
+                // Update UI with distance
+                if (deliveryUI != null)
+                {
+                    deliveryUI.UpdateDistance(distance);
+                }
+
                 if (distance < deliveryRadius)
                 {
                     CompleteDelivery();
@@ -98,21 +111,30 @@ public class DeliveryManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Get random position on ground
+    /// Get random position on ground with proper ground detection
     /// </summary>
     private Vector3 GetRandomGroundPosition()
     {
-        float x = Random.Range(spawnAreaMin.x, spawnAreaMax.x);
-        float z = Random.Range(spawnAreaMin.y, spawnAreaMax.y);
-        Vector3 position = new Vector3(x, 100f, z);
-
-        // Raycast down to find ground
-        if (Physics.Raycast(position, Vector3.down, out RaycastHit hit, 200f))
+        int maxAttempts = 10;
+        for (int i = 0; i < maxAttempts; i++)
         {
-            return hit.point + Vector3.up * spawnHeight;
+            float x = Random.Range(spawnAreaMin.x, spawnAreaMax.x);
+            float z = Random.Range(spawnAreaMin.y, spawnAreaMax.y);
+            Vector3 position = new Vector3(x, 200f, z);
+
+            // Raycast down to find ground
+            if (Physics.Raycast(position, Vector3.down, out RaycastHit hit, 300f, groundMask, QueryTriggerInteraction.Ignore))
+            {
+                // Make sure it's not too steep
+                if (Vector3.Dot(hit.normal, Vector3.up) > 0.7f)
+                {
+                    return hit.point + Vector3.up * spawnHeight;
+                }
+            }
         }
 
-        return new Vector3(x, spawnHeight, z);
+        // Fallback
+        return new Vector3(0, spawnHeight, 0);
     }
 
     /// <summary>
@@ -131,17 +153,32 @@ public class DeliveryManager : MonoBehaviour
             availableSpawnPoints[Random.Range(0, availableSpawnPoints.Count)] :
             GetRandomGroundPosition();
 
-        // Spawn box
-        currentBox = Instantiate(boxPrefab, spawnPos, Quaternion.identity).GetComponent<DeliveryBox>();
+        // Spawn box with slight rotation variation
+        Quaternion rotation = Quaternion.Euler(0, Random.Range(0f, 360f), 0);
+        GameObject boxObj = Instantiate(boxPrefab, spawnPos, rotation);
+
+        currentBox = boxObj.GetComponent<DeliveryBox>();
         if (currentBox == null)
         {
-            currentBox = Instantiate(boxPrefab, spawnPos, Quaternion.identity).AddComponent<DeliveryBox>();
+            currentBox = boxObj.AddComponent<DeliveryBox>();
         }
+
+        // Ensure box has collider
+        if (boxObj.GetComponent<Collider>() == null)
+        {
+            BoxCollider collider = boxObj.AddComponent<BoxCollider>();
+            collider.isTrigger = false; // Solid collider
+        }
+
+        // Add trigger collider for pickup detection
+        BoxCollider triggerCollider = boxObj.AddComponent<BoxCollider>();
+        triggerCollider.isTrigger = true;
+        triggerCollider.size = triggerCollider.size * 1.5f; // Larger trigger area
 
         // Spawn pickup indicator
         if (pickupIndicatorPrefab != null)
         {
-            currentPickupIndicator = Instantiate(pickupIndicatorPrefab, spawnPos, Quaternion.identity);
+            currentPickupIndicator = Instantiate(pickupIndicatorPrefab, spawnPos + Vector3.up * 2f, Quaternion.identity);
             currentPickupIndicator.transform.SetParent(currentBox.transform);
         }
 
@@ -165,13 +202,50 @@ public class DeliveryManager : MonoBehaviour
         // Spawn delivery indicator
         if (deliveryIndicatorPrefab != null)
         {
-            currentDeliveryIndicator = Instantiate(deliveryIndicatorPrefab, currentDeliveryPoint, Quaternion.identity);
+            currentDeliveryIndicator = Instantiate(deliveryIndicatorPrefab, currentDeliveryPoint + Vector3.up * 2f, Quaternion.identity);
+        }
+        else
+        {
+            // Create default delivery indicator
+            CreateDefaultDeliveryIndicator();
+        }
+
+        // Notify UI
+        if (deliveryUI != null)
+        {
+            deliveryUI.OnBoxPickedUp(currentDeliveryPoint);
         }
 
         if (showDebugInfo)
         {
-            Debug.Log($"[DeliveryManager] Delivery point set at {currentDeliveryPoint}");
+            float distance = Vector3.Distance(box.transform.position, currentDeliveryPoint);
+            Debug.Log($"[DeliveryManager] Delivery point set at {currentDeliveryPoint} (Distance: {distance:F1}m)");
         }
+    }
+
+    /// <summary>
+    /// Create default delivery indicator if none assigned
+    /// </summary>
+    private void CreateDefaultDeliveryIndicator()
+    {
+        // Create a tall cylinder
+        GameObject indicator = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        indicator.name = "DeliveryIndicator";
+        indicator.transform.position = currentDeliveryPoint + Vector3.up * 2f;
+        indicator.transform.localScale = new Vector3(2f, 3f, 2f);
+
+        // Remove collider
+        Destroy(indicator.GetComponent<Collider>());
+
+        // Create glowing material
+        Material indicatorMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+        indicatorMat.color = new Color(1f, 0.8f, 0f, 1f); // Yellow-orange
+        indicator.GetComponent<MeshRenderer>().material = indicatorMat;
+
+        // Add rotation script
+        DeliveryIndicator script = indicator.AddComponent<DeliveryIndicator>();
+
+        currentDeliveryIndicator = indicator;
     }
 
     /// <summary>
@@ -213,6 +287,12 @@ public class DeliveryManager : MonoBehaviour
 
         isDeliveryActive = false;
 
+        // Notify UI
+        if (deliveryUI != null)
+        {
+            deliveryUI.OnDeliveryComplete();
+        }
+
         // Destroy indicators
         if (currentDeliveryIndicator != null)
         {
@@ -231,7 +311,7 @@ public class DeliveryManager : MonoBehaviour
         }
 
         // Spawn new box after delay
-        Invoke(nameof(SpawnNewBox), 1f);
+        Invoke(nameof(SpawnNewBox), 2f);
     }
 
     private void OnDrawGizmos()

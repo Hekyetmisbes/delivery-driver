@@ -3,16 +3,44 @@ using UnityEngine;
 /// <summary>
 /// Delivery box that can be picked up by the player
 /// </summary>
+[RequireComponent(typeof(Rigidbody))]
 public class DeliveryBox : MonoBehaviour
 {
     [Header("Visual Feedback")]
     [SerializeField] private GameObject pickupIndicator;
     [SerializeField] private float indicatorRotationSpeed = 50f;
+    [SerializeField] private float indicatorHeightOffset = 2f;
+
+    [Header("Pickup Settings")]
+    [SerializeField] private float pickupRadius = 3f;
+    [SerializeField] private LayerMask playerLayer = ~0;
 
     private bool isPickedUp = false;
     private Transform playerTransform;
+    private Rigidbody rb;
+    private MeshRenderer[] meshRenderers;
 
     public bool IsPickedUp => isPickedUp;
+
+    private void Awake()
+    {
+        rb = GetComponent<Rigidbody>();
+        meshRenderers = GetComponentsInChildren<MeshRenderer>();
+
+        // Setup rigidbody
+        if (rb != null)
+        {
+            rb.mass = 5f;
+            rb.linearDamping = 0.5f;
+            rb.angularDamping = 0.5f;
+        }
+
+        // Create pickup indicator if not assigned
+        if (pickupIndicator == null)
+        {
+            CreateDefaultIndicator();
+        }
+    }
 
     private void Update()
     {
@@ -20,6 +48,32 @@ public class DeliveryBox : MonoBehaviour
         if (pickupIndicator != null && !isPickedUp)
         {
             pickupIndicator.transform.Rotate(Vector3.up, indicatorRotationSpeed * Time.deltaTime);
+        }
+
+        // Check for nearby player (distance-based pickup)
+        if (!isPickedUp)
+        {
+            CheckForPlayer();
+        }
+    }
+
+    private void CheckForPlayer()
+    {
+        // Find player
+        GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+        if (playerObj == null)
+        {
+            CarController car = FindFirstObjectByType<CarController>();
+            if (car != null) playerObj = car.gameObject;
+        }
+
+        if (playerObj != null)
+        {
+            float distance = Vector3.Distance(transform.position, playerObj.transform.position);
+            if (distance < pickupRadius)
+            {
+                PickupBox(playerObj.transform);
+            }
         }
     }
 
@@ -36,8 +90,33 @@ public class DeliveryBox : MonoBehaviour
 
     private void PickupBox(Transform player)
     {
+        if (isPickedUp) return;
+
         isPickedUp = true;
         playerTransform = player;
+
+        // Hide the box visually (like it's loaded in the car)
+        if (meshRenderers != null)
+        {
+            foreach (MeshRenderer renderer in meshRenderers)
+            {
+                renderer.enabled = false;
+            }
+        }
+
+        // Disable physics
+        if (rb != null)
+        {
+            rb.isKinematic = true;
+            rb.detectCollisions = false;
+        }
+
+        // Disable colliders
+        Collider[] colliders = GetComponentsInChildren<Collider>();
+        foreach (Collider col in colliders)
+        {
+            col.enabled = false;
+        }
 
         // Hide indicator
         if (pickupIndicator != null)
@@ -72,5 +151,34 @@ public class DeliveryBox : MonoBehaviour
         // Destroy box
         Destroy(gameObject);
         Debug.Log("[DeliveryBox] Box delivered!");
+    }
+
+    private void CreateDefaultIndicator()
+    {
+        // Create a simple cylinder indicator
+        GameObject indicator = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        indicator.name = "PickupIndicator";
+        indicator.transform.SetParent(transform);
+        indicator.transform.localPosition = Vector3.up * indicatorHeightOffset;
+        indicator.transform.localScale = new Vector3(0.5f, 1.5f, 0.5f);
+
+        // Remove collider
+        Destroy(indicator.GetComponent<Collider>());
+
+        // Create glowing material
+        Material indicatorMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+        indicatorMat.color = Color.green;
+        indicator.GetComponent<MeshRenderer>().material = indicatorMat;
+
+        pickupIndicator = indicator;
+    }
+
+    private void OnDrawGizmos()
+    {
+        if (!isPickedUp)
+        {
+            Gizmos.color = Color.green;
+            Gizmos.DrawWireSphere(transform.position, pickupRadius);
+        }
     }
 }
