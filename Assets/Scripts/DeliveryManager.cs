@@ -23,6 +23,8 @@ public class DeliveryManager : MonoBehaviour
     [SerializeField] private int numberOfAutoSpawnPoints = 10;
     [SerializeField] private Vector2 spawnAreaMin = new Vector2(-50, -50);
     [SerializeField] private Vector2 spawnAreaMax = new Vector2(50, 50);
+    [SerializeField] private float raycastStartHeight = 300f;
+    [SerializeField] private float raycastMaxDistance = 400f;
 
     [Header("Debug")]
     [SerializeField] private bool showDebugInfo = true;
@@ -115,26 +117,57 @@ public class DeliveryManager : MonoBehaviour
     /// </summary>
     private Vector3 GetRandomGroundPosition()
     {
-        int maxAttempts = 10;
+        int maxAttempts = 30;
         for (int i = 0; i < maxAttempts; i++)
         {
             float x = Random.Range(spawnAreaMin.x, spawnAreaMax.x);
             float z = Random.Range(spawnAreaMin.y, spawnAreaMax.y);
-            Vector3 position = new Vector3(x, 200f, z);
+            Vector3 position = new Vector3(x, raycastStartHeight, z);
 
             // Raycast down to find ground
-            if (Physics.Raycast(position, Vector3.down, out RaycastHit hit, 300f, groundMask, QueryTriggerInteraction.Ignore))
+            if (Physics.Raycast(position, Vector3.down, out RaycastHit hit, raycastMaxDistance, groundMask, QueryTriggerInteraction.Ignore))
             {
-                // Make sure it's not too steep
-                if (Vector3.Dot(hit.normal, Vector3.up) > 0.7f)
+                // Make sure it's not too steep and not a trigger
+                if (Vector3.Dot(hit.normal, Vector3.up) > 0.7f && !hit.collider.isTrigger)
                 {
-                    return hit.point + Vector3.up * spawnHeight;
+                    Vector3 spawnPos = hit.point + Vector3.up * spawnHeight;
+
+                    // Validate spawn position with sphere check (ensure there's space)
+                    if (!Physics.CheckSphere(spawnPos, 1f, groundMask, QueryTriggerInteraction.Ignore))
+                    {
+                        if (showDebugInfo && i > 0)
+                        {
+                            Debug.Log($"[DeliveryManager] Found valid spawn point at {spawnPos} (attempt {i + 1})");
+                        }
+                        return spawnPos;
+                    }
                 }
             }
         }
 
-        // Fallback
-        return new Vector3(0, spawnHeight, 0);
+        // Fallback - use player position if available
+        GameObject player = GameObject.FindGameObjectWithTag("Player");
+        if (player == null)
+        {
+            CarController car = FindFirstObjectByType<CarController>();
+            if (car != null) player = car.gameObject;
+        }
+
+        if (player != null)
+        {
+            Vector3 playerPos = player.transform.position;
+            Vector3 offset = Random.insideUnitCircle * 20f;
+            Vector3 fallbackPos = new Vector3(playerPos.x + offset.x, raycastStartHeight, playerPos.z + offset.y);
+
+            if (Physics.Raycast(fallbackPos, Vector3.down, out RaycastHit hit, raycastMaxDistance, groundMask, QueryTriggerInteraction.Ignore))
+            {
+                Debug.LogWarning($"[DeliveryManager] Using fallback spawn near player at {hit.point}");
+                return hit.point + Vector3.up * spawnHeight;
+            }
+        }
+
+        Debug.LogError("[DeliveryManager] Failed to find valid spawn position! Using fallback.");
+        return new Vector3(0, 10f, 0);
     }
 
     /// <summary>
@@ -163,17 +196,44 @@ public class DeliveryManager : MonoBehaviour
             currentBox = boxObj.AddComponent<DeliveryBox>();
         }
 
-        // Ensure box has collider
-        if (boxObj.GetComponent<Collider>() == null)
+        // Setup colliders
+        Collider[] existingColliders = boxObj.GetComponentsInChildren<Collider>();
+        bool hasMainCollider = false;
+        bool hasTriggerCollider = false;
+
+        foreach (Collider col in existingColliders)
         {
-            BoxCollider collider = boxObj.AddComponent<BoxCollider>();
-            collider.isTrigger = false; // Solid collider
+            if (col.isTrigger) hasTriggerCollider = true;
+            else hasMainCollider = true;
         }
 
-        // Add trigger collider for pickup detection
-        BoxCollider triggerCollider = boxObj.AddComponent<BoxCollider>();
-        triggerCollider.isTrigger = true;
-        triggerCollider.size = triggerCollider.size * 1.5f; // Larger trigger area
+        // Add main collider if missing
+        if (!hasMainCollider)
+        {
+            BoxCollider collider = boxObj.AddComponent<BoxCollider>();
+            collider.isTrigger = false;
+            collider.size = new Vector3(1f, 1f, 1f);
+        }
+
+        // Add trigger collider for pickup if missing
+        if (!hasTriggerCollider)
+        {
+            BoxCollider triggerCollider = boxObj.AddComponent<BoxCollider>();
+            triggerCollider.isTrigger = true;
+            triggerCollider.center = Vector3.zero;
+            triggerCollider.size = new Vector3(3f, 3f, 3f); // Large pickup area
+        }
+
+        // Ensure rigidbody exists
+        Rigidbody boxRb = boxObj.GetComponent<Rigidbody>();
+        if (boxRb == null)
+        {
+            boxRb = boxObj.AddComponent<Rigidbody>();
+            boxRb.mass = 5f;
+            boxRb.linearDamping = 0.5f;
+            boxRb.angularDamping = 0.5f;
+        }
+        boxRb.isKinematic = true; // Start kinematic
 
         // Spawn pickup indicator
         if (pickupIndicatorPrefab != null)

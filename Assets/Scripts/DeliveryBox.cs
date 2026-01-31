@@ -15,10 +15,15 @@ public class DeliveryBox : MonoBehaviour
     [SerializeField] private float pickupRadius = 3f;
     [SerializeField] private LayerMask playerLayer = ~0;
 
+    [Header("Safety Settings")]
+    [SerializeField] private float fallThreshold = -10f;
+    [SerializeField] private bool enableFallProtection = true;
+
     private bool isPickedUp = false;
     private Transform playerTransform;
     private Rigidbody rb;
     private MeshRenderer[] meshRenderers;
+    private Vector3 spawnPosition;
 
     public bool IsPickedUp => isPickedUp;
 
@@ -26,19 +31,35 @@ public class DeliveryBox : MonoBehaviour
     {
         rb = GetComponent<Rigidbody>();
         meshRenderers = GetComponentsInChildren<MeshRenderer>();
+        spawnPosition = transform.position;
 
-        // Setup rigidbody
+        // Setup rigidbody - start as kinematic to prevent falling during spawn
         if (rb != null)
         {
             rb.mass = 5f;
             rb.linearDamping = 0.5f;
             rb.angularDamping = 0.5f;
+            rb.isKinematic = true; // Start kinematic, will enable physics after delay
         }
 
         // Create pickup indicator if not assigned
         if (pickupIndicator == null)
         {
             CreateDefaultIndicator();
+        }
+
+        // Enable physics after short delay to ensure proper ground placement
+        Invoke(nameof(EnablePhysics), 0.5f);
+    }
+
+    /// <summary>
+    /// Enable physics after spawn delay
+    /// </summary>
+    private void EnablePhysics()
+    {
+        if (rb != null && !isPickedUp)
+        {
+            rb.isKinematic = false;
         }
     }
 
@@ -54,6 +75,30 @@ public class DeliveryBox : MonoBehaviour
         if (!isPickedUp)
         {
             CheckForPlayer();
+
+            // Fall protection - respawn if box falls through world
+            if (enableFallProtection && transform.position.y < fallThreshold)
+            {
+                RespawnBox();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Respawn box at original position if it falls
+    /// </summary>
+    private void RespawnBox()
+    {
+        Debug.LogWarning("[DeliveryBox] Box fell below world! Respawning...");
+
+        transform.position = spawnPosition;
+
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.isKinematic = true;
+            Invoke(nameof(EnablePhysics), 0.5f);
         }
     }
 
