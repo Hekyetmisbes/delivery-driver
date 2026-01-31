@@ -11,20 +11,13 @@ public class DeliveryUI : MonoBehaviour
     [SerializeField] private GameObject deliveryPanel;
     [SerializeField] private TextMeshProUGUI statusText;
     [SerializeField] private TextMeshProUGUI distanceText;
-    [SerializeField] private Image directionArrow;
-
-    [Header("Settings")]
-    [SerializeField] private bool showDirection = true;
-    [SerializeField] private float arrowDistance = 100f;
 
     private DeliveryManager deliveryManager;
     private Transform playerTransform;
-    private Camera mainCamera;
 
     private void Start()
     {
         deliveryManager = FindFirstObjectByType<DeliveryManager>();
-        mainCamera = Camera.main;
 
         // Find player
         GameObject playerObj = GameObject.FindGameObjectWithTag("Player");

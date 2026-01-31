@@ -423,7 +423,7 @@ public class DeliveryManager : MonoBehaviour
             QuestDescription = $"Pick up package at {FormatCoordinates(pickupPos)}",
             QuestType = QuestType.StandardDelivery,
             Difficulty = QuestDifficulty.Easy,
-            Status = QuestStatus.Available,
+            Status = QuestStatus.NotStarted,
             TimeLimit = 300f, // 5 minutes
             TimeRemaining = 300f,
             BaseReward = 100,
@@ -433,10 +433,13 @@ public class DeliveryManager : MonoBehaviour
         };
 
         // Add cargo if available
-        if (cargoLibrary != null && cargoLibrary.GetAllCargo().Count > 0)
+        if (cargoLibrary != null)
         {
-            var allCargo = cargoLibrary.GetAllCargo();
-            currentDeliveryQuest.Cargo = allCargo[Random.Range(0, allCargo.Count)];
+            CargoData randomCargo = cargoLibrary.GetRandomCargo();
+            if (randomCargo != null)
+            {
+                currentDeliveryQuest.Cargo = randomCargo;
+            }
         }
 
         // Add quest to QuestManager
@@ -465,7 +468,7 @@ public class DeliveryManager : MonoBehaviour
 
         currentDeliveryQuest.DeliveryLocations.Add(deliveryLocation);
         currentDeliveryQuest.QuestDescription = $"Deliver package to {FormatCoordinates(deliveryPos)}";
-        currentDeliveryQuest.Status = QuestStatus.InProgress;
+        currentDeliveryQuest.Status = QuestStatus.Active;
 
         // Show marker
         deliveryLocation.VisualMarker = deliveryIndicatorPrefab;
