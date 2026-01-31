@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using DeliveryDriver.Quest;
+using DeliveryDriver.Quest.UI;
 
 /// <summary>
 /// Manages delivery missions - spawning boxes and delivery points
@@ -427,6 +428,8 @@ public class DeliveryManager : MonoBehaviour
 
         isDeliveryActive = false;
 
+        QuestData questToShow = currentDeliveryQuest;
+
         // Complete quest
         if (useQuestSystem)
         {
@@ -458,7 +461,9 @@ public class DeliveryManager : MonoBehaviour
         }
 
         // Show quest complete UI
-        ShowQuestCompleteUI();
+        ShowQuestCompleteUI(questToShow);
+
+        currentDeliveryQuest = null;
 
         if (showDebugInfo)
         {
@@ -560,21 +565,21 @@ public class DeliveryManager : MonoBehaviour
             Debug.Log($"[DeliveryManager] Completed delivery quest!");
         }
 
-        currentDeliveryQuest = null;
     }
 
     /// <summary>
     /// Show quest complete UI
     /// </summary>
-    private void ShowQuestCompleteUI()
+    private void ShowQuestCompleteUI(QuestData quest)
     {
         // Try to find and use the quest complete UI
         if (QuestUIManager.Instance != null)
         {
-            var questCompleteUI = FindFirstObjectByType<DeliveryDriver.Quest.UI.QuestCompleteUI>();
-            if (questCompleteUI != null && currentDeliveryQuest != null)
+            QuestCompleteUI questCompleteUI = FindFirstObjectByType<QuestCompleteUI>();
+            if (questCompleteUI != null)
             {
-                questCompleteUI.Show(currentDeliveryQuest);
+                int reward = QuestManager.Instance != null ? QuestManager.Instance.LastCompletionReward : 0;
+                questCompleteUI.ShowCompleteScreen(quest, reward);
             }
         }
         else

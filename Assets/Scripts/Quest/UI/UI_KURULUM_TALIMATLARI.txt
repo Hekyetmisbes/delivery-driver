@@ -1,0 +1,79 @@
+===========================================
+GÖREV SİSTEMİ UI KURULUM TALİMATLARI
+===========================================
+
+SORUNLAR:
+✗ Görev listesi gözükmüyor
+✗ TAB tuşuna basınca açılmıyor
+✗ Görev tamamlayınca mesaj çıkmıyor
+
+ÇÖZÜM:
+Bu sorunları çözmek için aşağıdaki adımları izleyin:
+
+===========================================
+OTOMATIK KURULUM (ÖNERİLEN)
+===========================================
+
+1. Unity Editor'ü açın
+2. SampleScene sahnesini açın (Assets/Scenes/SampleScene.unity)
+3. Hierarchy'de sağ tıklayın ve "Create Empty" seçin
+4. Oluşan GameObject'in adını "UI Setup Helper" yapın
+5. Inspector'da "Add Component" butonuna tıklayın
+6. "Quest UI Setup" yazıp QuestUISetup script'ini ekleyin
+7. Play tuşuna basın (▶)
+8. Console'da "Quest UI setup complete!" mesajını görmelisiniz
+9. Play modundan çıkın (Stop)
+10. Hierarchy'de oluşan UI elementlerini göreceksiniz:
+    - Quest UI Canvas
+    - QuestUIManager
+    - QuestListUI
+    - ActiveQuestUI
+    - QuestCompleteUI
+
+11. "UI Setup Helper" GameObject'ini artık silebilirsiniz
+12. Sahneyi kaydedin (Ctrl+S)
+
+===========================================
+SONUÇ
+===========================================
+
+Şimdi oyunu çalıştırdığınızda:
+
+✓ TAB tuşuna basarak görev listesini açıp kapatabilirsiniz
+✓ Sağ üst köşede aktif görev bilgilerini göreceksiniz
+✓ Görevi tamamladığınızda "GÖREV TAMAMLANDI!" mesajı çıkacak
+
+===========================================
+MANUEL KURULUM (İLERİ SEVİYE)
+===========================================
+
+Eğer otomatik kurulum işe yaramazsa:
+
+1. Hierarchy'de sağ tık > UI > Canvas oluşturun
+2. Canvas adını "Quest UI Canvas" yapın
+3. Canvas altında boş GameObject oluşturun: "QuestUIManager"
+4. QuestUIManager'a QuestUIManager.cs script'ini ekleyin
+5. QuestListUI, ActiveQuestUI ve QuestCompleteUI için GameObject'ler oluşturun
+6. Her birine ilgili script'leri ekleyin
+7. QuestUIManager Inspector'da bu UI referanslarını atayın
+
+===========================================
+SORUN GİDERME
+===========================================
+
+TAB tuşu çalışmıyorsa:
+- QuestUIManager sahne içinde olmalı
+- QuestListUI referansı atanmış olmalı
+- Console'da hata mesajı var mı kontrol edin
+
+Görev tamamlama mesajı çıkmıyorsa:
+- QuestCompleteUI sahne içinde olmalı
+- QuestUIManager'a bağlı olmalı
+- DeliveryManager'da useQuestSystem = true olmalı
+
+===========================================
+DESTEK
+===========================================
+
+Sorun yaşarsanız Unity Console'a bakın (Window > General > Console)
+Hata mesajları orada görünecektir.

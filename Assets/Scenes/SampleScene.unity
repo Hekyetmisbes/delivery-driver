@@ -3920,6 +3920,52 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 179636937}
   m_Mesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!1 &191120941
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 191120942}
+  - component: {fileID: 191120943}
+  m_Layer: 0
+  m_Name: QuestUISetupHelper
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &191120942
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 191120941}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1707111773}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &191120943
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 191120941}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f9e8a7b6c5d4e3f2a1b0c9d8e7f6a5b4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: GameScripts::DeliveryDriver.Quest.UI.QuestUISetup
+  setupOnAwake: 1
+  destroyAfterSetup: 1
 --- !u!1 &197294224
 GameObject:
   m_ObjectHideFlags: 0
@@ -24019,6 +24065,199 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 991724762}
   m_Mesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!1 &992426637
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 992426638}
+  - component: {fileID: 992426639}
+  m_Layer: 0
+  m_Name: QuestManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &992426638
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 992426637}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1707111773}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &992426639
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 992426637}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6f3a9cd9f6d64b44b8b48d7c8c08e2d1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: GameScripts::DeliveryDriver.Quest.QuestManager
+  questDatabase: {fileID: 0}
+  cargoLibrary: {fileID: 0}
+  roadGraphBuilder: {fileID: 0}
+  playerTransform: {fileID: 0}
+  playerController: {fileID: 0}
+  questSystemSettings: {fileID: 0}
+  pickupMarkerPrefab: {fileID: 0}
+  deliveryMarkerPrefab: {fileID: 0}
+  markerPool: {fileID: 0}
+  markerPoolSize: 10
+  questZonePrefab: {fileID: 0}
+  activeZones: []
+  questSfxSource: {fileID: 0}
+  pickupClip: {fileID: 0}
+  deliveryClip: {fileID: 0}
+  failureClip: {fileID: 0}
+  damageClip: {fileID: 0}
+  destroyedClip: {fileID: 0}
+  musicSource: {fileID: 0}
+  questAcceptedClip: {fileID: 0}
+  timeWarningClip: {fileID: 0}
+  levelUpClip: {fileID: 0}
+  explorationMusicClip: {fileID: 0}
+  deliveryMusicClip: {fileID: 0}
+  timeWarningThreshold: 30
+  musicCrossfadeDuration: 2
+  cargoVisual: {fileID: 0}
+  questMarkerParticlePrefab: {fileID: 0}
+  pickupEffectPrefab: {fileID: 0}
+  deliveryEffectPrefab: {fileID: 0}
+  damageEffectPrefab: {fileID: 0}
+  levelUpEffectPrefab: {fileID: 0}
+  particlePoolSize: 10
+  collisionDamageThreshold: 10000
+  collisionDamageDivider: 1000
+  collisionDamageCooldown: 0.25
+  maxActiveQuests: 3
+  activeQuests: []
+  availableQuests: []
+  completedQuests: []
+  currentQuest:
+    QuestID: 392018e5-6765-4850-a83a-01ccea8e56df
+    QuestName: New Quest
+    QuestDescription: 
+    QuestType: 0
+    Difficulty: 0
+    Status: 0
+    PickupLocation:
+      Position: {x: 0, y: 0, z: 0}
+      LocationName: 
+      RoadSegmentIndex: 0
+      WaypointIndex: 0
+      TriggerRadius: 10
+      VisualMarker: {fileID: 0}
+    DeliveryLocations: []
+    Cargo:
+      CargoName: Standard Cargo
+      Weight: 100
+      IsFragile: 0
+      CargoHealth: 100
+      CargoIcon: {fileID: 0}
+      Description: 
+    TimeLimit: 300
+    TimeRemaining: 300
+    BaseReward: 100
+    BonusReward: 50
+    BonusTimeThreshold: 0.5
+    RequiredLevel: 1
+    IsRepeatable: 1
+    XPReward: 50
+    HasPickedUpCargo: 0
+    CurrentDeliveryIndex: 0
+    StartTime: 0
+    PausedTime: 0
+    IsPaused: 0
+    TotalDistanceTraveled: 0
+    CollisionCount: 0
+    NpcCollisionCount: 0
+  debugInfiniteTime: 0
+  debugInvincibleCargo: 0
+  debugDrawGizmos: 1
+  debugDrawRoute: 1
+  debugDrawLabels: 1
+  debugPickupColor: {r: 0.2, g: 0.9, b: 1, a: 0.9}
+  debugDeliveryColor: {r: 0.3, g: 1, b: 0.5, a: 0.9}
+  debugRouteColor: {r: 1, g: 0.85, b: 0.2, a: 0.9}
+  consecutiveSuccesses: 0
+  streakMultiplier: 1
+  maxStreakMultiplier: 2
+  streakMultiplierIncrement: 0.1
+  dailyChallenge:
+    QuestID: 537aed49-8452-4699-bd4d-9a66acadc188
+    QuestName: New Quest
+    QuestDescription: 
+    QuestType: 0
+    Difficulty: 0
+    Status: 0
+    PickupLocation:
+      Position: {x: 0, y: 0, z: 0}
+      LocationName: 
+      RoadSegmentIndex: 0
+      WaypointIndex: 0
+      TriggerRadius: 10
+      VisualMarker: {fileID: 0}
+    DeliveryLocations: []
+    Cargo:
+      CargoName: Standard Cargo
+      Weight: 100
+      IsFragile: 0
+      CargoHealth: 100
+      CargoIcon: {fileID: 0}
+      Description: 
+    TimeLimit: 300
+    TimeRemaining: 300
+    BaseReward: 100
+    BonusReward: 50
+    BonusTimeThreshold: 0.5
+    RequiredLevel: 1
+    IsRepeatable: 1
+    XPReward: 50
+    HasPickedUpCargo: 0
+    CurrentDeliveryIndex: 0
+    StartTime: 0
+    PausedTime: 0
+    IsPaused: 0
+    TotalDistanceTraveled: 0
+    CollisionCount: 0
+    NpcCollisionCount: 0
+  lastDailyChallengeDate: 
+  dailyChallengeRewardMultiplier: 2
+  locationCooldownDistance: 100
+  questRefreshInterval: 300
+  manualRefreshCooldown: 30
+  targetQuestPoolSize: 5
+  OnQuestStarted:
+    m_PersistentCalls:
+      m_Calls: []
+  OnQuestCompleted:
+    m_PersistentCalls:
+      m_Calls: []
+  OnQuestFailed:
+    m_PersistentCalls:
+      m_Calls: []
+  OnQuestUpdated:
+    m_PersistentCalls:
+      m_Calls: []
+  OnDailyChallengeGenerated:
+    m_PersistentCalls:
+      m_Calls: []
 --- !u!1 &994365830
 GameObject:
   m_ObjectHideFlags: 0
@@ -43007,6 +43246,7 @@ GameObject:
   - component: {fileID: 1707111773}
   - component: {fileID: 1707111771}
   - component: {fileID: 1707111774}
+  - component: {fileID: 1707111775}
   m_Layer: 0
   m_Name: Scripts
   m_TagString: Untagged
@@ -43048,6 +43288,8 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1632399929}
+  - {fileID: 992426638}
+  - {fileID: 191120942}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &1707111774
@@ -43086,6 +43328,37 @@ MonoBehaviour:
   spawnRaycastDistance: 10
   enablePooling: 1
   poolExtraCount: 5
+  showDebugInfo: 1
+--- !u!114 &1707111775
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1707111770}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e7aca205261618143960e10030d07100, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: GameScripts::DeliveryManager
+  boxPrefab: {fileID: 6764019898714205150, guid: 57c9acc510ae1fb4bb6a617279d6e71b, type: 3}
+  pickupIndicatorPrefab: {fileID: 1708900355816085136, guid: 54c5563dc45134db29234a835c433ca6, type: 3}
+  deliveryIndicatorPrefab: {fileID: 1708900355816085136, guid: 54c5563dc45134db29234a835c433ca6, type: 3}
+  spawnPoints: []
+  spawnHeight: 1
+  minDistanceBetweenPoints: 20
+  groundMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  deliveryRadius: 5
+  autoGenerateSpawnPoints: 1
+  numberOfAutoSpawnPoints: 10
+  spawnAreaMin: {x: -50, y: -50}
+  spawnAreaMax: {x: 50, y: 50}
+  raycastStartHeight: 300
+  raycastMaxDistance: 400
+  useQuestSystem: 1
+  cargoLibrary: {fileID: 0}
   showDebugInfo: 1
 --- !u!1 &1710467947
 GameObject:
@@ -44989,7 +45262,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!1 &1802162136
 GameObject:
   m_ObjectHideFlags: 0
@@ -52910,67 +53183,6 @@ Material:
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1
---- !u!1001 &2144158952
-PrefabInstance:
-  m_ObjectHideFlags: 0
-  serializedVersion: 2
-  m_Modification:
-    serializedVersion: 3
-    m_TransformParent: {fileID: 0}
-    m_Modifications:
-    - target: {fileID: 3417198704780361152, guid: 57c9acc510ae1fb4bb6a617279d6e71b, type: 3}
-      propertyPath: m_LocalPosition.x
-      value: -85.77261
-      objectReference: {fileID: 0}
-    - target: {fileID: 3417198704780361152, guid: 57c9acc510ae1fb4bb6a617279d6e71b, type: 3}
-      propertyPath: m_LocalPosition.y
-      value: 0.266
-      objectReference: {fileID: 0}
-    - target: {fileID: 3417198704780361152, guid: 57c9acc510ae1fb4bb6a617279d6e71b, type: 3}
-      propertyPath: m_LocalPosition.z
-      value: 7.1532545
-      objectReference: {fileID: 0}
-    - target: {fileID: 3417198704780361152, guid: 57c9acc510ae1fb4bb6a617279d6e71b, type: 3}
-      propertyPath: m_LocalRotation.w
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 3417198704780361152, guid: 57c9acc510ae1fb4bb6a617279d6e71b, type: 3}
-      propertyPath: m_LocalRotation.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 3417198704780361152, guid: 57c9acc510ae1fb4bb6a617279d6e71b, type: 3}
-      propertyPath: m_LocalRotation.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 3417198704780361152, guid: 57c9acc510ae1fb4bb6a617279d6e71b, type: 3}
-      propertyPath: m_LocalRotation.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 3417198704780361152, guid: 57c9acc510ae1fb4bb6a617279d6e71b, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 3417198704780361152, guid: 57c9acc510ae1fb4bb6a617279d6e71b, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 3417198704780361152, guid: 57c9acc510ae1fb4bb6a617279d6e71b, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 5021457067924806057, guid: 57c9acc510ae1fb4bb6a617279d6e71b, type: 3}
-      propertyPath: m_Enabled
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 6764019898714205150, guid: 57c9acc510ae1fb4bb6a617279d6e71b, type: 3}
-      propertyPath: m_Name
-      value: Cardboard Box (Closed)
-      objectReference: {fileID: 0}
-    m_RemovedComponents: []
-    m_RemovedGameObjects: []
-    m_AddedGameObjects: []
-    m_AddedComponents: []
-  m_SourcePrefab: {fileID: 100100000, guid: 57c9acc510ae1fb4bb6a617279d6e71b, type: 3}
 --- !u!1 &2146627462
 GameObject:
   m_ObjectHideFlags: 0
@@ -53285,4 +53497,3 @@ SceneRoots:
   - {fileID: 1712823211}
   - {fileID: 1190258974}
   - {fileID: 1783540995}
-  - {fileID: 2144158952}
