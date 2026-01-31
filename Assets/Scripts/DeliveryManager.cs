@@ -1,8 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
+using DeliveryDriver.Quest;
 
 /// <summary>
 /// Manages delivery missions - spawning boxes and delivery points
+/// Integrates with Quest system to show missions in UI
 /// </summary>
 public class DeliveryManager : MonoBehaviour
 {
@@ -26,19 +28,26 @@ public class DeliveryManager : MonoBehaviour
     [SerializeField] private float raycastStartHeight = 300f;
     [SerializeField] private float raycastMaxDistance = 400f;
 
+    [Header("Quest Integration")]
+    [SerializeField] private bool useQuestSystem = true;
+    [SerializeField] private CargoLibrary cargoLibrary;
+
     [Header("Debug")]
     [SerializeField] private bool showDebugInfo = true;
 
     private DeliveryBox currentBox;
     private GameObject currentPickupIndicator;
     private GameObject currentDeliveryIndicator;
+    private Vector3 currentPickupPoint;
     private Vector3 currentDeliveryPoint;
     private bool isDeliveryActive = false;
     private List<Vector3> availableSpawnPoints = new List<Vector3>();
     private DeliveryUI deliveryUI;
+    private QuestData currentDeliveryQuest;
 
     public bool IsDeliveryActive => isDeliveryActive;
     public Vector3 CurrentDeliveryPoint => currentDeliveryPoint;
+    public Vector3 CurrentPickupPoint => currentPickupPoint;
 
     private void Start()
     {
@@ -242,6 +251,15 @@ public class DeliveryManager : MonoBehaviour
             currentPickupIndicator.transform.SetParent(currentBox.transform);
         }
 
+        // Store pickup point
+        currentPickupPoint = spawnPos;
+
+        // Create quest in quest system
+        if (useQuestSystem)
+        {
+            CreateDeliveryQuest(spawnPos);
+        }
+
         if (showDebugInfo)
         {
             Debug.Log($"[DeliveryManager] Spawned box at {spawnPos}");
@@ -268,6 +286,12 @@ public class DeliveryManager : MonoBehaviour
         {
             // Create default delivery indicator
             CreateDefaultDeliveryIndicator();
+        }
+
+        // Update quest with delivery location
+        if (useQuestSystem)
+        {
+            UpdateQuestWithDelivery(currentDeliveryPoint);
         }
 
         // Notify UI
@@ -347,6 +371,12 @@ public class DeliveryManager : MonoBehaviour
 
         isDeliveryActive = false;
 
+        // Complete quest
+        if (useQuestSystem)
+        {
+            CompleteDeliveryQuest();
+        }
+
         // Notify UI
         if (deliveryUI != null)
         {
@@ -374,6 +404,105 @@ public class DeliveryManager : MonoBehaviour
         Invoke(nameof(SpawnNewBox), 2f);
     }
 
+    /// <summary>
+    /// Create a delivery quest in the quest system
+    /// </summary>
+    private void CreateDeliveryQuest(Vector3 pickupPos)
+    {
+        if (QuestManager.Instance == null)
+        {
+            Debug.LogWarning("[DeliveryManager] QuestManager not found! Quest will not be created.");
+            return;
+        }
+
+        // Create quest data
+        currentDeliveryQuest = new QuestData
+        {
+            QuestID = System.Guid.NewGuid().ToString(),
+            QuestName = "Package Delivery",
+            QuestDescription = $"Pick up package at {FormatCoordinates(pickupPos)}",
+            QuestType = QuestType.StandardDelivery,
+            Difficulty = QuestDifficulty.Easy,
+            Status = QuestStatus.Available,
+            TimeLimit = 300f, // 5 minutes
+            TimeRemaining = 300f,
+            BaseReward = 100,
+            BonusReward = 50,
+            PickupLocation = new QuestLocation(pickupPos, $"Pickup: {FormatCoordinates(pickupPos)}", deliveryRadius),
+            DeliveryLocations = new List<QuestLocation>()
+        };
+
+        // Add cargo if available
+        if (cargoLibrary != null && cargoLibrary.GetAllCargo().Count > 0)
+        {
+            var allCargo = cargoLibrary.GetAllCargo();
+            currentDeliveryQuest.Cargo = allCargo[Random.Range(0, allCargo.Count)];
+        }
+
+        // Add quest to QuestManager
+        QuestManager.Instance.AddAvailableQuest(currentDeliveryQuest);
+        QuestManager.Instance.StartQuest(currentDeliveryQuest);
+
+        if (showDebugInfo)
+        {
+            Debug.Log($"[DeliveryManager] Created delivery quest: {currentDeliveryQuest.QuestName}");
+        }
+    }
+
+    /// <summary>
+    /// Update quest with delivery location
+    /// </summary>
+    private void UpdateQuestWithDelivery(Vector3 deliveryPos)
+    {
+        if (currentDeliveryQuest == null) return;
+
+        // Add delivery location
+        QuestLocation deliveryLocation = new QuestLocation(
+            deliveryPos,
+            $"Delivery: {FormatCoordinates(deliveryPos)}",
+            deliveryRadius
+        );
+
+        currentDeliveryQuest.DeliveryLocations.Add(deliveryLocation);
+        currentDeliveryQuest.QuestDescription = $"Deliver package to {FormatCoordinates(deliveryPos)}";
+        currentDeliveryQuest.Status = QuestStatus.InProgress;
+
+        // Show marker
+        deliveryLocation.VisualMarker = deliveryIndicatorPrefab;
+        deliveryLocation.ShowMarker();
+
+        if (showDebugInfo)
+        {
+            Debug.Log($"[DeliveryManager] Updated quest with delivery location: {FormatCoordinates(deliveryPos)}");
+        }
+    }
+
+    /// <summary>
+    /// Complete the current delivery quest
+    /// </summary>
+    private void CompleteDeliveryQuest()
+    {
+        if (currentDeliveryQuest == null || QuestManager.Instance == null) return;
+
+        currentDeliveryQuest.Status = QuestStatus.Completed;
+        QuestManager.Instance.CompleteQuest(currentDeliveryQuest);
+
+        if (showDebugInfo)
+        {
+            Debug.Log($"[DeliveryManager] Completed delivery quest!");
+        }
+
+        currentDeliveryQuest = null;
+    }
+
+    /// <summary>
+    /// Format coordinates for display
+    /// </summary>
+    private string FormatCoordinates(Vector3 position)
+    {
+        return $"({position.x:F0}, {position.z:F0})";
+    }
+
     private void OnDrawGizmos()
     {
         if (!showDebugInfo) return;
@@ -383,6 +512,13 @@ public class DeliveryManager : MonoBehaviour
         foreach (Vector3 point in availableSpawnPoints)
         {
             Gizmos.DrawWireSphere(point, 2f);
+        }
+
+        // Draw pickup point
+        if (currentBox != null && !currentBox.IsPickedUp)
+        {
+            Gizmos.color = Color.cyan;
+            Gizmos.DrawWireSphere(currentPickupPoint, deliveryRadius);
         }
 
         // Draw delivery point

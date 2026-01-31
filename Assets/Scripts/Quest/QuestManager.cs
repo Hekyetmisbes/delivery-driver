@@ -2616,5 +2616,60 @@ namespace DeliveryDriver.Quest
         }
 
         #endregion
+
+        #region External Quest Integration
+
+        /// <summary>
+        /// Add a quest to available quests (for external systems like DeliveryManager)
+        /// </summary>
+        public void AddAvailableQuest(QuestData quest)
+        {
+            if (quest == null)
+            {
+                Debug.LogError("[QuestManager] Cannot add null quest");
+                return;
+            }
+
+            if (!availableQuests.Contains(quest))
+            {
+                availableQuests.Add(quest);
+                Debug.Log($"[QuestManager] Added quest: {quest.QuestName}");
+            }
+        }
+
+        /// <summary>
+        /// Start a quest immediately (for external systems)
+        /// </summary>
+        public void StartQuest(QuestData quest)
+        {
+            if (quest == null)
+            {
+                Debug.LogError("[QuestManager] Cannot start null quest");
+                return;
+            }
+
+            // Set as current quest
+            currentQuest = quest;
+            quest.Status = QuestStatus.Active;
+
+            // Add to active quests if not already there
+            if (!activeQuests.Contains(quest))
+            {
+                activeQuests.Add(quest);
+            }
+
+            // Remove from available if it's there
+            availableQuests.Remove(quest);
+
+            // Show pickup marker
+            if (quest.PickupLocation != null)
+            {
+                quest.PickupLocation.ShowMarker();
+            }
+
+            Debug.Log($"[QuestManager] Started quest: {quest.QuestName}");
+        }
+
+        #endregion
     }
 }
