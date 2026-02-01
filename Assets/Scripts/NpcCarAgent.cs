@@ -78,8 +78,6 @@ namespace TrafficSystem
         [SerializeField] private float followingTimeSeconds = 2.5f;
         [Tooltip("Minimum gap when following (meters)")]
         [SerializeField] private float minimumFollowingGap = 3f;
-        [Tooltip("Speed matching smoothness (higher = smoother)")]
-        [SerializeField] private float speedMatchingSmooth = 3f;
 
         [Header("Lane Change Logic (Priority 1)")]
         [Tooltip("Minimum time between lane changes (seconds)")]
@@ -1154,9 +1152,13 @@ namespace TrafficSystem
                 {
                     maxAngleChange = angleChange;
                 }
+            }
 
-                // Check for intersections (connections)
-                if (current.connections != null && current.connections.Count > 0)
+            // Check if approaching end of segment (intersection)
+            if (currentSegment.connections != null && currentSegment.connections.Count > 0)
+            {
+                int distanceToEnd = currentSegment.waypoints.Count - currentWaypointIndex;
+                if (distanceToEnd < waypointCount)
                 {
                     hasIntersection = true;
                 }
