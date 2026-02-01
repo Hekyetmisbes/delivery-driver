@@ -57,9 +57,25 @@ namespace TrafficSystem
             npcContainer = new GameObject("NPC Vehicles").transform;
             npcContainer.SetParent(transform);
 
+            // Priority 2: Ensure traffic communication system exists
+            EnsureTrafficCommunicationSystem();
+
             if (spawnOnStart)
             {
                 StartCoroutine(SpawnNpcsCoroutine());
+            }
+        }
+
+        /// <summary>
+        /// Ensure traffic communication system exists in scene
+        /// </summary>
+        private void EnsureTrafficCommunicationSystem()
+        {
+            if (TrafficCommunicationSystem.Instance == null)
+            {
+                GameObject commsObj = new GameObject("TrafficCommunicationSystem");
+                commsObj.AddComponent<TrafficCommunicationSystem>();
+                Debug.Log("[NpcSpawner] Created TrafficCommunicationSystem");
             }
         }
 

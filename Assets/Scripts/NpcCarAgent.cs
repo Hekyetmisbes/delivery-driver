@@ -169,6 +169,13 @@ namespace TrafficSystem
         // Priority 1: Turn Signal System
         private TurnSignalController turnSignalController;
 
+        // Priority 2: Personality System
+        private DrivingPersonality personality;
+
+        // Priority 2: Predictive Behavior
+        private LookaheadData currentLookaheadData;
+        private TurnInfo currentTurnInfo;
+
         // Public accessors
         public RoadSegment CurrentSegment => currentSegment;
         public int CurrentWaypointIndex => currentWaypointIndex;
@@ -307,6 +314,9 @@ namespace TrafficSystem
 
         private void Start()
         {
+            // Priority 2: Initialize personality system
+            InitializePersonality();
+
             // Random cruise speed for this NPC with larger variation
             targetSpeed = Random.Range(cruiseSpeedRange.x, cruiseSpeedRange.y);
 
@@ -325,8 +335,11 @@ namespace TrafficSystem
 
             if (logPathChanges)
             {
-                Debug.Log($"[NpcCarAgent] {name} - Speed: {targetSpeed:F1} km/h, Offset: {lateralOffset:F1}m, Lookahead: {personalityLookAhead:F1}m");
+                Debug.Log($"[NpcCarAgent] {name} - Speed: {targetSpeed:F1} km/h, Offset: {lateralOffset:F1}m, Lookahead: {personalityLookAhead:F1}m, Personality: {personality.GetDescription()}");
             }
+
+            // Priority 2: Register with traffic communication system
+            RegisterWithTrafficSystem();
         }
 
         private void SetupRigidbody()
@@ -398,6 +411,12 @@ namespace TrafficSystem
 
             UpdatePath();
             UpdateOffRoadStatus();
+
+            // Priority 2: Predictive behavior
+            AnalyzeUpcomingPath();
+            DetectUpcomingTurn();
+            CheckPredictiveCollisions();
+
             CheckObstacles();
             UpdateLaneChange();
             ApplySteering();
@@ -1061,6 +1080,408 @@ namespace TrafficSystem
             // Cancel signal after a delay (handled in UpdateLaneChange)
         }
 
+        // ============================================================================
+        // PRIORITY 2: Personality System (Step 5.1)
+        // ============================================================================
+
+        /// <summary>
+        /// Initialize driving personality for this NPC
+        /// </summary>
+        private void InitializePersonality()
+        {
+            personality = DrivingPersonality.CreateRandomVaried();
+
+            if (logPathChanges)
+            {
+                Debug.Log($"[NpcCarAgent] {name} - Personality: {personality.GetDescription()}");
+            }
+        }
+
+        /// <summary>
+        /// Apply personality to behavior parameters
+        /// </summary>
+        private void ApplyPersonalityToParameters()
+        {
+            // Speed calculations
+            targetSpeed *= personality.speedMultiplier;
+            targetSpeed *= personality.speedLimitCompliance;
+
+            // Following distance
+            followingTimeSeconds *= personality.followingDistanceMultiplier;
+
+            // Lane changes
+            laneChangeCooldown /= personality.laneChangeFrequency;
+
+            // Acceleration/braking
+            acceleration *= personality.accelerationAggression;
+            braking *= personality.brakingAggression;
+
+            // Reaction delays
+            // Could be used in future implementations
+        }
+
+        // ============================================================================
+        // PRIORITY 2: Predictive Behavior - Multi-Waypoint Lookahead (Step 3.1)
+        // ============================================================================
+
+        /// <summary>
+        /// Analyze upcoming path for turns, intersections, and obstacles
+        /// </summary>
+        private void AnalyzeUpcomingPath()
+        {
+            if (currentSegment == null || currentWaypointIndex >= currentSegment.waypoints.Count)
+            {
+                currentLookaheadData = new LookaheadData();
+                return;
+            }
+
+            LookaheadData data = new LookaheadData();
+            int waypointCount = 15; // Look ahead 15 waypoints
+            int endIndex = Mathf.Min(currentWaypointIndex + waypointCount, currentSegment.waypoints.Count - 1);
+
+            // Analyze waypoints ahead
+            float maxAngleChange = 0f;
+            bool hasIntersection = false;
+
+            for (int i = currentWaypointIndex; i < endIndex - 1; i++)
+            {
+                Waypoint current = currentSegment.waypoints[i];
+                Waypoint next = currentSegment.waypoints[i + 1];
+
+                // Check for sharp turns
+                float angleChange = Vector3.Angle(current.forward, next.forward);
+                if (angleChange > maxAngleChange)
+                {
+                    maxAngleChange = angleChange;
+                }
+
+                // Check for intersections (connections)
+                if (current.connections != null && current.connections.Count > 0)
+                {
+                    hasIntersection = true;
+                }
+            }
+
+            data.hasSharpTurn = maxAngleChange > 15f;
+            data.turnSharpness = maxAngleChange;
+            data.hasIntersection = hasIntersection;
+            data.recommendedSpeed = CalculatePlannedSpeed(data);
+
+            currentLookaheadData = data;
+        }
+
+        /// <summary>
+        /// Calculate optimal speed based on upcoming path
+        /// </summary>
+        private float CalculatePlannedSpeed(LookaheadData ahead)
+        {
+            float speed = targetSpeed;
+
+            // Reduce for sharp turns
+            if (ahead.hasSharpTurn)
+            {
+                float turnFactor = Mathf.Clamp01(1f - (ahead.turnSharpness / 90f));
+                float turnSpeed = targetSpeed * Mathf.Lerp(0.5f, 1f, turnFactor);
+                speed = Mathf.Min(speed, turnSpeed);
+            }
+
+            // Reduce for intersections
+            if (ahead.hasIntersection)
+            {
+                speed = Mathf.Min(speed, targetSpeed * 0.7f);
+            }
+
+            return speed;
+        }
+
+        // ============================================================================
+        // PRIORITY 2: Predictive Behavior - Turn Planning (Step 3.3)
+        // ============================================================================
+
+        /// <summary>
+        /// Detect upcoming turns and plan deceleration
+        /// </summary>
+        private void DetectUpcomingTurn()
+        {
+            if (currentSegment == null || currentWaypointIndex >= currentSegment.waypoints.Count - 3)
+            {
+                currentTurnInfo = new TurnInfo();
+                return;
+            }
+
+            TurnInfo turnInfo = new TurnInfo();
+
+            // Look ahead 5-10 waypoints
+            int lookAheadCount = 10;
+            int endIndex = Mathf.Min(currentWaypointIndex + lookAheadCount, currentSegment.waypoints.Count - 1);
+
+            Vector3 currentPos = transform.position;
+            float distanceToTurn = 0f;
+            float maxAngle = 0f;
+
+            for (int i = currentWaypointIndex; i < endIndex - 1; i++)
+            {
+                Waypoint wp1 = currentSegment.waypoints[i];
+                Waypoint wp2 = currentSegment.waypoints[i + 1];
+
+                float angle = Vector3.Angle(wp1.forward, wp2.forward);
+
+                if (angle > 15f) // Significant turn
+                {
+                    turnInfo.isTurn = true;
+                    distanceToTurn = Vector3.Distance(currentPos, wp1.position);
+                    maxAngle = Mathf.Max(maxAngle, angle);
+                }
+            }
+
+            if (turnInfo.isTurn)
+            {
+                turnInfo.distanceToTurn = distanceToTurn;
+                turnInfo.turnAngle = maxAngle;
+                turnInfo.recommendedSpeed = CalculateTurnSpeed(maxAngle);
+            }
+
+            currentTurnInfo = turnInfo;
+        }
+
+        /// <summary>
+        /// Calculate safe speed for a turn based on angle
+        /// </summary>
+        private float CalculateTurnSpeed(float turnAngle)
+        {
+            // Sharp turns require slower speeds
+            float turnFactor = Mathf.Clamp01(1f - (turnAngle / 90f));
+            float minSpeed = targetSpeed * 0.4f; // At least 40% of target speed
+            float maxSpeed = targetSpeed;
+
+            return Mathf.Lerp(minSpeed, maxSpeed, turnFactor);
+        }
+
+        /// <summary>
+        /// Prepare for upcoming turn by adjusting speed
+        /// </summary>
+        private float PrepareForTurn(float desiredSpeed)
+        {
+            if (!currentTurnInfo.isTurn)
+            {
+                return desiredSpeed;
+            }
+
+            // Calculate braking distance needed
+            float currentSpeedMs = CurrentSpeed / 3.6f;
+            float targetSpeedMs = currentTurnInfo.recommendedSpeed / 3.6f;
+
+            if (currentSpeedMs <= targetSpeedMs)
+            {
+                return desiredSpeed; // Already slow enough
+            }
+
+            // Check if we need to start braking
+            float brakingDistance = CalculateBrakingDistance(CurrentSpeed, currentTurnInfo.recommendedSpeed);
+
+            if (currentTurnInfo.distanceToTurn < brakingDistance)
+            {
+                // Start decelerating
+                return currentTurnInfo.recommendedSpeed;
+            }
+
+            return desiredSpeed;
+        }
+
+        /// <summary>
+        /// Calculate braking distance needed to reach target speed
+        /// </summary>
+        private float CalculateBrakingDistance(float currentSpeed, float targetSpeed)
+        {
+            float deceleration = 4f; // m/s² - moderate braking
+            deceleration *= personality != null ? personality.brakingAggression : 1f;
+
+            float currentSpeedMs = currentSpeed / 3.6f;
+            float targetSpeedMs = targetSpeed / 3.6f;
+
+            float speedDiff = currentSpeedMs - targetSpeedMs;
+            if (speedDiff <= 0) return 0f;
+
+            // Physics: d = (v1² - v2²) / (2 * a)
+            float distance = (currentSpeedMs * currentSpeedMs - targetSpeedMs * targetSpeedMs) / (2 * deceleration);
+
+            // Add reaction distance
+            float reactionTime = personality != null ? personality.reactionTime : 0.5f;
+            float reactionDistance = currentSpeedMs * reactionTime;
+
+            return distance + reactionDistance + 2f; // +2m safety buffer
+        }
+
+        // ============================================================================
+        // PRIORITY 2: Predictive Behavior - Trajectory Prediction (Step 3.2)
+        // ============================================================================
+
+        /// <summary>
+        /// Check for predicted collisions with nearby vehicles
+        /// </summary>
+        private void CheckPredictiveCollisions()
+        {
+            if (TrafficCommunicationSystem.Instance == null) return;
+
+            // Get nearby vehicles
+            var nearbyVehicles = TrafficCommunicationSystem.Instance.GetNearbyVehicles(transform.position, 30f);
+
+            foreach (var otherVehicle in nearbyVehicles)
+            {
+                if (otherVehicle == this || otherVehicle == null) continue;
+
+                // Check if we'll collide in next 3 seconds
+                if (VehicleTrajectoryPredictor.WillCollide(this, otherVehicle, 3f))
+                {
+                    // Take evasive action
+                    float timeToCollision = VehicleTrajectoryPredictor.CalculateTimeToCollision(this, otherVehicle);
+
+                    if (timeToCollision < 2f)
+                    {
+                        // Urgent - slow down
+                        targetSpeed *= 0.7f;
+                    }
+                    else if (timeToCollision < 3f && ShouldChangeLane())
+                    {
+                        // Consider lane change if safe
+                        if (IsLaneSafe(-1))
+                        {
+                            ExecuteLaneChange(-1);
+                        }
+                        else if (IsLaneSafe(1))
+                        {
+                            ExecuteLaneChange(1);
+                        }
+                    }
+                }
+            }
+        }
+
+        // ============================================================================
+        // PRIORITY 2: Cooperative Behavior - Vehicle Communication (Step 4.1)
+        // ============================================================================
+
+        /// <summary>
+        /// Register this vehicle with the traffic communication system
+        /// </summary>
+        private void RegisterWithTrafficSystem()
+        {
+            if (TrafficCommunicationSystem.Instance != null)
+            {
+                TrafficCommunicationSystem.Instance.RegisterVehicle(this);
+            }
+        }
+
+        /// <summary>
+        /// Unregister from traffic communication system
+        /// </summary>
+        private void OnDestroy()
+        {
+            if (TrafficCommunicationSystem.Instance != null)
+            {
+                TrafficCommunicationSystem.Instance.UnregisterVehicle(this);
+            }
+        }
+
+        // ============================================================================
+        // PRIORITY 2: Cooperative Behavior - Merge Assistance (Step 4.2)
+        // ============================================================================
+
+        /// <summary>
+        /// Detect vehicles trying to merge into our lane
+        /// </summary>
+        private bool DetectMergingVehicle(out NpcCarAgent mergingVehicle, out float mergePoint)
+        {
+            mergingVehicle = null;
+            mergePoint = 0f;
+
+            if (TrafficCommunicationSystem.Instance == null) return false;
+
+            // Get nearby vehicles
+            var nearbyVehicles = TrafficCommunicationSystem.Instance.GetNearbyVehicles(transform.position, 20f);
+
+            foreach (var otherVehicle in nearbyVehicles)
+            {
+                if (otherVehicle == this || otherVehicle == null) continue;
+
+                // Check if they're changing lanes towards us
+                VehicleState state = TrafficCommunicationSystem.Instance.GetVehicleState(otherVehicle);
+                if (state != null && state.isChangingLanes)
+                {
+                    // Check if they're in adjacent lane
+                    Vector3 toOther = otherVehicle.transform.position - transform.position;
+                    float lateralDistance = Vector3.Dot(toOther, transform.right);
+
+                    if (Mathf.Abs(lateralDistance) > 2f && Mathf.Abs(lateralDistance) < 5f)
+                    {
+                        // They're in adjacent lane and changing lanes
+                        float forwardDistance = Vector3.Dot(toOther, transform.forward);
+
+                        if (forwardDistance > -5f && forwardDistance < 15f)
+                        {
+                            // They're in merge range
+                            mergingVehicle = otherVehicle;
+                            mergePoint = forwardDistance;
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Assist merging vehicle by creating space
+        /// </summary>
+        private void AssistMerge()
+        {
+            if (DetectMergingVehicle(out NpcCarAgent mergingVehicle, out float mergePoint))
+            {
+                // Create gap by slightly adjusting speed
+                if (mergePoint > 0 && mergePoint < 10f)
+                {
+                    // They're ahead - can speed up to clear gap
+                    if (personality != null && personality.riskTolerance > 0.4f)
+                    {
+                        targetSpeed *= 1.05f;
+                    }
+                }
+                else if (mergePoint < 0 && mergePoint > -5f)
+                {
+                    // They're behind - slow down to create gap
+                    targetSpeed *= 0.95f;
+                }
+            }
+        }
+
+        // ============================================================================
+        // Helper Structures
+        // ============================================================================
+
+        /// <summary>
+        /// Data structure for lookahead analysis
+        /// </summary>
+        private struct LookaheadData
+        {
+            public bool hasSharpTurn;
+            public float turnSharpness;
+            public bool hasIntersection;
+            public bool hasTrafficControl;
+            public float recommendedSpeed;
+        }
+
+        /// <summary>
+        /// Data structure for turn information
+        /// </summary>
+        private struct TurnInfo
+        {
+            public bool isTurn;
+            public float distanceToTurn;
+            public float turnAngle;
+            public float recommendedSpeed;
+        }
+
         /// <summary>
         /// Apply throttle and braking based on target speed and obstacles
         /// </summary>
@@ -1071,6 +1492,18 @@ namespace TrafficSystem
 
             // Priority 1: Adjust speed for traffic (following distance system)
             effectiveTargetSpeed = AdjustSpeedForTraffic(effectiveTargetSpeed);
+
+            // Priority 2: Prepare for upcoming turns
+            effectiveTargetSpeed = PrepareForTurn(effectiveTargetSpeed);
+
+            // Priority 2: Apply lookahead-based speed adjustments
+            if (currentLookaheadData.hasSharpTurn || currentLookaheadData.hasIntersection)
+            {
+                effectiveTargetSpeed = Mathf.Min(effectiveTargetSpeed, currentLookaheadData.recommendedSpeed);
+            }
+
+            // Priority 2: Assist merging vehicles
+            AssistMerge();
 
             // Advanced obstacle-based speed adjustment
             if (isObstacleDetected)
@@ -1546,6 +1979,27 @@ namespace TrafficSystem
                     Vector3 targetPos = transform.position + transform.right * (targetLateralOffset - lateralOffset);
                     Gizmos.DrawLine(transform.position + Vector3.up, targetPos + Vector3.up);
                     Gizmos.DrawWireSphere(targetPos + Vector3.up, 0.3f);
+                }
+
+                // Priority 2: Draw upcoming turn indicator
+                if (currentTurnInfo.isTurn)
+                {
+                    Gizmos.color = Color.magenta;
+                    Vector3 turnPos = transform.position + forward * currentTurnInfo.distanceToTurn;
+                    Gizmos.DrawWireSphere(turnPos, 1f);
+                    Gizmos.DrawLine(transform.position + Vector3.up * 2f, turnPos + Vector3.up * 2f);
+                }
+
+                // Priority 2: Draw predicted trajectory
+                if (Application.isPlaying)
+                {
+                    Gizmos.color = Color.cyan;
+                    for (int i = 1; i <= 5; i++)
+                    {
+                        float t = i * 0.5f; // 0.5s intervals
+                        Vector3 predictedPos = VehicleTrajectoryPredictor.PredictPositionWithPath(this, t);
+                        Gizmos.DrawWireSphere(predictedPos, 0.2f);
+                    }
                 }
             }
         }
