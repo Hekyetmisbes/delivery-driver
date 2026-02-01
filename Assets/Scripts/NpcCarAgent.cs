@@ -43,7 +43,7 @@ namespace TrafficSystem
 
         [Header("Speed Settings")]
         [Tooltip("Cruise speed range (km/h)")]
-        [SerializeField] private Vector2 cruiseSpeedRange = new Vector2(30f, 50f);
+        [SerializeField] private Vector2 cruiseSpeedRange = new Vector2(40f, 60f);
         [Tooltip("Acceleration force")]
         [SerializeField] private float acceleration = 800f;
         [Tooltip("Braking force")]
@@ -55,21 +55,25 @@ namespace TrafficSystem
         [Tooltip("Enable advanced obstacle detection and avoidance")]
         [SerializeField] private bool enableObstacleAvoidance = true;
         [Tooltip("Forward raycast distance (meters)")]
-        [SerializeField] private float avoidanceRayDistance = 15f;
+        [SerializeField] private float avoidanceRayDistance = 20f;
         [Tooltip("Side raycast distance for lane checking (meters)")]
-        [SerializeField] private float sideRayDistance = 10f;
+        [SerializeField] private float sideRayDistance = 15f;
         [Tooltip("Lateral offset for side raycasts (meters)")]
-        [SerializeField] private float sideRayOffset = 1.5f;
+        [SerializeField] private float sideRayOffset = 2f;  // Wider for better lane detection
         [Tooltip("Safe following distance (meters)")]
-        [SerializeField] private float safeFollowingDistance = 8f;
+        [SerializeField] private float safeFollowingDistance = 15f;  // Increased for smoother flow
         [Tooltip("Critical braking distance (meters)")]
-        [SerializeField] private float criticalBrakingDistance = 4f;
+        [SerializeField] private float criticalBrakingDistance = 4f;  // Reduced - only brake hard when very close
         [Tooltip("Brake strength when obstacle detected (0-1)")]
-        [SerializeField] private float avoidanceBrakeStrength = 0.7f;
+        [SerializeField] private float avoidanceBrakeStrength = 0.5f;  // Reduced for gentler braking
+        [Tooltip("Minimum separation distance (meters)")]
+        [SerializeField] private float minimumSeparationDistance = 2f;
+        [Tooltip("Separation force strength")]
+        [SerializeField] private float separationForceStrength = 5f;
         [Tooltip("Enable lane changing to avoid obstacles")]
         [SerializeField] private bool enableLaneChange = true;
         [Tooltip("Lane change speed (how fast to move laterally)")]
-        [SerializeField] private float laneChangeSpeed = 2f;
+        [SerializeField] private float laneChangeSpeed = 3f;  // Faster lane changes for smoother overtakes
         [Tooltip("Layer mask for obstacle detection")]
         [SerializeField] private LayerMask obstacleLayerMask = ~0;
 
@@ -81,11 +85,13 @@ namespace TrafficSystem
 
         [Header("Lane Change Logic (Priority 1)")]
         [Tooltip("Minimum time between lane changes (seconds)")]
-        [SerializeField] private float laneChangeCooldown = 5f;
+        [SerializeField] private float laneChangeCooldown = 3f;  // Reduced for more frequent overtakes
         [Tooltip("Minimum gap required for safe lane change (meters)")]
-        [SerializeField] private float laneChangeMinGap = 10f;
+        [SerializeField] private float laneChangeMinGap = 8f;  // Reduced for easier overtakes
         [Tooltip("Side check distance for lane safety (meters)")]
-        [SerializeField] private float laneCheckDistance = 15f;
+        [SerializeField] private float laneCheckDistance = 20f;  // Increased for safer overtakes
+        [Tooltip("Speed difference threshold to trigger overtake (km/h)")]
+        [SerializeField] private float overtakeSpeedThreshold = 5f;  // Overtake if 5+ km/h faster
 
         [Header("Environmental Awareness (Priority 3)")]
         [Tooltip("Enable weather-based behavior adjustments")]
@@ -120,6 +126,8 @@ namespace TrafficSystem
         [Header("Debug")]
         [SerializeField] private bool showDebugGizmos = true;
         [SerializeField] private bool logPathChanges = false;
+        [SerializeField] private bool logCollisions = true;
+        [SerializeField] private bool logOvertakes = true;  // Log overtaking behavior
 
         [Header("Grounding")]
         [Tooltip("Raycast mask for grounding the vehicle to the road surface")]
@@ -150,6 +158,12 @@ namespace TrafficSystem
         private bool isPotentiallyOffRoad;
         private float wheelBase;
 
+        // Collision handling
+        private bool isColliding;
+        private float collisionTimer;
+        private Vector3 separationDirection;
+        private List<Collider> nearbyVehicles = new List<Collider>();
+
         // Advanced obstacle avoidance state
         private bool leftLaneClear;
         private bool rightLaneClear;
@@ -171,6 +185,8 @@ namespace TrafficSystem
         // Priority 1: Lane Change System
         private float lastLaneChangeTime;
         private bool isChangingLanes;
+        private bool isOvertaking;  // Track if currently overtaking
+        private int currentLane;  // -1 = left, 0 = center/right, 1 = far right
 
         // Priority 1: Turn Signal System
         private TurnSignalController turnSignalController;
@@ -337,12 +353,17 @@ namespace TrafficSystem
             targetSpeed = Mathf.Max(20f, targetSpeed); // Minimum 20 km/h
 
             // Randomize driving personality
-            lateralOffset = Random.Range(-2.5f, 2.5f); // Random lane position (-2.5 to 2.5 meters)
+            lateralOffset = Random.Range(-1f, 1f); // Start closer to center for cleaner traffic
             targetLateralOffset = lateralOffset; // Initialize target
             currentLateralOffset = lateralOffset;
             personalityLookAhead = lookAheadDistance * Random.Range(0.6f, 1.4f); // Vary lookahead 60-140%
             personalityAcceleration = acceleration * Random.Range(0.7f, 1.3f); // Vary acceleration 70-130%
             personalitySteerSpeed = steeringSmoothSpeed * Random.Range(0.7f, 1.3f); // Vary steering 70-130%
+
+            // Initialize overtaking flags
+            isOvertaking = false;
+            isChangingLanes = false;
+            currentLane = 0;
 
             if (logPathChanges)
             {
@@ -461,10 +482,103 @@ namespace TrafficSystem
             CheckPredictiveCollisions();
 
             CheckObstacles();
+            CheckNearbyVehicles();
+            ApplySeparationForce();
             UpdateLaneChange();
             ApplySteering();
             ApplyStability();
             ApplyThrottle();
+        }
+
+        /// <summary>
+        /// Check for nearby vehicles using physics overlap
+        /// </summary>
+        private void CheckNearbyVehicles()
+        {
+            nearbyVehicles.Clear();
+            isColliding = false;
+
+            // Only check very close vehicles
+            Collider[] colliders = Physics.OverlapSphere(transform.position, 3f, obstacleLayerMask, QueryTriggerInteraction.Ignore);
+
+            foreach (Collider col in colliders)
+            {
+                if (col == null || col.transform.IsChildOf(transform))
+                    continue;
+
+                if (IsVehicleCollider(col))
+                {
+                    nearbyVehicles.Add(col);
+
+                    float distance = Vector3.Distance(transform.position, col.transform.position);
+                    // Only consider as collision if EXTREMELY close (< 1m)
+                    // This prevents false positives from cars passing by
+                    if (distance < 1f)
+                    {
+                        isColliding = true;
+                    }
+                }
+            }
+
+            if (isColliding)
+            {
+                collisionTimer += Time.fixedDeltaTime;
+            }
+            else
+            {
+                // Reset collision timer quickly when separated
+                collisionTimer = Mathf.Max(0, collisionTimer - Time.fixedDeltaTime * 3f);
+            }
+        }
+
+        /// <summary>
+        /// Apply separation force to push away from nearby vehicles
+        /// </summary>
+        private void ApplySeparationForce()
+        {
+            if (nearbyVehicles.Count == 0) return;
+
+            Vector3 separationForce = Vector3.zero;
+            int separationCount = 0;
+
+            foreach (Collider nearbyVehicle in nearbyVehicles)
+            {
+                if (nearbyVehicle == null) continue;
+
+                Vector3 toOther = nearbyVehicle.transform.position - transform.position;
+                float distance = toOther.magnitude;
+
+                // Skip if too far
+                if (distance > minimumSeparationDistance) continue;
+
+                // Apply gentle separation force when close
+                if (distance < 2.5f && distance > 0.1f)
+                {
+                    // Calculate repulsion force (stronger when closer)
+                    float strength = 1f - (distance / 2.5f);
+                    Vector3 repulsion = -toOther.normalized * strength;
+                    separationForce += repulsion;
+                    separationCount++;
+                }
+            }
+
+            if (separationCount > 0)
+            {
+                separationForce /= separationCount;
+                separationDirection = separationForce.normalized;
+
+                // Apply gentle lateral force to separate while maintaining forward motion
+                Vector3 lateralForce = Vector3.ProjectOnPlane(separationForce * separationForceStrength * 0.5f, transform.forward);
+                rb.AddForce(lateralForce, ForceMode.Acceleration);
+
+                // Keep moving forward even when separating
+                // Ensure minimum forward velocity to prevent getting stuck
+                Vector3 forwardVel = Vector3.Project(rb.linearVelocity, transform.forward);
+                if (forwardVel.magnitude < 5f && !isColliding) // 5 m/s = 18 km/h minimum
+                {
+                    rb.AddForce(transform.forward * 2f, ForceMode.Acceleration);
+                }
+            }
         }
 
         /// <summary>
@@ -493,7 +607,7 @@ namespace TrafficSystem
             if (ShouldChangeLane() && !isChangingLanes)
             {
                 // Determine direction based on which lane is safer
-                if (IsLaneSafe(-1)) // Left lane
+                if (IsLaneSafe(-1)) // Left lane (passing lane)
                 {
                     ExecuteLaneChange(-1);
                 }
@@ -503,13 +617,38 @@ namespace TrafficSystem
                 }
             }
 
-            // Reset to original lane if no obstacle and lane change complete
-            if (!isObstacleDetected && Mathf.Abs(lateralOffset - targetLateralOffset) < 0.1f)
+            // REALISTIC TRAFFIC: Return to RIGHT lane after overtaking
+            if (isOvertaking && !isObstacleDetected && !isFollowing)
             {
-                // Gradually return to center/original position
-                if (Mathf.Abs(currentLateralOffset) > 0.1f)
+                // Check if we've completed the overtake
+                if (Mathf.Abs(lateralOffset - targetLateralOffset) < 0.3f)
                 {
-                    targetLateralOffset = Mathf.Lerp(targetLateralOffset, 0f, Time.fixedDeltaTime * 0.5f);
+                    // Check if right lane is clear to return
+                    if (lateralOffset < -0.5f && IsLaneSafe(1)) // We're in left lane, return to right
+                    {
+                        if (logOvertakes)
+                        {
+                            Debug.Log($"[NpcCarAgent] {name} completing overtake (returning to right lane)");
+                        }
+
+                        targetLateralOffset = 0f; // Return to right/center lane
+                        isOvertaking = false;
+
+                        // Signal right turn
+                        if (turnSignalController != null)
+                        {
+                            turnSignalController.ActivateRight();
+                        }
+                    }
+                }
+            }
+
+            // Gradually return to right lane when clear (default driving lane)
+            if (!isObstacleDetected && !isFollowing && !isOvertaking && Mathf.Abs(lateralOffset - targetLateralOffset) < 0.1f)
+            {
+                if (lateralOffset < -0.5f) // In left lane, return to right
+                {
+                    targetLateralOffset = Mathf.Lerp(targetLateralOffset, 0f, Time.fixedDeltaTime * 0.3f);
                 }
             }
 
@@ -1016,21 +1155,37 @@ namespace TrafficSystem
             if (Mathf.Abs(targetLateralOffset - lateralOffset) > 0.5f)
                 return;
 
-            // Try to move to clearer lane
+            // REALISTIC TRAFFIC: Prefer LEFT lane for overtaking
+            if (isObstacleDetected || isFollowing)
+            {
+                // Try left lane first (passing lane)
+                if (leftLaneClear)
+                {
+                    targetLateralOffset = Mathf.Clamp(lateralOffset - 3f, -4f, 4f);
+                    isOvertaking = true;
+                    return;
+                }
+                // Only use right if left is blocked
+                else if (rightLaneClear)
+                {
+                    targetLateralOffset = Mathf.Clamp(lateralOffset + 3f, -4f, 4f);
+                    return;
+                }
+            }
+
+            // General lane selection when both clear
             if (leftLaneClear && !rightLaneClear)
             {
-                targetLateralOffset = Mathf.Clamp(lateralOffset - 2f, -3.5f, 3.5f);
+                targetLateralOffset = Mathf.Clamp(lateralOffset - 3f, -4f, 4f);
             }
             else if (rightLaneClear && !leftLaneClear)
             {
-                targetLateralOffset = Mathf.Clamp(lateralOffset + 2f, -3.5f, 3.5f);
+                targetLateralOffset = Mathf.Clamp(lateralOffset + 3f, -4f, 4f);
             }
             else if (leftLaneClear && rightLaneClear)
             {
-                // Both clear, choose randomly
-                targetLateralOffset = Random.value > 0.5f ?
-                    Mathf.Clamp(lateralOffset - 2f, -3.5f, 3.5f) :
-                    Mathf.Clamp(lateralOffset + 2f, -3.5f, 3.5f);
+                // Both clear, prefer left for overtaking
+                targetLateralOffset = Mathf.Clamp(lateralOffset - 3f, -4f, 4f);
             }
         }
 
@@ -1212,20 +1367,17 @@ namespace TrafficSystem
 
             // Reasons to change lanes:
 
-            // 1. Following too close and can't maintain desired speed
+            // 1. OVERTAKING: Following a slower vehicle (realistic traffic behavior)
             if (isFollowing && vehicleAhead != null)
             {
                 float speedDifference = targetSpeed - vehicleAhead.CurrentSpeed;
-                if (speedDifference > 10f) // We want to go at least 10 km/h faster
+                // Overtake if we're even slightly faster (5+ km/h)
+                if (speedDifference > overtakeSpeedThreshold)
                 {
-                    // Try left lane first (passing lane)
+                    // ALWAYS try LEFT lane first (passing lane in traffic)
                     if (IsLaneSafe(-1))
                     {
-                        return true;
-                    }
-                    // Try right lane
-                    if (IsLaneSafe(1))
-                    {
+                        isOvertaking = true;
                         return true;
                     }
                 }
@@ -1234,7 +1386,14 @@ namespace TrafficSystem
             // 2. Current lane blocked ahead
             if (isObstacleDetected && obstacleDistance < safeFollowingDistance)
             {
-                if (IsLaneSafe(-1) || IsLaneSafe(1))
+                // Prefer left lane for overtaking
+                if (IsLaneSafe(-1))
+                {
+                    isOvertaking = true;
+                    return true;
+                }
+                // Only use right if left is blocked
+                if (IsLaneSafe(1))
                 {
                     return true;
                 }
@@ -1266,12 +1425,23 @@ namespace TrafficSystem
                 }
             }
 
-            // Set target lateral offset
-            targetLateralOffset = Mathf.Clamp(lateralOffset + (direction * 3f), -3.5f, 3.5f);
+            // Set target lateral offset (wider range for better lane separation)
+            targetLateralOffset = Mathf.Clamp(lateralOffset + (direction * 3.5f), -4.5f, 4.5f);
 
             // Mark as changing lanes
             isChangingLanes = true;
             lastLaneChangeTime = Time.time;
+
+            // Mark as overtaking if moving left with vehicle ahead
+            if (direction < 0 && (isFollowing || isObstacleDetected))
+            {
+                isOvertaking = true;
+
+                if (logOvertakes)
+                {
+                    Debug.Log($"[NpcCarAgent] {name} starting overtake (moving to left lane)");
+                }
+            }
 
             // Cancel signal after a delay (handled in UpdateLaneChange)
         }
@@ -1801,8 +1971,19 @@ namespace TrafficSystem
             float currentSpeed = CurrentSpeed;
             float effectiveTargetSpeed = GetTurnLimitedTargetSpeed();
 
+            // OVERTAKING BOOST: Maintain or increase speed when overtaking
+            if (isOvertaking && isChangingLanes)
+            {
+                // Don't reduce speed during overtake - maintain target speed
+                effectiveTargetSpeed = Mathf.Max(effectiveTargetSpeed, targetSpeed * 1.1f);
+            }
+
             // Priority 1: Adjust speed for traffic (following distance system)
-            effectiveTargetSpeed = AdjustSpeedForTraffic(effectiveTargetSpeed);
+            // But not during active overtake
+            if (!isOvertaking || !isChangingLanes)
+            {
+                effectiveTargetSpeed = AdjustSpeedForTraffic(effectiveTargetSpeed);
+            }
 
             // Priority 2: Prepare for upcoming turns
             effectiveTargetSpeed = PrepareForTurn(effectiveTargetSpeed);
@@ -1817,19 +1998,21 @@ namespace TrafficSystem
             AssistMerge();
 
             // Advanced obstacle-based speed adjustment
-            if (isObstacleDetected)
+            // Be less aggressive when overtaking
+            if (isObstacleDetected && !isOvertaking)
             {
                 if (obstacleDistance < criticalBrakingDistance)
                 {
-                    // Emergency braking - very close obstacle
-                    effectiveTargetSpeed = Mathf.Min(effectiveTargetSpeed * 0.2f, 10f);
+                    // Very close obstacle - slow down but keep moving
+                    // Don't stop completely, just reduce speed to allow gradual separation
+                    effectiveTargetSpeed = Mathf.Max(effectiveTargetSpeed * 0.5f, 20f);
                 }
                 else if (obstacleDistance < safeFollowingDistance)
                 {
                     // Maintain safe following distance
                     float distanceFactor = (obstacleDistance - criticalBrakingDistance) /
                                           (safeFollowingDistance - criticalBrakingDistance);
-                    effectiveTargetSpeed *= Mathf.Lerp(0.3f, 0.7f, distanceFactor);
+                    effectiveTargetSpeed *= Mathf.Lerp(0.5f, 0.8f, distanceFactor);
                 }
                 else
                 {
@@ -1837,6 +2020,9 @@ namespace TrafficSystem
                     effectiveTargetSpeed *= 0.85f;
                 }
             }
+
+            // Ensure minimum speed to keep traffic flowing
+            effectiveTargetSpeed = Mathf.Max(effectiveTargetSpeed, 15f);
 
             float speedDifference = effectiveTargetSpeed - currentSpeed;
 
@@ -2236,6 +2422,84 @@ namespace TrafficSystem
             wheelCollider.GetWorldPose(out Vector3 pos, out Quaternion rot);
             wheelVisual.position = pos;
             wheelVisual.rotation = rot;
+        }
+
+        /// <summary>
+        /// Handle collision with other vehicles
+        /// </summary>
+        private void OnCollisionEnter(Collision collision)
+        {
+            if (IsVehicleCollider(collision.collider))
+            {
+                isColliding = true;
+                collisionTimer = 0f;
+
+                // Log collision for debugging
+                if (logCollisions)
+                {
+                    Debug.LogWarning($"[NpcCarAgent] {name} collided with {collision.collider.name}");
+                }
+
+                // Calculate separation direction
+                Vector3 collisionNormal = Vector3.zero;
+                foreach (ContactPoint contact in collision.contacts)
+                {
+                    collisionNormal += contact.normal;
+                }
+                if (collisionNormal.sqrMagnitude > 0.01f)
+                {
+                    separationDirection = collisionNormal.normalized;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Handle continuous collision
+        /// </summary>
+        private void OnCollisionStay(Collision collision)
+        {
+            if (IsVehicleCollider(collision.collider))
+            {
+                isColliding = true;
+
+                // Keep moving even during collision to allow natural separation
+                // Don't intervene too aggressively - let the separation force handle it
+                if (collisionTimer > 8f)
+                {
+                    // Only slow down if stuck for a very long time
+                    // Keep minimum speed of 15 km/h to ensure movement
+                    targetSpeed = Mathf.Max(15f, Mathf.Min(targetSpeed, 25f));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Handle collision exit
+        /// </summary>
+        private void OnCollisionExit(Collision collision)
+        {
+            if (IsVehicleCollider(collision.collider))
+            {
+                // Check if still colliding with other vehicles
+                bool stillColliding = false;
+                foreach (Collider col in nearbyVehicles)
+                {
+                    if (col != null && col != collision.collider)
+                    {
+                        float distance = Vector3.Distance(transform.position, col.transform.position);
+                        if (distance < minimumSeparationDistance * 0.7f)
+                        {
+                            stillColliding = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!stillColliding)
+                {
+                    isColliding = false;
+                }
+            }
         }
 
         private void OnDrawGizmos()

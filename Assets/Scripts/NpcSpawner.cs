@@ -19,9 +19,9 @@ namespace TrafficSystem
         [Tooltip("Number of NPCs to spawn")]
         [SerializeField] private int spawnCount = 10;
         [Tooltip("Minimum distance between spawned vehicles (meters)")]
-        [SerializeField] private float minimumSpawnSpacing = 8f;
+        [SerializeField] private float minimumSpawnSpacing = 30f;  // Increased to prevent overlaps
         [Tooltip("Check radius for existing vehicles/obstacles at spawn point (meters)")]
-        [SerializeField] private float spawnCheckRadius = 3f;
+        [SerializeField] private float spawnCheckRadius = 8f;  // Increased for better detection
         [Tooltip("Layer mask for checking obstacles at spawn point")]
         [SerializeField] private LayerMask spawnObstacleCheckMask = ~0;
         [Tooltip("Spawn vehicles on Start()")]
@@ -29,7 +29,7 @@ namespace TrafficSystem
         [Tooltip("Initial delay before starting spawn (seconds, to let road graph build)")]
         [SerializeField] private float initialSpawnDelay = 0.5f;
         [Tooltip("Delay between each NPC spawn (seconds)")]
-        [SerializeField] private float spawnDelay = 0.3f;
+        [SerializeField] private float spawnDelay = 0.8f;  // Increased from 0.3f to give time to accelerate
         [Tooltip("Raycast mask for grounding spawn position")]
         [SerializeField] private LayerMask spawnGroundMask = ~0;
         [Tooltip("Raycast height above waypoint for grounding")]
@@ -272,11 +272,11 @@ namespace TrafficSystem
                 {
                     carAgent.Initialize(roadGraphBuilder, segment, waypointIndex);
 
-                    // Give random initial velocity (20-40 km/h range)
+                    // Give initial velocity to start moving
                     Rigidbody rb = npcVehicle.GetComponent<Rigidbody>();
                     if (rb != null)
                     {
-                        float initialSpeed = Random.Range(5f, 11f); // 5-11 m/s = ~18-40 km/h
+                        float initialSpeed = Random.Range(8f, 12f); // 8-12 m/s = ~29-43 km/h (good starting speed)
                         rb.linearVelocity = forward * initialSpeed;
                         rb.angularVelocity = Vector3.zero;
                     }
@@ -466,11 +466,11 @@ namespace TrafficSystem
                 {
                     carAgent.Initialize(roadGraphBuilder, segment, waypointIndex);
 
-                    // Give random initial velocity (20-40 km/h range)
+                    // Give initial velocity to start moving
                     Rigidbody rb = npc.GetComponent<Rigidbody>();
                     if (rb != null)
                     {
-                        float initialSpeed = Random.Range(5f, 11f); // 5-11 m/s = ~18-40 km/h
+                        float initialSpeed = Random.Range(8f, 12f); // 8-12 m/s = ~29-43 km/h (good starting speed)
                         rb.linearVelocity = forward * initialSpeed;
                         rb.angularVelocity = Vector3.zero;
                     }
