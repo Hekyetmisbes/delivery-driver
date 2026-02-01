@@ -378,9 +378,12 @@ namespace TrafficSystem
             currentWaypointIndex = Mathf.Clamp(waypointIndex, 0, segment.waypoints.Count - 1);
             isInitialized = true;
 
-            if (logPathChanges)
+            // Always log initialization for debugging
+            Debug.Log($"[NpcCarAgent] {name} initialized on segment '{segment.name}' (waypoints: {segment.waypoints.Count}) at index {waypointIndex}");
+
+            if (segment.waypoints.Count == 0)
             {
-                Debug.Log($"[NpcCarAgent] {name} initialized on segment '{segment.name}' at waypoint {waypointIndex}");
+                Debug.LogError($"[NpcCarAgent] {name} - Segment '{segment.name}' has ZERO waypoints!");
             }
         }
 
@@ -418,7 +421,32 @@ namespace TrafficSystem
 
         private void FixedUpdate()
         {
-            if (!isInitialized || currentSegment == null) return;
+            if (!isInitialized)
+            {
+                if (Time.frameCount % 120 == 0) // Log every 2 seconds
+                {
+                    Debug.LogWarning($"[NpcCarAgent] {name} - Not initialized!");
+                }
+                return;
+            }
+
+            if (currentSegment == null)
+            {
+                if (Time.frameCount % 120 == 0) // Log every 2 seconds
+                {
+                    Debug.LogWarning($"[NpcCarAgent] {name} - No current segment!");
+                }
+                return;
+            }
+
+            if (currentSegment.waypoints == null || currentSegment.waypoints.Count == 0)
+            {
+                if (Time.frameCount % 120 == 0) // Log every 2 seconds
+                {
+                    Debug.LogWarning($"[NpcCarAgent] {name} - Segment '{currentSegment.name}' has no waypoints!");
+                }
+                return;
+            }
 
             UpdatePath();
             UpdateOffRoadStatus();
