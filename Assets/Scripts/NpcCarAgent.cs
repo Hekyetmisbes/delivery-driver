@@ -87,6 +87,14 @@ namespace TrafficSystem
         [Tooltip("Side check distance for lane safety (meters)")]
         [SerializeField] private float laneCheckDistance = 15f;
 
+        [Header("Environmental Awareness (Priority 3)")]
+        [Tooltip("Enable weather-based behavior adjustments")]
+        [SerializeField] private bool enableWeatherEffects = true;
+        [Tooltip("Enable time of day behavior adjustments")]
+        [SerializeField] private bool enableTimeOfDayEffects = true;
+        [Tooltip("Enable type-specific obstacle responses")]
+        [SerializeField] private bool enableObstacleClassification = true;
+
         [Header("Stability")]
         [Tooltip("Enable stability helpers (turn speed limit, downforce, anti-roll)")]
         [SerializeField] private bool enableStability = true;
@@ -173,6 +181,11 @@ namespace TrafficSystem
         // Priority 2: Predictive Behavior
         private LookaheadData currentLookaheadData;
         private TurnInfo currentTurnInfo;
+
+        // Priority 3: Environmental Awareness
+        private float weatherSpeedMultiplier = 1f;
+        private float timeOfDaySpeedMultiplier = 1f;
+        private float environmentalFollowingDistanceMultiplier = 1f;
 
         // Public accessors
         public RoadSegment CurrentSegment => currentSegment;
@@ -409,6 +422,10 @@ namespace TrafficSystem
 
             UpdatePath();
             UpdateOffRoadStatus();
+
+            // Priority 3: Environmental awareness
+            UpdateWeatherEffects();
+            UpdateTimeOfDayEffects();
 
             // Priority 2: Predictive behavior
             AnalyzeUpcomingPath();
@@ -789,6 +806,156 @@ namespace TrafficSystem
                    (collider.attachedRigidbody != null && !collider.attachedRigidbody.isKinematic);
         }
 
+        // ============================================================================
+        // PRIORITY 3: Obstacle Classification (Step 6.3)
+        // ============================================================================
+
+        /// <summary>
+        /// Classify obstacle type for appropriate response
+        /// </summary>
+        private ObstacleType ClassifyObstacle(Collider obstacle)
+        {
+            if (obstacle == null) return ObstacleType.Unknown;
+
+            // Check for vehicles
+            if (obstacle.CompareTag("NPC") || obstacle.CompareTag("Player"))
+                return ObstacleType.Vehicle;
+
+            // Check for emergency vehicles
+            if (obstacle.CompareTag("Emergency"))
+                return ObstacleType.EmergencyVehicle;
+
+            // Check for pedestrians
+            if (obstacle.CompareTag("Pedestrian"))
+                return ObstacleType.Pedestrian;
+
+            // Check if it's a vehicle by component
+            if (obstacle.GetComponent<NpcCarAgent>() != null ||
+                obstacle.GetComponentInParent<NpcCarAgent>() != null ||
+                obstacle.GetComponent<CarController>() != null ||
+                obstacle.GetComponentInParent<CarController>() != null)
+                return ObstacleType.Vehicle;
+
+            // Check if it's static
+            Rigidbody rb = obstacle.attachedRigidbody;
+            if (rb == null || rb.isKinematic)
+                return ObstacleType.StaticObject;
+
+            return ObstacleType.Unknown;
+        }
+
+        /// <summary>
+        /// Respond to obstacle based on its type
+        /// </summary>
+        private float RespondToObstacle(Collider obstacle, float distance, float currentTargetSpeed)
+        {
+            if (!enableObstacleClassification)
+            {
+                // Default behavior - treat all as vehicles
+                return currentTargetSpeed;
+            }
+
+            ObstacleType type = ClassifyObstacle(obstacle);
+
+            switch (type)
+            {
+                case ObstacleType.Vehicle:
+                    return HandleVehicleObstacle(distance, currentTargetSpeed);
+
+                case ObstacleType.Pedestrian:
+                    return HandlePedestrianObstacle(distance, currentTargetSpeed);
+
+                case ObstacleType.EmergencyVehicle:
+                    return HandleEmergencyVehicle(distance, currentTargetSpeed);
+
+                case ObstacleType.StaticObject:
+                    return HandleStaticObstacle(distance, currentTargetSpeed);
+
+                default:
+                    return HandleVehicleObstacle(distance, currentTargetSpeed);
+            }
+        }
+
+        /// <summary>
+        /// Handle vehicle obstacle - maintain distance, match speed
+        /// </summary>
+        private float HandleVehicleObstacle(float distance, float currentTargetSpeed)
+        {
+            if (distance < criticalBrakingDistance)
+            {
+                return currentTargetSpeed * 0.3f;
+            }
+            else if (distance < safeFollowingDistance)
+            {
+                float distanceFactor = distance / safeFollowingDistance;
+                return currentTargetSpeed * Mathf.Lerp(0.5f, 0.9f, distanceFactor);
+            }
+            return currentTargetSpeed;
+        }
+
+        /// <summary>
+        /// Handle pedestrian - ALWAYS stop, large safety margin
+        /// </summary>
+        private float HandlePedestrianObstacle(float distance, float currentTargetSpeed)
+        {
+            if (distance < 15f) // Large safety margin
+            {
+                return 0f; // Full stop
+            }
+            else if (distance < 25f)
+            {
+                return currentTargetSpeed * 0.3f; // Slow down significantly
+            }
+            return currentTargetSpeed;
+        }
+
+        /// <summary>
+        /// Handle emergency vehicle - pull over and stop
+        /// </summary>
+        private float HandleEmergencyVehicle(float distance, float currentTargetSpeed)
+        {
+            if (distance < 30f)
+            {
+                // Pull over to the right (if possible)
+                if (IsLaneSafe(1)) // Right lane
+                {
+                    ExecuteLaneChange(1);
+                }
+
+                // Slow down significantly
+                return currentTargetSpeed * 0.4f;
+            }
+            return currentTargetSpeed;
+        }
+
+        /// <summary>
+        /// Handle static obstacle - navigate around or stop
+        /// </summary>
+        private float HandleStaticObstacle(float distance, float currentTargetSpeed)
+        {
+            if (distance < criticalBrakingDistance)
+            {
+                return 0f; // Stop for very close static obstacles
+            }
+            else if (distance < safeFollowingDistance * 1.5f)
+            {
+                // Try to change lanes
+                if (enableLaneChange)
+                {
+                    if (IsLaneSafe(-1))
+                    {
+                        ExecuteLaneChange(-1);
+                    }
+                    else if (IsLaneSafe(1))
+                    {
+                        ExecuteLaneChange(1);
+                    }
+                }
+                return currentTargetSpeed * 0.6f;
+            }
+            return currentTargetSpeed;
+        }
+
         /// <summary>
         /// Check lane availability with additional side checks
         /// </summary>
@@ -899,13 +1066,16 @@ namespace TrafficSystem
             float baseDistance = currentSpeedMs * followingTimeSeconds;
 
             // Add personality multiplier (some drivers follow closer, others farther)
-            float personalityMultiplier = Mathf.Lerp(0.8f, 1.2f, Random.value);
+            float personalityMultiplier = personality != null ? personality.followingDistanceMultiplier : 1f;
+
+            // Priority 3: Increase following distance in bad weather
+            float weatherMultiplier = environmentalFollowingDistanceMultiplier;
 
             // Add buffer for reaction time
             float reactionBuffer = 2f; // 2 meters buffer
 
             // Ensure minimum gap
-            return Mathf.Max(minimumFollowingGap, baseDistance * personalityMultiplier + reactionBuffer);
+            return Mathf.Max(minimumFollowingGap, baseDistance * personalityMultiplier * weatherMultiplier + reactionBuffer);
         }
 
         /// <summary>
@@ -1458,6 +1628,117 @@ namespace TrafficSystem
         }
 
         // ============================================================================
+        // PRIORITY 3: Weather Effects (Step 6.1)
+        // ============================================================================
+
+        /// <summary>
+        /// Update behavior based on weather conditions
+        /// </summary>
+        private void UpdateWeatherEffects()
+        {
+            if (!enableWeatherEffects || WeatherManager.Instance == null)
+            {
+                weatherSpeedMultiplier = 1f;
+                environmentalFollowingDistanceMultiplier = 1f;
+                return;
+            }
+
+            // Apply weather-based speed reduction
+            weatherSpeedMultiplier = WeatherManager.Instance.GetSpeedReduction();
+
+            // Increase following distance in bad weather
+            environmentalFollowingDistanceMultiplier = WeatherManager.Instance.GetFollowingDistanceMultiplier();
+
+            // Apply steering smoothing in bad weather
+            if (WeatherManager.Instance.IsBadWeather())
+            {
+                float smoothingMultiplier = WeatherManager.Instance.GetSteeringSmoothingMultiplier();
+                // This affects steering through the personality steering speed
+                // Could be applied directly if needed
+            }
+        }
+
+        /// <summary>
+        /// Apply weather effects to speed
+        /// </summary>
+        private float ApplyWeatherEffects(float baseSpeed)
+        {
+            return baseSpeed * weatherSpeedMultiplier;
+        }
+
+        // ============================================================================
+        // PRIORITY 3: Time of Day Effects (Step 6.2)
+        // ============================================================================
+
+        /// <summary>
+        /// Update behavior based on time of day
+        /// </summary>
+        private void UpdateTimeOfDayEffects()
+        {
+            if (!enableTimeOfDayEffects)
+            {
+                timeOfDaySpeedMultiplier = 1f;
+                return;
+            }
+
+            timeOfDaySpeedMultiplier = GetTimeOfDayMultiplier();
+        }
+
+        /// <summary>
+        /// Get speed multiplier based on time of day
+        /// </summary>
+        private float GetTimeOfDayMultiplier()
+        {
+            int hour = System.DateTime.Now.Hour;
+
+            // Rush hour (7-9 AM, 5-7 PM): more aggressive, higher speeds
+            if ((hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 19))
+            {
+                // Adjust based on personality - aggressive drivers go faster in rush hour
+                if (personality != null && personality.riskTolerance > 0.6f)
+                {
+                    return 1.15f; // Aggressive drivers speed up in rush hour
+                }
+                return 1.05f; // Normal drivers slightly faster
+            }
+
+            // Night (10 PM - 6 AM): slower, more cautious
+            if (hour >= 22 || hour <= 6)
+            {
+                return 0.85f; // 15% slower at night
+            }
+
+            // Daytime (normal)
+            return 1.0f;
+        }
+
+        /// <summary>
+        /// Check if it's currently rush hour
+        /// </summary>
+        private bool IsRushHour()
+        {
+            int hour = System.DateTime.Now.Hour;
+            return (hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 19);
+        }
+
+        /// <summary>
+        /// Check if it's currently night time
+        /// </summary>
+        private bool IsNightTime()
+        {
+            int hour = System.DateTime.Now.Hour;
+            return hour >= 22 || hour <= 6;
+        }
+
+        /// <summary>
+        /// Apply time of day effects to speed
+        /// </summary>
+        private float ApplyTimeOfDayEffects(float baseSpeed)
+        {
+            return baseSpeed * timeOfDaySpeedMultiplier;
+        }
+
+        // ============================================================================
         // Helper Structures
         // ============================================================================
 
@@ -1575,6 +1856,10 @@ namespace TrafficSystem
         {
             float baseSpeed = targetSpeed;
 
+            // Priority 3: Apply environmental effects
+            baseSpeed = ApplyWeatherEffects(baseSpeed);
+            baseSpeed = ApplyTimeOfDayEffects(baseSpeed);
+
             // Reduce speed when off-road
             if (isPotentiallyOffRoad)
             {
@@ -1596,6 +1881,14 @@ namespace TrafficSystem
             float maxSpeedKmh = maxSpeedMs * 3.6f;
 
             float steerFactor = Mathf.Lerp(1f, minTurnSpeedFactor, steerAbs / maxSteerAngle);
+
+            // Priority 3: Adjust for weather traction
+            if (WeatherManager.Instance != null && enableWeatherEffects)
+            {
+                float traction = WeatherManager.Instance.GetTractionMultiplier();
+                maxSpeedKmh *= traction;
+            }
+
             return Mathf.Min(baseSpeed * steerFactor, maxSpeedKmh);
         }
 
@@ -2005,5 +2298,45 @@ namespace TrafficSystem
                 }
             }
         }
+
+        // ============================================================================
+        // Helper Structures
+        // ============================================================================
+
+        /// <summary>
+        /// Data structure for lookahead analysis
+        /// </summary>
+        private struct LookaheadData
+        {
+            public bool hasSharpTurn;
+            public float turnSharpness;
+            public bool hasIntersection;
+            public bool hasTrafficControl;
+            public float recommendedSpeed;
+        }
+
+        /// <summary>
+        /// Data structure for turn information
+        /// </summary>
+        private struct TurnInfo
+        {
+            public bool isTurn;
+            public float distanceToTurn;
+            public float turnAngle;
+            public float recommendedSpeed;
+        }
+    }
+
+    /// <summary>
+    /// Obstacle type classification for appropriate responses
+    /// Priority 3: Environmental Awareness
+    /// </summary>
+    public enum ObstacleType
+    {
+        Unknown,
+        Vehicle,
+        Pedestrian,
+        StaticObject,
+        EmergencyVehicle
     }
 }

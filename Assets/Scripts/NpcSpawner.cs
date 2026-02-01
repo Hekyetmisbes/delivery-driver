@@ -77,6 +77,14 @@ namespace TrafficSystem
                 commsObj.AddComponent<TrafficCommunicationSystem>();
                 Debug.Log("[NpcSpawner] Created TrafficCommunicationSystem");
             }
+
+            // Priority 3: Ensure weather manager exists
+            if (WeatherManager.Instance == null)
+            {
+                GameObject weatherObj = new GameObject("WeatherManager");
+                weatherObj.AddComponent<WeatherManager>();
+                Debug.Log("[NpcSpawner] Created WeatherManager");
+            }
         }
 
         /// <summary>
