@@ -36,9 +36,9 @@ namespace TrafficSystem
 
         [Header("Stuck Detection")]
         [Tooltip("Minimum speed before considered stuck (km/h)")]
-        [SerializeField] private float stuckSpeedThreshold = 3f;
+        [SerializeField] private float stuckSpeedThreshold = 2f;  // More sensitive
         [Tooltip("Time at low speed before triggering recovery (seconds)")]
-        [SerializeField] private float stuckTimeSeconds = 3f;
+        [SerializeField] private float stuckTimeSeconds = 5f;  // Increased to reduce false positives
 
         [Header("Recovery Settings")]
         [Tooltip("Height offset when snapping back to road (meters)")]
