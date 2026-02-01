@@ -2298,33 +2298,6 @@ namespace TrafficSystem
                 }
             }
         }
-
-        // ============================================================================
-        // Helper Structures
-        // ============================================================================
-
-        /// <summary>
-        /// Data structure for lookahead analysis
-        /// </summary>
-        private struct LookaheadData
-        {
-            public bool hasSharpTurn;
-            public float turnSharpness;
-            public bool hasIntersection;
-            public bool hasTrafficControl;
-            public float recommendedSpeed;
-        }
-
-        /// <summary>
-        /// Data structure for turn information
-        /// </summary>
-        private struct TurnInfo
-        {
-            public bool isTurn;
-            public float distanceToTurn;
-            public float turnAngle;
-            public float recommendedSpeed;
-        }
     }
 
     /// <summary>
