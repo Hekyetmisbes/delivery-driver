@@ -114,6 +114,18 @@ namespace TrafficSystem
         [SerializeField] private float laneCheckDistance = 20f;  // Increased for safer overtakes
         [Tooltip("Speed difference threshold to trigger overtake (km/h)")]
         [SerializeField] private float overtakeSpeedThreshold = 5f;  // Overtake if 5+ km/h faster
+        [Tooltip("Lateral distance used for one lane change step (meters)")]
+        [SerializeField] private float laneChangeOffset = 3f;
+        [Tooltip("Clamp for allowed lateral lane offset (meters)")]
+        [SerializeField] private float maxLateralLaneOffset = 4.5f;
+
+        [Header("Lane Centering")]
+        [Tooltip("Keep NPCs on fixed lane centers instead of centerline wandering")]
+        [SerializeField] private bool useFixedLaneCenters = false;
+        [Tooltip("Lane center distance from road centerline (meters)")]
+        [SerializeField] private float laneCenterOffset = 1.5f;
+        [Tooltip("Choose random left/right lane at spawn")]
+        [SerializeField] private bool randomizeInitialLane = true;
 
         [Header("Environmental Awareness (Priority 3)")]
         [Tooltip("Enable weather-based behavior adjustments")]
@@ -194,6 +206,7 @@ namespace TrafficSystem
 
         // Randomized behavior parameters
         private float lateralOffset; // Lateral offset from centerline (for lane variation)
+        private float cruisingLaneOffset;
         private float personalityLookAhead; // Randomized lookahead distance
         private float personalityAcceleration; // Randomized acceleration
         private float personalitySteerSpeed; // Randomized steering speed
@@ -376,7 +389,17 @@ namespace TrafficSystem
             targetSpeed = Mathf.Max(20f, targetSpeed); // Minimum 20 km/h
 
             // Randomize driving personality
-            lateralOffset = Random.Range(-1f, 1f); // Start closer to center for cleaner traffic
+            if (useFixedLaneCenters)
+            {
+                float laneSign = randomizeInitialLane && Random.value < 0.5f ? -1f : 1f;
+                cruisingLaneOffset = laneSign * Mathf.Max(0.1f, laneCenterOffset);
+                lateralOffset = cruisingLaneOffset;
+            }
+            else
+            {
+                cruisingLaneOffset = 0f;
+                lateralOffset = 0f; // Follow lane center from road graph directly
+            }
             targetLateralOffset = lateralOffset; // Initialize target
             currentLateralOffset = lateralOffset;
             personalityLookAhead = lookAheadDistance * Random.Range(0.6f, 1.4f); // Vary lookahead 60-140%
@@ -673,7 +696,7 @@ namespace TrafficSystem
                             Debug.Log($"[NpcCarAgent] {name} completing overtake (returning to right lane)");
                         }
 
-                        targetLateralOffset = 0f; // Return to right/center lane
+                        targetLateralOffset = cruisingLaneOffset; // Return to cruise lane center
                         isOvertaking = false;
 
                         // Signal right turn
@@ -688,9 +711,9 @@ namespace TrafficSystem
             // Gradually return to right lane when clear (default driving lane)
             if (!isObstacleDetected && !isFollowing && !isOvertaking && Mathf.Abs(lateralOffset - targetLateralOffset) < 0.1f)
             {
-                if (lateralOffset < -0.5f) // In left lane, return to right
+                if (lateralOffset < (cruisingLaneOffset - 0.5f)) // In left of cruise lane, return
                 {
-                    targetLateralOffset = Mathf.Lerp(targetLateralOffset, 0f, Time.fixedDeltaTime * 0.3f);
+                    targetLateralOffset = Mathf.Lerp(targetLateralOffset, cruisingLaneOffset, Time.fixedDeltaTime * 0.3f);
                 }
             }
 
@@ -1203,14 +1226,14 @@ namespace TrafficSystem
                 // Try left lane first (passing lane)
                 if (leftLaneClear)
                 {
-                    targetLateralOffset = Mathf.Clamp(lateralOffset - 3f, -4f, 4f);
+                    targetLateralOffset = Mathf.Clamp(lateralOffset - laneChangeOffset, -maxLateralLaneOffset, maxLateralLaneOffset);
                     isOvertaking = true;
                     return;
                 }
                 // Only use right if left is blocked
                 else if (rightLaneClear)
                 {
-                    targetLateralOffset = Mathf.Clamp(lateralOffset + 3f, -4f, 4f);
+                    targetLateralOffset = Mathf.Clamp(lateralOffset + laneChangeOffset, -maxLateralLaneOffset, maxLateralLaneOffset);
                     return;
                 }
             }
@@ -1218,16 +1241,16 @@ namespace TrafficSystem
             // General lane selection when both clear
             if (leftLaneClear && !rightLaneClear)
             {
-                targetLateralOffset = Mathf.Clamp(lateralOffset - 3f, -4f, 4f);
+                targetLateralOffset = Mathf.Clamp(lateralOffset - laneChangeOffset, -maxLateralLaneOffset, maxLateralLaneOffset);
             }
             else if (rightLaneClear && !leftLaneClear)
             {
-                targetLateralOffset = Mathf.Clamp(lateralOffset + 3f, -4f, 4f);
+                targetLateralOffset = Mathf.Clamp(lateralOffset + laneChangeOffset, -maxLateralLaneOffset, maxLateralLaneOffset);
             }
             else if (leftLaneClear && rightLaneClear)
             {
                 // Both clear, prefer left for overtaking
-                targetLateralOffset = Mathf.Clamp(lateralOffset - 3f, -4f, 4f);
+                targetLateralOffset = Mathf.Clamp(lateralOffset - laneChangeOffset, -maxLateralLaneOffset, maxLateralLaneOffset);
             }
         }
 
@@ -1508,7 +1531,7 @@ namespace TrafficSystem
             }
 
             // Set target lateral offset (wider range for better lane separation)
-            targetLateralOffset = Mathf.Clamp(lateralOffset + (direction * 3.5f), -4.5f, 4.5f);
+            targetLateralOffset = Mathf.Clamp(lateralOffset + (direction * laneChangeOffset), -maxLateralLaneOffset, maxLateralLaneOffset);
 
             // Mark as changing lanes
             isChangingLanes = true;

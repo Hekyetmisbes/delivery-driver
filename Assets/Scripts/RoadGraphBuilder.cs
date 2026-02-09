@@ -33,6 +33,10 @@ namespace TrafficSystem
         [Header("SimplePoly City Detection")]
         [Tooltip("Include SimplePoly City road prefabs (Road Lane, Road Corner, Road Intersection, etc.) in generated graph")]
         [SerializeField] private bool includeSimplePolyRoads = true;
+        [Tooltip("Generate separate left/right lane segments for SimplePoly roads")]
+        [SerializeField] private bool generateDualLaneSegmentsForSimplePoly = true;
+        [Tooltip("Fallback lane center offset from road centerline (meters)")]
+        [SerializeField] private float simplePolyLaneCenterOffset = 1.5f;
 
         [Header("Debug Visualization")]
         [SerializeField] private bool showWaypoints = true;
@@ -756,12 +760,22 @@ namespace TrafficSystem
                 // EasyRoads roads are already sampled via their own integration path.
                 if (IsEasyRoadsObject(go)) continue;
 
-                RoadSegment segment = new RoadSegment(roadGraph.roadSegments.Count, go.name);
-                SampleFromMesh(meshFilter, segment, segment.id);
-                if (segment.waypoints.Count < 2) continue;
+                RoadSegment centerSegment = new RoadSegment(roadGraph.roadSegments.Count, go.name);
+                SampleFromMesh(meshFilter, centerSegment, centerSegment.id);
+                if (centerSegment.waypoints.Count < 2) continue;
 
-                NormalizeWaypointForwards(segment);
-                roadGraph.roadSegments.Add(segment);
+                NormalizeWaypointForwards(centerSegment);
+
+                if (generateDualLaneSegmentsForSimplePoly)
+                {
+                    float laneOffset = EstimateLaneCenterOffset(meshFilter);
+                    AddOffsetLaneSegment(centerSegment, -laneOffset, $"{go.name}_Lane_Left");
+                    AddOffsetLaneSegment(centerSegment, laneOffset, $"{go.name}_Lane_Right");
+                }
+                else
+                {
+                    roadGraph.roadSegments.Add(centerSegment);
+                }
             }
 
             int added = roadGraph.roadSegments.Count - initialCount;
@@ -769,6 +783,59 @@ namespace TrafficSystem
             {
                 Debug.Log($"[RoadGraphBuilder] Added {added} SimplePoly road segments");
             }
+        }
+
+        private float EstimateLaneCenterOffset(MeshFilter meshFilter)
+        {
+            float fallback = Mathf.Max(0.1f, simplePolyLaneCenterOffset);
+            if (meshFilter == null || meshFilter.sharedMesh == null) return fallback;
+
+            Bounds b = meshFilter.sharedMesh.bounds;
+            Vector3 scale = meshFilter.transform.lossyScale;
+
+            float sx = Mathf.Abs(b.size.x * scale.x);
+            float sz = Mathf.Abs(b.size.z * scale.z);
+            float roadWidth = Mathf.Min(sx, sz);
+
+            if (roadWidth < 0.5f) return fallback;
+
+            // 2-lane road: center-to-lane-center ~= quarter of full road width.
+            float estimated = roadWidth * 0.25f;
+            return Mathf.Clamp(estimated, 0.8f, 2.2f);
+        }
+
+        private void AddOffsetLaneSegment(RoadSegment source, float lateralOffset, string name)
+        {
+            if (source == null || source.waypoints == null || source.waypoints.Count < 2) return;
+
+            RoadSegment laneSegment = new RoadSegment(roadGraph.roadSegments.Count, name);
+            for (int i = 0; i < source.waypoints.Count; i++)
+            {
+                Waypoint wp = source.waypoints[i];
+                Vector3 fwd = wp.forward;
+                if (fwd.sqrMagnitude < 0.01f)
+                {
+                    if (i < source.waypoints.Count - 1)
+                    {
+                        fwd = (source.waypoints[i + 1].position - wp.position).normalized;
+                    }
+                    else if (i > 0)
+                    {
+                        fwd = (wp.position - source.waypoints[i - 1].position).normalized;
+                    }
+                }
+
+                if (fwd.sqrMagnitude < 0.01f) fwd = Vector3.forward;
+
+                Vector3 right = Vector3.Cross(Vector3.up, fwd).normalized;
+                if (right.sqrMagnitude < 0.01f) right = Vector3.right;
+
+                Vector3 lanePos = wp.position + right * lateralOffset;
+                laneSegment.waypoints.Add(new Waypoint(lanePos, fwd, laneSegment.id));
+            }
+
+            NormalizeWaypointForwards(laneSegment);
+            roadGraph.roadSegments.Add(laneSegment);
         }
 
         private bool IsSimplePolyRoadObject(GameObject go)
