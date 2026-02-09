@@ -76,6 +76,20 @@ namespace TrafficSystem
         [SerializeField] private float laneChangeSpeed = 3f;  // Faster lane changes for smoother overtakes
         [Tooltip("Layer mask for obstacle detection")]
         [SerializeField] private LayerMask obstacleLayerMask = ~0;
+        [Tooltip("Radius used for forward vehicle detection casts")]
+        [SerializeField] private float vehicleDetectionRadius = 1.1f;
+        [Tooltip("Forward awareness angle used to ignore non-threatening side traffic")]
+        [SerializeField] private float forwardAwarenessAngle = 70f;
+        [Tooltip("Predictive collision lookahead horizon in seconds")]
+        [SerializeField] private float predictiveCollisionHorizon = 3.5f;
+        [Tooltip("Number of trajectory samples for predictive collision checks")]
+        [SerializeField] private int predictiveCollisionSamples = 8;
+        [Tooltip("TTC threshold for urgent braking")]
+        [SerializeField] private float hardBrakeTimeToCollision = 1.2f;
+        [Tooltip("TTC threshold for cautious deceleration")]
+        [SerializeField] private float cautionTimeToCollision = 2.8f;
+        [Tooltip("Extra clearance buffer added to safe gap calculations")]
+        [SerializeField] private float collisionBufferDistance = 2f;
 
         [Header("Following Distance (Priority 1)")]
         [Tooltip("Following time in seconds (2-3 second rule)")]
@@ -202,6 +216,8 @@ namespace TrafficSystem
         private float weatherSpeedMultiplier = 1f;
         private float timeOfDaySpeedMultiplier = 1f;
         private float environmentalFollowingDistanceMultiplier = 1f;
+        private float predictiveSpeedLimiter = 1f;
+        private bool imminentCollisionRisk;
 
         // Public accessors
         public RoadSegment CurrentSegment => currentSegment;
@@ -469,6 +485,9 @@ namespace TrafficSystem
                 return;
             }
 
+            predictiveSpeedLimiter = 1f;
+            imminentCollisionRisk = false;
+
             UpdatePath();
             UpdateOffRoadStatus();
 
@@ -498,8 +517,9 @@ namespace TrafficSystem
             nearbyVehicles.Clear();
             isColliding = false;
 
-            // Only check very close vehicles
-            Collider[] colliders = Physics.OverlapSphere(transform.position, 3f, obstacleLayerMask, QueryTriggerInteraction.Ignore);
+            float dynamicCheckRadius = Mathf.Lerp(3f, 6f, Mathf.Clamp01(CurrentSpeed / 80f));
+            Collider[] colliders = Physics.OverlapSphere(transform.position, dynamicCheckRadius, obstacleLayerMask, QueryTriggerInteraction.Ignore);
+            Vector3 selfReference = GetReferencePosition();
 
             foreach (Collider col in colliders)
             {
@@ -510,10 +530,19 @@ namespace TrafficSystem
                 {
                     nearbyVehicles.Add(col);
 
-                    float distance = Vector3.Distance(transform.position, col.transform.position);
-                    // Only consider as collision if EXTREMELY close (< 1m)
-                    // This prevents false positives from cars passing by
-                    if (distance < 1f)
+                    Vector3 closestPoint = col.ClosestPoint(selfReference);
+                    float distance = Vector3.Distance(selfReference, closestPoint);
+
+                    Rigidbody otherRb = col.attachedRigidbody;
+                    Vector3 otherVel = (otherRb != null && !otherRb.isKinematic) ? otherRb.linearVelocity : Vector3.zero;
+                    Vector3 toOther = closestPoint - selfReference;
+                    float closingSpeed = 0f;
+                    if (toOther.sqrMagnitude > 0.001f)
+                    {
+                        closingSpeed = Vector3.Dot(rb.linearVelocity - otherVel, toOther.normalized);
+                    }
+
+                    if (distance < 1.2f || (distance < minimumSeparationDistance && closingSpeed > 1.5f))
                     {
                         isColliding = true;
                     }
@@ -540,22 +569,29 @@ namespace TrafficSystem
 
             Vector3 separationForce = Vector3.zero;
             int separationCount = 0;
+            Vector3 selfReference = GetReferencePosition();
 
             foreach (Collider nearbyVehicle in nearbyVehicles)
             {
                 if (nearbyVehicle == null) continue;
 
-                Vector3 toOther = nearbyVehicle.transform.position - transform.position;
+                Vector3 closestPoint = nearbyVehicle.ClosestPoint(selfReference);
+                Vector3 toOther = closestPoint - selfReference;
                 float distance = toOther.magnitude;
 
                 // Skip if too far
                 if (distance > minimumSeparationDistance) continue;
 
                 // Apply gentle separation force when close
-                if (distance < 2.5f && distance > 0.1f)
+                if (distance < minimumSeparationDistance && distance > 0.05f)
                 {
-                    // Calculate repulsion force (stronger when closer)
-                    float strength = 1f - (distance / 2.5f);
+                    Rigidbody otherRb = nearbyVehicle.attachedRigidbody;
+                    Vector3 otherVel = (otherRb != null && !otherRb.isKinematic) ? otherRb.linearVelocity : Vector3.zero;
+                    float closingSpeed = Vector3.Dot(rb.linearVelocity - otherVel, toOther.normalized);
+
+                    float proximityFactor = 1f - (distance / minimumSeparationDistance);
+                    float closingFactor = Mathf.Clamp01(closingSpeed / 8f);
+                    float strength = proximityFactor * (1f + closingFactor);
                     Vector3 repulsion = -toOther.normalized * strength;
                     separationForce += repulsion;
                     separationCount++;
@@ -568,15 +604,15 @@ namespace TrafficSystem
                 separationDirection = separationForce.normalized;
 
                 // Apply gentle lateral force to separate while maintaining forward motion
-                Vector3 lateralForce = Vector3.ProjectOnPlane(separationForce * separationForceStrength * 0.5f, transform.forward);
+                Vector3 lateralForce = Vector3.ProjectOnPlane(separationForce * separationForceStrength, transform.forward);
                 rb.AddForce(lateralForce, ForceMode.Acceleration);
 
                 // Keep moving forward even when separating
                 // Ensure minimum forward velocity to prevent getting stuck
                 Vector3 forwardVel = Vector3.Project(rb.linearVelocity, transform.forward);
-                if (forwardVel.magnitude < 5f && !isColliding) // 5 m/s = 18 km/h minimum
+                if (forwardVel.magnitude < 4f && !isColliding)
                 {
-                    rb.AddForce(transform.forward * 2f, ForceMode.Acceleration);
+                    rb.AddForce(transform.forward * 1.5f, ForceMode.Acceleration);
                 }
             }
         }
@@ -1203,35 +1239,61 @@ namespace TrafficSystem
             vehicleAhead = null;
             isFollowing = false;
 
-            // Raycast ahead to detect vehicles
-            if (Physics.Raycast(rayOrigin, forward, out RaycastHit hit, avoidanceRayDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore))
+            RaycastHit[] hits = Physics.SphereCastAll(rayOrigin, vehicleDetectionRadius, forward, avoidanceRayDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore);
+            if (hits == null || hits.Length == 0)
             {
-                if (IsVehicleCollider(hit.collider))
+                return false;
+            }
+
+            System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+            float cosAwareness = Mathf.Cos(forwardAwarenessAngle * Mathf.Deg2Rad);
+
+            for (int i = 0; i < hits.Length; i++)
+            {
+                RaycastHit hit = hits[i];
+                if (!IsVehicleCollider(hit.collider))
                 {
-                    distance = hit.distance;
+                    continue;
+                }
 
-                    // Try to get the NpcCarAgent component
-                    NpcCarAgent otherAgent = hit.collider.GetComponent<NpcCarAgent>();
-                    if (otherAgent == null)
-                    {
-                        otherAgent = hit.collider.GetComponentInParent<NpcCarAgent>();
-                    }
+                NpcCarAgent otherAgent = hit.collider.GetComponent<NpcCarAgent>() ?? hit.collider.GetComponentInParent<NpcCarAgent>();
+                if (otherAgent == this)
+                {
+                    continue;
+                }
 
-                    if (otherAgent != null)
-                    {
-                        vehicleAhead = otherAgent;
+                Vector3 toOther = hit.point - rayOrigin;
+                if (toOther.sqrMagnitude < 0.001f)
+                {
+                    continue;
+                }
 
-                        // Calculate relative speed
-                        float mySpeed = CurrentSpeed / 3.6f; // Convert to m/s
-                        float theirSpeed = otherAgent.CurrentSpeed / 3.6f; // Convert to m/s
-                        relativeSpeed = mySpeed - theirSpeed; // Positive means we're catching up
+                Vector3 directionToOther = toOther.normalized;
+                if (Vector3.Dot(forward, directionToOther) < cosAwareness)
+                {
+                    continue;
+                }
 
-                        isFollowing = distance < CalculateSafeFollowingDistance();
-                        distanceToVehicleAhead = distance;
-                        relativeSpeedToVehicleAhead = relativeSpeed;
+                float lateralOffsetFromLane = Mathf.Abs(Vector3.Dot((hit.point - transform.position), transform.right));
+                if (lateralOffsetFromLane > sideRayOffset + 2.5f)
+                {
+                    continue;
+                }
 
-                        return true;
-                    }
+                distance = hit.distance;
+
+                if (otherAgent != null)
+                {
+                    float mySpeed = CurrentSpeed / 3.6f;
+                    float theirSpeed = otherAgent.CurrentSpeed / 3.6f;
+                    relativeSpeed = mySpeed - theirSpeed;
+
+                    float dynamicSafeDistance = CalculateSafeFollowingDistance() + Mathf.Max(0f, relativeSpeed * 1.2f);
+                    isFollowing = distance < dynamicSafeDistance;
+                    distanceToVehicleAhead = distance;
+                    relativeSpeedToVehicleAhead = relativeSpeed;
+                    vehicleAhead = otherAgent;
+                    return true;
                 }
             }
 
@@ -1693,38 +1755,94 @@ namespace TrafficSystem
         {
             if (TrafficCommunicationSystem.Instance == null) return;
 
-            // Get nearby vehicles
-            var nearbyVehicles = TrafficCommunicationSystem.Instance.GetNearbyVehicles(transform.position, 30f);
+            float speedMs = CurrentSpeed / 3.6f;
+            float queryRadius = Mathf.Max(30f, speedMs * predictiveCollisionHorizon + 10f);
+            var nearbyVehicles = TrafficCommunicationSystem.Instance.GetNearbyVehicles(transform.position, queryRadius);
+            float minSpeedLimiter = 1f;
+            bool urgentRisk = false;
 
             foreach (var otherVehicle in nearbyVehicles)
             {
                 if (otherVehicle == this || otherVehicle == null) continue;
 
-                // Check if we'll collide in next 3 seconds
-                if (VehicleTrajectoryPredictor.WillCollide(this, otherVehicle, 3f))
-                {
-                    // Take evasive action
-                    float timeToCollision = VehicleTrajectoryPredictor.CalculateTimeToCollision(this, otherVehicle);
+                float closestPredictedDistance = EstimateClosestPredictedDistance(otherVehicle, predictiveCollisionHorizon, predictiveCollisionSamples);
+                float timeToCollision = VehicleTrajectoryPredictor.CalculateTimeToCollision(this, otherVehicle);
+                float relativeClosingSpeed = CalculateRelativeClosingSpeed(otherVehicle);
+                float dynamicSafeGap = CalculateSafeFollowingDistance() + Mathf.Max(0f, relativeClosingSpeed * 1.5f) + collisionBufferDistance;
 
-                    if (timeToCollision < 2f)
+                bool hasPredictiveRisk = closestPredictedDistance < dynamicSafeGap || timeToCollision < cautionTimeToCollision;
+                if (!hasPredictiveRisk)
+                {
+                    continue;
+                }
+
+                if (timeToCollision < hardBrakeTimeToCollision || closestPredictedDistance < minimumSeparationDistance * 0.8f)
+                {
+                    minSpeedLimiter = Mathf.Min(minSpeedLimiter, 0.35f);
+                    urgentRisk = true;
+                }
+                else if (timeToCollision < cautionTimeToCollision)
+                {
+                    minSpeedLimiter = Mathf.Min(minSpeedLimiter, 0.55f);
+                }
+                else
+                {
+                    float clearanceFactor = Mathf.Clamp01(closestPredictedDistance / Mathf.Max(1f, dynamicSafeGap));
+                    minSpeedLimiter = Mathf.Min(minSpeedLimiter, Mathf.Lerp(0.6f, 0.9f, clearanceFactor));
+                }
+
+                if (timeToCollision < cautionTimeToCollision && ShouldChangeLane())
+                {
+                    if (IsLaneSafe(-1))
                     {
-                        // Urgent - slow down
-                        targetSpeed *= 0.7f;
+                        ExecuteLaneChange(-1);
                     }
-                    else if (timeToCollision < 3f && ShouldChangeLane())
+                    else if (IsLaneSafe(1))
                     {
-                        // Consider lane change if safe
-                        if (IsLaneSafe(-1))
-                        {
-                            ExecuteLaneChange(-1);
-                        }
-                        else if (IsLaneSafe(1))
-                        {
-                            ExecuteLaneChange(1);
-                        }
+                        ExecuteLaneChange(1);
                     }
                 }
             }
+
+            predictiveSpeedLimiter = Mathf.Clamp(minSpeedLimiter, 0.25f, 1f);
+            imminentCollisionRisk = urgentRisk;
+        }
+
+        private float EstimateClosestPredictedDistance(NpcCarAgent otherVehicle, float horizonSeconds, int samples)
+        {
+            if (otherVehicle == null) return float.MaxValue;
+
+            int sampleCount = Mathf.Max(3, samples);
+            float timeStep = horizonSeconds / sampleCount;
+            float closestDistance = Vector3.Distance(transform.position, otherVehicle.transform.position);
+
+            for (int i = 1; i <= sampleCount; i++)
+            {
+                float t = i * timeStep;
+                Vector3 posA = VehicleTrajectoryPredictor.PredictPositionWithPath(this, t);
+                Vector3 posB = VehicleTrajectoryPredictor.PredictPositionWithPath(otherVehicle, t);
+                float distance = Vector3.Distance(posA, posB);
+                if (distance < closestDistance)
+                {
+                    closestDistance = distance;
+                }
+            }
+
+            return closestDistance;
+        }
+
+        private float CalculateRelativeClosingSpeed(NpcCarAgent otherVehicle)
+        {
+            if (otherVehicle == null) return 0f;
+
+            Rigidbody otherRb = otherVehicle.GetComponent<Rigidbody>();
+            if (otherRb == null) return 0f;
+
+            Vector3 relativePos = otherVehicle.transform.position - transform.position;
+            if (relativePos.sqrMagnitude < 0.01f) return 0f;
+
+            Vector3 relativeVel = rb.linearVelocity - otherRb.linearVelocity;
+            return Vector3.Dot(relativeVel, relativePos.normalized);
         }
 
         // ============================================================================
@@ -1997,6 +2115,13 @@ namespace TrafficSystem
             // Priority 2: Assist merging vehicles
             AssistMerge();
 
+            // Predictive collision response (TTC and trajectory based)
+            effectiveTargetSpeed *= predictiveSpeedLimiter;
+            if (imminentCollisionRisk)
+            {
+                effectiveTargetSpeed = Mathf.Min(effectiveTargetSpeed, 12f);
+            }
+
             // Advanced obstacle-based speed adjustment
             // Be less aggressive when overtaking
             if (isObstacleDetected && !isOvertaking)
@@ -2053,6 +2178,11 @@ namespace TrafficSystem
                 else
                 {
                     brakeTorque = braking * 0.3f;
+                }
+
+                if (imminentCollisionRisk)
+                {
+                    brakeTorque = Mathf.Max(brakeTorque, braking * 1.3f);
                 }
 
                 SetMotorTorque(0f);

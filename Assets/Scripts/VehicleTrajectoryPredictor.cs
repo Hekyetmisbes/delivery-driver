@@ -78,8 +78,9 @@ namespace TrafficSystem
             if (vehicleA == null || vehicleB == null) return false;
 
             // Sample trajectory at multiple time steps
-            int samples = 5;
+            int samples = 8;
             float timeStep = timeWindow / samples;
+            float collisionThreshold = GetCombinedCollisionRadius(vehicleA, vehicleB);
 
             for (int i = 1; i <= samples; i++)
             {
@@ -89,9 +90,6 @@ namespace TrafficSystem
                 Vector3 posB = PredictPositionWithPath(vehicleB, t);
 
                 float distance = Vector3.Distance(posA, posB);
-
-                // Collision threshold (sum of vehicle sizes)
-                float collisionThreshold = 4f; // Approximate vehicle size
 
                 if (distance < collisionThreshold)
                 {
@@ -142,8 +140,7 @@ namespace TrafficSystem
             Vector3 posAtClosest = relativePos + relativeVel * timeToClosest;
             float closestDistance = posAtClosest.magnitude;
 
-            // Collision threshold
-            float collisionThreshold = 4f;
+            float collisionThreshold = GetCombinedCollisionRadius(vehicleA, vehicleB);
 
             if (closestDistance < collisionThreshold)
             {
@@ -196,6 +193,34 @@ namespace TrafficSystem
             }
 
             return false;
+        }
+
+        private static float GetCombinedCollisionRadius(NpcCarAgent vehicleA, NpcCarAgent vehicleB)
+        {
+            float radiusA = GetVehicleCollisionRadius(vehicleA);
+            float radiusB = GetVehicleCollisionRadius(vehicleB);
+            return radiusA + radiusB + 0.4f; // Safety buffer
+        }
+
+        private static float GetVehicleCollisionRadius(NpcCarAgent vehicle)
+        {
+            if (vehicle == null) return 2f;
+
+            Collider[] colliders = vehicle.GetComponentsInChildren<Collider>();
+            if (colliders == null || colliders.Length == 0)
+            {
+                return 2f;
+            }
+
+            Bounds bounds = colliders[0].bounds;
+            for (int i = 1; i < colliders.Length; i++)
+            {
+                bounds.Encapsulate(colliders[i].bounds);
+            }
+
+            float xExtent = Mathf.Max(0.5f, bounds.extents.x);
+            float zExtent = Mathf.Max(0.5f, bounds.extents.z);
+            return Mathf.Sqrt((xExtent * xExtent) + (zExtent * zExtent));
         }
     }
 }
