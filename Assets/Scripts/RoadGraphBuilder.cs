@@ -30,6 +30,10 @@ namespace TrafficSystem
         [Tooltip("Manual road network root (if auto-detection fails)")]
         [SerializeField] private GameObject roadNetworkRoot;
 
+        [Header("SimplePoly City Detection")]
+        [Tooltip("Include SimplePoly City road prefabs (Road Lane, Road Corner, Road Intersection, etc.) in generated graph")]
+        [SerializeField] private bool includeSimplePolyRoads = true;
+
         [Header("Debug Visualization")]
         [SerializeField] private bool showWaypoints = true;
         [SerializeField] private bool showConnections = true;
@@ -70,6 +74,11 @@ namespace TrafficSystem
             else if (roadNetworkRoot != null)
             {
                 ExtractRoadsFromNetwork(roadNetworkRoot);
+            }
+
+            if (includeSimplePolyRoads)
+            {
+                ExtractSimplePolyRoadMeshes();
             }
 
             // Build connections between road segments
@@ -725,6 +734,69 @@ namespace TrafficSystem
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Extract road segments from SimplePoly City road meshes in the active scene
+        /// </summary>
+        private void ExtractSimplePolyRoadMeshes()
+        {
+            MeshFilter[] sceneMeshFilters = FindObjectsByType<MeshFilter>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            if (sceneMeshFilters == null || sceneMeshFilters.Length == 0) return;
+
+            int initialCount = roadGraph.roadSegments.Count;
+
+            foreach (MeshFilter meshFilter in sceneMeshFilters)
+            {
+                if (meshFilter == null || meshFilter.sharedMesh == null) continue;
+
+                GameObject go = meshFilter.gameObject;
+                if (!IsSimplePolyRoadObject(go)) continue;
+
+                // EasyRoads roads are already sampled via their own integration path.
+                if (IsEasyRoadsObject(go)) continue;
+
+                RoadSegment segment = new RoadSegment(roadGraph.roadSegments.Count, go.name);
+                SampleFromMesh(meshFilter, segment, segment.id);
+                if (segment.waypoints.Count < 2) continue;
+
+                NormalizeWaypointForwards(segment);
+                roadGraph.roadSegments.Add(segment);
+            }
+
+            int added = roadGraph.roadSegments.Count - initialCount;
+            if (added > 0)
+            {
+                Debug.Log($"[RoadGraphBuilder] Added {added} SimplePoly road segments");
+            }
+        }
+
+        private bool IsSimplePolyRoadObject(GameObject go)
+        {
+            if (go == null) return false;
+
+            string lowerName = go.name.ToLowerInvariant();
+            if (!lowerName.Contains("road")) return false;
+
+            // Match typical SimplePoly road prefab names
+            if (lowerName.Contains("lane") ||
+                lowerName.Contains("corner") ||
+                lowerName.Contains("t_intersection") ||
+                lowerName.Contains("intersection") ||
+                lowerName.Contains("tile") ||
+                lowerName.Contains("concrete"))
+            {
+                return true;
+            }
+
+            MeshRenderer renderer = go.GetComponent<MeshRenderer>();
+            if (renderer == null) return false;
+
+            Material sharedMaterial = renderer.sharedMaterial;
+            if (sharedMaterial == null) return false;
+
+            string materialName = sharedMaterial.name.ToLowerInvariant();
+            return materialName.Contains("road");
         }
 
         /// <summary>
