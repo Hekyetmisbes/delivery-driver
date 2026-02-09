@@ -30,6 +30,8 @@ namespace TrafficSystem
         [SerializeField] private float initialSpawnDelay = 0.5f;
         [Tooltip("Delay between each NPC spawn (seconds)")]
         [SerializeField] private float spawnDelay = 0.8f;  // Increased from 0.3f to give time to accelerate
+        [Tooltip("Treat spawn spacing as planar road distance (ignores Y)")]
+        [SerializeField] private bool usePlanarSpawnSpacing = true;
         [Tooltip("Extra clearance multiplier around each spawned vehicle")]
         [SerializeField] private float spawnClearanceMultiplier = 1.15f;
         [Tooltip("Raycast mask for grounding spawn position")]
@@ -204,33 +206,6 @@ namespace TrafficSystem
                     continue;
                 }
 
-                // Check spacing with previously spawned vehicles in this batch
-                bool validSpacing = true;
-                foreach (Vector3 existingPos in spawnPositions)
-                {
-                    if (Vector3.Distance(spawnPos, existingPos) < minimumSpawnSpacing)
-                    {
-                        validSpacing = false;
-                        break;
-                    }
-                }
-
-                if (!validSpacing)
-                    continue;
-
-                // Check spacing with all active vehicles (including already spawned ones)
-                foreach (GameObject activeNpc in activeNpcs)
-                {
-                    if (activeNpc != null && Vector3.Distance(spawnPos, GetVehicleReferencePosition(activeNpc)) < minimumSpawnSpacing)
-                    {
-                        validSpacing = false;
-                        break;
-                    }
-                }
-
-                if (!validSpacing)
-                    continue;
-
                 // Spawn NPC
                 GameObject npcVehicle = GetOrCreateNpc();
                 if (npcVehicle == null)
@@ -250,21 +225,32 @@ namespace TrafficSystem
 
                 Vector3 finalSpawnPos = GetGroundedSpawnPosition(spawnPos, heightOffset);
 
+                // Check spacing with previously spawned vehicles in this batch
+                if (!IsSpacingValid(finalSpawnPos, spawnPositions))
+                {
+                    ReturnNpcToPool(npcVehicle);
+                    continue;
+                }
+
+                // Check spacing with all active vehicles (including already spawned ones)
+                bool validSpacing = true;
+                foreach (GameObject activeNpc in activeNpcs)
+                {
+                    if (activeNpc != null && !IsFarEnough(finalSpawnPos, GetVehicleReferencePosition(activeNpc), minimumSpawnSpacing))
+                    {
+                        validSpacing = false;
+                        break;
+                    }
+                }
+
+                if (!validSpacing)
+                {
+                    ReturnNpcToPool(npcVehicle);
+                    continue;
+                }
+
                 // Safe rotation with zero vector check - flatten to horizontal
-                Vector3 forward = spawnWaypoint.forward;
-                if (forward.sqrMagnitude < 0.01f)
-                {
-                    forward = Vector3.forward;
-                }
-                forward.y = 0; // Keep car level on road
-                if (forward.sqrMagnitude < 0.01f)
-                {
-                    forward = Vector3.forward;
-                }
-                else
-                {
-                    forward.Normalize();
-                }
+                Vector3 forward = ResolveSpawnForward(segment, waypointIndex, spawnWaypoint.forward);
                 Quaternion spawnRotation = Quaternion.LookRotation(forward);
 
                 // Check if spawn position is clear of physical obstacles using the real grounded pose.
@@ -282,6 +268,10 @@ namespace TrafficSystem
 
                 npcVehicle.transform.position = finalSpawnPos;
                 npcVehicle.transform.rotation = spawnRotation;
+                if (!npcVehicle.activeSelf)
+                {
+                    npcVehicle.SetActive(true);
+                }
 
                 if (showDebugInfo)
                 {
@@ -357,7 +347,10 @@ namespace TrafficSystem
             {
                 npc = pooledNpcs[0];
                 pooledNpcs.RemoveAt(0);
-                npc.SetActive(true);
+                if (npc.activeSelf)
+                {
+                    npc.SetActive(false);
+                }
             }
             else
             {
@@ -365,8 +358,10 @@ namespace TrafficSystem
                 GameObject prefab = npcVehiclePrefabs[Random.Range(0, npcVehiclePrefabs.Length)];
                 npc = Instantiate(prefab, npcContainer);
                 npc.name = $"NPC_{prefab.name}_{activeNpcs.Count}";
+                npc.SetActive(false);
             }
 
+            ResetPhysicsState(npc);
             return npc;
         }
 
@@ -468,20 +463,6 @@ namespace TrafficSystem
                 Waypoint wp = segment.waypoints[waypointIndex];
                 Vector3 spawnPos = wp.position;
 
-                // Check spacing with all active vehicles
-                bool validSpacing = true;
-                foreach (GameObject activeNpc in activeNpcs)
-                {
-                    if (activeNpc != null && Vector3.Distance(spawnPos, activeNpc.transform.position) < minimumSpawnSpacing)
-                    {
-                        validSpacing = false;
-                        break;
-                    }
-                }
-
-                if (!validSpacing)
-                    continue;
-
                 // Check if spawn position is clear
                 GameObject npc = GetOrCreateNpc();
                 if (npc == null)
@@ -496,21 +477,25 @@ namespace TrafficSystem
                     heightOffset = carAgent.GetGroundClearanceOffset();
                 Vector3 finalSpawnPos = GetGroundedSpawnPosition(wp.position, heightOffset);
 
+                // Check spacing with all active vehicles using final grounded position.
+                bool validSpacing = true;
+                foreach (GameObject activeNpc in activeNpcs)
+                {
+                    if (activeNpc != null && !IsFarEnough(finalSpawnPos, GetVehicleReferencePosition(activeNpc), minimumSpawnSpacing))
+                    {
+                        validSpacing = false;
+                        break;
+                    }
+                }
+
+                if (!validSpacing)
+                {
+                    ReturnNpcToPool(npc);
+                    continue;
+                }
+
                 // Safe rotation - flatten to horizontal
-                Vector3 forward = wp.forward;
-                if (forward.sqrMagnitude < 0.01f)
-                {
-                    forward = Vector3.forward;
-                }
-                forward.y = 0; // Keep car level
-                if (forward.sqrMagnitude < 0.01f)
-                {
-                    forward = Vector3.forward;
-                }
-                else
-                {
-                    forward.Normalize();
-                }
+                Vector3 forward = ResolveSpawnForward(segment, waypointIndex, wp.forward);
                 Quaternion spawnRotation = Quaternion.LookRotation(forward);
 
                 float clearanceRadius = GetSpawnClearanceRadius();
@@ -522,6 +507,10 @@ namespace TrafficSystem
 
                 npc.transform.position = finalSpawnPos;
                 npc.transform.rotation = spawnRotation;
+                if (!npc.activeSelf)
+                {
+                    npc.SetActive(true);
+                }
 
                 if (carAgent != null)
                 {
@@ -714,6 +703,73 @@ namespace TrafficSystem
             }
 
             return basePosition + Vector3.up * heightOffset;
+        }
+
+        private Vector3 ResolveSpawnForward(RoadSegment segment, int waypointIndex, Vector3 fallbackForward)
+        {
+            if (segment != null && segment.waypoints != null && segment.waypoints.Count >= 2)
+            {
+                int nextIndex = Mathf.Min(segment.waypoints.Count - 1, waypointIndex + 1);
+                int prevIndex = Mathf.Max(0, waypointIndex - 1);
+
+                Vector3 tangent = (nextIndex != waypointIndex)
+                    ? segment.waypoints[nextIndex].position - segment.waypoints[waypointIndex].position
+                    : segment.waypoints[waypointIndex].position - segment.waypoints[prevIndex].position;
+
+                tangent.y = 0f;
+                if (tangent.sqrMagnitude > 0.0001f)
+                {
+                    return tangent.normalized;
+                }
+            }
+
+            fallbackForward.y = 0f;
+            if (fallbackForward.sqrMagnitude > 0.0001f)
+            {
+                return fallbackForward.normalized;
+            }
+
+            return Vector3.forward;
+        }
+
+        private bool IsSpacingValid(Vector3 candidatePosition, List<Vector3> existingPositions)
+        {
+            for (int i = 0; i < existingPositions.Count; i++)
+            {
+                if (!IsFarEnough(candidatePosition, existingPositions[i], minimumSpawnSpacing))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool IsFarEnough(Vector3 a, Vector3 b, float minDistance)
+        {
+            if (!usePlanarSpawnSpacing)
+            {
+                return Vector3.Distance(a, b) >= minDistance;
+            }
+
+            Vector2 axz = new Vector2(a.x, a.z);
+            Vector2 bxz = new Vector2(b.x, b.z);
+            return Vector2.Distance(axz, bxz) >= minDistance;
+        }
+
+        private void ResetPhysicsState(GameObject npc)
+        {
+            if (npc == null)
+            {
+                return;
+            }
+
+            Rigidbody rb = npc.GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
         }
     }
 }

@@ -71,7 +71,7 @@ namespace TrafficSystem
         [Tooltip("Separation force strength")]
         [SerializeField] private float separationForceStrength = 5f;
         [Tooltip("Enable lane changing to avoid obstacles")]
-        [SerializeField] private bool enableLaneChange = true;
+        [SerializeField] private bool enableLaneChange = false;
         [Tooltip("Lane change speed (how fast to move laterally)")]
         [SerializeField] private float laneChangeSpeed = 3f;  // Faster lane changes for smoother overtakes
         [Tooltip("Layer mask for obstacle detection")]
@@ -115,17 +115,17 @@ namespace TrafficSystem
         [Tooltip("Speed difference threshold to trigger overtake (km/h)")]
         [SerializeField] private float overtakeSpeedThreshold = 5f;  // Overtake if 5+ km/h faster
         [Tooltip("Lateral distance used for one lane change step (meters)")]
-        [SerializeField] private float laneChangeOffset = 3f;
+        [SerializeField] private float laneChangeOffset = 1.5f;
         [Tooltip("Clamp for allowed lateral lane offset (meters)")]
         [SerializeField] private float maxLateralLaneOffset = 4.5f;
 
         [Header("Lane Centering")]
         [Tooltip("Keep NPCs on fixed lane centers instead of centerline wandering")]
-        [SerializeField] private bool useFixedLaneCenters = false;
+        [SerializeField] private bool useFixedLaneCenters = true;
         [Tooltip("Lane center distance from road centerline (meters)")]
         [SerializeField] private float laneCenterOffset = 1.5f;
         [Tooltip("Choose random left/right lane at spawn")]
-        [SerializeField] private bool randomizeInitialLane = true;
+        [SerializeField] private bool randomizeInitialLane = false;
 
         [Header("Environmental Awareness (Priority 3)")]
         [Tooltip("Enable weather-based behavior adjustments")]
@@ -402,9 +402,9 @@ namespace TrafficSystem
             }
             targetLateralOffset = lateralOffset; // Initialize target
             currentLateralOffset = lateralOffset;
-            personalityLookAhead = lookAheadDistance * Random.Range(0.6f, 1.4f); // Vary lookahead 60-140%
-            personalityAcceleration = acceleration * Random.Range(0.7f, 1.3f); // Vary acceleration 70-130%
-            personalitySteerSpeed = steeringSmoothSpeed * Random.Range(0.7f, 1.3f); // Vary steering 70-130%
+            personalityLookAhead = lookAheadDistance * Random.Range(0.9f, 1.1f); // Keep path progression stable
+            personalityAcceleration = acceleration * Random.Range(0.9f, 1.1f);
+            personalitySteerSpeed = steeringSmoothSpeed * Random.Range(0.9f, 1.1f);
 
             // Initialize overtaking flags
             isOvertaking = false;
@@ -757,8 +757,13 @@ namespace TrafficSystem
             // Check for connections (intersections)
             if (currentSegment.connections != null && currentSegment.connections.Count > 0)
             {
-                // Choose random connection
-                RoadConnection connection = currentSegment.connections[Random.Range(0, currentSegment.connections.Count)];
+                RoadConnection connection = SelectBestConnection(currentSegment.connections);
+                if (connection == null || connection.toSegment == null)
+                {
+                    currentWaypointIndex = 0;
+                    return;
+                }
+
                 currentSegment = connection.toSegment;
                 currentWaypointIndex = connection.toWaypointIndex;
 
@@ -769,26 +774,69 @@ namespace TrafficSystem
             }
             else
             {
-                // No connections - randomly choose to loop or teleport
-                float choice = Random.value;
-
-                if (choice < 0.3f && currentSegment.waypoints.Count > 1) // 30% loop back
+                // No connection: loop on current segment instead of random teleport.
+                currentWaypointIndex = 0;
+                if (logPathChanges)
                 {
-                    currentWaypointIndex = 0;
-                    if (logPathChanges)
-                    {
-                        Debug.Log($"[NpcCarAgent] {name} looping back on segment '{currentSegment.name}'");
-                    }
-                }
-                else // 70% teleport to random location
-                {
-                    if (logPathChanges)
-                    {
-                        Debug.Log($"[NpcCarAgent] {name} teleporting to random road");
-                    }
-                    TeleportToRandomRoad();
+                    Debug.Log($"[NpcCarAgent] {name} looping on segment '{currentSegment.name}' (no outgoing connection)");
                 }
             }
+        }
+
+        private RoadConnection SelectBestConnection(List<RoadConnection> connections)
+        {
+            if (connections == null || connections.Count == 0)
+            {
+                return null;
+            }
+
+            Vector3 currentForward = GetWorldForward();
+            currentForward.y = 0f;
+            if (currentForward.sqrMagnitude < 0.0001f)
+            {
+                currentForward = Vector3.forward;
+            }
+            else
+            {
+                currentForward.Normalize();
+            }
+
+            RoadConnection best = connections[0];
+            float bestDot = -999f;
+
+            for (int i = 0; i < connections.Count; i++)
+            {
+                RoadConnection connection = connections[i];
+                if (connection == null || connection.toSegment == null || connection.toSegment.waypoints == null || connection.toSegment.waypoints.Count == 0)
+                {
+                    continue;
+                }
+
+                int toIndex = Mathf.Clamp(connection.toWaypointIndex, 0, connection.toSegment.waypoints.Count - 1);
+                Vector3 candidateForward = connection.toSegment.waypoints[toIndex].forward;
+                candidateForward.y = 0f;
+
+                if (candidateForward.sqrMagnitude < 0.0001f && toIndex < connection.toSegment.waypoints.Count - 1)
+                {
+                    candidateForward = connection.toSegment.waypoints[toIndex + 1].position - connection.toSegment.waypoints[toIndex].position;
+                    candidateForward.y = 0f;
+                }
+
+                if (candidateForward.sqrMagnitude < 0.0001f)
+                {
+                    continue;
+                }
+
+                candidateForward.Normalize();
+                float dot = Vector3.Dot(currentForward, candidateForward);
+                if (dot > bestDot)
+                {
+                    bestDot = dot;
+                    best = connection;
+                }
+            }
+
+            return best;
         }
 
         /// <summary>
