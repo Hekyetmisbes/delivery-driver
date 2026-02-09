@@ -268,7 +268,7 @@ namespace TrafficSystem
                 Quaternion spawnRotation = Quaternion.LookRotation(forward);
 
                 // Check if spawn position is clear of physical obstacles using the real grounded pose.
-                float clearanceRadius = minimumSpawnSpacing * spawnClearanceMultiplier;
+                float clearanceRadius = GetSpawnClearanceRadius();
                 if (!IsSpawnPositionClear(finalSpawnPos, clearanceRadius))
                 {
                     if (showDebugInfo && attempts % 10 == 0)
@@ -508,7 +508,7 @@ namespace TrafficSystem
                 }
                 Quaternion spawnRotation = Quaternion.LookRotation(forward);
 
-                float clearanceRadius = minimumSpawnSpacing * spawnClearanceMultiplier;
+                float clearanceRadius = GetSpawnClearanceRadius();
                 if (!IsSpawnPositionClear(finalSpawnPos, clearanceRadius))
                 {
                     ReturnNpcToPool(npc);
@@ -673,6 +673,14 @@ namespace TrafficSystem
             }
 
             return true;
+        }
+
+        private float GetSpawnClearanceRadius()
+        {
+            // Keep extra spawn reservation realistic to road width.
+            // Large spacing values are still enforced separately via minimumSpawnSpacing.
+            float scaledRadius = minimumSpawnSpacing * spawnClearanceMultiplier * 0.4f;
+            return Mathf.Clamp(scaledRadius, spawnCheckRadius, 9f);
         }
 
         private Vector3 GetVehicleReferencePosition(GameObject npc)
