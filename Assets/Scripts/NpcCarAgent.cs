@@ -96,6 +96,14 @@ namespace TrafficSystem
         [SerializeField] private float followingTimeSeconds = 2.5f;
         [Tooltip("Minimum gap when following (meters)")]
         [SerializeField] private float minimumFollowingGap = 3f;
+        [Tooltip("Minimum bumper gap at very low speed / stop-go traffic (meters)")]
+        [SerializeField] private float standstillFollowingGap = 5.5f;
+        [Tooltip("Extra following gap multiplier at low speed to avoid bumper-to-bumper clumping")]
+        [SerializeField] private float lowSpeedFollowingMultiplier = 1.35f;
+        [Tooltip("Minimum speed when constrained by traffic ahead (km/h)")]
+        [SerializeField] private float trafficConstrainedMinSpeed = 2f;
+        [Tooltip("Minimum cruising speed when road ahead is clear (km/h)")]
+        [SerializeField] private float freeFlowMinSpeed = 15f;
 
         [Header("Lane Change Logic (Priority 1)")]
         [Tooltip("Minimum time between lane changes (seconds)")]
@@ -200,7 +208,6 @@ namespace TrafficSystem
         private float lastLaneChangeTime;
         private bool isChangingLanes;
         private bool isOvertaking;  // Track if currently overtaking
-        private int currentLane;  // -1 = left, 0 = center/right, 1 = far right
 
         // Priority 1: Turn Signal System
         private TurnSignalController turnSignalController;
@@ -379,7 +386,6 @@ namespace TrafficSystem
             // Initialize overtaking flags
             isOvertaking = false;
             isChangingLanes = false;
-            currentLane = 0;
 
             if (logPathChanges)
             {
@@ -1319,8 +1325,16 @@ namespace TrafficSystem
             // Add buffer for reaction time
             float reactionBuffer = 2f; // 2 meters buffer
 
-            // Ensure minimum gap
-            return Mathf.Max(minimumFollowingGap, baseDistance * personalityMultiplier * weatherMultiplier + reactionBuffer);
+            float dynamicGap = baseDistance * personalityMultiplier * weatherMultiplier + reactionBuffer;
+
+            // In stop-go traffic, keep an explicit standing gap to avoid "glued" convoys.
+            if (currentSpeedMs < 8f) // ~29 km/h and below
+            {
+                dynamicGap *= lowSpeedFollowingMultiplier;
+                dynamicGap = Mathf.Max(dynamicGap, standstillFollowingGap);
+            }
+
+            return Mathf.Max(minimumFollowingGap, dynamicGap);
         }
 
         /// <summary>
@@ -1341,13 +1355,19 @@ namespace TrafficSystem
                 float leadVehicleSpeed = vehicleAhead.CurrentSpeed;
 
                 // Calculate how much slower we should go based on distance
-                float distanceRatio = distanceToVehicleAhead / safeDistance;
+                float distanceRatio = Mathf.Clamp01(distanceToVehicleAhead / Mathf.Max(0.1f, safeDistance));
+                float closingKmh = Mathf.Max(0f, relativeSpeedToVehicleAhead * 3.6f);
 
-                // If very close, match or go slower than lead vehicle
-                if (distanceRatio < 0.5f)
+                // If very close, brake much harder than lead speed to reopen a gap.
+                if (distanceRatio < 0.35f)
                 {
-                    // Very close - go slower than lead vehicle
-                    return Mathf.Max(0, leadVehicleSpeed - 5f);
+                    float aggressiveDrop = Mathf.Lerp(10f, 22f, 1f - distanceRatio) + closingKmh * 0.35f;
+                    return Mathf.Max(0f, leadVehicleSpeed - aggressiveDrop);
+                }
+                else if (distanceRatio < 0.6f)
+                {
+                    float moderatedDrop = Mathf.Lerp(4f, 10f, 0.6f - distanceRatio) + closingKmh * 0.2f;
+                    return Mathf.Max(0f, Mathf.Min(leadVehicleSpeed, desiredSpeed) - moderatedDrop);
                 }
                 else
                 {
@@ -2128,9 +2148,8 @@ namespace TrafficSystem
             {
                 if (obstacleDistance < criticalBrakingDistance)
                 {
-                    // Very close obstacle - slow down but keep moving
-                    // Don't stop completely, just reduce speed to allow gradual separation
-                    effectiveTargetSpeed = Mathf.Max(effectiveTargetSpeed * 0.5f, 20f);
+                    // Very close obstacle - allow near-stop to prevent bumper lock.
+                    effectiveTargetSpeed = Mathf.Max(effectiveTargetSpeed * 0.35f, trafficConstrainedMinSpeed);
                 }
                 else if (obstacleDistance < safeFollowingDistance)
                 {
@@ -2146,10 +2165,14 @@ namespace TrafficSystem
                 }
             }
 
-            // Ensure minimum speed to keep traffic flowing
-            effectiveTargetSpeed = Mathf.Max(effectiveTargetSpeed, 15f);
+            // Enforce low minimum only in clear road conditions.
+            bool trafficConstrained = isFollowing || isObstacleDetected || imminentCollisionRisk || isColliding;
+            float minAllowedSpeed = trafficConstrained ? trafficConstrainedMinSpeed : freeFlowMinSpeed;
+            effectiveTargetSpeed = Mathf.Max(effectiveTargetSpeed, minAllowedSpeed);
 
             float speedDifference = effectiveTargetSpeed - currentSpeed;
+            float currentSafeDistance = CalculateSafeFollowingDistance();
+            bool tooCloseToLead = isFollowing && distanceToVehicleAhead < currentSafeDistance;
 
             // Apply motor torque or braking
             if (speedDifference > speedTolerance)
@@ -2162,7 +2185,7 @@ namespace TrafficSystem
                 // Release brakes
                 SetBrakeTorque(0f);
             }
-            else if (speedDifference < -speedTolerance || isObstacleDetected)
+            else if (speedDifference < -speedTolerance || isObstacleDetected || tooCloseToLead)
             {
                 // Need to slow down
                 float brakeTorque;
@@ -2178,6 +2201,14 @@ namespace TrafficSystem
                 else
                 {
                     brakeTorque = braking * 0.3f;
+                }
+
+                if (tooCloseToLead)
+                {
+                    float gapRatio = Mathf.Clamp01(distanceToVehicleAhead / Mathf.Max(0.1f, currentSafeDistance));
+                    float closeBrakeBoost = Mathf.Lerp(1.45f, 0.95f, gapRatio);
+                    float closingBoost = Mathf.Clamp01(relativeSpeedToVehicleAhead / 6f) * 0.35f;
+                    brakeTorque = Mathf.Max(brakeTorque, braking * (closeBrakeBoost + closingBoost));
                 }
 
                 if (imminentCollisionRisk)
