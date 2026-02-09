@@ -138,8 +138,8 @@ namespace TrafficSystem
                 yield break;
             }
 
-            // Clear existing NPCs
-            ClearAllNpcs();
+            // Clear existing NPCs without stopping this active spawn routine.
+            ClearAllNpcs(stopSpawnRoutine: false);
 
             // Pre-pool if enabled
             if (enablePooling)
@@ -411,7 +411,12 @@ namespace TrafficSystem
         [ContextMenu("Clear All NPCs")]
         public void ClearAllNpcs()
         {
-            if (spawnCoroutine != null)
+            ClearAllNpcs(stopSpawnRoutine: true);
+        }
+
+        private void ClearAllNpcs(bool stopSpawnRoutine)
+        {
+            if (stopSpawnRoutine && spawnCoroutine != null)
             {
                 StopCoroutine(spawnCoroutine);
                 spawnCoroutine = null;
