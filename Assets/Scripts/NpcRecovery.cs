@@ -29,7 +29,7 @@ namespace TrafficSystem
         [Header("Scene Boundary")]
         [Tooltip("Enable scene boundary safety net")]
         [SerializeField] private bool enableSceneBoundary = true;
-        [Tooltip("Maximum distance from origin before emergency recovery (meters)")]
+        [Tooltip("Maximum distance from boundary center before emergency recovery (meters)")]
         [SerializeField] private float sceneBoundaryRadius = 150f;
         [Tooltip("Emergency recovery ignores cooldown")]
         [SerializeField] private bool emergencyRecoveryIgnoresCooldown = true;
@@ -68,6 +68,7 @@ namespace TrafficSystem
         private bool isRecovering;
         private float offRoadTimer;
         private float lastRecoveryTime;
+        private Vector3 boundaryCenter;
 
         // Stats
         private int recoveryCount;
@@ -82,6 +83,7 @@ namespace TrafficSystem
         {
             lastPosition = transform.position;
             nextCheckTime = Time.time + checkInterval;
+            boundaryCenter = transform.position;
 
             // FORCE FIX: Enable recovery for all vehicles
             // This overrides any prefab settings that might be stuck
@@ -91,12 +93,12 @@ namespace TrafficSystem
                 disableRecovery = false;
             }
 
-            // Enable scene boundary for safety
-            enableSceneBoundary = true;
-            sceneBoundaryRadius = 150f;
-            emergencyRecoveryIgnoresCooldown = true;
+            if (roadGraphBuilder != null)
+            {
+                RecalculateBoundaryCenterAndRadius();
+            }
 
-            Debug.Log($"[NpcRecovery] {name} - Recovery ENABLED, Boundary: {sceneBoundaryRadius}m");
+            Debug.Log($"[NpcRecovery] {name} - Recovery ENABLED, Boundary radius: {sceneBoundaryRadius:F1}m");
         }
 
         /// <summary>
@@ -105,6 +107,7 @@ namespace TrafficSystem
         public void Initialize(RoadGraphBuilder builder)
         {
             roadGraphBuilder = builder;
+            RecalculateBoundaryCenterAndRadius();
         }
 
         private void Update()
@@ -192,15 +195,15 @@ namespace TrafficSystem
             // Check scene boundary
             if (enableSceneBoundary)
             {
-                float distanceFromOrigin = transform.position.magnitude;
-                if (distanceFromOrigin > sceneBoundaryRadius)
+                float distanceFromBoundaryCenter = Vector3.Distance(GetReferencePosition(), boundaryCenter);
+                if (distanceFromBoundaryCenter > sceneBoundaryRadius)
                 {
                     bool allowRecovery = emergencyRecoveryIgnoresCooldown || (Time.time - lastRecoveryTime >= recoveryCooldownSeconds);
                     if (allowRecovery)
                     {
                         if (logRecoveryEvents)
                         {
-                            Debug.LogWarning($"[NpcRecovery] {name} exceeded scene boundary! Distance: {distanceFromOrigin:F1}m (limit: {sceneBoundaryRadius:F1}m)");
+                            Debug.LogWarning($"[NpcRecovery] {name} exceeded scene boundary! Distance: {distanceFromBoundaryCenter:F1}m (limit: {sceneBoundaryRadius:F1}m)");
                         }
                         TriggerRecovery("Scene Boundary");
                     }
@@ -482,6 +485,52 @@ namespace TrafficSystem
             }
 
             return false;
+        }
+
+        private void RecalculateBoundaryCenterAndRadius()
+        {
+            if (roadGraphBuilder == null || roadGraphBuilder.RoadGraph == null || roadGraphBuilder.RoadGraph.roadSegments == null || roadGraphBuilder.RoadGraph.roadSegments.Count == 0)
+            {
+                boundaryCenter = transform.position;
+                return;
+            }
+
+            Vector3 sum = Vector3.zero;
+            int count = 0;
+            float maxDist = 0f;
+
+            foreach (RoadSegment segment in roadGraphBuilder.RoadGraph.roadSegments)
+            {
+                if (segment == null || segment.waypoints == null) continue;
+
+                foreach (Waypoint wp in segment.waypoints)
+                {
+                    sum += wp.position;
+                    count++;
+                }
+            }
+
+            if (count == 0)
+            {
+                boundaryCenter = transform.position;
+                return;
+            }
+
+            boundaryCenter = sum / count;
+
+            foreach (RoadSegment segment in roadGraphBuilder.RoadGraph.roadSegments)
+            {
+                if (segment == null || segment.waypoints == null) continue;
+
+                foreach (Waypoint wp in segment.waypoints)
+                {
+                    float d = Vector3.Distance(wp.position, boundaryCenter);
+                    if (d > maxDist) maxDist = d;
+                }
+            }
+
+            // Keep user-defined small radii intact, but auto-expand if the road network is larger.
+            sceneBoundaryRadius = Mathf.Max(sceneBoundaryRadius, maxDist + 30f);
         }
     }
 }
