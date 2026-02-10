@@ -1169,8 +1169,8 @@ namespace DeliveryDriver.Quest
             lastCollisionTime = Time.time;
 
             // Record collision for penalty calculation
-            bool isNpcCollision = collision.gameObject.CompareTag("NPC") ||
-                                  collision.gameObject.CompareTag("Traffic") ||
+            bool isNpcCollision = SafeCompareTag(collision.gameObject, "NPC") ||
+                                  SafeCompareTag(collision.gameObject, "Traffic") ||
                                   collision.gameObject.layer == LayerMask.NameToLayer("NPC");
             currentQuest.RecordCollision(isNpcCollision);
 
@@ -1200,6 +1200,23 @@ namespace DeliveryDriver.Quest
             }
 
             MarkQuestUiDirty();
+        }
+
+        private static bool SafeCompareTag(GameObject gameObject, string tag)
+        {
+            if (gameObject == null || string.IsNullOrEmpty(tag))
+            {
+                return false;
+            }
+
+            try
+            {
+                return gameObject.CompareTag(tag);
+            }
+            catch (UnityException)
+            {
+                return false;
+            }
         }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
