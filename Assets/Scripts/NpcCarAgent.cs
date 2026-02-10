@@ -158,10 +158,10 @@ namespace TrafficSystem
         [SerializeField] private int solverVelocityIterations = 12;
 
         [Header("Debug")]
-        [SerializeField] private bool showDebugGizmos = true;
+        [SerializeField] private bool showDebugGizmos = false;
         [SerializeField] private bool logPathChanges = false;
-        [SerializeField] private bool logCollisions = true;
-        [SerializeField] private bool logOvertakes = true;  // Log overtaking behavior
+        [SerializeField] private bool logCollisions = false;
+        [SerializeField] private bool logOvertakes = false;  // Log overtaking behavior
 
         [Header("Grounding")]
         [Tooltip("Raycast mask for grounding the vehicle to the road surface")]
@@ -262,7 +262,7 @@ namespace TrafficSystem
 
             offset = Mathf.Clamp(offset, minGroundClearance, maxGroundClearance);
 
-            Debug.Log($"[NpcCarAgent] {name} - Ground clearance: {offset:F2}m");
+            // Debug.Log($"[NpcCarAgent] {name} - Ground clearance: {offset:F2}m");
             return offset;
         }
 
@@ -445,11 +445,11 @@ namespace TrafficSystem
             isInitialized = true;
 
             // Always log initialization for debugging
-            Debug.Log($"[NpcCarAgent] {name} initialized on segment '{segment.name}' (waypoints: {segment.waypoints.Count}) at index {waypointIndex}");
+            // Debug.Log($"[NpcCarAgent] {name} initialized on segment '{segment.name}' (waypoints: {segment.waypoints.Count}) at index {waypointIndex}");
 
             if (segment.waypoints.Count == 0)
             {
-                Debug.LogError($"[NpcCarAgent] {name} - Segment '{segment.name}' has ZERO waypoints!");
+                // Debug.LogError($"[NpcCarAgent] {name} - Segment '{segment.name}' has ZERO waypoints!");
             }
         }
 
@@ -460,7 +460,7 @@ namespace TrafficSystem
         {
             if (builder == null || builder.RoadGraph == null)
             {
-                Debug.LogError($"[NpcCarAgent] {name} - RoadGraphBuilder or RoadGraph is null!");
+                // Debug.LogError($"[NpcCarAgent] {name} - RoadGraphBuilder or RoadGraph is null!");
                 return;
             }
 
@@ -491,7 +491,7 @@ namespace TrafficSystem
             {
                 if (Time.frameCount % 120 == 0) // Log every 2 seconds
                 {
-                    Debug.LogWarning($"[NpcCarAgent] {name} - Not initialized!");
+                    // Debug.LogWarning($"[NpcCarAgent] {name} - Not initialized!");
                 }
                 return;
             }
@@ -500,7 +500,7 @@ namespace TrafficSystem
             {
                 if (Time.frameCount % 120 == 0) // Log every 2 seconds
                 {
-                    Debug.LogWarning($"[NpcCarAgent] {name} - No current segment!");
+                    // Debug.LogWarning($"[NpcCarAgent] {name} - No current segment!");
                 }
                 return;
             }
@@ -509,7 +509,7 @@ namespace TrafficSystem
             {
                 if (Time.frameCount % 120 == 0) // Log every 2 seconds
                 {
-                    Debug.LogWarning($"[NpcCarAgent] {name} - Segment '{currentSegment.name}' has no waypoints!");
+                    // Debug.LogWarning($"[NpcCarAgent] {name} - Segment '{currentSegment.name}' has no waypoints!");
                 }
                 return;
             }
@@ -1148,15 +1148,15 @@ namespace TrafficSystem
             if (obstacle == null) return ObstacleType.Unknown;
 
             // Check for vehicles
-            if (obstacle.CompareTag("NPC") || obstacle.CompareTag("Player"))
+            if (SafeCompareTag(obstacle.gameObject, "NPC") || SafeCompareTag(obstacle.gameObject, "Player"))
                 return ObstacleType.Vehicle;
 
             // Check for emergency vehicles
-            if (obstacle.CompareTag("Emergency"))
+            if (SafeCompareTag(obstacle.gameObject, "Emergency"))
                 return ObstacleType.EmergencyVehicle;
 
             // Check for pedestrians
-            if (obstacle.CompareTag("Pedestrian"))
+            if (SafeCompareTag(obstacle.gameObject, "Pedestrian"))
                 return ObstacleType.Pedestrian;
 
             // Check if it's a vehicle by component
@@ -1172,6 +1172,14 @@ namespace TrafficSystem
                 return ObstacleType.StaticObject;
 
             return ObstacleType.Unknown;
+        }
+
+        private static bool SafeCompareTag(GameObject gameObject, string tag)
+        {
+            if (gameObject == null || string.IsNullOrEmpty(tag))
+                return false;
+
+            return string.Equals(gameObject.tag, tag, System.StringComparison.Ordinal);
         }
 
         /// <summary>

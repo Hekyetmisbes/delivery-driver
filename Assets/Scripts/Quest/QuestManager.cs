@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Events;
@@ -119,6 +120,7 @@ namespace DeliveryDriver.Quest
         private float lastCargoHealth = -1f;
         private string lastQuestId = string.Empty;
         private bool questUiDirty = true;
+        private Coroutine startupInitCoroutine;
 
         public UnityEvent<QuestData> OnQuestStarted = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnQuestCompleted = new UnityEvent<QuestData>();
@@ -181,6 +183,17 @@ namespace DeliveryDriver.Quest
                 cargoLibrary = Resources.Load<CargoLibrary>("CargoLibrary");
             }
 
+            if (questDatabase == null)
+            {
+                questDatabase = Resources.Load<QuestDatabase>("QuestDatabase");
+            }
+
+            if (SaveManager.Instance == null)
+            {
+                GameObject saveManagerObject = new GameObject("SaveManager");
+                saveManagerObject.AddComponent<SaveManager>();
+            }
+
             if (markerPool == null)
             {
                 markerPool = FindAnyObjectByType<QuestMarkerPool>();
@@ -211,33 +224,56 @@ namespace DeliveryDriver.Quest
                 musicSource.Play();
             }
 
-            // Try to load saved game
+            // Delay quest generation until road graph is built to avoid startup warnings.
+            startupInitCoroutine = StartCoroutine(InitializeQuestStateWhenReady());
+        }
+
+        private IEnumerator InitializeQuestStateWhenReady()
+        {
+            if (roadGraphBuilder == null)
+            {
+                roadGraphBuilder = FindAnyObjectByType<RoadGraphBuilder>();
+            }
+
+            // Wait briefly for RoadGraphBuilder.Start() to run and build the graph.
+            float timeoutAt = Time.time + 8f;
+            while (!IsRoadGraphReady() && Time.time < timeoutAt)
+            {
+                yield return null;
+            }
+
             if (SaveManager.Instance != null)
             {
                 GameSaveData saveData = SaveManager.Instance.LoadGame();
 
                 if (saveData != null && saveData.QuestData != null)
                 {
-                    // Load quest data from save
                     LoadSaveData(saveData.QuestData);
                     Debug.Log("[QuestManager] Loaded quest data from save file.");
                 }
-                else
+                else if (IsRoadGraphReady())
                 {
-                    // No save found - generate initial quests
                     Debug.Log("[QuestManager] No save found. Generating initial quests.");
                     GenerateAvailableQuests(5);
                 }
             }
-            else
+            else if (IsRoadGraphReady())
             {
-                // SaveManager not found - generate initial quests
-                Debug.LogWarning("[QuestManager] SaveManager not found. Generating initial quests.");
                 GenerateAvailableQuests(5);
             }
 
-            // Check and generate daily challenge if needed
-            CheckDailyChallenge();
+            if (IsRoadGraphReady())
+            {
+                CheckDailyChallenge();
+            }
+        }
+
+        private bool IsRoadGraphReady()
+        {
+            return roadGraphBuilder != null &&
+                   roadGraphBuilder.RoadGraph != null &&
+                   roadGraphBuilder.RoadGraph.roadSegments != null &&
+                   roadGraphBuilder.RoadGraph.roadSegments.Count > 0;
         }
 
         private void Update()
@@ -792,7 +828,7 @@ namespace DeliveryDriver.Quest
         {
             if (roadGraphBuilder == null || roadGraphBuilder.RoadGraph == null)
             {
-                Debug.LogWarning("[QuestManager] RoadGraphBuilder is not ready. Cannot generate quest locations.");
+                Debug.Log("[QuestManager] RoadGraphBuilder is not ready yet. Skipping quest location generation.");
                 return null;
             }
 
@@ -970,16 +1006,37 @@ namespace DeliveryDriver.Quest
                 return null;
             }
 
-            GameObject zoneObject = questZonePrefab != null
-                ? Instantiate(questZonePrefab, location.Position, Quaternion.identity)
-                : new GameObject("QuestZone");
+            GameObject zoneObject = null;
+            if (questZonePrefab != null)
+            {
+                zoneObject = Instantiate(questZonePrefab, location.Position, Quaternion.identity);
+            }
+
+            if (zoneObject == null)
+            {
+                zoneObject = new GameObject("QuestZone");
+            }
 
             zoneObject.transform.position = location.Position;
 
             QuestZone zone = zoneObject.GetComponent<QuestZone>();
             if (zone == null)
             {
-                zone = zoneObject.AddComponent<QuestZone>();
+                try
+                {
+                    zone = zoneObject.AddComponent<QuestZone>();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[QuestManager] Failed adding QuestZone component: {e.Message}");
+                }
+            }
+
+            if (zone == null)
+            {
+                Debug.LogError("[QuestManager] Failed to create QuestZone component.");
+                Destroy(zoneObject);
+                return null;
             }
 
             zone.Configure(location, type);
@@ -1015,6 +1072,11 @@ namespace DeliveryDriver.Quest
             }
 
             zone.SetActive(true);
+
+            if (activeZones == null)
+            {
+                activeZones = new List<QuestZone>();
+            }
             activeZones.Add(zone);
 
             // Task 10.2: Spawn marker particles at quest zone
@@ -1209,14 +1271,9 @@ namespace DeliveryDriver.Quest
                 return false;
             }
 
-            try
-            {
-                return gameObject.CompareTag(tag);
-            }
-            catch (UnityException)
-            {
-                return false;
-            }
+            // CompareTag logs an error when the target tag does not exist in TagManager.
+            // Direct string compare avoids console spam for optional tags like NPC/Traffic.
+            return string.Equals(gameObject.tag, tag, System.StringComparison.Ordinal);
         }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -2533,7 +2590,7 @@ namespace DeliveryDriver.Quest
         {
             if (questDatabase == null)
             {
-                Debug.LogWarning("[QuestManager] Cannot generate daily challenge - QuestDatabase not assigned");
+                Debug.Log("[QuestManager] Daily challenge skipped: QuestDatabase not assigned.");
                 return;
             }
 

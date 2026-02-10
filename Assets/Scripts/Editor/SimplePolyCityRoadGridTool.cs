@@ -12,7 +12,7 @@ public class SimplePolyCityRoadGridTool : EditorWindow
     private const int West = 8;
 
     [Header("Scene References")]
-    [SerializeField] private Terrain targetTerrain;
+    [SerializeField] private List<Terrain> targetTerrains = new List<Terrain>();
     [SerializeField] private Transform roadParent;
     [SerializeField] private Transform buildingParent;
     [SerializeField] private Transform neighborhoodParent;
@@ -136,7 +136,38 @@ public class SimplePolyCityRoadGridTool : EditorWindow
     private void DrawSceneSection()
     {
         EditorGUILayout.LabelField("Scene References", EditorStyles.boldLabel);
-        targetTerrain = (Terrain)EditorGUILayout.ObjectField("Target Terrain", targetTerrain, typeof(Terrain), true);
+
+        // Draw terrain list
+        EditorGUILayout.LabelField($"Target Terrains ({targetTerrains.Count})", EditorStyles.boldLabel);
+        if (GUILayout.Button("Auto Find All Terrains", GUILayout.Height(24)))
+        {
+            AutoFindTerrains();
+        }
+
+        int removeTerrainIndex = -1;
+        for (int i = 0; i < targetTerrains.Count; i++)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                targetTerrains[i] = (Terrain)EditorGUILayout.ObjectField($"Terrain {i + 1}", targetTerrains[i], typeof(Terrain), true);
+                if (GUILayout.Button("X", GUILayout.Width(24)))
+                {
+                    removeTerrainIndex = i;
+                }
+            }
+        }
+
+        if (removeTerrainIndex >= 0)
+        {
+            targetTerrains.RemoveAt(removeTerrainIndex);
+        }
+
+        if (GUILayout.Button("Add Terrain Slot", GUILayout.Height(20)))
+        {
+            targetTerrains.Add(null);
+        }
+
+        EditorGUILayout.Space(4);
         roadParent = (Transform)EditorGUILayout.ObjectField("Road Parent", roadParent, typeof(Transform), true);
         buildingParent = (Transform)EditorGUILayout.ObjectField("Building Parent", buildingParent, typeof(Transform), true);
         neighborhoodParent = (Transform)EditorGUILayout.ObjectField("Neighborhood Parent", neighborhoodParent, typeof(Transform), true);
@@ -294,9 +325,9 @@ public class SimplePolyCityRoadGridTool : EditorWindow
             return;
         }
 
-        if (targetTerrain == null)
+        if (targetTerrains == null || targetTerrains.Count == 0)
         {
-            targetTerrain = FindFirstObjectByType<Terrain>();
+            AutoFindTerrains();
         }
 
         if (roadParent == null)
@@ -374,7 +405,15 @@ public class SimplePolyCityRoadGridTool : EditorWindow
 
         Selection.activeTransform = roadParent;
         EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
-        Debug.Log($"[CityRoadGridTool] Generated {createdCount} roads, {createdBuildings} buildings, and {createdNeighborhoods} neighborhoods. Seed: {randomSeed}, Cell Size: {effectiveCellSize:F2}");
+        int validTerrainCount = 0;
+        if (targetTerrains != null)
+        {
+            foreach (Terrain t in targetTerrains)
+            {
+                if (t != null && t.terrainData != null) validTerrainCount++;
+            }
+        }
+        Debug.Log($"[CityRoadGridTool] Generated {createdCount} roads, {createdBuildings} buildings, and {createdNeighborhoods} neighborhoods across {validTerrainCount} terrain(s). Seed: {randomSeed}, Cell Size: {effectiveCellSize:F2}");
     }
 
     private int GenerateBuildings(bool[,] roadMask, int width, int height, float currentCellSize)
@@ -684,10 +723,11 @@ public class SimplePolyCityRoadGridTool : EditorWindow
 
     private float SampleY(float worldX, float worldZ, float extraOffset)
     {
-        if (targetTerrain != null && targetTerrain.terrainData != null)
+        Terrain terrain = GetTerrainAt(worldX, worldZ);
+        if (terrain != null && terrain.terrainData != null)
         {
-            float y = targetTerrain.SampleHeight(new Vector3(worldX, targetTerrain.transform.position.y, worldZ));
-            return y + targetTerrain.transform.position.y + extraOffset;
+            float y = terrain.SampleHeight(new Vector3(worldX, terrain.transform.position.y, worldZ));
+            return y + terrain.transform.position.y + extraOffset;
         }
 
         return extraOffset;
@@ -730,24 +770,23 @@ public class SimplePolyCityRoadGridTool : EditorWindow
 
     private void FitGridToTerrain(ref int width, ref int height, float currentCellSize)
     {
-        if (!autoFitGridToTerrain || targetTerrain == null || targetTerrain.terrainData == null)
+        if (!autoFitGridToTerrain || targetTerrains == null || targetTerrains.Count == 0)
         {
             return;
         }
 
-        Vector3 size = targetTerrain.terrainData.size;
+        Bounds combinedBounds = GetCombinedTerrainBounds();
+        Vector3 size = combinedBounds.size;
         float usableX = Mathf.Max(1f, size.x - terrainInset * 2f);
         float usableZ = Mathf.Max(1f, size.z - terrainInset * 2f);
 
-        int maxWidth = Mathf.Max(2, Mathf.FloorToInt(usableX / currentCellSize));
-        int maxHeight = Mathf.Max(2, Mathf.FloorToInt(usableZ / currentCellSize));
+        int calculatedWidth = Mathf.Max(2, Mathf.FloorToInt(usableX / currentCellSize));
+        int calculatedHeight = Mathf.Max(2, Mathf.FloorToInt(usableZ / currentCellSize));
 
-        if (width > maxWidth || height > maxHeight)
-        {
-            width = Mathf.Min(width, maxWidth);
-            height = Mathf.Min(height, maxHeight);
-            Debug.Log($"[CityRoadGridTool] Grid clamped to terrain: {width}x{height}");
-        }
+        // Auto-fit: Set grid size to fill all terrains
+        width = calculatedWidth;
+        height = calculatedHeight;
+        Debug.Log($"[CityRoadGridTool] Grid auto-fitted to cover all {targetTerrains.Count} terrain(s): {width}x{height} cells (Combined terrain size: {size.x:F1}x{size.z:F1}m, Cell size: {currentCellSize:F2}m)");
     }
 
     private bool[,] BuildRoadMask(int width, int height, bool cleanGapsEnabled, int iterations)
@@ -897,25 +936,26 @@ public class SimplePolyCityRoadGridTool : EditorWindow
 
     private Vector3 CalculateWorldPosition(int x, int z, int width, int height, float currentCellSize)
     {
-        if (targetTerrain != null && targetTerrain.terrainData != null)
+        if (targetTerrains != null && targetTerrains.Count > 0)
         {
-            Vector3 terrainPos = targetTerrain.transform.position;
-            Vector3 terrainSize = targetTerrain.terrainData.size;
+            Bounds combinedBounds = GetCombinedTerrainBounds();
+            Vector3 boundsMin = combinedBounds.min;
+            Vector3 boundsSize = combinedBounds.size;
 
-            float startX = terrainPos.x + terrainInset + currentCellSize * 0.5f;
-            float startZ = terrainPos.z + terrainInset + currentCellSize * 0.5f;
+            float startX = boundsMin.x + terrainInset + currentCellSize * 0.5f;
+            float startZ = boundsMin.z + terrainInset + currentCellSize * 0.5f;
 
             if (!autoFitGridToTerrain)
             {
-                float centeredOffsetX = (terrainSize.x - width * currentCellSize) * 0.5f;
-                float centeredOffsetZ = (terrainSize.z - height * currentCellSize) * 0.5f;
-                startX = terrainPos.x + Mathf.Max(terrainInset, centeredOffsetX) + currentCellSize * 0.5f;
-                startZ = terrainPos.z + Mathf.Max(terrainInset, centeredOffsetZ) + currentCellSize * 0.5f;
+                float centeredOffsetX = (boundsSize.x - width * currentCellSize) * 0.5f;
+                float centeredOffsetZ = (boundsSize.z - height * currentCellSize) * 0.5f;
+                startX = boundsMin.x + Mathf.Max(terrainInset, centeredOffsetX) + currentCellSize * 0.5f;
+                startZ = boundsMin.z + Mathf.Max(terrainInset, centeredOffsetZ) + currentCellSize * 0.5f;
             }
 
             float worldX = startX + x * currentCellSize;
             float worldZ = startZ + z * currentCellSize;
-            float sampledY = targetTerrain.SampleHeight(new Vector3(worldX, terrainPos.y, worldZ)) + terrainPos.y + heightOffset;
+            float sampledY = SampleY(worldX, worldZ, heightOffset);
             return new Vector3(worldX, sampledY, worldZ);
         }
 
@@ -986,6 +1026,85 @@ public class SimplePolyCityRoadGridTool : EditorWindow
         }
 
         EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+    }
+
+    private void AutoFindTerrains()
+    {
+        Terrain[] allTerrains = FindObjectsByType<Terrain>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        targetTerrains.Clear();
+        foreach (Terrain terrain in allTerrains)
+        {
+            if (terrain != null)
+            {
+                targetTerrains.Add(terrain);
+            }
+        }
+        Debug.Log($"[CityRoadGridTool] Found {targetTerrains.Count} terrains in scene.");
+    }
+
+    private Bounds GetCombinedTerrainBounds()
+    {
+        if (targetTerrains == null || targetTerrains.Count == 0)
+        {
+            return new Bounds(Vector3.zero, Vector3.one * 100f);
+        }
+
+        Terrain firstValidTerrain = null;
+        foreach (Terrain t in targetTerrains)
+        {
+            if (t != null && t.terrainData != null)
+            {
+                firstValidTerrain = t;
+                break;
+            }
+        }
+
+        if (firstValidTerrain == null)
+        {
+            return new Bounds(Vector3.zero, Vector3.one * 100f);
+        }
+
+        Vector3 min = firstValidTerrain.transform.position;
+        Vector3 max = min + firstValidTerrain.terrainData.size;
+
+        foreach (Terrain terrain in targetTerrains)
+        {
+            if (terrain == null || terrain.terrainData == null) continue;
+
+            Vector3 terrainMin = terrain.transform.position;
+            Vector3 terrainMax = terrainMin + terrain.terrainData.size;
+
+            min = Vector3.Min(min, terrainMin);
+            max = Vector3.Max(max, terrainMax);
+        }
+
+        Vector3 center = (min + max) * 0.5f;
+        Vector3 size = max - min;
+        return new Bounds(center, size);
+    }
+
+    private Terrain GetTerrainAt(float worldX, float worldZ)
+    {
+        if (targetTerrains == null || targetTerrains.Count == 0)
+        {
+            return null;
+        }
+
+        foreach (Terrain terrain in targetTerrains)
+        {
+            if (terrain == null || terrain.terrainData == null) continue;
+
+            Vector3 terrainPos = terrain.transform.position;
+            Vector3 terrainSize = terrain.terrainData.size;
+
+            if (worldX >= terrainPos.x && worldX <= terrainPos.x + terrainSize.x &&
+                worldZ >= terrainPos.z && worldZ <= terrainPos.z + terrainSize.z)
+            {
+                return terrain;
+            }
+        }
+
+        return targetTerrains.Count > 0 ? targetTerrains[0] : null;
     }
 
     private void AutoLoadPrefabs()
@@ -1140,23 +1259,24 @@ public class SimplePolyCityRoadGridTool : EditorWindow
 
     private Vector3 GetGridOrigin(int width, int height, float currentCellSize)
     {
-        if (targetTerrain != null && targetTerrain.terrainData != null)
+        if (targetTerrains != null && targetTerrains.Count > 0)
         {
-            Vector3 terrainPos = targetTerrain.transform.position;
-            Vector3 terrainSize = targetTerrain.terrainData.size;
+            Bounds combinedBounds = GetCombinedTerrainBounds();
+            Vector3 boundsMin = combinedBounds.min;
+            Vector3 boundsSize = combinedBounds.size;
 
-            float startX = terrainPos.x + terrainInset;
-            float startZ = terrainPos.z + terrainInset;
+            float startX = boundsMin.x + terrainInset;
+            float startZ = boundsMin.z + terrainInset;
 
             if (!autoFitGridToTerrain)
             {
-                float centeredOffsetX = (terrainSize.x - width * currentCellSize) * 0.5f;
-                float centeredOffsetZ = (terrainSize.z - height * currentCellSize) * 0.5f;
-                startX = terrainPos.x + Mathf.Max(terrainInset, centeredOffsetX);
-                startZ = terrainPos.z + Mathf.Max(terrainInset, centeredOffsetZ);
+                float centeredOffsetX = (boundsSize.x - width * currentCellSize) * 0.5f;
+                float centeredOffsetZ = (boundsSize.z - height * currentCellSize) * 0.5f;
+                startX = boundsMin.x + Mathf.Max(terrainInset, centeredOffsetX);
+                startZ = boundsMin.z + Mathf.Max(terrainInset, centeredOffsetZ);
             }
 
-            return new Vector3(startX, terrainPos.y, startZ);
+            return new Vector3(startX, boundsMin.y, startZ);
         }
 
         return Vector3.zero;

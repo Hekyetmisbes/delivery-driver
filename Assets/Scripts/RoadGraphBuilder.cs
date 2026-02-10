@@ -162,7 +162,7 @@ namespace TrafficSystem
                 Component roadNetwork = FindEasyRoadsNetworkComponent(network);
                 if (roadNetwork == null)
                 {
-                    Debug.LogWarning("[RoadGraphBuilder] EasyRoads3D network component not found");
+                    Debug.Log("[RoadGraphBuilder] EasyRoads3D network component not found. Falling back to transform extraction.");
                     return false;
                 }
 

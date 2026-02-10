@@ -53,8 +53,8 @@ namespace TrafficSystem
         [SerializeField] private float snapRaycastDistance = 10f;
 
         [Header("Debug")]
-        [SerializeField] private bool showDebugInfo = true;
-        [SerializeField] private bool logRecoveryEvents = true;
+        [SerializeField] private bool showDebugInfo = false;
+        [SerializeField] private bool logRecoveryEvents = false;
 
         // Components
         private NpcCarAgent carAgent;
@@ -89,7 +89,7 @@ namespace TrafficSystem
             // This overrides any prefab settings that might be stuck
             if (disableRecovery)
             {
-                Debug.LogWarning($"[NpcRecovery] {name} - FORCE ENABLING recovery (was disabled in prefab)");
+                // Debug.LogWarning($"[NpcRecovery] {name} - FORCE ENABLING recovery (was disabled in prefab)");
                 disableRecovery = false;
             }
 
@@ -98,7 +98,7 @@ namespace TrafficSystem
                 RecalculateBoundaryCenterAndRadius();
             }
 
-            Debug.Log($"[NpcRecovery] {name} - Recovery ENABLED, Boundary radius: {sceneBoundaryRadius:F1}m");
+            // Debug.Log($"[NpcRecovery] {name} - Recovery ENABLED, Boundary radius: {sceneBoundaryRadius:F1}m");
         }
 
         /// <summary>
@@ -148,7 +148,7 @@ namespace TrafficSystem
                 offRoadTimer += checkInterval;
                 if (logRecoveryEvents)
                 {
-                    Debug.LogWarning($"[NpcRecovery] {name} is off-road! Horizontal: {roadInfo.horizontalDistance:F1}m, Vertical: {roadInfo.verticalDistance:F1}m");
+                    Debug.Log($"[NpcRecovery] {name} is off-road! Horizontal: {roadInfo.horizontalDistance:F1}m, Vertical: {roadInfo.verticalDistance:F1}m");
                 }
                 if (offRoadTimer >= offRoadRequiredSeconds && Time.time - lastRecoveryTime >= recoveryCooldownSeconds)
                 {
@@ -173,7 +173,7 @@ namespace TrafficSystem
                 {
                     if (logRecoveryEvents)
                     {
-                        Debug.LogWarning($"[NpcRecovery] {name} is flipped! UpDot: {upDot:F2}");
+                        Debug.Log($"[NpcRecovery] {name} is flipped! UpDot: {upDot:F2}");
                     }
                     TriggerRecovery("Flipped");
                 }
@@ -186,7 +186,7 @@ namespace TrafficSystem
                 {
                     if (logRecoveryEvents)
                     {
-                        Debug.LogWarning($"[NpcRecovery] {name} is falling! Velocity Y: {rb.linearVelocity.y:F1}m/s");
+                        Debug.Log($"[NpcRecovery] {name} is falling! Velocity Y: {rb.linearVelocity.y:F1}m/s");
                     }
                     TriggerRecovery("Falling");
                 }
@@ -203,7 +203,7 @@ namespace TrafficSystem
                     {
                         if (logRecoveryEvents)
                         {
-                            Debug.LogWarning($"[NpcRecovery] {name} exceeded scene boundary! Distance: {distanceFromBoundaryCenter:F1}m (limit: {sceneBoundaryRadius:F1}m)");
+                            Debug.Log($"[NpcRecovery] {name} exceeded scene boundary! Distance: {distanceFromBoundaryCenter:F1}m (limit: {sceneBoundaryRadius:F1}m)");
                         }
                         TriggerRecovery("Scene Boundary");
                     }
@@ -229,7 +229,7 @@ namespace TrafficSystem
                 {
                     if (logRecoveryEvents)
                     {
-                        Debug.LogWarning($"[NpcRecovery] {name} is stuck! Speed: {currentSpeed:F1} km/h for {stuckTimer:F1}s");
+                        Debug.Log($"[NpcRecovery] {name} is stuck! Speed: {currentSpeed:F1} km/h for {stuckTimer:F1}s");
                     }
                     TriggerRecovery("Stuck");
                     stuckTimer = 0f;
@@ -318,7 +318,7 @@ namespace TrafficSystem
                 // Fallback: reinitialize at random position
                 if (logRecoveryEvents)
                 {
-                    Debug.LogWarning($"[NpcRecovery] {name} - No road segment found for recovery! Reinitializing randomly.");
+                    Debug.Log($"[NpcRecovery] {name} - No road segment found for recovery! Reinitializing randomly.");
                 }
                 carAgent.InitializeRandom(roadGraphBuilder);
             }
@@ -353,10 +353,13 @@ namespace TrafficSystem
             // Re-enable physics and apply gentle velocity
             rb.isKinematic = wasKinematic;
 
-            // Apply recovery velocity immediately but gently
+            // Apply recovery velocity only for dynamic rigidbodies.
             Vector3 recoveryVelocity = rotation * Vector3.forward * (recoverySpeed / 3.6f);
-            rb.linearVelocity = recoveryVelocity;
-            rb.angularVelocity = Vector3.zero;
+            if (!rb.isKinematic)
+            {
+                rb.linearVelocity = recoveryVelocity;
+                rb.angularVelocity = Vector3.zero;
+            }
 
             // Reset timers
             stuckTimer = 0f;

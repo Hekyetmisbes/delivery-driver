@@ -79,7 +79,7 @@ namespace DeliveryDriver.Quest
                 }
                 else
                 {
-                    Debug.LogWarning("[SaveManager] PlayerProgressionManager not found. Saving with default player data.");
+                    Debug.Log("[SaveManager] PlayerProgressionManager not found. Saving with default player data.");
                     saveData.PlayerData = new PlayerProgressionData();
                 }
 
@@ -90,7 +90,7 @@ namespace DeliveryDriver.Quest
                 }
                 else
                 {
-                    Debug.LogWarning("[SaveManager] QuestManager not found. Saving with default quest data.");
+                    Debug.Log("[SaveManager] QuestManager not found. Saving with default quest data.");
                     saveData.QuestData = new QuestSaveData();
                 }
 

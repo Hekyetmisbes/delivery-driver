@@ -183,7 +183,10 @@ public class DeliveryManager : MonoBehaviour
 
             if (Physics.Raycast(fallbackPos, Vector3.down, out RaycastHit hit, raycastMaxDistance, groundMask, QueryTriggerInteraction.Ignore))
             {
-                Debug.LogWarning($"[DeliveryManager] Using fallback spawn near player at {hit.point}");
+                if (showDebugInfo)
+                {
+                    Debug.Log($"[DeliveryManager] Using fallback spawn near player at {hit.point}");
+                }
                 return hit.point + Vector3.up * spawnHeight;
             }
         }
@@ -537,6 +540,13 @@ public class DeliveryManager : MonoBehaviour
             PickupLocation = new QuestLocation(pickupPos, $"Pickup: {FormatCoordinates(pickupPos)}", deliveryRadius),
             DeliveryLocations = new List<QuestLocation>()
         };
+
+        if (currentDeliveryQuest.PickupLocation != null)
+        {
+            currentDeliveryQuest.PickupLocation.VisualMarker = pickupIndicatorPrefab != null
+                ? pickupIndicatorPrefab
+                : deliveryIndicatorPrefab;
+        }
 
         // Add cargo if available
         if (cargoLibrary != null)

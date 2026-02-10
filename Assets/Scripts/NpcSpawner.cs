@@ -48,7 +48,7 @@ namespace TrafficSystem
         [SerializeField] private int poolExtraCount = 5;
 
         [Header("Debug")]
-        [SerializeField] private bool showDebugInfo = true;
+        [SerializeField] private bool showDebugInfo = false;
 
         // Runtime data
         private List<GameObject> activeNpcs = new List<GameObject>();
@@ -80,7 +80,7 @@ namespace TrafficSystem
             {
                 GameObject commsObj = new GameObject("TrafficCommunicationSystem");
                 commsObj.AddComponent<TrafficCommunicationSystem>();
-                Debug.Log("[NpcSpawner] Created TrafficCommunicationSystem");
+                // Debug.Log("[NpcSpawner] Created TrafficCommunicationSystem");
             }
 
             // Priority 3: Ensure weather manager exists
@@ -88,7 +88,7 @@ namespace TrafficSystem
             {
                 GameObject weatherObj = new GameObject("WeatherManager");
                 weatherObj.AddComponent<WeatherManager>();
-                Debug.Log("[NpcSpawner] Created WeatherManager");
+                // Debug.Log("[NpcSpawner] Created WeatherManager");
             }
         }
 
@@ -121,21 +121,21 @@ namespace TrafficSystem
 
             if (roadGraphBuilder == null)
             {
-                Debug.LogError("[NpcSpawner] RoadGraphBuilder is not assigned!");
+                // Debug.LogError("[NpcSpawner] RoadGraphBuilder is not assigned!");
                 spawnCoroutine = null;
                 yield break;
             }
 
             if (roadGraphBuilder.RoadGraph == null || roadGraphBuilder.RoadGraph.roadSegments.Count == 0)
             {
-                Debug.LogError("[NpcSpawner] Road graph is empty! Make sure RoadGraphBuilder has built the graph.");
+                // Debug.LogError("[NpcSpawner] Road graph is empty! Make sure RoadGraphBuilder has built the graph.");
                 spawnCoroutine = null;
                 yield break;
             }
 
             if (npcVehiclePrefabs == null || npcVehiclePrefabs.Length == 0)
             {
-                Debug.LogError("[NpcSpawner] No NPC vehicle prefabs assigned!");
+                // Debug.LogError("[NpcSpawner] No NPC vehicle prefabs assigned!");
                 spawnCoroutine = null;
                 yield break;
             }
@@ -163,7 +163,7 @@ namespace TrafficSystem
             int totalSegments = roadGraphBuilder.RoadGraph.roadSegments.Count;
             int maxPerSegment = Mathf.CeilToInt((float)spawnCount / Mathf.Max(1, totalSegments)) + 1;
 
-            Debug.Log($"[NpcSpawner] Distributing {spawnCount} NPCs across {totalSegments} road segments (max {maxPerSegment} per segment)");
+            // Debug.Log($"[NpcSpawner] Distributing {spawnCount} NPCs across {totalSegments} road segments (max {maxPerSegment} per segment)");
 
             while (spawnedCount < spawnCount && attempts < maxAttempts)
             {
@@ -192,7 +192,7 @@ namespace TrafficSystem
 
                 if (segment == null || segment.waypoints.Count == 0)
                 {
-                    Debug.LogWarning("[NpcSpawner] Failed to get random waypoint!");
+                    // Debug.LogWarning("[NpcSpawner] Failed to get random waypoint!");
                     continue;
                 }
 
@@ -202,7 +202,7 @@ namespace TrafficSystem
                 // Skip invalid positions (0,0,0 or near origin)
                 if (spawnPos.sqrMagnitude < 1f)
                 {
-                    Debug.LogWarning($"[NpcSpawner] Invalid spawn position {spawnPos} on segment '{segment.name}', skipping");
+                    // Debug.LogWarning($"[NpcSpawner] Invalid spawn position {spawnPos} on segment '{segment.name}', skipping");
                     continue;
                 }
 
@@ -210,7 +210,7 @@ namespace TrafficSystem
                 GameObject npcVehicle = GetOrCreateNpc();
                 if (npcVehicle == null)
                 {
-                    Debug.LogError("[NpcSpawner] Failed to instantiate NPC vehicle!");
+                    // Debug.LogError("[NpcSpawner] Failed to instantiate NPC vehicle!");
                     continue;
                 }
 
@@ -294,7 +294,7 @@ namespace TrafficSystem
                 }
                 else
                 {
-                    Debug.LogError($"[NpcSpawner] NPC vehicle '{npcVehicle.name}' missing NpcCarAgent component!");
+                    // Debug.LogError($"[NpcSpawner] NPC vehicle '{npcVehicle.name}' missing NpcCarAgent component!");
                 }
 
                 NpcRecovery recovery = npcVehicle.GetComponent<NpcRecovery>();
@@ -331,7 +331,7 @@ namespace TrafficSystem
             {
                 distributionSummary += $"  - {kvp.Key.name}: {kvp.Value} NPCs\n";
             }
-            Debug.Log(distributionSummary);
+            // Debug.Log(distributionSummary);
             spawnCoroutine = null;
         }
 
@@ -397,7 +397,7 @@ namespace TrafficSystem
                 pooledNpcs.Add(npc);
             }
 
-            Debug.Log($"[NpcSpawner] Pre-pooled {count} vehicles");
+            // Debug.Log($"[NpcSpawner] Pre-pooled {count} vehicles");
         }
 
         /// <summary>
@@ -442,7 +442,7 @@ namespace TrafficSystem
             }
 
             activeNpcs.Clear();
-            Debug.Log("[NpcSpawner] Cleared all NPCs");
+            // Debug.Log("[NpcSpawner] Cleared all NPCs");
         }
 
         /// <summary>
@@ -542,7 +542,7 @@ namespace TrafficSystem
                 return npc;
             }
 
-            Debug.LogWarning($"[NpcSpawner] Failed to find valid spawn position after {maxAttempts} attempts");
+            // Debug.LogWarning($"[NpcSpawner] Failed to find valid spawn position after {maxAttempts} attempts");
             return null;
         }
 
