@@ -1152,16 +1152,9 @@ namespace TrafficSystem
                 return;
             }
 
-            // Convert vertices to world space and find centerline
-            List<Vector3> worldVertices = new List<Vector3>();
-            foreach (Vector3 v in vertices)
-            {
-                worldVertices.Add(transform.TransformPoint(v));
-            }
-
-            // For road meshes, find the centerline by averaging left/right edge vertices
-            // Sample along the length of the road
-            List<Vector3> centerlinePoints = ExtractCenterline(worldVertices);
+            // For road meshes, find the centerline in local mesh space first, then convert to world space.
+            // This keeps sampling aligned when the road GameObject is rotated in world space.
+            List<Vector3> centerlinePoints = ExtractCenterline(vertices, transform);
 
             if (centerlinePoints.Count < 2)
             {
@@ -1193,16 +1186,16 @@ namespace TrafficSystem
         /// <summary>
         /// Extract centerline from mesh vertices
         /// </summary>
-        private List<Vector3> ExtractCenterline(List<Vector3> vertices)
+        private List<Vector3> ExtractCenterline(Vector3[] localVertices, Transform meshTransform)
         {
             List<Vector3> centerline = new List<Vector3>();
 
-            if (vertices.Count == 0) return centerline;
+            if (localVertices == null || localVertices.Length == 0 || meshTransform == null) return centerline;
 
             // Find dominant axis length to avoid sampling severely curved roads
             float minX = float.MaxValue, maxX = float.MinValue;
             float minZ = float.MaxValue, maxZ = float.MinValue;
-            foreach (Vector3 v in vertices)
+            foreach (Vector3 v in localVertices)
             {
                 if (v.x < minX) minX = v.x;
                 if (v.x > maxX) maxX = v.x;
@@ -1213,10 +1206,14 @@ namespace TrafficSystem
             float spanX = maxX - minX;
             float spanZ = maxZ - minZ;
             bool useZ = spanZ >= spanX;
-            float roadLength = useZ ? spanZ : spanX;
+            float dominantScale = Mathf.Abs(useZ ? meshTransform.lossyScale.z : meshTransform.lossyScale.x);
+            if (dominantScale < 0.0001f) dominantScale = 1f;
+
+            float roadLength = (useZ ? spanZ : spanX) * dominantScale;
             if (roadLength < 1f) return centerline;
 
             int sampleCount = Mathf.Max(2, Mathf.CeilToInt(roadLength / sampleStepMeters));
+            float axisToleranceLocal = (sampleStepMeters * 0.5f) / dominantScale;
 
             // Sample points along the road
             for (int i = 0; i < sampleCount; i++)
@@ -1226,12 +1223,11 @@ namespace TrafficSystem
 
                 // Find all vertices near this Z position
                 List<Vector3> nearVertices = new List<Vector3>();
-                float zTolerance = sampleStepMeters * 0.5f;
 
-                foreach (Vector3 v in vertices)
+                foreach (Vector3 v in localVertices)
                 {
                     float axisValue = useZ ? v.z : v.x;
-                    if (Mathf.Abs(axisValue - targetAxis) < zTolerance)
+                    if (Mathf.Abs(axisValue - targetAxis) < axisToleranceLocal)
                     {
                         nearVertices.Add(v);
                     }
@@ -1246,7 +1242,7 @@ namespace TrafficSystem
                         center += v;
                     }
                     center /= nearVertices.Count;
-                    centerline.Add(center);
+                    centerline.Add(meshTransform.TransformPoint(center));
                 }
             }
 
