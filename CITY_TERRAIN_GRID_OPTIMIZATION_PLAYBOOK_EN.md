@@ -416,6 +416,7 @@ Following this order gives durable gains by reducing architectural load, not jus
    - Terrain optimization per quality level
    - Shadow distance management
    - Quality-aware configuration system
+   - Compatible with Built-in, URP, and HDRP pipelines
 
 3. **NpcCarAgent.cs** (MODIFIED)
    - Added unique NPC ID system

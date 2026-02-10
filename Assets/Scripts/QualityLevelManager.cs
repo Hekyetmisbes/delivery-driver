@@ -1,10 +1,9 @@
 using UnityEngine;
-using UnityEngine.Rendering;
-using UnityEngine.Rendering.Universal;
 
 /// <summary>
 /// Manages quality level settings and applies optimizations per level
 /// Configures shadows, rendering, and terrain based on quality preset
+/// Works with Built-in, URP, and HDRP render pipelines
 /// </summary>
 public class QualityLevelManager : MonoBehaviour
 {
@@ -18,11 +17,9 @@ public class QualityLevelManager : MonoBehaviour
     [Tooltip("Terrain detail distance for each quality level (Low, Medium, High)")]
     [SerializeField] private float[] terrainDetailDistances = new float[] { 50f, 80f, 120f };
 
-    [Header("URP Settings")]
-    [Tooltip("Main URP render pipeline asset")]
-    [SerializeField] private UniversalRenderPipelineAsset urpAsset;
-    [Tooltip("Apply URP optimizations")]
-    [SerializeField] private bool applyUrpOptimizations = true;
+    [Header("Rendering Settings")]
+    [Tooltip("Apply additional rendering optimizations")]
+    [SerializeField] private bool applyRenderingOptimizations = true;
 
     [Header("Runtime Adjustments")]
     [Tooltip("Apply settings on Start")]
@@ -85,10 +82,10 @@ public class QualityLevelManager : MonoBehaviour
         // Apply terrain settings
         ApplyTerrainSettings(qualityLevel);
 
-        // Apply URP settings if available
-        if (applyUrpOptimizations && urpAsset != null)
+        // Apply additional rendering settings if available
+        if (applyRenderingOptimizations)
         {
-            ApplyUrpSettings(qualityLevel);
+            ApplyRenderingSettings(qualityLevel);
         }
 
         lastQualityLevel = qualityLevel;
@@ -141,24 +138,30 @@ public class QualityLevelManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Apply URP-specific settings for quality level
+    /// Apply rendering-specific settings for quality level
     /// </summary>
-    private void ApplyUrpSettings(int qualityLevel)
+    private void ApplyRenderingSettings(int qualityLevel)
     {
-        // Note: URP asset settings are read-only at runtime
-        // These settings should be configured in the URP asset directly per quality level
-        // This method serves as documentation of recommended settings
-
+        // Apply additional rendering settings based on quality level
         switch (qualityLevel)
         {
             case 0: // Low
-                Debug.Log("[QualityLevelManager] Low Quality - Recommended URP: MSAA=Off, Shadows=1 Cascade, Render Scale=0.8");
+                QualitySettings.pixelLightCount = 1;
+                QualitySettings.shadowCascades = 1;
+                QualitySettings.vSyncCount = 0;
+                Debug.Log("[QualityLevelManager] Low Quality - Pixel Lights: 1, Shadow Cascades: 1, VSync: Off");
                 break;
             case 1: // Medium
-                Debug.Log("[QualityLevelManager] Medium Quality - Recommended URP: MSAA=2x, Shadows=2 Cascades, Render Scale=1.0");
+                QualitySettings.pixelLightCount = 2;
+                QualitySettings.shadowCascades = 2;
+                QualitySettings.vSyncCount = 0;
+                Debug.Log("[QualityLevelManager] Medium Quality - Pixel Lights: 2, Shadow Cascades: 2, VSync: Off");
                 break;
             case 2: // High
-                Debug.Log("[QualityLevelManager] High Quality - Recommended URP: MSAA=4x, Shadows=2 Cascades, Render Scale=1.0");
+                QualitySettings.pixelLightCount = 3;
+                QualitySettings.shadowCascades = 2;
+                QualitySettings.vSyncCount = 1;
+                Debug.Log("[QualityLevelManager] High Quality - Pixel Lights: 3, Shadow Cascades: 2, VSync: On");
                 break;
         }
     }
