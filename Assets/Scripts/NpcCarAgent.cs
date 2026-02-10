@@ -760,12 +760,20 @@ namespace TrafficSystem
                 RoadConnection connection = SelectBestConnection(currentSegment.connections);
                 if (connection == null || connection.toSegment == null)
                 {
-                    currentWaypointIndex = 0;
+                    if (TryGetSequentialNextSegment(out RoadSegment fallbackSegment))
+                    {
+                        currentSegment = fallbackSegment;
+                        currentWaypointIndex = 0;
+                    }
+                    else
+                    {
+                        currentWaypointIndex = 0;
+                    }
                     return;
                 }
 
                 currentSegment = connection.toSegment;
-                currentWaypointIndex = connection.toWaypointIndex;
+                currentWaypointIndex = 0;
 
                 if (logPathChanges)
                 {
@@ -774,13 +782,55 @@ namespace TrafficSystem
             }
             else
             {
-                // No connection: loop on current segment instead of random teleport.
-                currentWaypointIndex = 0;
-                if (logPathChanges)
+                // No direct connection: continue with the next segment's first waypoint.
+                if (TryGetSequentialNextSegment(out RoadSegment nextSegment))
                 {
-                    Debug.Log($"[NpcCarAgent] {name} looping on segment '{currentSegment.name}' (no outgoing connection)");
+                    currentSegment = nextSegment;
+                    currentWaypointIndex = 0;
+
+                    if (logPathChanges)
+                    {
+                        Debug.Log($"[NpcCarAgent] {name} continuing to next segment '{currentSegment.name}' at waypoint 0");
+                    }
+                }
+                else
+                {
+                    currentWaypointIndex = 0;
+                    if (logPathChanges)
+                    {
+                        Debug.Log($"[NpcCarAgent] {name} looping on segment '{currentSegment.name}' (no outgoing connection)");
+                    }
                 }
             }
+        }
+
+        private bool TryGetSequentialNextSegment(out RoadSegment nextSegment)
+        {
+            nextSegment = null;
+
+            if (roadGraphBuilder == null || roadGraphBuilder.RoadGraph == null)
+                return false;
+
+            List<RoadSegment> segments = roadGraphBuilder.RoadGraph.roadSegments;
+            if (segments == null || segments.Count == 0 || currentSegment == null)
+                return false;
+
+            int currentIndex = segments.IndexOf(currentSegment);
+            if (currentIndex < 0)
+                return false;
+
+            for (int offset = 1; offset <= segments.Count; offset++)
+            {
+                int candidateIndex = (currentIndex + offset) % segments.Count;
+                RoadSegment candidate = segments[candidateIndex];
+                if (candidate != null && candidate.waypoints != null && candidate.waypoints.Count > 0)
+                {
+                    nextSegment = candidate;
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private RoadConnection SelectBestConnection(List<RoadConnection> connections)
