@@ -1416,6 +1416,11 @@ namespace TrafficSystem
 
             foreach (var segment in roadGraph.roadSegments)
             {
+                if (segment == null || segment.waypoints == null || segment.waypoints.Count == 0)
+                {
+                    continue;
+                }
+
                 if (showWaypoints)
                 {
                     Gizmos.color = Color.cyan;
@@ -1441,9 +1446,27 @@ namespace TrafficSystem
 
                 if (showConnections)
                 {
+                    if (segment.connections == null)
+                    {
+                        continue;
+                    }
+
                     Gizmos.color = Color.yellow;
                     foreach (var connection in segment.connections)
                     {
+                        if (connection == null || connection.toSegment == null || connection.toSegment.waypoints == null)
+                        {
+                            continue;
+                        }
+
+                        if (connection.fromWaypointIndex < 0 ||
+                            connection.fromWaypointIndex >= segment.waypoints.Count ||
+                            connection.toWaypointIndex < 0 ||
+                            connection.toWaypointIndex >= connection.toSegment.waypoints.Count)
+                        {
+                            continue;
+                        }
+
                         Vector3 from = segment.waypoints[connection.fromWaypointIndex].position;
                         Vector3 to = connection.toSegment.waypoints[connection.toWaypointIndex].position;
                         Gizmos.DrawLine(from, to);
