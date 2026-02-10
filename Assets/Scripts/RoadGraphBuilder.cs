@@ -30,6 +30,14 @@ namespace TrafficSystem
         [Tooltip("Manual road network root (if auto-detection fails)")]
         [SerializeField] private GameObject roadNetworkRoot;
 
+        [Header("SimplePoly City Detection")]
+        [Tooltip("Include SimplePoly City road prefabs (Road Lane, Road Corner, Road Intersection, etc.) in generated graph")]
+        [SerializeField] private bool includeSimplePolyRoads = true;
+        [Tooltip("Generate separate left/right lane segments for SimplePoly roads")]
+        [SerializeField] private bool generateDualLaneSegmentsForSimplePoly = true;
+        [Tooltip("Fallback lane center offset from road centerline (meters)")]
+        [SerializeField] private float simplePolyLaneCenterOffset = 1.5f;
+
         [Header("Debug Visualization")]
         [SerializeField] private bool showWaypoints = true;
         [SerializeField] private bool showConnections = true;
@@ -70,6 +78,11 @@ namespace TrafficSystem
             else if (roadNetworkRoot != null)
             {
                 ExtractRoadsFromNetwork(roadNetworkRoot);
+            }
+
+            if (includeSimplePolyRoads)
+            {
+                ExtractSimplePolyRoadMeshes();
             }
 
             // Build connections between road segments
@@ -728,6 +741,132 @@ namespace TrafficSystem
         }
 
         /// <summary>
+        /// Extract road segments from SimplePoly City road meshes in the active scene
+        /// </summary>
+        private void ExtractSimplePolyRoadMeshes()
+        {
+            MeshFilter[] sceneMeshFilters = FindObjectsByType<MeshFilter>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            if (sceneMeshFilters == null || sceneMeshFilters.Length == 0) return;
+
+            int initialCount = roadGraph.roadSegments.Count;
+
+            foreach (MeshFilter meshFilter in sceneMeshFilters)
+            {
+                if (meshFilter == null || meshFilter.sharedMesh == null) continue;
+
+                GameObject go = meshFilter.gameObject;
+                if (!IsSimplePolyRoadObject(go)) continue;
+
+                // EasyRoads roads are already sampled via their own integration path.
+                if (IsEasyRoadsObject(go)) continue;
+
+                RoadSegment centerSegment = new RoadSegment(roadGraph.roadSegments.Count, go.name);
+                SampleFromMesh(meshFilter, centerSegment, centerSegment.id);
+                if (centerSegment.waypoints.Count < 2) continue;
+
+                NormalizeWaypointForwards(centerSegment);
+
+                if (generateDualLaneSegmentsForSimplePoly)
+                {
+                    float laneOffset = EstimateLaneCenterOffset(meshFilter);
+                    AddOffsetLaneSegment(centerSegment, -laneOffset, $"{go.name}_Lane_Left");
+                    AddOffsetLaneSegment(centerSegment, laneOffset, $"{go.name}_Lane_Right");
+                }
+                else
+                {
+                    roadGraph.roadSegments.Add(centerSegment);
+                }
+            }
+
+            int added = roadGraph.roadSegments.Count - initialCount;
+            if (added > 0)
+            {
+                Debug.Log($"[RoadGraphBuilder] Added {added} SimplePoly road segments");
+            }
+        }
+
+        private float EstimateLaneCenterOffset(MeshFilter meshFilter)
+        {
+            float fallback = Mathf.Max(0.1f, simplePolyLaneCenterOffset);
+            if (meshFilter == null || meshFilter.sharedMesh == null) return fallback;
+
+            Bounds b = meshFilter.sharedMesh.bounds;
+            Vector3 scale = meshFilter.transform.lossyScale;
+
+            float sx = Mathf.Abs(b.size.x * scale.x);
+            float sz = Mathf.Abs(b.size.z * scale.z);
+            float roadWidth = Mathf.Min(sx, sz);
+
+            if (roadWidth < 0.5f) return fallback;
+
+            // 2-lane road: center-to-lane-center ~= quarter of full road width.
+            float estimated = roadWidth * 0.25f;
+            return Mathf.Clamp(estimated, 0.8f, 2.2f);
+        }
+
+        private void AddOffsetLaneSegment(RoadSegment source, float lateralOffset, string name)
+        {
+            if (source == null || source.waypoints == null || source.waypoints.Count < 2) return;
+
+            RoadSegment laneSegment = new RoadSegment(roadGraph.roadSegments.Count, name);
+            for (int i = 0; i < source.waypoints.Count; i++)
+            {
+                Waypoint wp = source.waypoints[i];
+                Vector3 fwd = wp.forward;
+                if (fwd.sqrMagnitude < 0.01f)
+                {
+                    if (i < source.waypoints.Count - 1)
+                    {
+                        fwd = (source.waypoints[i + 1].position - wp.position).normalized;
+                    }
+                    else if (i > 0)
+                    {
+                        fwd = (wp.position - source.waypoints[i - 1].position).normalized;
+                    }
+                }
+
+                if (fwd.sqrMagnitude < 0.01f) fwd = Vector3.forward;
+
+                Vector3 right = Vector3.Cross(Vector3.up, fwd).normalized;
+                if (right.sqrMagnitude < 0.01f) right = Vector3.right;
+
+                Vector3 lanePos = wp.position + right * lateralOffset;
+                laneSegment.waypoints.Add(new Waypoint(lanePos, fwd, laneSegment.id));
+            }
+
+            NormalizeWaypointForwards(laneSegment);
+            roadGraph.roadSegments.Add(laneSegment);
+        }
+
+        private bool IsSimplePolyRoadObject(GameObject go)
+        {
+            if (go == null) return false;
+
+            string lowerName = go.name.ToLowerInvariant();
+            if (!lowerName.Contains("road")) return false;
+
+            // Match typical SimplePoly road prefab names
+            if (lowerName.Contains("lane") ||
+                lowerName.Contains("corner") ||
+                lowerName.Contains("t_intersection") ||
+                lowerName.Contains("intersection") ||
+                lowerName.Contains("tile") ||
+                lowerName.Contains("concrete"))
+            {
+                return true;
+            }
+
+            MeshRenderer renderer = go.GetComponent<MeshRenderer>();
+            if (renderer == null) return false;
+
+            Material sharedMaterial = renderer.sharedMaterial;
+            if (sharedMaterial == null) return false;
+
+            string materialName = sharedMaterial.name.ToLowerInvariant();
+            return materialName.Contains("road");
+        }
+
+        /// <summary>
         /// Fallback: Extract roads from child transform hierarchy
         /// </summary>
         private void ExtractFromChildTransforms(GameObject network)
@@ -1013,16 +1152,9 @@ namespace TrafficSystem
                 return;
             }
 
-            // Convert vertices to world space and find centerline
-            List<Vector3> worldVertices = new List<Vector3>();
-            foreach (Vector3 v in vertices)
-            {
-                worldVertices.Add(transform.TransformPoint(v));
-            }
-
-            // For road meshes, find the centerline by averaging left/right edge vertices
-            // Sample along the length of the road
-            List<Vector3> centerlinePoints = ExtractCenterline(worldVertices);
+            // For road meshes, find the centerline in local mesh space first, then convert to world space.
+            // This keeps sampling aligned when the road GameObject is rotated in world space.
+            List<Vector3> centerlinePoints = ExtractCenterline(vertices, transform);
 
             if (centerlinePoints.Count < 2)
             {
@@ -1054,16 +1186,16 @@ namespace TrafficSystem
         /// <summary>
         /// Extract centerline from mesh vertices
         /// </summary>
-        private List<Vector3> ExtractCenterline(List<Vector3> vertices)
+        private List<Vector3> ExtractCenterline(Vector3[] localVertices, Transform meshTransform)
         {
             List<Vector3> centerline = new List<Vector3>();
 
-            if (vertices.Count == 0) return centerline;
+            if (localVertices == null || localVertices.Length == 0 || meshTransform == null) return centerline;
 
             // Find dominant axis length to avoid sampling severely curved roads
             float minX = float.MaxValue, maxX = float.MinValue;
             float minZ = float.MaxValue, maxZ = float.MinValue;
-            foreach (Vector3 v in vertices)
+            foreach (Vector3 v in localVertices)
             {
                 if (v.x < minX) minX = v.x;
                 if (v.x > maxX) maxX = v.x;
@@ -1074,10 +1206,14 @@ namespace TrafficSystem
             float spanX = maxX - minX;
             float spanZ = maxZ - minZ;
             bool useZ = spanZ >= spanX;
-            float roadLength = useZ ? spanZ : spanX;
+            float dominantScale = Mathf.Abs(useZ ? meshTransform.lossyScale.z : meshTransform.lossyScale.x);
+            if (dominantScale < 0.0001f) dominantScale = 1f;
+
+            float roadLength = (useZ ? spanZ : spanX) * dominantScale;
             if (roadLength < 1f) return centerline;
 
             int sampleCount = Mathf.Max(2, Mathf.CeilToInt(roadLength / sampleStepMeters));
+            float axisToleranceLocal = (sampleStepMeters * 0.5f) / dominantScale;
 
             // Sample points along the road
             for (int i = 0; i < sampleCount; i++)
@@ -1087,12 +1223,11 @@ namespace TrafficSystem
 
                 // Find all vertices near this Z position
                 List<Vector3> nearVertices = new List<Vector3>();
-                float zTolerance = sampleStepMeters * 0.5f;
 
-                foreach (Vector3 v in vertices)
+                foreach (Vector3 v in localVertices)
                 {
                     float axisValue = useZ ? v.z : v.x;
-                    if (Mathf.Abs(axisValue - targetAxis) < zTolerance)
+                    if (Mathf.Abs(axisValue - targetAxis) < axisToleranceLocal)
                     {
                         nearVertices.Add(v);
                     }
@@ -1107,7 +1242,7 @@ namespace TrafficSystem
                         center += v;
                     }
                     center /= nearVertices.Count;
-                    centerline.Add(center);
+                    centerline.Add(meshTransform.TransformPoint(center));
                 }
             }
 

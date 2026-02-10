@@ -1,0 +1,5 @@
+- Arabalar spawn olurken spawn oldukları yerde veya yakında araba var mı? diye kontrol etsinler. Üst üste spawnlanma sorunu olmasın.
+- Arabalar ilerlerken çevre kontrolü yapsınlar. Kaza durumları oluşmasın. Arabalar birbirlerine yaklaşınca yavaşlasın veya yanlarından geçsinler.
+- Trafik ışıklarına uysunlar. Dur kalk yaparak ışıklarda bekleyip sonra devam etsinler ışığın durumuna göre. (Bu şimdi değil)
+- Daha akıllı npc sistemleri için bir md dosyası hazırlat ve o dosyayı yaptır.
+- Arabalara geri gitme özelliği de ekle. Bir yerde önlerinde engel varsa geri giderek devam etsinler

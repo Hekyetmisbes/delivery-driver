@@ -43,7 +43,7 @@ namespace TrafficSystem
 
         [Header("Speed Settings")]
         [Tooltip("Cruise speed range (km/h)")]
-        [SerializeField] private Vector2 cruiseSpeedRange = new Vector2(30f, 50f);
+        [SerializeField] private Vector2 cruiseSpeedRange = new Vector2(40f, 60f);
         [Tooltip("Acceleration force")]
         [SerializeField] private float acceleration = 800f;
         [Tooltip("Braking force")]
@@ -55,23 +55,85 @@ namespace TrafficSystem
         [Tooltip("Enable advanced obstacle detection and avoidance")]
         [SerializeField] private bool enableObstacleAvoidance = true;
         [Tooltip("Forward raycast distance (meters)")]
-        [SerializeField] private float avoidanceRayDistance = 15f;
+        [SerializeField] private float avoidanceRayDistance = 20f;
         [Tooltip("Side raycast distance for lane checking (meters)")]
-        [SerializeField] private float sideRayDistance = 10f;
+        [SerializeField] private float sideRayDistance = 15f;
         [Tooltip("Lateral offset for side raycasts (meters)")]
-        [SerializeField] private float sideRayOffset = 1.5f;
+        [SerializeField] private float sideRayOffset = 2f;  // Wider for better lane detection
         [Tooltip("Safe following distance (meters)")]
-        [SerializeField] private float safeFollowingDistance = 8f;
+        [SerializeField] private float safeFollowingDistance = 15f;  // Increased for smoother flow
         [Tooltip("Critical braking distance (meters)")]
-        [SerializeField] private float criticalBrakingDistance = 4f;
+        [SerializeField] private float criticalBrakingDistance = 4f;  // Reduced - only brake hard when very close
         [Tooltip("Brake strength when obstacle detected (0-1)")]
-        [SerializeField] private float avoidanceBrakeStrength = 0.7f;
+        [SerializeField] private float avoidanceBrakeStrength = 0.5f;  // Reduced for gentler braking
+        [Tooltip("Minimum separation distance (meters)")]
+        [SerializeField] private float minimumSeparationDistance = 2f;
+        [Tooltip("Separation force strength")]
+        [SerializeField] private float separationForceStrength = 5f;
         [Tooltip("Enable lane changing to avoid obstacles")]
-        [SerializeField] private bool enableLaneChange = true;
+        [SerializeField] private bool enableLaneChange = false;
         [Tooltip("Lane change speed (how fast to move laterally)")]
-        [SerializeField] private float laneChangeSpeed = 2f;
+        [SerializeField] private float laneChangeSpeed = 3f;  // Faster lane changes for smoother overtakes
         [Tooltip("Layer mask for obstacle detection")]
         [SerializeField] private LayerMask obstacleLayerMask = ~0;
+        [Tooltip("Radius used for forward vehicle detection casts")]
+        [SerializeField] private float vehicleDetectionRadius = 1.1f;
+        [Tooltip("Forward awareness angle used to ignore non-threatening side traffic")]
+        [SerializeField] private float forwardAwarenessAngle = 70f;
+        [Tooltip("Predictive collision lookahead horizon in seconds")]
+        [SerializeField] private float predictiveCollisionHorizon = 3.5f;
+        [Tooltip("Number of trajectory samples for predictive collision checks")]
+        [SerializeField] private int predictiveCollisionSamples = 8;
+        [Tooltip("TTC threshold for urgent braking")]
+        [SerializeField] private float hardBrakeTimeToCollision = 1.2f;
+        [Tooltip("TTC threshold for cautious deceleration")]
+        [SerializeField] private float cautionTimeToCollision = 2.8f;
+        [Tooltip("Extra clearance buffer added to safe gap calculations")]
+        [SerializeField] private float collisionBufferDistance = 2f;
+
+        [Header("Following Distance (Priority 1)")]
+        [Tooltip("Following time in seconds (2-3 second rule)")]
+        [SerializeField] private float followingTimeSeconds = 2.5f;
+        [Tooltip("Minimum gap when following (meters)")]
+        [SerializeField] private float minimumFollowingGap = 3f;
+        [Tooltip("Minimum bumper gap at very low speed / stop-go traffic (meters)")]
+        [SerializeField] private float standstillFollowingGap = 5.5f;
+        [Tooltip("Extra following gap multiplier at low speed to avoid bumper-to-bumper clumping")]
+        [SerializeField] private float lowSpeedFollowingMultiplier = 1.35f;
+        [Tooltip("Minimum speed when constrained by traffic ahead (km/h)")]
+        [SerializeField] private float trafficConstrainedMinSpeed = 2f;
+        [Tooltip("Minimum cruising speed when road ahead is clear (km/h)")]
+        [SerializeField] private float freeFlowMinSpeed = 15f;
+
+        [Header("Lane Change Logic (Priority 1)")]
+        [Tooltip("Minimum time between lane changes (seconds)")]
+        [SerializeField] private float laneChangeCooldown = 3f;  // Reduced for more frequent overtakes
+        [Tooltip("Minimum gap required for safe lane change (meters)")]
+        [SerializeField] private float laneChangeMinGap = 8f;  // Reduced for easier overtakes
+        [Tooltip("Side check distance for lane safety (meters)")]
+        [SerializeField] private float laneCheckDistance = 20f;  // Increased for safer overtakes
+        [Tooltip("Speed difference threshold to trigger overtake (km/h)")]
+        [SerializeField] private float overtakeSpeedThreshold = 5f;  // Overtake if 5+ km/h faster
+        [Tooltip("Lateral distance used for one lane change step (meters)")]
+        [SerializeField] private float laneChangeOffset = 1.5f;
+        [Tooltip("Clamp for allowed lateral lane offset (meters)")]
+        [SerializeField] private float maxLateralLaneOffset = 4.5f;
+
+        [Header("Lane Centering")]
+        [Tooltip("Keep NPCs on fixed lane centers instead of centerline wandering")]
+        [SerializeField] private bool useFixedLaneCenters = true;
+        [Tooltip("Lane center distance from road centerline (meters)")]
+        [SerializeField] private float laneCenterOffset = 1.5f;
+        [Tooltip("Choose random left/right lane at spawn")]
+        [SerializeField] private bool randomizeInitialLane = false;
+
+        [Header("Environmental Awareness (Priority 3)")]
+        [Tooltip("Enable weather-based behavior adjustments")]
+        [SerializeField] private bool enableWeatherEffects = true;
+        [Tooltip("Enable time of day behavior adjustments")]
+        [SerializeField] private bool enableTimeOfDayEffects = true;
+        [Tooltip("Enable type-specific obstacle responses")]
+        [SerializeField] private bool enableObstacleClassification = true;
 
         [Header("Stability")]
         [Tooltip("Enable stability helpers (turn speed limit, downforce, anti-roll)")]
@@ -98,6 +160,8 @@ namespace TrafficSystem
         [Header("Debug")]
         [SerializeField] private bool showDebugGizmos = true;
         [SerializeField] private bool logPathChanges = false;
+        [SerializeField] private bool logCollisions = true;
+        [SerializeField] private bool logOvertakes = true;  // Log overtaking behavior
 
         [Header("Grounding")]
         [Tooltip("Raycast mask for grounding the vehicle to the road surface")]
@@ -128,6 +192,12 @@ namespace TrafficSystem
         private bool isPotentiallyOffRoad;
         private float wheelBase;
 
+        // Collision handling
+        private bool isColliding;
+        private float collisionTimer;
+        private Vector3 separationDirection;
+        private List<Collider> nearbyVehicles = new List<Collider>();
+
         // Advanced obstacle avoidance state
         private bool leftLaneClear;
         private bool rightLaneClear;
@@ -136,9 +206,38 @@ namespace TrafficSystem
 
         // Randomized behavior parameters
         private float lateralOffset; // Lateral offset from centerline (for lane variation)
+        private float cruisingLaneOffset;
         private float personalityLookAhead; // Randomized lookahead distance
         private float personalityAcceleration; // Randomized acceleration
         private float personalitySteerSpeed; // Randomized steering speed
+
+        // Priority 1: Following Distance System
+        private NpcCarAgent vehicleAhead;
+        private float distanceToVehicleAhead;
+        private float relativeSpeedToVehicleAhead;
+        private bool isFollowing;
+
+        // Priority 1: Lane Change System
+        private float lastLaneChangeTime;
+        private bool isChangingLanes;
+        private bool isOvertaking;  // Track if currently overtaking
+
+        // Priority 1: Turn Signal System
+        private TurnSignalController turnSignalController;
+
+        // Priority 2: Personality System
+        private DrivingPersonality personality;
+
+        // Priority 2: Predictive Behavior
+        private LookaheadData currentLookaheadData;
+        private TurnInfo currentTurnInfo;
+
+        // Priority 3: Environmental Awareness
+        private float weatherSpeedMultiplier = 1f;
+        private float timeOfDaySpeedMultiplier = 1f;
+        private float environmentalFollowingDistanceMultiplier = 1f;
+        private float predictiveSpeedLimiter = 1f;
+        private bool imminentCollisionRisk;
 
         // Public accessors
         public RoadSegment CurrentSegment => currentSegment;
@@ -236,6 +335,7 @@ namespace TrafficSystem
             NormalizeModelAxes();
             ConfigureGroundMaskIfNeeded();
             SetupWheelVisuals();
+            SetupTurnSignals(); // Priority 1: Turn Signal System
         }
 
         private void ConfigureSuspension()
@@ -277,6 +377,9 @@ namespace TrafficSystem
 
         private void Start()
         {
+            // Priority 2: Initialize personality system
+            InitializePersonality();
+
             // Random cruise speed for this NPC with larger variation
             targetSpeed = Random.Range(cruiseSpeedRange.x, cruiseSpeedRange.y);
 
@@ -286,17 +389,34 @@ namespace TrafficSystem
             targetSpeed = Mathf.Max(20f, targetSpeed); // Minimum 20 km/h
 
             // Randomize driving personality
-            lateralOffset = Random.Range(-2.5f, 2.5f); // Random lane position (-2.5 to 2.5 meters)
+            if (useFixedLaneCenters)
+            {
+                float laneSign = randomizeInitialLane && Random.value < 0.5f ? -1f : 1f;
+                cruisingLaneOffset = laneSign * Mathf.Max(0.1f, laneCenterOffset);
+                lateralOffset = cruisingLaneOffset;
+            }
+            else
+            {
+                cruisingLaneOffset = 0f;
+                lateralOffset = 0f; // Follow lane center from road graph directly
+            }
             targetLateralOffset = lateralOffset; // Initialize target
             currentLateralOffset = lateralOffset;
-            personalityLookAhead = lookAheadDistance * Random.Range(0.6f, 1.4f); // Vary lookahead 60-140%
-            personalityAcceleration = acceleration * Random.Range(0.7f, 1.3f); // Vary acceleration 70-130%
-            personalitySteerSpeed = steeringSmoothSpeed * Random.Range(0.7f, 1.3f); // Vary steering 70-130%
+            personalityLookAhead = lookAheadDistance * Random.Range(0.9f, 1.1f); // Keep path progression stable
+            personalityAcceleration = acceleration * Random.Range(0.9f, 1.1f);
+            personalitySteerSpeed = steeringSmoothSpeed * Random.Range(0.9f, 1.1f);
+
+            // Initialize overtaking flags
+            isOvertaking = false;
+            isChangingLanes = false;
 
             if (logPathChanges)
             {
-                Debug.Log($"[NpcCarAgent] {name} - Speed: {targetSpeed:F1} km/h, Offset: {lateralOffset:F1}m, Lookahead: {personalityLookAhead:F1}m");
+                Debug.Log($"[NpcCarAgent] {name} - Speed: {targetSpeed:F1} km/h, Offset: {lateralOffset:F1}m, Lookahead: {personalityLookAhead:F1}m, Personality: {personality.GetDescription()}");
             }
+
+            // Priority 2: Register with traffic communication system
+            RegisterWithTrafficSystem();
         }
 
         private void SetupRigidbody()
@@ -324,9 +444,12 @@ namespace TrafficSystem
             currentWaypointIndex = Mathf.Clamp(waypointIndex, 0, segment.waypoints.Count - 1);
             isInitialized = true;
 
-            if (logPathChanges)
+            // Always log initialization for debugging
+            Debug.Log($"[NpcCarAgent] {name} initialized on segment '{segment.name}' (waypoints: {segment.waypoints.Count}) at index {waypointIndex}");
+
+            if (segment.waypoints.Count == 0)
             {
-                Debug.Log($"[NpcCarAgent] {name} initialized on segment '{segment.name}' at waypoint {waypointIndex}");
+                Debug.LogError($"[NpcCarAgent] {name} - Segment '{segment.name}' has ZERO waypoints!");
             }
         }
 
@@ -364,15 +487,163 @@ namespace TrafficSystem
 
         private void FixedUpdate()
         {
-            if (!isInitialized || currentSegment == null) return;
+            if (!isInitialized)
+            {
+                if (Time.frameCount % 120 == 0) // Log every 2 seconds
+                {
+                    Debug.LogWarning($"[NpcCarAgent] {name} - Not initialized!");
+                }
+                return;
+            }
+
+            if (currentSegment == null)
+            {
+                if (Time.frameCount % 120 == 0) // Log every 2 seconds
+                {
+                    Debug.LogWarning($"[NpcCarAgent] {name} - No current segment!");
+                }
+                return;
+            }
+
+            if (currentSegment.waypoints == null || currentSegment.waypoints.Count == 0)
+            {
+                if (Time.frameCount % 120 == 0) // Log every 2 seconds
+                {
+                    Debug.LogWarning($"[NpcCarAgent] {name} - Segment '{currentSegment.name}' has no waypoints!");
+                }
+                return;
+            }
+
+            predictiveSpeedLimiter = 1f;
+            imminentCollisionRisk = false;
 
             UpdatePath();
             UpdateOffRoadStatus();
+
+            // Priority 3: Environmental awareness
+            UpdateWeatherEffects();
+            UpdateTimeOfDayEffects();
+
+            // Priority 2: Predictive behavior
+            AnalyzeUpcomingPath();
+            DetectUpcomingTurn();
+            CheckPredictiveCollisions();
+
             CheckObstacles();
+            CheckNearbyVehicles();
+            ApplySeparationForce();
             UpdateLaneChange();
             ApplySteering();
             ApplyStability();
             ApplyThrottle();
+        }
+
+        /// <summary>
+        /// Check for nearby vehicles using physics overlap
+        /// </summary>
+        private void CheckNearbyVehicles()
+        {
+            nearbyVehicles.Clear();
+            isColliding = false;
+
+            float dynamicCheckRadius = Mathf.Lerp(3f, 6f, Mathf.Clamp01(CurrentSpeed / 80f));
+            Collider[] colliders = Physics.OverlapSphere(transform.position, dynamicCheckRadius, obstacleLayerMask, QueryTriggerInteraction.Ignore);
+            Vector3 selfReference = GetReferencePosition();
+
+            foreach (Collider col in colliders)
+            {
+                if (col == null || col.transform.IsChildOf(transform))
+                    continue;
+
+                if (IsVehicleCollider(col))
+                {
+                    nearbyVehicles.Add(col);
+
+                    Vector3 closestPoint = col.ClosestPoint(selfReference);
+                    float distance = Vector3.Distance(selfReference, closestPoint);
+
+                    Rigidbody otherRb = col.attachedRigidbody;
+                    Vector3 otherVel = (otherRb != null && !otherRb.isKinematic) ? otherRb.linearVelocity : Vector3.zero;
+                    Vector3 toOther = closestPoint - selfReference;
+                    float closingSpeed = 0f;
+                    if (toOther.sqrMagnitude > 0.001f)
+                    {
+                        closingSpeed = Vector3.Dot(rb.linearVelocity - otherVel, toOther.normalized);
+                    }
+
+                    if (distance < 1.2f || (distance < minimumSeparationDistance && closingSpeed > 1.5f))
+                    {
+                        isColliding = true;
+                    }
+                }
+            }
+
+            if (isColliding)
+            {
+                collisionTimer += Time.fixedDeltaTime;
+            }
+            else
+            {
+                // Reset collision timer quickly when separated
+                collisionTimer = Mathf.Max(0, collisionTimer - Time.fixedDeltaTime * 3f);
+            }
+        }
+
+        /// <summary>
+        /// Apply separation force to push away from nearby vehicles
+        /// </summary>
+        private void ApplySeparationForce()
+        {
+            if (nearbyVehicles.Count == 0) return;
+
+            Vector3 separationForce = Vector3.zero;
+            int separationCount = 0;
+            Vector3 selfReference = GetReferencePosition();
+
+            foreach (Collider nearbyVehicle in nearbyVehicles)
+            {
+                if (nearbyVehicle == null) continue;
+
+                Vector3 closestPoint = nearbyVehicle.ClosestPoint(selfReference);
+                Vector3 toOther = closestPoint - selfReference;
+                float distance = toOther.magnitude;
+
+                // Skip if too far
+                if (distance > minimumSeparationDistance) continue;
+
+                // Apply gentle separation force when close
+                if (distance < minimumSeparationDistance && distance > 0.05f)
+                {
+                    Rigidbody otherRb = nearbyVehicle.attachedRigidbody;
+                    Vector3 otherVel = (otherRb != null && !otherRb.isKinematic) ? otherRb.linearVelocity : Vector3.zero;
+                    float closingSpeed = Vector3.Dot(rb.linearVelocity - otherVel, toOther.normalized);
+
+                    float proximityFactor = 1f - (distance / minimumSeparationDistance);
+                    float closingFactor = Mathf.Clamp01(closingSpeed / 8f);
+                    float strength = proximityFactor * (1f + closingFactor);
+                    Vector3 repulsion = -toOther.normalized * strength;
+                    separationForce += repulsion;
+                    separationCount++;
+                }
+            }
+
+            if (separationCount > 0)
+            {
+                separationForce /= separationCount;
+                separationDirection = separationForce.normalized;
+
+                // Apply gentle lateral force to separate while maintaining forward motion
+                Vector3 lateralForce = Vector3.ProjectOnPlane(separationForce * separationForceStrength, transform.forward);
+                rb.AddForce(lateralForce, ForceMode.Acceleration);
+
+                // Keep moving forward even when separating
+                // Ensure minimum forward velocity to prevent getting stuck
+                Vector3 forwardVel = Vector3.Project(rb.linearVelocity, transform.forward);
+                if (forwardVel.magnitude < 4f && !isColliding)
+                {
+                    rb.AddForce(transform.forward * 1.5f, ForceMode.Acceleration);
+                }
+            }
         }
 
         /// <summary>
@@ -385,13 +656,64 @@ namespace TrafficSystem
             // Smoothly transition to target lateral offset
             lateralOffset = Mathf.Lerp(lateralOffset, targetLateralOffset, Time.fixedDeltaTime * laneChangeSpeed);
 
-            // Reset to original lane if no obstacle and lane change complete
-            if (!isObstacleDetected && Mathf.Abs(lateralOffset - targetLateralOffset) < 0.1f)
+            // Priority 1: Check if lane change is complete
+            if (isChangingLanes && Mathf.Abs(lateralOffset - targetLateralOffset) < 0.2f)
             {
-                // Gradually return to center/original position
-                if (Mathf.Abs(currentLateralOffset) > 0.1f)
+                isChangingLanes = false;
+
+                // Deactivate turn signals
+                if (turnSignalController != null)
                 {
-                    targetLateralOffset = Mathf.Lerp(targetLateralOffset, 0f, Time.fixedDeltaTime * 0.5f);
+                    turnSignalController.DeactivateAll();
+                }
+            }
+
+            // Priority 1: Check if we should initiate a lane change
+            if (ShouldChangeLane() && !isChangingLanes)
+            {
+                // Determine direction based on which lane is safer
+                if (IsLaneSafe(-1)) // Left lane (passing lane)
+                {
+                    ExecuteLaneChange(-1);
+                }
+                else if (IsLaneSafe(1)) // Right lane
+                {
+                    ExecuteLaneChange(1);
+                }
+            }
+
+            // REALISTIC TRAFFIC: Return to RIGHT lane after overtaking
+            if (isOvertaking && !isObstacleDetected && !isFollowing)
+            {
+                // Check if we've completed the overtake
+                if (Mathf.Abs(lateralOffset - targetLateralOffset) < 0.3f)
+                {
+                    // Check if right lane is clear to return
+                    if (lateralOffset < -0.5f && IsLaneSafe(1)) // We're in left lane, return to right
+                    {
+                        if (logOvertakes)
+                        {
+                            Debug.Log($"[NpcCarAgent] {name} completing overtake (returning to right lane)");
+                        }
+
+                        targetLateralOffset = cruisingLaneOffset; // Return to cruise lane center
+                        isOvertaking = false;
+
+                        // Signal right turn
+                        if (turnSignalController != null)
+                        {
+                            turnSignalController.ActivateRight();
+                        }
+                    }
+                }
+            }
+
+            // Gradually return to right lane when clear (default driving lane)
+            if (!isObstacleDetected && !isFollowing && !isOvertaking && Mathf.Abs(lateralOffset - targetLateralOffset) < 0.1f)
+            {
+                if (lateralOffset < (cruisingLaneOffset - 0.5f)) // In left of cruise lane, return
+                {
+                    targetLateralOffset = Mathf.Lerp(targetLateralOffset, cruisingLaneOffset, Time.fixedDeltaTime * 0.3f);
                 }
             }
 
@@ -435,10 +757,23 @@ namespace TrafficSystem
             // Check for connections (intersections)
             if (currentSegment.connections != null && currentSegment.connections.Count > 0)
             {
-                // Choose random connection
-                RoadConnection connection = currentSegment.connections[Random.Range(0, currentSegment.connections.Count)];
+                RoadConnection connection = SelectBestConnection(currentSegment.connections);
+                if (connection == null || connection.toSegment == null)
+                {
+                    if (TryGetSequentialNextSegment(out RoadSegment fallbackSegment))
+                    {
+                        currentSegment = fallbackSegment;
+                        currentWaypointIndex = 0;
+                    }
+                    else
+                    {
+                        currentWaypointIndex = 0;
+                    }
+                    return;
+                }
+
                 currentSegment = connection.toSegment;
-                currentWaypointIndex = connection.toWaypointIndex;
+                currentWaypointIndex = 0;
 
                 if (logPathChanges)
                 {
@@ -447,26 +782,111 @@ namespace TrafficSystem
             }
             else
             {
-                // No connections - randomly choose to loop or teleport
-                float choice = Random.value;
+                // No direct connection: continue with the next segment's first waypoint.
+                if (TryGetSequentialNextSegment(out RoadSegment nextSegment))
+                {
+                    currentSegment = nextSegment;
+                    currentWaypointIndex = 0;
 
-                if (choice < 0.3f && currentSegment.waypoints.Count > 1) // 30% loop back
+                    if (logPathChanges)
+                    {
+                        Debug.Log($"[NpcCarAgent] {name} continuing to next segment '{currentSegment.name}' at waypoint 0");
+                    }
+                }
+                else
                 {
                     currentWaypointIndex = 0;
                     if (logPathChanges)
                     {
-                        Debug.Log($"[NpcCarAgent] {name} looping back on segment '{currentSegment.name}'");
+                        Debug.Log($"[NpcCarAgent] {name} looping on segment '{currentSegment.name}' (no outgoing connection)");
                     }
-                }
-                else // 70% teleport to random location
-                {
-                    if (logPathChanges)
-                    {
-                        Debug.Log($"[NpcCarAgent] {name} teleporting to random road");
-                    }
-                    TeleportToRandomRoad();
                 }
             }
+        }
+
+        private bool TryGetSequentialNextSegment(out RoadSegment nextSegment)
+        {
+            nextSegment = null;
+
+            if (roadGraphBuilder == null || roadGraphBuilder.RoadGraph == null)
+                return false;
+
+            List<RoadSegment> segments = roadGraphBuilder.RoadGraph.roadSegments;
+            if (segments == null || segments.Count == 0 || currentSegment == null)
+                return false;
+
+            int currentIndex = segments.IndexOf(currentSegment);
+            if (currentIndex < 0)
+                return false;
+
+            for (int offset = 1; offset <= segments.Count; offset++)
+            {
+                int candidateIndex = (currentIndex + offset) % segments.Count;
+                RoadSegment candidate = segments[candidateIndex];
+                if (candidate != null && candidate.waypoints != null && candidate.waypoints.Count > 0)
+                {
+                    nextSegment = candidate;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private RoadConnection SelectBestConnection(List<RoadConnection> connections)
+        {
+            if (connections == null || connections.Count == 0)
+            {
+                return null;
+            }
+
+            Vector3 currentForward = GetWorldForward();
+            currentForward.y = 0f;
+            if (currentForward.sqrMagnitude < 0.0001f)
+            {
+                currentForward = Vector3.forward;
+            }
+            else
+            {
+                currentForward.Normalize();
+            }
+
+            RoadConnection best = connections[0];
+            float bestDot = -999f;
+
+            for (int i = 0; i < connections.Count; i++)
+            {
+                RoadConnection connection = connections[i];
+                if (connection == null || connection.toSegment == null || connection.toSegment.waypoints == null || connection.toSegment.waypoints.Count == 0)
+                {
+                    continue;
+                }
+
+                int toIndex = Mathf.Clamp(connection.toWaypointIndex, 0, connection.toSegment.waypoints.Count - 1);
+                Vector3 candidateForward = connection.toSegment.waypoints[toIndex].forward;
+                candidateForward.y = 0f;
+
+                if (candidateForward.sqrMagnitude < 0.0001f && toIndex < connection.toSegment.waypoints.Count - 1)
+                {
+                    candidateForward = connection.toSegment.waypoints[toIndex + 1].position - connection.toSegment.waypoints[toIndex].position;
+                    candidateForward.y = 0f;
+                }
+
+                if (candidateForward.sqrMagnitude < 0.0001f)
+                {
+                    continue;
+                }
+
+                candidateForward.Normalize();
+                float dot = Vector3.Dot(currentForward, candidateForward);
+                if (dot > bestDot)
+                {
+                    bestDot = dot;
+                    best = connection;
+                }
+            }
+
+            return best;
         }
 
         /// <summary>
@@ -658,6 +1078,9 @@ namespace TrafficSystem
             Vector3 forward = transform.forward;
             Vector3 right = transform.right;
 
+            // Priority 1: Detect vehicle ahead for following distance system
+            DetectVehicleAhead(rayOrigin, forward, out float distance, out float relativeSpeed);
+
             // Center raycast - main forward detection
             if (Physics.Raycast(rayOrigin, forward, out RaycastHit centerHit, avoidanceRayDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore))
             {
@@ -713,6 +1136,156 @@ namespace TrafficSystem
                    (collider.attachedRigidbody != null && !collider.attachedRigidbody.isKinematic);
         }
 
+        // ============================================================================
+        // PRIORITY 3: Obstacle Classification (Step 6.3)
+        // ============================================================================
+
+        /// <summary>
+        /// Classify obstacle type for appropriate response
+        /// </summary>
+        private ObstacleType ClassifyObstacle(Collider obstacle)
+        {
+            if (obstacle == null) return ObstacleType.Unknown;
+
+            // Check for vehicles
+            if (obstacle.CompareTag("NPC") || obstacle.CompareTag("Player"))
+                return ObstacleType.Vehicle;
+
+            // Check for emergency vehicles
+            if (obstacle.CompareTag("Emergency"))
+                return ObstacleType.EmergencyVehicle;
+
+            // Check for pedestrians
+            if (obstacle.CompareTag("Pedestrian"))
+                return ObstacleType.Pedestrian;
+
+            // Check if it's a vehicle by component
+            if (obstacle.GetComponent<NpcCarAgent>() != null ||
+                obstacle.GetComponentInParent<NpcCarAgent>() != null ||
+                obstacle.GetComponent<CarController>() != null ||
+                obstacle.GetComponentInParent<CarController>() != null)
+                return ObstacleType.Vehicle;
+
+            // Check if it's static
+            Rigidbody rb = obstacle.attachedRigidbody;
+            if (rb == null || rb.isKinematic)
+                return ObstacleType.StaticObject;
+
+            return ObstacleType.Unknown;
+        }
+
+        /// <summary>
+        /// Respond to obstacle based on its type
+        /// </summary>
+        private float RespondToObstacle(Collider obstacle, float distance, float currentTargetSpeed)
+        {
+            if (!enableObstacleClassification)
+            {
+                // Default behavior - treat all as vehicles
+                return currentTargetSpeed;
+            }
+
+            ObstacleType type = ClassifyObstacle(obstacle);
+
+            switch (type)
+            {
+                case ObstacleType.Vehicle:
+                    return HandleVehicleObstacle(distance, currentTargetSpeed);
+
+                case ObstacleType.Pedestrian:
+                    return HandlePedestrianObstacle(distance, currentTargetSpeed);
+
+                case ObstacleType.EmergencyVehicle:
+                    return HandleEmergencyVehicle(distance, currentTargetSpeed);
+
+                case ObstacleType.StaticObject:
+                    return HandleStaticObstacle(distance, currentTargetSpeed);
+
+                default:
+                    return HandleVehicleObstacle(distance, currentTargetSpeed);
+            }
+        }
+
+        /// <summary>
+        /// Handle vehicle obstacle - maintain distance, match speed
+        /// </summary>
+        private float HandleVehicleObstacle(float distance, float currentTargetSpeed)
+        {
+            if (distance < criticalBrakingDistance)
+            {
+                return currentTargetSpeed * 0.3f;
+            }
+            else if (distance < safeFollowingDistance)
+            {
+                float distanceFactor = distance / safeFollowingDistance;
+                return currentTargetSpeed * Mathf.Lerp(0.5f, 0.9f, distanceFactor);
+            }
+            return currentTargetSpeed;
+        }
+
+        /// <summary>
+        /// Handle pedestrian - ALWAYS stop, large safety margin
+        /// </summary>
+        private float HandlePedestrianObstacle(float distance, float currentTargetSpeed)
+        {
+            if (distance < 15f) // Large safety margin
+            {
+                return 0f; // Full stop
+            }
+            else if (distance < 25f)
+            {
+                return currentTargetSpeed * 0.3f; // Slow down significantly
+            }
+            return currentTargetSpeed;
+        }
+
+        /// <summary>
+        /// Handle emergency vehicle - pull over and stop
+        /// </summary>
+        private float HandleEmergencyVehicle(float distance, float currentTargetSpeed)
+        {
+            if (distance < 30f)
+            {
+                // Pull over to the right (if possible)
+                if (IsLaneSafe(1)) // Right lane
+                {
+                    ExecuteLaneChange(1);
+                }
+
+                // Slow down significantly
+                return currentTargetSpeed * 0.4f;
+            }
+            return currentTargetSpeed;
+        }
+
+        /// <summary>
+        /// Handle static obstacle - navigate around or stop
+        /// </summary>
+        private float HandleStaticObstacle(float distance, float currentTargetSpeed)
+        {
+            if (distance < criticalBrakingDistance)
+            {
+                return 0f; // Stop for very close static obstacles
+            }
+            else if (distance < safeFollowingDistance * 1.5f)
+            {
+                // Try to change lanes
+                if (enableLaneChange)
+                {
+                    if (IsLaneSafe(-1))
+                    {
+                        ExecuteLaneChange(-1);
+                    }
+                    else if (IsLaneSafe(1))
+                    {
+                        ExecuteLaneChange(1);
+                    }
+                }
+                return currentTargetSpeed * 0.6f;
+            }
+            return currentTargetSpeed;
+        }
+
         /// <summary>
         /// Check lane availability with additional side checks
         /// </summary>
@@ -745,22 +1318,908 @@ namespace TrafficSystem
             if (Mathf.Abs(targetLateralOffset - lateralOffset) > 0.5f)
                 return;
 
-            // Try to move to clearer lane
+            // REALISTIC TRAFFIC: Prefer LEFT lane for overtaking
+            if (isObstacleDetected || isFollowing)
+            {
+                // Try left lane first (passing lane)
+                if (leftLaneClear)
+                {
+                    targetLateralOffset = Mathf.Clamp(lateralOffset - laneChangeOffset, -maxLateralLaneOffset, maxLateralLaneOffset);
+                    isOvertaking = true;
+                    return;
+                }
+                // Only use right if left is blocked
+                else if (rightLaneClear)
+                {
+                    targetLateralOffset = Mathf.Clamp(lateralOffset + laneChangeOffset, -maxLateralLaneOffset, maxLateralLaneOffset);
+                    return;
+                }
+            }
+
+            // General lane selection when both clear
             if (leftLaneClear && !rightLaneClear)
             {
-                targetLateralOffset = Mathf.Clamp(lateralOffset - 2f, -3.5f, 3.5f);
+                targetLateralOffset = Mathf.Clamp(lateralOffset - laneChangeOffset, -maxLateralLaneOffset, maxLateralLaneOffset);
             }
             else if (rightLaneClear && !leftLaneClear)
             {
-                targetLateralOffset = Mathf.Clamp(lateralOffset + 2f, -3.5f, 3.5f);
+                targetLateralOffset = Mathf.Clamp(lateralOffset + laneChangeOffset, -maxLateralLaneOffset, maxLateralLaneOffset);
             }
             else if (leftLaneClear && rightLaneClear)
             {
-                // Both clear, choose randomly
-                targetLateralOffset = Random.value > 0.5f ?
-                    Mathf.Clamp(lateralOffset - 2f, -3.5f, 3.5f) :
-                    Mathf.Clamp(lateralOffset + 2f, -3.5f, 3.5f);
+                // Both clear, prefer left for overtaking
+                targetLateralOffset = Mathf.Clamp(lateralOffset - laneChangeOffset, -maxLateralLaneOffset, maxLateralLaneOffset);
             }
+        }
+
+        // ============================================================================
+        // PRIORITY 1: Following Distance System (Step 1.1)
+        // ============================================================================
+
+        /// <summary>
+        /// Detect vehicle ahead and calculate distance and relative speed
+        /// </summary>
+        private bool DetectVehicleAhead(Vector3 rayOrigin, Vector3 forward, out float distance, out float relativeSpeed)
+        {
+            distance = float.MaxValue;
+            relativeSpeed = 0f;
+            vehicleAhead = null;
+            isFollowing = false;
+
+            RaycastHit[] hits = Physics.SphereCastAll(rayOrigin, vehicleDetectionRadius, forward, avoidanceRayDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore);
+            if (hits == null || hits.Length == 0)
+            {
+                return false;
+            }
+
+            System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+            float cosAwareness = Mathf.Cos(forwardAwarenessAngle * Mathf.Deg2Rad);
+
+            for (int i = 0; i < hits.Length; i++)
+            {
+                RaycastHit hit = hits[i];
+                if (!IsVehicleCollider(hit.collider))
+                {
+                    continue;
+                }
+
+                NpcCarAgent otherAgent = hit.collider.GetComponent<NpcCarAgent>() ?? hit.collider.GetComponentInParent<NpcCarAgent>();
+                if (otherAgent == this)
+                {
+                    continue;
+                }
+
+                Vector3 toOther = hit.point - rayOrigin;
+                if (toOther.sqrMagnitude < 0.001f)
+                {
+                    continue;
+                }
+
+                Vector3 directionToOther = toOther.normalized;
+                if (Vector3.Dot(forward, directionToOther) < cosAwareness)
+                {
+                    continue;
+                }
+
+                float lateralOffsetFromLane = Mathf.Abs(Vector3.Dot((hit.point - transform.position), transform.right));
+                if (lateralOffsetFromLane > sideRayOffset + 2.5f)
+                {
+                    continue;
+                }
+
+                distance = hit.distance;
+
+                if (otherAgent != null)
+                {
+                    float mySpeed = CurrentSpeed / 3.6f;
+                    float theirSpeed = otherAgent.CurrentSpeed / 3.6f;
+                    relativeSpeed = mySpeed - theirSpeed;
+
+                    float dynamicSafeDistance = CalculateSafeFollowingDistance() + Mathf.Max(0f, relativeSpeed * 1.2f);
+                    isFollowing = distance < dynamicSafeDistance;
+                    distanceToVehicleAhead = distance;
+                    relativeSpeedToVehicleAhead = relativeSpeed;
+                    vehicleAhead = otherAgent;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Calculate safe following distance based on speed (2-3 second rule)
+        /// </summary>
+        private float CalculateSafeFollowingDistance()
+        {
+            float currentSpeedMs = CurrentSpeed / 3.6f; // Convert km/h to m/s
+
+            // Base formula: speed * following time
+            float baseDistance = currentSpeedMs * followingTimeSeconds;
+
+            // Add personality multiplier (some drivers follow closer, others farther)
+            float personalityMultiplier = personality != null ? personality.followingDistanceMultiplier : 1f;
+
+            // Priority 3: Increase following distance in bad weather
+            float weatherMultiplier = environmentalFollowingDistanceMultiplier;
+
+            // Add buffer for reaction time
+            float reactionBuffer = 2f; // 2 meters buffer
+
+            float dynamicGap = baseDistance * personalityMultiplier * weatherMultiplier + reactionBuffer;
+
+            // In stop-go traffic, keep an explicit standing gap to avoid "glued" convoys.
+            if (currentSpeedMs < 8f) // ~29 km/h and below
+            {
+                dynamicGap *= lowSpeedFollowingMultiplier;
+                dynamicGap = Mathf.Max(dynamicGap, standstillFollowingGap);
+            }
+
+            return Mathf.Max(minimumFollowingGap, dynamicGap);
+        }
+
+        /// <summary>
+        /// Adjust speed to maintain safe following distance
+        /// </summary>
+        private float AdjustSpeedForTraffic(float desiredSpeed)
+        {
+            if (!isFollowing || vehicleAhead == null)
+            {
+                return desiredSpeed;
+            }
+
+            float safeDistance = CalculateSafeFollowingDistance();
+
+            if (distanceToVehicleAhead < safeDistance)
+            {
+                // Too close - need to slow down
+                float leadVehicleSpeed = vehicleAhead.CurrentSpeed;
+
+                // Calculate how much slower we should go based on distance
+                float distanceRatio = Mathf.Clamp01(distanceToVehicleAhead / Mathf.Max(0.1f, safeDistance));
+                float closingKmh = Mathf.Max(0f, relativeSpeedToVehicleAhead * 3.6f);
+
+                // If very close, brake much harder than lead speed to reopen a gap.
+                if (distanceRatio < 0.35f)
+                {
+                    float aggressiveDrop = Mathf.Lerp(10f, 22f, 1f - distanceRatio) + closingKmh * 0.35f;
+                    return Mathf.Max(0f, leadVehicleSpeed - aggressiveDrop);
+                }
+                else if (distanceRatio < 0.6f)
+                {
+                    float moderatedDrop = Mathf.Lerp(4f, 10f, 0.6f - distanceRatio) + closingKmh * 0.2f;
+                    return Mathf.Max(0f, Mathf.Min(leadVehicleSpeed, desiredSpeed) - moderatedDrop);
+                }
+                else
+                {
+                    // Moderately close - gradually match speed
+                    return Mathf.Lerp(leadVehicleSpeed, desiredSpeed, distanceRatio);
+                }
+            }
+            else if (distanceToVehicleAhead < safeDistance * 1.5f)
+            {
+                // Within comfortable range - match lead vehicle speed
+                return vehicleAhead.CurrentSpeed;
+            }
+            else
+            {
+                // Far enough - can go desired speed
+                return desiredSpeed;
+            }
+        }
+
+        // ============================================================================
+        // PRIORITY 1: Enhanced Lane Change Logic (Step 1.2)
+        // ============================================================================
+
+        /// <summary>
+        /// Check if adjacent lane is safe for lane change
+        /// </summary>
+        private bool IsLaneSafe(int laneDirection) // -1 = left, +1 = right
+        {
+            // Check cooldown
+            if (Time.time - lastLaneChangeTime < laneChangeCooldown)
+            {
+                return false;
+            }
+
+            Vector3 rayOrigin = transform.position + Vector3.up * 0.5f;
+            Vector3 forward = transform.forward;
+            Vector3 right = transform.right;
+            Vector3 checkDirection = right * laneDirection;
+
+            // Check forward in adjacent lane
+            Vector3 checkOrigin = rayOrigin + checkDirection * sideRayOffset;
+            if (Physics.Raycast(checkOrigin, forward, laneCheckDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore))
+            {
+                return false; // Vehicle ahead in target lane
+            }
+
+            // Check backward in adjacent lane (blind spot)
+            if (Physics.Raycast(checkOrigin, -forward, laneChangeMinGap, obstacleLayerMask, QueryTriggerInteraction.Ignore))
+            {
+                return false; // Vehicle behind in target lane
+            }
+
+            // Check diagonal forward
+            Vector3 diagonalForward = (forward + checkDirection * 0.5f).normalized;
+            if (Physics.Raycast(rayOrigin, diagonalForward, laneChangeMinGap, obstacleLayerMask, QueryTriggerInteraction.Ignore))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Decide if lane change should be initiated
+        /// </summary>
+        private bool ShouldChangeLane()
+        {
+            // Don't change if already changing
+            if (isChangingLanes)
+            {
+                return false;
+            }
+
+            // Check cooldown
+            if (Time.time - lastLaneChangeTime < laneChangeCooldown)
+            {
+                return false;
+            }
+
+            // Reasons to change lanes:
+
+            // 1. OVERTAKING: Following a slower vehicle (realistic traffic behavior)
+            if (isFollowing && vehicleAhead != null)
+            {
+                float speedDifference = targetSpeed - vehicleAhead.CurrentSpeed;
+                // Overtake if we're even slightly faster (5+ km/h)
+                if (speedDifference > overtakeSpeedThreshold)
+                {
+                    // ALWAYS try LEFT lane first (passing lane in traffic)
+                    if (IsLaneSafe(-1))
+                    {
+                        isOvertaking = true;
+                        return true;
+                    }
+                }
+            }
+
+            // 2. Current lane blocked ahead
+            if (isObstacleDetected && obstacleDistance < safeFollowingDistance)
+            {
+                // Prefer left lane for overtaking
+                if (IsLaneSafe(-1))
+                {
+                    isOvertaking = true;
+                    return true;
+                }
+                // Only use right if left is blocked
+                if (IsLaneSafe(1))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Execute lane change with turn signal
+        /// </summary>
+        private void ExecuteLaneChange(int direction) // -1 = left, +1 = right
+        {
+            if (!IsLaneSafe(direction))
+            {
+                return;
+            }
+
+            // Activate turn signal
+            if (turnSignalController != null)
+            {
+                if (direction < 0)
+                {
+                    turnSignalController.ActivateLeft();
+                }
+                else
+                {
+                    turnSignalController.ActivateRight();
+                }
+            }
+
+            // Set target lateral offset (wider range for better lane separation)
+            targetLateralOffset = Mathf.Clamp(lateralOffset + (direction * laneChangeOffset), -maxLateralLaneOffset, maxLateralLaneOffset);
+
+            // Mark as changing lanes
+            isChangingLanes = true;
+            lastLaneChangeTime = Time.time;
+
+            // Mark as overtaking if moving left with vehicle ahead
+            if (direction < 0 && (isFollowing || isObstacleDetected))
+            {
+                isOvertaking = true;
+
+                if (logOvertakes)
+                {
+                    Debug.Log($"[NpcCarAgent] {name} starting overtake (moving to left lane)");
+                }
+            }
+
+            // Cancel signal after a delay (handled in UpdateLaneChange)
+        }
+
+        // ============================================================================
+        // PRIORITY 2: Personality System (Step 5.1)
+        // ============================================================================
+
+        /// <summary>
+        /// Initialize driving personality for this NPC
+        /// </summary>
+        private void InitializePersonality()
+        {
+            personality = DrivingPersonality.CreateRandomVaried();
+
+            if (logPathChanges)
+            {
+                Debug.Log($"[NpcCarAgent] {name} - Personality: {personality.GetDescription()}");
+            }
+        }
+
+        /// <summary>
+        /// Apply personality to behavior parameters
+        /// </summary>
+        private void ApplyPersonalityToParameters()
+        {
+            // Speed calculations
+            targetSpeed *= personality.speedMultiplier;
+            targetSpeed *= personality.speedLimitCompliance;
+
+            // Following distance
+            followingTimeSeconds *= personality.followingDistanceMultiplier;
+
+            // Lane changes
+            laneChangeCooldown /= personality.laneChangeFrequency;
+
+            // Acceleration/braking
+            acceleration *= personality.accelerationAggression;
+            braking *= personality.brakingAggression;
+
+            // Reaction delays
+            // Could be used in future implementations
+        }
+
+        // ============================================================================
+        // PRIORITY 2: Predictive Behavior - Multi-Waypoint Lookahead (Step 3.1)
+        // ============================================================================
+
+        /// <summary>
+        /// Analyze upcoming path for turns, intersections, and obstacles
+        /// </summary>
+        private void AnalyzeUpcomingPath()
+        {
+            if (currentSegment == null || currentWaypointIndex >= currentSegment.waypoints.Count)
+            {
+                currentLookaheadData = new LookaheadData();
+                return;
+            }
+
+            LookaheadData data = new LookaheadData();
+            int waypointCount = 15; // Look ahead 15 waypoints
+            int endIndex = Mathf.Min(currentWaypointIndex + waypointCount, currentSegment.waypoints.Count - 1);
+
+            // Analyze waypoints ahead
+            float maxAngleChange = 0f;
+            bool hasIntersection = false;
+
+            for (int i = currentWaypointIndex; i < endIndex - 1; i++)
+            {
+                Waypoint current = currentSegment.waypoints[i];
+                Waypoint next = currentSegment.waypoints[i + 1];
+
+                // Check for sharp turns
+                float angleChange = Vector3.Angle(current.forward, next.forward);
+                if (angleChange > maxAngleChange)
+                {
+                    maxAngleChange = angleChange;
+                }
+            }
+
+            // Check if approaching end of segment (intersection)
+            if (currentSegment.connections != null && currentSegment.connections.Count > 0)
+            {
+                int distanceToEnd = currentSegment.waypoints.Count - currentWaypointIndex;
+                if (distanceToEnd < waypointCount)
+                {
+                    hasIntersection = true;
+                }
+            }
+
+            data.hasSharpTurn = maxAngleChange > 15f;
+            data.turnSharpness = maxAngleChange;
+            data.hasIntersection = hasIntersection;
+            data.recommendedSpeed = CalculatePlannedSpeed(data);
+
+            currentLookaheadData = data;
+        }
+
+        /// <summary>
+        /// Calculate optimal speed based on upcoming path
+        /// </summary>
+        private float CalculatePlannedSpeed(LookaheadData ahead)
+        {
+            float speed = targetSpeed;
+
+            // Reduce for sharp turns
+            if (ahead.hasSharpTurn)
+            {
+                float turnFactor = Mathf.Clamp01(1f - (ahead.turnSharpness / 90f));
+                float turnSpeed = targetSpeed * Mathf.Lerp(0.5f, 1f, turnFactor);
+                speed = Mathf.Min(speed, turnSpeed);
+            }
+
+            // Reduce for intersections
+            if (ahead.hasIntersection)
+            {
+                speed = Mathf.Min(speed, targetSpeed * 0.7f);
+            }
+
+            return speed;
+        }
+
+        // ============================================================================
+        // PRIORITY 2: Predictive Behavior - Turn Planning (Step 3.3)
+        // ============================================================================
+
+        /// <summary>
+        /// Detect upcoming turns and plan deceleration
+        /// </summary>
+        private void DetectUpcomingTurn()
+        {
+            if (currentSegment == null || currentWaypointIndex >= currentSegment.waypoints.Count - 3)
+            {
+                currentTurnInfo = new TurnInfo();
+                return;
+            }
+
+            TurnInfo turnInfo = new TurnInfo();
+
+            // Look ahead 5-10 waypoints
+            int lookAheadCount = 10;
+            int endIndex = Mathf.Min(currentWaypointIndex + lookAheadCount, currentSegment.waypoints.Count - 1);
+
+            Vector3 currentPos = transform.position;
+            float distanceToTurn = 0f;
+            float maxAngle = 0f;
+
+            for (int i = currentWaypointIndex; i < endIndex - 1; i++)
+            {
+                Waypoint wp1 = currentSegment.waypoints[i];
+                Waypoint wp2 = currentSegment.waypoints[i + 1];
+
+                float angle = Vector3.Angle(wp1.forward, wp2.forward);
+
+                if (angle > 15f) // Significant turn
+                {
+                    turnInfo.isTurn = true;
+                    distanceToTurn = Vector3.Distance(currentPos, wp1.position);
+                    maxAngle = Mathf.Max(maxAngle, angle);
+                }
+            }
+
+            if (turnInfo.isTurn)
+            {
+                turnInfo.distanceToTurn = distanceToTurn;
+                turnInfo.turnAngle = maxAngle;
+                turnInfo.recommendedSpeed = CalculateTurnSpeed(maxAngle);
+            }
+
+            currentTurnInfo = turnInfo;
+        }
+
+        /// <summary>
+        /// Calculate safe speed for a turn based on angle
+        /// </summary>
+        private float CalculateTurnSpeed(float turnAngle)
+        {
+            // Sharp turns require slower speeds
+            float turnFactor = Mathf.Clamp01(1f - (turnAngle / 90f));
+            float minSpeed = targetSpeed * 0.4f; // At least 40% of target speed
+            float maxSpeed = targetSpeed;
+
+            return Mathf.Lerp(minSpeed, maxSpeed, turnFactor);
+        }
+
+        /// <summary>
+        /// Prepare for upcoming turn by adjusting speed
+        /// </summary>
+        private float PrepareForTurn(float desiredSpeed)
+        {
+            if (!currentTurnInfo.isTurn)
+            {
+                return desiredSpeed;
+            }
+
+            // Calculate braking distance needed
+            float currentSpeedMs = CurrentSpeed / 3.6f;
+            float targetSpeedMs = currentTurnInfo.recommendedSpeed / 3.6f;
+
+            if (currentSpeedMs <= targetSpeedMs)
+            {
+                return desiredSpeed; // Already slow enough
+            }
+
+            // Check if we need to start braking
+            float brakingDistance = CalculateBrakingDistance(CurrentSpeed, currentTurnInfo.recommendedSpeed);
+
+            if (currentTurnInfo.distanceToTurn < brakingDistance)
+            {
+                // Start decelerating
+                return currentTurnInfo.recommendedSpeed;
+            }
+
+            return desiredSpeed;
+        }
+
+        /// <summary>
+        /// Calculate braking distance needed to reach target speed
+        /// </summary>
+        private float CalculateBrakingDistance(float currentSpeed, float targetSpeed)
+        {
+            float deceleration = 4f; // m/s² - moderate braking
+            deceleration *= personality != null ? personality.brakingAggression : 1f;
+
+            float currentSpeedMs = currentSpeed / 3.6f;
+            float targetSpeedMs = targetSpeed / 3.6f;
+
+            float speedDiff = currentSpeedMs - targetSpeedMs;
+            if (speedDiff <= 0) return 0f;
+
+            // Physics: d = (v1² - v2²) / (2 * a)
+            float distance = (currentSpeedMs * currentSpeedMs - targetSpeedMs * targetSpeedMs) / (2 * deceleration);
+
+            // Add reaction distance
+            float reactionTime = personality != null ? personality.reactionTime : 0.5f;
+            float reactionDistance = currentSpeedMs * reactionTime;
+
+            return distance + reactionDistance + 2f; // +2m safety buffer
+        }
+
+        // ============================================================================
+        // PRIORITY 2: Predictive Behavior - Trajectory Prediction (Step 3.2)
+        // ============================================================================
+
+        /// <summary>
+        /// Check for predicted collisions with nearby vehicles
+        /// </summary>
+        private void CheckPredictiveCollisions()
+        {
+            if (TrafficCommunicationSystem.Instance == null) return;
+
+            float speedMs = CurrentSpeed / 3.6f;
+            float queryRadius = Mathf.Max(30f, speedMs * predictiveCollisionHorizon + 10f);
+            var nearbyVehicles = TrafficCommunicationSystem.Instance.GetNearbyVehicles(transform.position, queryRadius);
+            float minSpeedLimiter = 1f;
+            bool urgentRisk = false;
+
+            foreach (var otherVehicle in nearbyVehicles)
+            {
+                if (otherVehicle == this || otherVehicle == null) continue;
+
+                float closestPredictedDistance = EstimateClosestPredictedDistance(otherVehicle, predictiveCollisionHorizon, predictiveCollisionSamples);
+                float timeToCollision = VehicleTrajectoryPredictor.CalculateTimeToCollision(this, otherVehicle);
+                float relativeClosingSpeed = CalculateRelativeClosingSpeed(otherVehicle);
+                float dynamicSafeGap = CalculateSafeFollowingDistance() + Mathf.Max(0f, relativeClosingSpeed * 1.5f) + collisionBufferDistance;
+
+                bool hasPredictiveRisk = closestPredictedDistance < dynamicSafeGap || timeToCollision < cautionTimeToCollision;
+                if (!hasPredictiveRisk)
+                {
+                    continue;
+                }
+
+                if (timeToCollision < hardBrakeTimeToCollision || closestPredictedDistance < minimumSeparationDistance * 0.8f)
+                {
+                    minSpeedLimiter = Mathf.Min(minSpeedLimiter, 0.35f);
+                    urgentRisk = true;
+                }
+                else if (timeToCollision < cautionTimeToCollision)
+                {
+                    minSpeedLimiter = Mathf.Min(minSpeedLimiter, 0.55f);
+                }
+                else
+                {
+                    float clearanceFactor = Mathf.Clamp01(closestPredictedDistance / Mathf.Max(1f, dynamicSafeGap));
+                    minSpeedLimiter = Mathf.Min(minSpeedLimiter, Mathf.Lerp(0.6f, 0.9f, clearanceFactor));
+                }
+
+                if (timeToCollision < cautionTimeToCollision && ShouldChangeLane())
+                {
+                    if (IsLaneSafe(-1))
+                    {
+                        ExecuteLaneChange(-1);
+                    }
+                    else if (IsLaneSafe(1))
+                    {
+                        ExecuteLaneChange(1);
+                    }
+                }
+            }
+
+            predictiveSpeedLimiter = Mathf.Clamp(minSpeedLimiter, 0.25f, 1f);
+            imminentCollisionRisk = urgentRisk;
+        }
+
+        private float EstimateClosestPredictedDistance(NpcCarAgent otherVehicle, float horizonSeconds, int samples)
+        {
+            if (otherVehicle == null) return float.MaxValue;
+
+            int sampleCount = Mathf.Max(3, samples);
+            float timeStep = horizonSeconds / sampleCount;
+            float closestDistance = Vector3.Distance(transform.position, otherVehicle.transform.position);
+
+            for (int i = 1; i <= sampleCount; i++)
+            {
+                float t = i * timeStep;
+                Vector3 posA = VehicleTrajectoryPredictor.PredictPositionWithPath(this, t);
+                Vector3 posB = VehicleTrajectoryPredictor.PredictPositionWithPath(otherVehicle, t);
+                float distance = Vector3.Distance(posA, posB);
+                if (distance < closestDistance)
+                {
+                    closestDistance = distance;
+                }
+            }
+
+            return closestDistance;
+        }
+
+        private float CalculateRelativeClosingSpeed(NpcCarAgent otherVehicle)
+        {
+            if (otherVehicle == null) return 0f;
+
+            Rigidbody otherRb = otherVehicle.GetComponent<Rigidbody>();
+            if (otherRb == null) return 0f;
+
+            Vector3 relativePos = otherVehicle.transform.position - transform.position;
+            if (relativePos.sqrMagnitude < 0.01f) return 0f;
+
+            Vector3 relativeVel = rb.linearVelocity - otherRb.linearVelocity;
+            return Vector3.Dot(relativeVel, relativePos.normalized);
+        }
+
+        // ============================================================================
+        // PRIORITY 2: Cooperative Behavior - Vehicle Communication (Step 4.1)
+        // ============================================================================
+
+        /// <summary>
+        /// Register this vehicle with the traffic communication system
+        /// </summary>
+        private void RegisterWithTrafficSystem()
+        {
+            if (TrafficCommunicationSystem.Instance != null)
+            {
+                TrafficCommunicationSystem.Instance.RegisterVehicle(this);
+            }
+        }
+
+        /// <summary>
+        /// Unregister from traffic communication system
+        /// </summary>
+        private void OnDestroy()
+        {
+            if (TrafficCommunicationSystem.Instance != null)
+            {
+                TrafficCommunicationSystem.Instance.UnregisterVehicle(this);
+            }
+        }
+
+        // ============================================================================
+        // PRIORITY 2: Cooperative Behavior - Merge Assistance (Step 4.2)
+        // ============================================================================
+
+        /// <summary>
+        /// Detect vehicles trying to merge into our lane
+        /// </summary>
+        private bool DetectMergingVehicle(out NpcCarAgent mergingVehicle, out float mergePoint)
+        {
+            mergingVehicle = null;
+            mergePoint = 0f;
+
+            if (TrafficCommunicationSystem.Instance == null) return false;
+
+            // Get nearby vehicles
+            var nearbyVehicles = TrafficCommunicationSystem.Instance.GetNearbyVehicles(transform.position, 20f);
+
+            foreach (var otherVehicle in nearbyVehicles)
+            {
+                if (otherVehicle == this || otherVehicle == null) continue;
+
+                // Check if they're changing lanes towards us
+                VehicleState state = TrafficCommunicationSystem.Instance.GetVehicleState(otherVehicle);
+                if (state != null && state.isChangingLanes)
+                {
+                    // Check if they're in adjacent lane
+                    Vector3 toOther = otherVehicle.transform.position - transform.position;
+                    float lateralDistance = Vector3.Dot(toOther, transform.right);
+
+                    if (Mathf.Abs(lateralDistance) > 2f && Mathf.Abs(lateralDistance) < 5f)
+                    {
+                        // They're in adjacent lane and changing lanes
+                        float forwardDistance = Vector3.Dot(toOther, transform.forward);
+
+                        if (forwardDistance > -5f && forwardDistance < 15f)
+                        {
+                            // They're in merge range
+                            mergingVehicle = otherVehicle;
+                            mergePoint = forwardDistance;
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Assist merging vehicle by creating space
+        /// </summary>
+        private void AssistMerge()
+        {
+            if (DetectMergingVehicle(out NpcCarAgent mergingVehicle, out float mergePoint))
+            {
+                // Create gap by slightly adjusting speed
+                if (mergePoint > 0 && mergePoint < 10f)
+                {
+                    // They're ahead - can speed up to clear gap
+                    if (personality != null && personality.riskTolerance > 0.4f)
+                    {
+                        targetSpeed *= 1.05f;
+                    }
+                }
+                else if (mergePoint < 0 && mergePoint > -5f)
+                {
+                    // They're behind - slow down to create gap
+                    targetSpeed *= 0.95f;
+                }
+            }
+        }
+
+        // ============================================================================
+        // PRIORITY 3: Weather Effects (Step 6.1)
+        // ============================================================================
+
+        /// <summary>
+        /// Update behavior based on weather conditions
+        /// </summary>
+        private void UpdateWeatherEffects()
+        {
+            if (!enableWeatherEffects || WeatherManager.Instance == null)
+            {
+                weatherSpeedMultiplier = 1f;
+                environmentalFollowingDistanceMultiplier = 1f;
+                return;
+            }
+
+            // Apply weather-based speed reduction
+            weatherSpeedMultiplier = WeatherManager.Instance.GetSpeedReduction();
+
+            // Increase following distance in bad weather
+            environmentalFollowingDistanceMultiplier = WeatherManager.Instance.GetFollowingDistanceMultiplier();
+
+            // Apply steering smoothing in bad weather
+            if (WeatherManager.Instance.IsBadWeather())
+            {
+                float smoothingMultiplier = WeatherManager.Instance.GetSteeringSmoothingMultiplier();
+                // This affects steering through the personality steering speed
+                // Could be applied directly if needed
+            }
+        }
+
+        /// <summary>
+        /// Apply weather effects to speed
+        /// </summary>
+        private float ApplyWeatherEffects(float baseSpeed)
+        {
+            return baseSpeed * weatherSpeedMultiplier;
+        }
+
+        // ============================================================================
+        // PRIORITY 3: Time of Day Effects (Step 6.2)
+        // ============================================================================
+
+        /// <summary>
+        /// Update behavior based on time of day
+        /// </summary>
+        private void UpdateTimeOfDayEffects()
+        {
+            if (!enableTimeOfDayEffects)
+            {
+                timeOfDaySpeedMultiplier = 1f;
+                return;
+            }
+
+            timeOfDaySpeedMultiplier = GetTimeOfDayMultiplier();
+        }
+
+        /// <summary>
+        /// Get speed multiplier based on time of day
+        /// </summary>
+        private float GetTimeOfDayMultiplier()
+        {
+            int hour = System.DateTime.Now.Hour;
+
+            // Rush hour (7-9 AM, 5-7 PM): more aggressive, higher speeds
+            if ((hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 19))
+            {
+                // Adjust based on personality - aggressive drivers go faster in rush hour
+                if (personality != null && personality.riskTolerance > 0.6f)
+                {
+                    return 1.15f; // Aggressive drivers speed up in rush hour
+                }
+                return 1.05f; // Normal drivers slightly faster
+            }
+
+            // Night (10 PM - 6 AM): slower, more cautious
+            if (hour >= 22 || hour <= 6)
+            {
+                return 0.85f; // 15% slower at night
+            }
+
+            // Daytime (normal)
+            return 1.0f;
+        }
+
+        /// <summary>
+        /// Check if it's currently rush hour
+        /// </summary>
+        private bool IsRushHour()
+        {
+            int hour = System.DateTime.Now.Hour;
+            return (hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 19);
+        }
+
+        /// <summary>
+        /// Check if it's currently night time
+        /// </summary>
+        private bool IsNightTime()
+        {
+            int hour = System.DateTime.Now.Hour;
+            return hour >= 22 || hour <= 6;
+        }
+
+        /// <summary>
+        /// Apply time of day effects to speed
+        /// </summary>
+        private float ApplyTimeOfDayEffects(float baseSpeed)
+        {
+            return baseSpeed * timeOfDaySpeedMultiplier;
+        }
+
+        // ============================================================================
+        // Helper Structures
+        // ============================================================================
+
+        /// <summary>
+        /// Data structure for lookahead analysis
+        /// </summary>
+        private struct LookaheadData
+        {
+            public bool hasSharpTurn;
+            public float turnSharpness;
+            public bool hasIntersection;
+            public bool hasTrafficControl;
+            public float recommendedSpeed;
+        }
+
+        /// <summary>
+        /// Data structure for turn information
+        /// </summary>
+        private struct TurnInfo
+        {
+            public bool isTurn;
+            public float distanceToTurn;
+            public float turnAngle;
+            public float recommendedSpeed;
         }
 
         /// <summary>
@@ -771,20 +2230,54 @@ namespace TrafficSystem
             float currentSpeed = CurrentSpeed;
             float effectiveTargetSpeed = GetTurnLimitedTargetSpeed();
 
+            // OVERTAKING BOOST: Maintain or increase speed when overtaking
+            if (isOvertaking && isChangingLanes)
+            {
+                // Don't reduce speed during overtake - maintain target speed
+                effectiveTargetSpeed = Mathf.Max(effectiveTargetSpeed, targetSpeed * 1.1f);
+            }
+
+            // Priority 1: Adjust speed for traffic (following distance system)
+            // But not during active overtake
+            if (!isOvertaking || !isChangingLanes)
+            {
+                effectiveTargetSpeed = AdjustSpeedForTraffic(effectiveTargetSpeed);
+            }
+
+            // Priority 2: Prepare for upcoming turns
+            effectiveTargetSpeed = PrepareForTurn(effectiveTargetSpeed);
+
+            // Priority 2: Apply lookahead-based speed adjustments
+            if (currentLookaheadData.hasSharpTurn || currentLookaheadData.hasIntersection)
+            {
+                effectiveTargetSpeed = Mathf.Min(effectiveTargetSpeed, currentLookaheadData.recommendedSpeed);
+            }
+
+            // Priority 2: Assist merging vehicles
+            AssistMerge();
+
+            // Predictive collision response (TTC and trajectory based)
+            effectiveTargetSpeed *= predictiveSpeedLimiter;
+            if (imminentCollisionRisk)
+            {
+                effectiveTargetSpeed = Mathf.Min(effectiveTargetSpeed, 12f);
+            }
+
             // Advanced obstacle-based speed adjustment
-            if (isObstacleDetected)
+            // Be less aggressive when overtaking
+            if (isObstacleDetected && !isOvertaking)
             {
                 if (obstacleDistance < criticalBrakingDistance)
                 {
-                    // Emergency braking - very close obstacle
-                    effectiveTargetSpeed = Mathf.Min(effectiveTargetSpeed * 0.2f, 10f);
+                    // Very close obstacle - allow near-stop to prevent bumper lock.
+                    effectiveTargetSpeed = Mathf.Max(effectiveTargetSpeed * 0.35f, trafficConstrainedMinSpeed);
                 }
                 else if (obstacleDistance < safeFollowingDistance)
                 {
                     // Maintain safe following distance
                     float distanceFactor = (obstacleDistance - criticalBrakingDistance) /
                                           (safeFollowingDistance - criticalBrakingDistance);
-                    effectiveTargetSpeed *= Mathf.Lerp(0.3f, 0.7f, distanceFactor);
+                    effectiveTargetSpeed *= Mathf.Lerp(0.5f, 0.8f, distanceFactor);
                 }
                 else
                 {
@@ -793,7 +2286,14 @@ namespace TrafficSystem
                 }
             }
 
+            // Enforce low minimum only in clear road conditions.
+            bool trafficConstrained = isFollowing || isObstacleDetected || imminentCollisionRisk || isColliding;
+            float minAllowedSpeed = trafficConstrained ? trafficConstrainedMinSpeed : freeFlowMinSpeed;
+            effectiveTargetSpeed = Mathf.Max(effectiveTargetSpeed, minAllowedSpeed);
+
             float speedDifference = effectiveTargetSpeed - currentSpeed;
+            float currentSafeDistance = CalculateSafeFollowingDistance();
+            bool tooCloseToLead = isFollowing && distanceToVehicleAhead < currentSafeDistance;
 
             // Apply motor torque or braking
             if (speedDifference > speedTolerance)
@@ -806,7 +2306,7 @@ namespace TrafficSystem
                 // Release brakes
                 SetBrakeTorque(0f);
             }
-            else if (speedDifference < -speedTolerance || isObstacleDetected)
+            else if (speedDifference < -speedTolerance || isObstacleDetected || tooCloseToLead)
             {
                 // Need to slow down
                 float brakeTorque;
@@ -824,6 +2324,19 @@ namespace TrafficSystem
                     brakeTorque = braking * 0.3f;
                 }
 
+                if (tooCloseToLead)
+                {
+                    float gapRatio = Mathf.Clamp01(distanceToVehicleAhead / Mathf.Max(0.1f, currentSafeDistance));
+                    float closeBrakeBoost = Mathf.Lerp(1.45f, 0.95f, gapRatio);
+                    float closingBoost = Mathf.Clamp01(relativeSpeedToVehicleAhead / 6f) * 0.35f;
+                    brakeTorque = Mathf.Max(brakeTorque, braking * (closeBrakeBoost + closingBoost));
+                }
+
+                if (imminentCollisionRisk)
+                {
+                    brakeTorque = Mathf.Max(brakeTorque, braking * 1.3f);
+                }
+
                 SetMotorTorque(0f);
                 SetBrakeTorque(brakeTorque);
             }
@@ -838,6 +2351,10 @@ namespace TrafficSystem
         private float GetTurnLimitedTargetSpeed()
         {
             float baseSpeed = targetSpeed;
+
+            // Priority 3: Apply environmental effects
+            baseSpeed = ApplyWeatherEffects(baseSpeed);
+            baseSpeed = ApplyTimeOfDayEffects(baseSpeed);
 
             // Reduce speed when off-road
             if (isPotentiallyOffRoad)
@@ -860,6 +2377,14 @@ namespace TrafficSystem
             float maxSpeedKmh = maxSpeedMs * 3.6f;
 
             float steerFactor = Mathf.Lerp(1f, minTurnSpeedFactor, steerAbs / maxSteerAngle);
+
+            // Priority 3: Adjust for weather traction
+            if (WeatherManager.Instance != null && enableWeatherEffects)
+            {
+                float traction = WeatherManager.Instance.GetTractionMultiplier();
+                maxSpeedKmh *= traction;
+            }
+
             return Mathf.Min(baseSpeed * steerFactor, maxSpeedKmh);
         }
 
@@ -1111,6 +2636,18 @@ namespace TrafficSystem
             rearRightWheelVisual = GetWheelVisualTransform(rearRightCollider, rearRightWheelVisual);
         }
 
+        /// <summary>
+        /// Priority 1: Setup turn signal controller
+        /// </summary>
+        private void SetupTurnSignals()
+        {
+            turnSignalController = GetComponent<TurnSignalController>();
+            if (turnSignalController == null)
+            {
+                turnSignalController = gameObject.AddComponent<TurnSignalController>();
+            }
+        }
+
         private Transform GetWheelVisualTransform(WheelCollider wheel, Transform currentVisual)
         {
             if (currentVisual != null) return currentVisual;
@@ -1169,6 +2706,84 @@ namespace TrafficSystem
             wheelVisual.rotation = rot;
         }
 
+        /// <summary>
+        /// Handle collision with other vehicles
+        /// </summary>
+        private void OnCollisionEnter(Collision collision)
+        {
+            if (IsVehicleCollider(collision.collider))
+            {
+                isColliding = true;
+                collisionTimer = 0f;
+
+                // Log collision for debugging
+                if (logCollisions)
+                {
+                    Debug.LogWarning($"[NpcCarAgent] {name} collided with {collision.collider.name}");
+                }
+
+                // Calculate separation direction
+                Vector3 collisionNormal = Vector3.zero;
+                foreach (ContactPoint contact in collision.contacts)
+                {
+                    collisionNormal += contact.normal;
+                }
+                if (collisionNormal.sqrMagnitude > 0.01f)
+                {
+                    separationDirection = collisionNormal.normalized;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Handle continuous collision
+        /// </summary>
+        private void OnCollisionStay(Collision collision)
+        {
+            if (IsVehicleCollider(collision.collider))
+            {
+                isColliding = true;
+
+                // Keep moving even during collision to allow natural separation
+                // Don't intervene too aggressively - let the separation force handle it
+                if (collisionTimer > 8f)
+                {
+                    // Only slow down if stuck for a very long time
+                    // Keep minimum speed of 15 km/h to ensure movement
+                    targetSpeed = Mathf.Max(15f, Mathf.Min(targetSpeed, 25f));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Handle collision exit
+        /// </summary>
+        private void OnCollisionExit(Collision collision)
+        {
+            if (IsVehicleCollider(collision.collider))
+            {
+                // Check if still colliding with other vehicles
+                bool stillColliding = false;
+                foreach (Collider col in nearbyVehicles)
+                {
+                    if (col != null && col != collision.collider)
+                    {
+                        float distance = Vector3.Distance(transform.position, col.transform.position);
+                        if (distance < minimumSeparationDistance * 0.7f)
+                        {
+                            stillColliding = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!stillColliding)
+                {
+                    isColliding = false;
+                }
+            }
+        }
+
         private void OnDrawGizmos()
         {
             if (!showDebugGizmos || !isInitialized) return;
@@ -1214,7 +2829,61 @@ namespace TrafficSystem
                     Gizmos.color = Color.red;
                     Gizmos.DrawWireSphere(rayOrigin + forward * obstacleDistance, 0.5f);
                 }
+
+                // Priority 1: Draw following distance
+                if (isFollowing && vehicleAhead != null)
+                {
+                    Gizmos.color = Color.cyan;
+                    Gizmos.DrawLine(transform.position, vehicleAhead.transform.position);
+
+                    float safeDistance = CalculateSafeFollowingDistance();
+                    Gizmos.color = distanceToVehicleAhead < safeDistance ? Color.red : Color.green;
+                    Gizmos.DrawWireSphere(transform.position + forward * safeDistance, 0.5f);
+                }
+
+                // Priority 1: Draw lane change indicators
+                if (isChangingLanes)
+                {
+                    Gizmos.color = Color.yellow;
+                    Vector3 targetPos = transform.position + transform.right * (targetLateralOffset - lateralOffset);
+                    Gizmos.DrawLine(transform.position + Vector3.up, targetPos + Vector3.up);
+                    Gizmos.DrawWireSphere(targetPos + Vector3.up, 0.3f);
+                }
+
+                // Priority 2: Draw upcoming turn indicator
+                if (currentTurnInfo.isTurn)
+                {
+                    Gizmos.color = Color.magenta;
+                    Vector3 turnPos = transform.position + forward * currentTurnInfo.distanceToTurn;
+                    Gizmos.DrawWireSphere(turnPos, 1f);
+                    Gizmos.DrawLine(transform.position + Vector3.up * 2f, turnPos + Vector3.up * 2f);
+                }
+
+                // Priority 2: Draw predicted trajectory
+                if (Application.isPlaying)
+                {
+                    Gizmos.color = Color.cyan;
+                    for (int i = 1; i <= 5; i++)
+                    {
+                        float t = i * 0.5f; // 0.5s intervals
+                        Vector3 predictedPos = VehicleTrajectoryPredictor.PredictPositionWithPath(this, t);
+                        Gizmos.DrawWireSphere(predictedPos, 0.2f);
+                    }
+                }
             }
         }
+    }
+
+    /// <summary>
+    /// Obstacle type classification for appropriate responses
+    /// Priority 3: Environmental Awareness
+    /// </summary>
+    public enum ObstacleType
+    {
+        Unknown,
+        Vehicle,
+        Pedestrian,
+        StaticObject,
+        EmergencyVehicle
     }
 }
