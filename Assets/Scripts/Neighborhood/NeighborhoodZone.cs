@@ -10,6 +10,8 @@ namespace DeliveryDriver.City
     {
         [SerializeField] private string neighborhoodName;
         [SerializeField] private Color debugColor = Color.cyan;
+        [SerializeField] private string playerTag = "Player";
+        [SerializeField] private bool debugLogs = true;
 
         private BoxCollider cachedCollider;
         private bool playerInside = false;
@@ -37,10 +39,17 @@ namespace DeliveryDriver.City
 
         private void OnTriggerEnter(Collider other)
         {
-            if (IsPlayer(other) && !playerInside)
+            bool isPlayer = IsPlayer(other);
+            if (debugLogs)
+            {
+                string otherName = other != null ? other.name : "null";
+                Debug.Log($"[NeighborhoodZone] Enter '{neighborhoodName}' by '{otherName}', IsPlayer={isPlayer}");
+            }
+
+            if (isPlayer && !playerInside)
             {
                 playerInside = true;
-                NeighborhoodManager.Instance?.OnPlayerEnteredNeighborhood(this);
+                NeighborhoodManager.EnsureInstance().OnPlayerEnteredNeighborhood(this);
             }
         }
 
@@ -49,7 +58,7 @@ namespace DeliveryDriver.City
             if (IsPlayer(other))
             {
                 playerInside = false;
-                NeighborhoodManager.Instance?.OnPlayerExitedNeighborhood(this);
+                NeighborhoodManager.EnsureInstance().OnPlayerExitedNeighborhood(this);
             }
         }
 
@@ -60,7 +69,27 @@ namespace DeliveryDriver.City
                 return false;
             }
 
-            return other.CompareTag("Player");
+            if (!string.IsNullOrWhiteSpace(playerTag) && other.tag == playerTag)
+            {
+                return true;
+            }
+
+            Rigidbody attachedRigidbody = other.attachedRigidbody;
+            if (attachedRigidbody != null)
+            {
+                if (attachedRigidbody.GetComponent<CarController>() != null)
+                {
+                    return true;
+                }
+
+                if (attachedRigidbody.GetComponentInParent<CarController>() != null)
+                {
+                    return true;
+                }
+            }
+
+            return other.GetComponent<CarController>() != null
+                || other.GetComponentInParent<CarController>() != null;
         }
 
 #if UNITY_EDITOR

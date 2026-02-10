@@ -20,19 +20,11 @@ namespace DeliveryDriver.City
 
         private Coroutine currentDisplayCoroutine;
         private CanvasGroup canvasGroup;
+        public bool HasValidReferences => neighborhoodPanel != null && neighborhoodNameText != null;
 
         private void Awake()
         {
-            if (neighborhoodPanel != null)
-            {
-                canvasGroup = neighborhoodPanel.GetComponent<CanvasGroup>();
-                if (canvasGroup == null)
-                {
-                    canvasGroup = neighborhoodPanel.AddComponent<CanvasGroup>();
-                }
-
-                neighborhoodPanel.SetActive(false);
-            }
+            EnsureCanvasGroup();
         }
 
         public void ShowNeighborhoodName(string neighborhoodName)
@@ -54,6 +46,13 @@ namespace DeliveryDriver.City
             }
 
             currentDisplayCoroutine = StartCoroutine(DisplayNeighborhoodNameRoutine(neighborhoodName));
+        }
+
+        public void ConfigureReferences(GameObject panel, TextMeshProUGUI text)
+        {
+            neighborhoodPanel = panel;
+            neighborhoodNameText = text;
+            EnsureCanvasGroup();
         }
 
         private IEnumerator DisplayNeighborhoodNameRoutine(string name)
@@ -91,6 +90,23 @@ namespace DeliveryDriver.City
             }
 
             group.alpha = endAlpha;
+        }
+
+        private void EnsureCanvasGroup()
+        {
+            if (neighborhoodPanel == null)
+            {
+                canvasGroup = null;
+                return;
+            }
+
+            canvasGroup = neighborhoodPanel.GetComponent<CanvasGroup>();
+            if (canvasGroup == null)
+            {
+                canvasGroup = neighborhoodPanel.AddComponent<CanvasGroup>();
+            }
+
+            neighborhoodPanel.SetActive(false);
         }
 
         public void HideNeighborhoodName()
