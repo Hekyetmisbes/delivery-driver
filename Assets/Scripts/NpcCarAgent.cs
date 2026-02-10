@@ -192,6 +192,11 @@ namespace TrafficSystem
         private bool isPotentiallyOffRoad;
         private float wheelBase;
 
+        // Performance optimization
+        private static int nextNpcId = 0;
+        private int npcId;
+        private bool shouldUpdateThisFrame = true;
+
         // Collision handling
         private bool isColliding;
         private float collisionTimer;
@@ -327,6 +332,9 @@ namespace TrafficSystem
 
         private void Awake()
         {
+            // Assign unique NPC ID for update throttling
+            npcId = nextNpcId++;
+
             rb = GetComponent<Rigidbody>();
             SetupRigidbody();
             ConfigureSuspension(); // New method to tune physics
@@ -487,6 +495,18 @@ namespace TrafficSystem
 
         private void FixedUpdate()
         {
+            // Performance optimization: Distance-based update throttling
+            if (PerformanceOptimizationManager.Instance != null)
+            {
+                shouldUpdateThisFrame = PerformanceOptimizationManager.Instance.ShouldNpcUpdate(transform.position, npcId);
+                if (!shouldUpdateThisFrame)
+                {
+                    // Still update wheel visuals even when throttled for smooth appearance
+                    UpdateWheelVisuals();
+                    return;
+                }
+            }
+
             if (!isInitialized)
             {
                 if (Time.frameCount % 120 == 0) // Log every 2 seconds
