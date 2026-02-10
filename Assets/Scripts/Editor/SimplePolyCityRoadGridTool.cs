@@ -69,8 +69,8 @@ public class SimplePolyCityRoadGridTool : EditorWindow
     [Header("Neighborhoods")]
     [SerializeField] private bool generateNeighborhoods = true;
     [SerializeField] private bool clearNeighborhoodsBeforeGenerate = true;
-    [SerializeField] private int neighborhoodSize = 3;
-    [SerializeField] private float neighborhoodZoneHeight = 10f;
+    [SerializeField] private int neighborhoodSize = 6;
+    [SerializeField] private float neighborhoodZoneHeight = 30f;
     [SerializeField] private List<string> neighborhoodNames = new List<string>();
 
     private Vector2 scrollPosition;
