@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using System.Collections.Generic;
+using DeliveryDriver.City;
 
 public class SimplePolyCityRoadGridTool : EditorWindow
 {
@@ -14,6 +15,7 @@ public class SimplePolyCityRoadGridTool : EditorWindow
     [SerializeField] private Terrain targetTerrain;
     [SerializeField] private Transform roadParent;
     [SerializeField] private Transform buildingParent;
+    [SerializeField] private Transform neighborhoodParent;
 
     [Header("Grid")]
     [SerializeField] private int gridWidth = 40;
@@ -53,6 +55,7 @@ public class SimplePolyCityRoadGridTool : EditorWindow
     [SerializeField] private bool clearBuildingsBeforeGenerate = true;
     [SerializeField, Range(0f, 1f)] private float buildingSpawnChance = 0.9f;
     [SerializeField] private float buildingSetbackFromRoad = 1.1f;
+    [SerializeField] private float buildingTowardRoadOffset = 4f;
     [SerializeField] private float buildingHeightOffset;
     [SerializeField] private bool randomizeBuildingYaw = false;
     [SerializeField] private float buildingRandomYawRange = 6f;
@@ -62,6 +65,14 @@ public class SimplePolyCityRoadGridTool : EditorWindow
     [SerializeField] private float buildingMinSpacing = 0.4f;
     [SerializeField] private float buildingFootprintPadding = 0.15f;
     [SerializeField] private List<GameObject> buildingPrefabs = new List<GameObject>();
+
+    [Header("Neighborhoods")]
+    [SerializeField] private bool generateNeighborhoods = true;
+    [SerializeField] private bool clearNeighborhoodsBeforeGenerate = true;
+    [SerializeField] private int neighborhoodSize = 3;
+    [SerializeField] private float neighborhoodZoneHeight = 10f;
+    [SerializeField] private List<string> neighborhoodNames = new List<string>();
+
     private Vector2 scrollPosition;
 
     [MenuItem("Tools/SimplePoly/City Road Grid Tool")]
@@ -87,6 +98,8 @@ public class SimplePolyCityRoadGridTool : EditorWindow
         DrawRotationSection();
         EditorGUILayout.Space();
         DrawBuildingSection();
+        EditorGUILayout.Space();
+        DrawNeighborhoodSection();
         EditorGUILayout.Space(8);
 
         using (new EditorGUILayout.HorizontalScope())
@@ -105,9 +118,14 @@ public class SimplePolyCityRoadGridTool : EditorWindow
             {
                 ClearBuildings();
             }
+
+            if (GUILayout.Button("Clear Neighborhoods", GUILayout.Height(28)))
+            {
+                ClearNeighborhoods();
+            }
         }
 
-        if (GUILayout.Button("Generate City (Roads + Buildings)", GUILayout.Height(42)))
+        if (GUILayout.Button("Generate City (Roads + Buildings + Neighborhoods)", GUILayout.Height(42)))
         {
             GenerateRoadGrid();
         }
@@ -121,6 +139,7 @@ public class SimplePolyCityRoadGridTool : EditorWindow
         targetTerrain = (Terrain)EditorGUILayout.ObjectField("Target Terrain", targetTerrain, typeof(Terrain), true);
         roadParent = (Transform)EditorGUILayout.ObjectField("Road Parent", roadParent, typeof(Transform), true);
         buildingParent = (Transform)EditorGUILayout.ObjectField("Building Parent", buildingParent, typeof(Transform), true);
+        neighborhoodParent = (Transform)EditorGUILayout.ObjectField("Neighborhood Parent", neighborhoodParent, typeof(Transform), true);
     }
 
     private void DrawGridSection()
@@ -175,6 +194,7 @@ public class SimplePolyCityRoadGridTool : EditorWindow
         clearBuildingsBeforeGenerate = EditorGUILayout.Toggle("Clear Buildings First", clearBuildingsBeforeGenerate);
         buildingSpawnChance = EditorGUILayout.Slider("Spawn Chance", buildingSpawnChance, 0f, 1f);
         buildingSetbackFromRoad = Mathf.Clamp(EditorGUILayout.FloatField("Setback From Road", buildingSetbackFromRoad), 0f, cellSize * 0.49f);
+        buildingTowardRoadOffset = Mathf.Max(0f, EditorGUILayout.FloatField("Toward Road Offset", buildingTowardRoadOffset));
         buildingHeightOffset = EditorGUILayout.FloatField("Height Offset", buildingHeightOffset);
         randomizeBuildingYaw = EditorGUILayout.Toggle("Randomize Yaw", randomizeBuildingYaw);
         buildingRandomYawRange = Mathf.Max(0f, EditorGUILayout.FloatField("Yaw Range (+/-)", buildingRandomYawRange));
@@ -213,6 +233,53 @@ public class SimplePolyCityRoadGridTool : EditorWindow
         if (GUILayout.Button("Add Building Slot", GUILayout.Height(20)))
         {
             buildingPrefabs.Add(null);
+        }
+    }
+
+    private void DrawNeighborhoodSection()
+    {
+        EditorGUILayout.LabelField("Neighborhoods", EditorStyles.boldLabel);
+        generateNeighborhoods = EditorGUILayout.Toggle("Generate Neighborhoods", generateNeighborhoods);
+        clearNeighborhoodsBeforeGenerate = EditorGUILayout.Toggle("Clear Neighborhoods First", clearNeighborhoodsBeforeGenerate);
+        neighborhoodSize = Mathf.Max(1, EditorGUILayout.IntField("Neighborhood Size (NxN)", neighborhoodSize));
+        neighborhoodZoneHeight = Mathf.Max(1f, EditorGUILayout.FloatField("Zone Height", neighborhoodZoneHeight));
+
+        EditorGUILayout.Space(4);
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUILayout.LabelField($"Neighborhood Names ({neighborhoodNames.Count})", EditorStyles.boldLabel);
+            if (GUILayout.Button("Auto Fill Names", GUILayout.Width(120)))
+            {
+                AutoFillNeighborhoodNames();
+            }
+            if (GUILayout.Button("Clear Names", GUILayout.Width(100)))
+            {
+                neighborhoodNames.Clear();
+            }
+        }
+
+        int removeNameIndex = -1;
+        for (int i = 0; i < neighborhoodNames.Count; i++)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                neighborhoodNames[i] = EditorGUILayout.TextField($"Name {i + 1}", neighborhoodNames[i]);
+                if (GUILayout.Button("X", GUILayout.Width(24)))
+                {
+                    removeNameIndex = i;
+                }
+            }
+        }
+
+        if (removeNameIndex >= 0)
+        {
+            neighborhoodNames.RemoveAt(removeNameIndex);
+        }
+
+        if (GUILayout.Button("Add Neighborhood Name", GUILayout.Height(20)))
+        {
+            neighborhoodNames.Add("Yeni Mahalle");
         }
     }
 
@@ -299,9 +366,15 @@ public class SimplePolyCityRoadGridTool : EditorWindow
             createdBuildings = GenerateBuildings(roadMask, width, height, effectiveCellSize);
         }
 
+        int createdNeighborhoods = 0;
+        if (generateNeighborhoods)
+        {
+            createdNeighborhoods = GenerateNeighborhoods(width, height, effectiveCellSize);
+        }
+
         Selection.activeTransform = roadParent;
         EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
-        Debug.Log($"[CityRoadGridTool] Generated {createdCount} roads and {createdBuildings} buildings. Seed: {randomSeed}, Cell Size: {effectiveCellSize:F2}");
+        Debug.Log($"[CityRoadGridTool] Generated {createdCount} roads, {createdBuildings} buildings, and {createdNeighborhoods} neighborhoods. Seed: {randomSeed}, Cell Size: {effectiveCellSize:F2}");
     }
 
     private int GenerateBuildings(bool[,] roadMask, int width, int height, float currentCellSize)
@@ -373,6 +446,9 @@ public class SimplePolyCityRoadGridTool : EditorWindow
                 Vector3 lotCenter = CalculateWorldPosition(x, z, width, height, currentCellSize);
                 Vector3 toRoadDirection = GetDirectionToRoad(roadNeighbors);
                 Vector3 spawnPos = lotCenter;
+                float maxTowardRoadOffset = Mathf.Max(0f, safeHalfCell - radius);
+                float towardRoadOffset = Mathf.Min(buildingTowardRoadOffset, maxTowardRoadOffset);
+                spawnPos += toRoadDirection * towardRoadOffset;
                 spawnPos.y = SampleY(spawnPos.x, spawnPos.z, buildingHeightOffset);
 
                 if (IsOverlappingPlacedBuildings(spawnPos, radius, placedBuildings))
@@ -938,6 +1014,152 @@ public class SimplePolyCityRoadGridTool : EditorWindow
         }
 
         Debug.Log($"[CityRoadGridTool] Auto loaded {buildingPrefabs.Count} building prefabs.");
+    }
+
+    private void AutoFillNeighborhoodNames()
+    {
+        float effectiveCellSize = ResolveCellSize();
+        int width = gridWidth;
+        int height = gridHeight;
+        FitGridToTerrain(ref width, ref height, effectiveCellSize);
+
+        int neighborhoodsX = Mathf.CeilToInt((float)width / neighborhoodSize);
+        int neighborhoodsZ = Mathf.CeilToInt((float)height / neighborhoodSize);
+        int totalNeighborhoods = neighborhoodsX * neighborhoodsZ;
+
+        neighborhoodNames.Clear();
+        NeighborhoodNameGenerator.ResetUsedNames();
+
+        for (int i = 0; i < totalNeighborhoods; i++)
+        {
+            neighborhoodNames.Add(NeighborhoodNameGenerator.GetRandomName(false));
+        }
+
+        Debug.Log($"[CityRoadGridTool] Auto-filled {totalNeighborhoods} neighborhood names.");
+    }
+
+    private int GenerateNeighborhoods(int width, int height, float currentCellSize)
+    {
+        EnsureNeighborhoodParent();
+
+        if (clearNeighborhoodsBeforeGenerate)
+        {
+            ClearNeighborhoods();
+        }
+
+        if (neighborhoodNames.Count == 0)
+        {
+            Debug.LogWarning("[CityRoadGridTool] No neighborhood names defined. Use 'Auto Fill Names' button.");
+            return 0;
+        }
+
+        int neighborhoodsX = Mathf.CeilToInt((float)width / neighborhoodSize);
+        int neighborhoodsZ = Mathf.CeilToInt((float)height / neighborhoodSize);
+        int createdCount = 0;
+        int nameIndex = 0;
+
+        for (int nz = 0; nz < neighborhoodsZ; nz++)
+        {
+            for (int nx = 0; nx < neighborhoodsX; nx++)
+            {
+                int startX = nx * neighborhoodSize;
+                int startZ = nz * neighborhoodSize;
+                int endX = Mathf.Min(startX + neighborhoodSize, width);
+                int endZ = Mathf.Min(startZ + neighborhoodSize, height);
+
+                List<Vector2Int> cells = new List<Vector2Int>();
+                for (int z = startZ; z < endZ; z++)
+                {
+                    for (int x = startX; x < endX; x++)
+                    {
+                        cells.Add(new Vector2Int(x, z));
+                    }
+                }
+
+                string neighborhoodName = nameIndex < neighborhoodNames.Count
+                    ? neighborhoodNames[nameIndex]
+                    : $"Mahalle {nameIndex + 1}";
+
+                Neighborhood neighborhood = new Neighborhood(neighborhoodName);
+                neighborhood.AddGridCells(cells);
+
+                Bounds bounds = neighborhood.GetBounds(currentCellSize, GetGridOrigin(width, height, currentCellSize));
+                Vector3 center = bounds.center;
+                Vector3 size = bounds.size;
+
+                GameObject zoneObj = new GameObject($"Zone_{neighborhoodName}");
+                zoneObj.transform.SetParent(neighborhoodParent);
+                zoneObj.transform.position = center;
+
+                NeighborhoodZone zone = zoneObj.AddComponent<NeighborhoodZone>();
+                zone.NeighborhoodName = neighborhoodName;
+                zone.DebugColor = neighborhood.DebugColor;
+
+                BoxCollider boxCollider = zoneObj.GetComponent<BoxCollider>();
+                boxCollider.center = Vector3.up * (neighborhoodZoneHeight * 0.5f);
+                boxCollider.size = new Vector3(size.x, neighborhoodZoneHeight, size.z);
+                boxCollider.isTrigger = true;
+
+                Undo.RegisterCreatedObjectUndo(zoneObj, "Create Neighborhood Zone");
+
+                createdCount++;
+                nameIndex++;
+            }
+        }
+
+        Debug.Log($"[CityRoadGridTool] Created {createdCount} neighborhoods ({neighborhoodsX}x{neighborhoodsZ}).");
+        return createdCount;
+    }
+
+    private void EnsureNeighborhoodParent()
+    {
+        if (neighborhoodParent != null)
+        {
+            return;
+        }
+
+        GameObject parent = new GameObject("Neighborhoods");
+        Undo.RegisterCreatedObjectUndo(parent, "Create Neighborhood Parent");
+        neighborhoodParent = parent.transform;
+    }
+
+    private void ClearNeighborhoods()
+    {
+        if (neighborhoodParent == null)
+        {
+            return;
+        }
+
+        for (int i = neighborhoodParent.childCount - 1; i >= 0; i--)
+        {
+            Undo.DestroyObjectImmediate(neighborhoodParent.GetChild(i).gameObject);
+        }
+
+        EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+    }
+
+    private Vector3 GetGridOrigin(int width, int height, float currentCellSize)
+    {
+        if (targetTerrain != null && targetTerrain.terrainData != null)
+        {
+            Vector3 terrainPos = targetTerrain.transform.position;
+            Vector3 terrainSize = targetTerrain.terrainData.size;
+
+            float startX = terrainPos.x + terrainInset;
+            float startZ = terrainPos.z + terrainInset;
+
+            if (!autoFitGridToTerrain)
+            {
+                float centeredOffsetX = (terrainSize.x - width * currentCellSize) * 0.5f;
+                float centeredOffsetZ = (terrainSize.z - height * currentCellSize) * 0.5f;
+                startX = terrainPos.x + Mathf.Max(terrainInset, centeredOffsetX);
+                startZ = terrainPos.z + Mathf.Max(terrainInset, centeredOffsetZ);
+            }
+
+            return new Vector3(startX, terrainPos.y, startZ);
+        }
+
+        return Vector3.zero;
     }
 
     private readonly struct RoadTileChoice

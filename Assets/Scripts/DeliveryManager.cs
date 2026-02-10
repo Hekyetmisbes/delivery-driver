@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using DeliveryDriver.Quest;
 using DeliveryDriver.Quest.UI;
+using DeliveryDriver.City;
 
 /// <summary>
 /// Manages delivery missions - spawning boxes and delivery points
@@ -32,6 +33,10 @@ public class DeliveryManager : MonoBehaviour
     [Header("Quest Integration")]
     [SerializeField] private bool useQuestSystem = true;
     [SerializeField] private CargoLibrary cargoLibrary;
+
+    [Header("Neighborhood Integration")]
+    [SerializeField] private bool spawnOnlyInNeighborhoods = true;
+    [SerializeField] private float neighborhoodCheckRadius = 2f;
 
     [Header("Debug")]
     [SerializeField] private bool showDebugInfo = true;
@@ -146,6 +151,12 @@ public class DeliveryManager : MonoBehaviour
                     // Validate spawn position with sphere check (ensure there's space)
                     if (!Physics.CheckSphere(spawnPos, 1f, groundMask, QueryTriggerInteraction.Ignore))
                     {
+                        // Check if position is inside a neighborhood (if enabled)
+                        if (spawnOnlyInNeighborhoods && !IsInsideNeighborhood(spawnPos))
+                        {
+                            continue; // Try another position
+                        }
+
                         if (showDebugInfo && i > 0)
                         {
                             Debug.Log($"[DeliveryManager] Found valid spawn point at {spawnPos} (attempt {i + 1})");
@@ -179,6 +190,31 @@ public class DeliveryManager : MonoBehaviour
 
         Debug.LogError("[DeliveryManager] Failed to find valid spawn position! Using fallback.");
         return new Vector3(0, 10f, 0);
+    }
+
+    /// <summary>
+    /// Check if a position is inside any neighborhood zone
+    /// </summary>
+    private bool IsInsideNeighborhood(Vector3 position)
+    {
+        // Find all colliders at this position
+        Collider[] colliders = Physics.OverlapSphere(position, neighborhoodCheckRadius, ~0, QueryTriggerInteraction.Collide);
+
+        foreach (Collider col in colliders)
+        {
+            // Check if this collider belongs to a NeighborhoodZone
+            NeighborhoodZone zone = col.GetComponent<NeighborhoodZone>();
+            if (zone != null)
+            {
+                if (showDebugInfo)
+                {
+                    Debug.Log($"[DeliveryManager] Position {position} is inside neighborhood: {zone.NeighborhoodName}");
+                }
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
