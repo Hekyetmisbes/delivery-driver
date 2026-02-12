@@ -452,8 +452,97 @@ Following this order gives durable gains by reducing architectural load, not jus
 - **Overall FPS**: 15-35% increase (combined optimizations)
 - **Memory**: Minimal change (pooling already existed)
 
-### Next Sprint Preview (Sprint 2):
-- Chunk-based world streaming
-- Addressables integration
-- Near/Mid/Far ring system
-- Expected additional gain: 20-45%
+### Sprint 2: Chunking + Streaming (COMPLETED - Ready for Integration)
+
+#### Completed:
+- [x] Created WorldChunk component system:
+  - Three-state system: Unloaded, LoadedProxy, LoadedFull
+  - Automatic renderer and collider management per state
+  - NPC vehicle registration and tracking per chunk
+  - Physics optimization in proxy mode
+  - Visual debugging with color-coded gizmos (Red=Unloaded, Yellow=Proxy, Green=Full)
+
+- [x] Created WorldChunkManager for intelligent chunk streaming:
+  - Near/Mid/Far ring system implementation
+  - Near Ring (0-150m): Full detail with all NPCs and physics
+  - Mid Ring (150-300m): Proxy meshes, disabled NPCs and physics
+  - Far Ring (300m+): Completely unloaded to save memory
+  - Distance-based chunk state transitions
+  - Automatic player tracking and chunk updates
+  - Performance-budgeted updates (max 4 chunks per frame)
+  - Auto-discovery of chunks in scene
+  - Real-time statistics display (Near/Mid/Far chunk counts)
+
+- [x] Created ChunkSetupTool (Editor Tool):
+  - Accessible via Tools > Performance > Chunk Setup
+  - One-click WorldChunkManager setup
+  - Auto-setup chunks from terrain size
+  - Manual chunk grid creation
+  - Chunk validation and diagnostics
+  - Automatic proxy content container creation
+
+#### Integration Steps Required:
+- [ ] Add WorldChunkManager to main scene
+- [ ] Run Tools > Performance > Chunk Setup
+- [ ] Choose setup method:
+  - Option A: "Auto-Setup Chunks from Terrain" (recommended for terrain-based cities)
+  - Option B: "Create Manual Chunk Grid" (custom grid configuration)
+- [ ] Organize existing city objects into chunk containers:
+  - Move buildings/props into appropriate chunk's "FullDetailContent" folder
+  - Create simplified proxy meshes and place in "ProxyContent" folder (optional but recommended)
+- [ ] Test chunk transitions in Play Mode
+- [ ] Verify NPCs properly register/unregister from chunks
+
+#### Testing & Validation:
+- [ ] Profile with Development Build to measure gains
+- [ ] Verify smooth chunk transitions (no pop-in/out)
+- [ ] Check memory usage reduction in far areas
+- [ ] Measure draw call reduction (expected 30-50% in large scenes)
+- [ ] Test at different player speeds
+- [ ] Update metrics table with Sprint 2 results
+
+### Implementation Notes (Sprint 2):
+- **Chunk Size**: Default 64m, adjustable per project scale
+- **Ring Distances**: Configurable per quality level (Low/Medium/High)
+- **Update Budget**: Maximum 4 chunks update per frame prevents spikes
+- **Auto-Discovery**: System automatically finds and registers WorldChunk components
+- **State Management**: Chunks transition smoothly between states based on player distance
+- **Memory Savings**: Far chunks completely disabled = significant memory reduction
+- **Draw Call Reduction**: Proxy meshes use merged geometry = fewer draw calls
+
+### Files Created (Sprint 2):
+1. **WorldChunk.cs** (NEW)
+   - Individual chunk state management
+   - Three-state system (Unloaded/Proxy/Full)
+   - Content container management
+   - NPC tracking per chunk
+   - Automatic component enable/disable
+
+2. **WorldChunkManager.cs** (NEW)
+   - Central chunk streaming system
+   - Near/Mid/Far ring logic
+   - Player-centered chunk updates
+   - Performance-budgeted transitions
+   - Real-time debug statistics
+
+3. **ChunkSetupTool.cs** (NEW - Editor)
+   - Quick setup wizard
+   - Terrain-based auto-generation
+   - Manual grid creation
+   - Validation tools
+
+### Expected Performance Gains (Sprint 2):
+- **Draw Calls**: 30-50% reduction (far chunks unloaded)
+- **Memory Usage**: 40-60% reduction (distant content disabled)
+- **Physics CPU**: 50-70% reduction (colliders disabled in proxy/unloaded)
+- **Rendering CPU**: 25-40% reduction (fewer active renderers)
+- **Overall FPS**: 20-45% increase (combined with Sprint 1)
+- **Scalability**: System now scales to much larger cities
+
+### Next Sprint Preview (Sprint 3):
+- HLOD (Hierarchical LOD) proxy mesh generation
+- Merged building block proxies
+- Material atlas for distant objects
+- NPC/traffic simulation throttling expansion
+- Object pooling for chunk content
+- Expected additional gain: 20-40%
