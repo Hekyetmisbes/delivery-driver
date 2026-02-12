@@ -38,6 +38,12 @@ namespace TrafficSystem
         [Tooltip("Fallback lane center offset from road centerline (meters)")]
         [SerializeField] private float simplePolyLaneCenterOffset = 1.5f;
 
+        [Header("Startup")]
+        [Tooltip("Build road graph automatically on Start")]
+        [SerializeField] private bool buildOnStart = true;
+        [Tooltip("Delay before road graph build starts")]
+        [SerializeField] private float startupBuildDelay = 0f;
+
         [Header("Debug Visualization")]
         [SerializeField] private bool showWaypoints = true;
         [SerializeField] private bool showConnections = true;
@@ -47,10 +53,35 @@ namespace TrafficSystem
         // Built road graph
         private RoadGraph roadGraph;
         public RoadGraph RoadGraph => roadGraph;
+        private Coroutine deferredBuildCoroutine;
 
         private void Start()
         {
+            if (buildOnStart)
+            {
+                BeginBuildWithDelay(startupBuildDelay);
+            }
+        }
+
+        public void BeginBuildWithDelay(float delaySeconds)
+        {
+            if (deferredBuildCoroutine != null)
+            {
+                StopCoroutine(deferredBuildCoroutine);
+            }
+
+            deferredBuildCoroutine = StartCoroutine(BuildRoadGraphDeferred(Mathf.Max(0f, delaySeconds)));
+        }
+
+        private IEnumerator BuildRoadGraphDeferred(float delaySeconds)
+        {
+            if (delaySeconds > 0f)
+            {
+                yield return new WaitForSeconds(delaySeconds);
+            }
+
             BuildRoadGraph();
+            deferredBuildCoroutine = null;
         }
 
         /// <summary>

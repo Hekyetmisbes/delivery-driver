@@ -237,7 +237,7 @@ namespace DeliveryDriver.Optimization
         }
 
         [ContextMenu("Add All Children as Source Objects")]
-        private void AddAllChildrenAsSource()
+        public void AddAllChildrenAsSource()
         {
             sourceObjects.Clear();
             foreach (Transform child in transform)

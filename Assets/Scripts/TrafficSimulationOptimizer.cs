@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections.Generic;
+using TrafficSystem;
 
 namespace DeliveryDriver.Optimization
 {
@@ -100,7 +101,7 @@ namespace DeliveryDriver.Optimization
 
         private void AutoRegisterNPCs()
         {
-            NpcCarAgent[] npcs = FindObjectsOfType<NpcCarAgent>();
+            NpcCarAgent[] npcs = FindObjectsByType<NpcCarAgent>(FindObjectsSortMode.None);
             foreach (var npc in npcs)
             {
                 RegisterNPC(npc);

@@ -205,7 +205,7 @@ namespace DeliveryDriver.Editor
 
         private void AutoGenerateHLODGroups()
         {
-            MeshRenderer[] allRenderers = FindObjectsOfType<MeshRenderer>();
+            MeshRenderer[] allRenderers = FindObjectsByType<MeshRenderer>(FindObjectsSortMode.None);
             if (allRenderers.Length == 0)
             {
                 EditorUtility.DisplayDialog("No Objects",
@@ -290,8 +290,8 @@ namespace DeliveryDriver.Editor
 
         private void GenerateAllProxyMeshes()
         {
-            HLODProxy[] proxies = FindObjectsOfType<HLODProxy>();
-            HLODGroup[] groups = FindObjectsOfType<HLODGroup>();
+            HLODProxy[] proxies = FindObjectsByType<HLODProxy>(FindObjectsSortMode.None);
+            HLODGroup[] groups = FindObjectsByType<HLODGroup>(FindObjectsSortMode.None);
 
             int generated = 0;
 
@@ -316,7 +316,7 @@ namespace DeliveryDriver.Editor
 
         private void OptimizeAllProxies()
         {
-            HLODProxy[] proxies = FindObjectsOfType<HLODProxy>();
+            HLODProxy[] proxies = FindObjectsByType<HLODProxy>(FindObjectsSortMode.None);
 
             int optimized = 0;
             foreach (var proxy in proxies)
@@ -337,8 +337,8 @@ namespace DeliveryDriver.Editor
 
         private void ValidateHLODSetup()
         {
-            HLODProxy[] proxies = FindObjectsOfType<HLODProxy>();
-            HLODGroup[] groups = FindObjectsOfType<HLODGroup>();
+            HLODProxy[] proxies = FindObjectsByType<HLODProxy>(FindObjectsSortMode.None);
+            HLODGroup[] groups = FindObjectsByType<HLODGroup>(FindObjectsSortMode.None);
 
             string report = "=== HLOD Setup Validation ===\n\n";
 
@@ -372,8 +372,8 @@ namespace DeliveryDriver.Editor
 
         private void CalculatePotentialSavings()
         {
-            HLODProxy[] proxies = FindObjectsOfType<HLODProxy>();
-            HLODGroup[] groups = FindObjectsOfType<HLODGroup>();
+            HLODProxy[] proxies = FindObjectsByType<HLODProxy>(FindObjectsSortMode.None);
+            HLODGroup[] groups = FindObjectsByType<HLODGroup>(FindObjectsSortMode.None);
 
             int totalSourceObjects = 0;
             int totalSourceVertices = 0;

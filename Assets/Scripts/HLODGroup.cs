@@ -201,7 +201,7 @@ namespace DeliveryDriver.Optimization
         public void AutoCollectMembers(Bounds bounds)
         {
             groupMembers.Clear();
-            MeshRenderer[] allRenderers = FindObjectsOfType<MeshRenderer>();
+            MeshRenderer[] allRenderers = FindObjectsByType<MeshRenderer>(FindObjectsSortMode.None);
 
             foreach (var renderer in allRenderers)
             {

@@ -86,7 +86,7 @@ namespace DeliveryDriver.Editor
         private void AddChunkManagerToScene()
         {
             // Check if already exists
-            WorldChunkManager existing = FindObjectOfType<WorldChunkManager>();
+            WorldChunkManager existing = FindFirstObjectByType<WorldChunkManager>();
             if (existing != null)
             {
                 EditorUtility.DisplayDialog("Already Exists",
@@ -121,7 +121,7 @@ namespace DeliveryDriver.Editor
 
         private void AutoSetupChunksFromTerrain()
         {
-            Terrain[] terrains = FindObjectsOfType<Terrain>();
+            Terrain[] terrains = FindObjectsByType<Terrain>(FindObjectsSortMode.None);
             if (terrains.Length == 0)
             {
                 EditorUtility.DisplayDialog("No Terrain",
@@ -221,7 +221,7 @@ namespace DeliveryDriver.Editor
 
         private void FindAndRegisterChunks()
         {
-            WorldChunkManager manager = FindObjectOfType<WorldChunkManager>();
+            WorldChunkManager manager = FindFirstObjectByType<WorldChunkManager>();
             if (manager == null)
             {
                 EditorUtility.DisplayDialog("No Manager",
@@ -238,8 +238,8 @@ namespace DeliveryDriver.Editor
 
         private void ValidateChunkSetup()
         {
-            WorldChunkManager manager = FindObjectOfType<WorldChunkManager>();
-            WorldChunk[] chunks = FindObjectsOfType<WorldChunk>();
+            WorldChunkManager manager = FindFirstObjectByType<WorldChunkManager>();
+            WorldChunk[] chunks = FindObjectsByType<WorldChunk>(FindObjectsSortMode.None);
 
             string report = "=== Chunk Setup Validation ===\n\n";
 

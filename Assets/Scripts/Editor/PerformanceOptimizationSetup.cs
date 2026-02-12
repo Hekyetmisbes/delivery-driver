@@ -1,6 +1,5 @@
 using UnityEngine;
 using UnityEditor;
-using System.Linq;
 
 /// <summary>
 /// Editor tool to configure performance optimizations for the city project
@@ -9,7 +8,11 @@ using System.Linq;
 public class PerformanceOptimizationSetup : EditorWindow
 {
     private Vector2 scrollPosition;
-    private bool autoApply = false;
+    private bool includeQualitySetup = true;
+    private bool includeTerrainOptimization = true;
+    private bool includeCameraOptimization = true;
+    private bool includePerformanceManager = true;
+    private bool includePhysicsGuidance = true;
 
     [MenuItem("Tools/Performance/Optimization Setup")]
     public static void ShowWindow()
@@ -29,6 +32,8 @@ public class PerformanceOptimizationSetup : EditorWindow
             "It will modify Quality Settings and create/configure optimization components.",
             MessageType.Info);
 
+        EditorGUILayout.Space();
+        DrawOneClickSection();
         EditorGUILayout.Space();
 
         // Quality Settings Section
@@ -84,15 +89,97 @@ public class PerformanceOptimizationSetup : EditorWindow
         EditorGUILayout.EndScrollView();
     }
 
+    private void DrawOneClickSection()
+    {
+        EditorGUILayout.LabelField("One-Click Setup (Recommended)", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox(
+            "Runs all selected optimization steps in order so you don't need to remember sequence.\n" +
+            "Order: 1) Performance Manager  2) Quality Setup  3) Terrain  4) Camera  5) Physics Guidance",
+            MessageType.None);
+
+        includePerformanceManager = EditorGUILayout.ToggleLeft("1) Ensure Performance Manager in scene", includePerformanceManager);
+        includeQualitySetup = EditorGUILayout.ToggleLeft("2) Configure Quality Settings guidance", includeQualitySetup);
+        includeTerrainOptimization = EditorGUILayout.ToggleLeft("3) Optimize all Terrain settings", includeTerrainOptimization);
+        includeCameraOptimization = EditorGUILayout.ToggleLeft("4) Optimize Main Camera settings", includeCameraOptimization);
+        includePhysicsGuidance = EditorGUILayout.ToggleLeft("5) Show Physics optimization guidance", includePhysicsGuidance);
+
+        EditorGUILayout.Space(4);
+        if (GUILayout.Button("Run One-Click Optimization", GUILayout.Height(36)))
+        {
+            RunOneClickOptimization();
+        }
+    }
+
+    private void RunOneClickOptimization()
+    {
+        int completedSteps = 0;
+        int totalSteps = 0;
+        System.Text.StringBuilder summary = new System.Text.StringBuilder();
+        summary.AppendLine("One-click optimization completed.");
+        summary.AppendLine();
+
+        if (includePerformanceManager)
+        {
+            totalSteps++;
+            string result = EnsurePerformanceManagerInScene();
+            summary.AppendLine("Performance Manager: " + result);
+            completedSteps++;
+        }
+
+        if (includeQualitySetup)
+        {
+            totalSteps++;
+            ConfigureQualitySettings(showDialog: false, askConfirmation: false);
+            summary.AppendLine("Quality Setup: Guidance applied/logged");
+            completedSteps++;
+        }
+
+        if (includeTerrainOptimization)
+        {
+            totalSteps++;
+            int terrainCount = OptimizeTerrainSettings(showDialog: false);
+            summary.AppendLine("Terrain Optimization: " + terrainCount + " terrain(s) updated");
+            completedSteps++;
+        }
+
+        if (includeCameraOptimization)
+        {
+            totalSteps++;
+            string cameraResult = OptimizeCameraSettings(showDialog: false);
+            summary.AppendLine("Camera Optimization: " + cameraResult);
+            completedSteps++;
+        }
+
+        if (includePhysicsGuidance)
+        {
+            totalSteps++;
+            LogPhysicsOptimizationGuidance();
+            summary.AppendLine("Physics Guidance: Logged to Console");
+            completedSteps++;
+        }
+
+        summary.AppendLine();
+        summary.AppendLine("Completed Steps: " + completedSteps + "/" + totalSteps);
+
+        Debug.Log("[PerformanceOptimizationSetup] One-click optimization finished.");
+        Debug.Log(summary.ToString());
+        EditorUtility.DisplayDialog("One-Click Optimization", summary.ToString(), "OK");
+    }
+
     private void ConfigureQualitySettings()
     {
-        if (!EditorUtility.DisplayDialog("Configure Quality Settings",
-            "This will modify your QualitySettings.asset to have 3 optimized levels:\n" +
-            "- Low (Mobile/Low-end PC)\n" +
-            "- Medium (Mid-range PC)\n" +
-            "- High (High-end PC)\n\n" +
-            "Current quality settings will be backed up. Continue?",
-            "Yes", "Cancel"))
+        ConfigureQualitySettings(showDialog: true, askConfirmation: true);
+    }
+
+    private void ConfigureQualitySettings(bool showDialog, bool askConfirmation)
+    {
+        if (askConfirmation && !EditorUtility.DisplayDialog("Configure Quality Settings",
+                "This will modify your QualitySettings.asset to have 3 optimized levels:\n" +
+                "- Low (Mobile/Low-end PC)\n" +
+                "- Medium (Mid-range PC)\n" +
+                "- High (High-end PC)\n\n" +
+                "Current quality settings will be backed up. Continue?",
+                "Yes", "Cancel"))
         {
             return;
         }
@@ -112,21 +199,33 @@ public class PerformanceOptimizationSetup : EditorWindow
         Debug.Log("MEDIUM: Shadow Distance=50m, Cascades=2, Pixel Error=3");
         Debug.Log("HIGH: Shadow Distance=75m, Cascades=2, Pixel Error=1");
 
-        EditorUtility.DisplayDialog("Quality Settings",
-            "Quality settings have been configured.\n\n" +
-            "Please verify the settings in Edit > Project Settings > Quality.\n\n" +
-            "Recommended values have been logged to console.",
-            "OK");
+        if (showDialog)
+        {
+            EditorUtility.DisplayDialog("Quality Settings",
+                "Quality settings have been configured.\n\n" +
+                "Please verify the settings in Edit > Project Settings > Quality.\n\n" +
+                "Recommended values have been logged to console.",
+                "OK");
+        }
     }
 
     private void OptimizeTerrainSettings()
+    {
+        OptimizeTerrainSettings(showDialog: true);
+    }
+
+    private int OptimizeTerrainSettings(bool showDialog)
     {
         Terrain[] terrains = FindObjectsByType<Terrain>(FindObjectsSortMode.None);
 
         if (terrains.Length == 0)
         {
-            EditorUtility.DisplayDialog("No Terrains", "No terrain objects found in the scene.", "OK");
-            return;
+            if (showDialog)
+            {
+                EditorUtility.DisplayDialog("No Terrains", "No terrain objects found in the scene.", "OK");
+            }
+
+            return 0;
         }
 
         int optimizedCount = 0;
@@ -167,16 +266,26 @@ public class PerformanceOptimizationSetup : EditorWindow
         }
 
         Debug.Log($"[PerformanceOptimizationSetup] Optimized {optimizedCount} terrain(s) for quality level: {QualitySettings.names[QualitySettings.GetQualityLevel()]}");
-        EditorUtility.DisplayDialog("Terrain Optimization",
-            $"Optimized {optimizedCount} terrain(s) based on current quality level.\n\n" +
-            "Settings adjusted:\n" +
-            "- Pixel Error\n" +
-            "- Basemap Distance\n" +
-            "- Detail/Tree Distances",
-            "OK");
+        if (showDialog)
+        {
+            EditorUtility.DisplayDialog("Terrain Optimization",
+                $"Optimized {optimizedCount} terrain(s) based on current quality level.\n\n" +
+                "Settings adjusted:\n" +
+                "- Pixel Error\n" +
+                "- Basemap Distance\n" +
+                "- Detail/Tree Distances",
+                "OK");
+        }
+
+        return optimizedCount;
     }
 
     private void OptimizeCameraSettings()
+    {
+        OptimizeCameraSettings(showDialog: true);
+    }
+
+    private string OptimizeCameraSettings(bool showDialog)
     {
         Camera mainCam = Camera.main;
         if (mainCam == null)
@@ -186,8 +295,12 @@ public class PerformanceOptimizationSetup : EditorWindow
 
         if (mainCam == null)
         {
-            EditorUtility.DisplayDialog("No Camera", "No camera found in the scene.", "OK");
-            return;
+            if (showDialog)
+            {
+                EditorUtility.DisplayDialog("No Camera", "No camera found in the scene.", "OK");
+            }
+
+            return "No camera found";
         }
 
         Undo.RecordObject(mainCam, "Optimize Camera Settings");
@@ -205,13 +318,18 @@ public class PerformanceOptimizationSetup : EditorWindow
         EditorUtility.SetDirty(mainCam);
 
         Debug.Log($"[PerformanceOptimizationSetup] Optimized camera: {mainCam.name}");
-        EditorUtility.DisplayDialog("Camera Optimization",
-            $"Optimized camera: {mainCam.name}\n\n" +
-            "Settings adjusted:\n" +
-            "- Far Clip Plane\n" +
-            "- Occlusion Culling\n\n" +
-            "Note: Configure layer culling distances in the PerformanceOptimizationManager component.",
-            "OK");
+        if (showDialog)
+        {
+            EditorUtility.DisplayDialog("Camera Optimization",
+                $"Optimized camera: {mainCam.name}\n\n" +
+                "Settings adjusted:\n" +
+                "- Far Clip Plane\n" +
+                "- Occlusion Culling\n\n" +
+                "Note: Configure layer culling distances in the PerformanceOptimizationManager component.",
+                "OK");
+        }
+
+        return mainCam.name;
     }
 
     private void AddPerformanceManager()
@@ -277,12 +395,7 @@ public class PerformanceOptimizationSetup : EditorWindow
             return;
         }
 
-        // Note: Physics settings are in ProjectSettings and need to be modified through EditorSettings
-        Debug.Log("[PerformanceOptimizationSetup] Physics optimization guidelines:");
-        Debug.Log("1. Fixed Timestep: 0.02 (50 Hz) for better performance, 0.0166 (60 Hz) for accuracy");
-        Debug.Log("2. Default Solver Iterations: 6 (default), reduce to 4 for performance");
-        Debug.Log("3. Default Solver Velocity Iterations: 1 (reduce physics load)");
-        Debug.Log("4. Disable unnecessary collision layer interactions in Edit > Project Settings > Physics");
+        LogPhysicsOptimizationGuidance();
 
         EditorUtility.DisplayDialog("Physics Optimization",
             "Physics optimization guidelines have been logged to console.\n\n" +
@@ -293,5 +406,47 @@ public class PerformanceOptimizationSetup : EditorWindow
             "- Solver Iterations: 4-6\n" +
             "- Disable unused layer collisions",
             "OK");
+    }
+
+    private void LogPhysicsOptimizationGuidance()
+    {
+        // Note: Physics settings are in ProjectSettings and need to be modified through EditorSettings
+        Debug.Log("[PerformanceOptimizationSetup] Physics optimization guidelines:");
+        Debug.Log("1. Fixed Timestep: 0.02 (50 Hz) for better performance, 0.0166 (60 Hz) for accuracy");
+        Debug.Log("2. Default Solver Iterations: 6 (default), reduce to 4 for performance");
+        Debug.Log("3. Default Solver Velocity Iterations: 1 (reduce physics load)");
+        Debug.Log("4. Disable unnecessary collision layer interactions in Edit > Project Settings > Physics");
+    }
+
+    private string EnsurePerformanceManagerInScene()
+    {
+        PerformanceOptimizationManager existing = FindFirstObjectByType<PerformanceOptimizationManager>();
+        if (existing != null)
+        {
+            return "Already exists (" + existing.gameObject.name + ")";
+        }
+
+        GameObject managerObj = new GameObject("PerformanceOptimizationManager");
+        PerformanceOptimizationManager manager = managerObj.AddComponent<PerformanceOptimizationManager>();
+        Undo.RegisterCreatedObjectUndo(managerObj, "Add Performance Manager");
+
+        GameObject player = GameObject.FindGameObjectWithTag("Player");
+        if (player != null)
+        {
+            SerializedObject so = new SerializedObject(manager);
+            so.FindProperty("playerTransform").objectReferenceValue = player.transform;
+            so.ApplyModifiedProperties();
+        }
+
+        Camera mainCam = Camera.main;
+        if (mainCam != null)
+        {
+            SerializedObject so = new SerializedObject(manager);
+            so.FindProperty("mainCamera").objectReferenceValue = mainCam;
+            so.ApplyModifiedProperties();
+        }
+
+        EditorUtility.SetDirty(managerObj);
+        return "Created new manager object";
     }
 }

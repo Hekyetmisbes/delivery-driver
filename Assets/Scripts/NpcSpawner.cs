@@ -67,7 +67,7 @@ namespace TrafficSystem
 
             if (spawnOnStart)
             {
-                StartSpawnRoutine();
+                SpawnNpcsDeferred(0f);
             }
         }
 
@@ -98,26 +98,26 @@ namespace TrafficSystem
         [ContextMenu("Spawn NPCs")]
         public void SpawnNpcs()
         {
-            StartSpawnRoutine();
+            SpawnNpcsDeferred(0f);
         }
 
-        private void StartSpawnRoutine()
+        public void SpawnNpcsDeferred(float additionalDelaySeconds)
         {
             if (spawnCoroutine != null)
             {
                 StopCoroutine(spawnCoroutine);
             }
 
-            spawnCoroutine = StartCoroutine(SpawnNpcsCoroutine());
+            spawnCoroutine = StartCoroutine(SpawnNpcsCoroutine(Mathf.Max(0f, additionalDelaySeconds)));
         }
 
         /// <summary>
         /// Coroutine to spawn NPCs sequentially with delay
         /// </summary>
-        private System.Collections.IEnumerator SpawnNpcsCoroutine()
+        private System.Collections.IEnumerator SpawnNpcsCoroutine(float additionalDelaySeconds)
         {
             // Wait for road graph to build
-            yield return new WaitForSeconds(initialSpawnDelay);
+            yield return new WaitForSeconds(initialSpawnDelay + additionalDelaySeconds);
 
             if (roadGraphBuilder == null)
             {

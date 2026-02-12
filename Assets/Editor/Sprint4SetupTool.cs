@@ -83,7 +83,7 @@ public class Sprint4SetupTool : EditorWindow
         }
 
         // Check if already exists
-        PerformanceBenchmark existing = FindObjectOfType<PerformanceBenchmark>();
+        PerformanceBenchmark existing = FindFirstObjectByType<PerformanceBenchmark>();
         if (existing != null)
         {
             EditorGUILayout.HelpBox("✓ Benchmark system already in scene", MessageType.Info);
@@ -107,7 +107,7 @@ public class Sprint4SetupTool : EditorWindow
             AddRegressionDetector();
         }
 
-        PerformanceRegressionDetector existingRegression = FindObjectOfType<PerformanceRegressionDetector>();
+        PerformanceRegressionDetector existingRegression = FindFirstObjectByType<PerformanceRegressionDetector>();
         if (existingRegression != null)
         {
             EditorGUILayout.HelpBox("✓ Regression detector already in scene", MessageType.Info);
@@ -135,7 +135,7 @@ public class Sprint4SetupTool : EditorWindow
             AddMemoryProfiler();
         }
 
-        MemoryProfiler existingMemory = FindObjectOfType<MemoryProfiler>();
+        MemoryProfiler existingMemory = FindFirstObjectByType<MemoryProfiler>();
         if (existingMemory != null)
         {
             EditorGUILayout.HelpBox("✓ Memory profiler already in scene\n\nIn Play Mode:\n• F3: Toggle overlay\n• F4: Force GC\n• F5: Export data", MessageType.Info);

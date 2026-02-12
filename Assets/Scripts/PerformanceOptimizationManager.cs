@@ -241,16 +241,18 @@ public class PerformanceOptimizationManager : MonoBehaviour
 
         float avgFPS = GetAverageFPS();
         int currentQuality = QualitySettings.GetQualityLevel();
+        float downgradeThreshold = Mathf.Min(fpsDowngradeThreshold, targetFPS - 5f);
+        float upgradeThreshold = Mathf.Max(fpsUpgradeThreshold, targetFPS + 5f);
 
         // Downgrade if FPS is too low
-        if (avgFPS < fpsDowngradeThreshold && currentQuality > 0)
+        if (avgFPS < downgradeThreshold && currentQuality > 0)
         {
             QualitySettings.DecreaseLevel(true);
             lastQualityAdjustTime = Time.time;
             Debug.Log($"[PerformanceOptimizationManager] Quality decreased to {QualitySettings.names[QualitySettings.GetQualityLevel()]} (FPS: {avgFPS:F1})");
         }
         // Upgrade if FPS is high
-        else if (avgFPS > fpsUpgradeThreshold && currentQuality < QualitySettings.names.Length - 1)
+        else if (avgFPS > upgradeThreshold && currentQuality < QualitySettings.names.Length - 1)
         {
             QualitySettings.IncreaseLevel(true);
             lastQualityAdjustTime = Time.time;

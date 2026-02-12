@@ -32,11 +32,13 @@ namespace DeliveryDriver.Optimization
 
         private Collider[] chunkColliders;
         private Renderer[] fullDetailRenderers;
-        private Renderer[] proxyRenderers;
+        private Renderer[] allChunkRenderers;
 
         private void Awake()
         {
             CacheComponents();
+            // Enforce initial state immediately so unloaded chunks do not keep rendering.
+            ApplyStateConfiguration();
         }
 
         private void CacheComponents()
@@ -46,11 +48,7 @@ namespace DeliveryDriver.Optimization
                 fullDetailRenderers = fullDetailContent.GetComponentsInChildren<Renderer>(true);
             }
 
-            if (proxyContent != null)
-            {
-                proxyRenderers = proxyContent.GetComponentsInChildren<Renderer>(true);
-            }
-
+            allChunkRenderers = GetComponentsInChildren<Renderer>(true);
             chunkColliders = GetComponentsInChildren<Collider>(true);
         }
 
@@ -99,25 +97,35 @@ namespace DeliveryDriver.Optimization
                     npc.SetActive(false);
             }
 
-            // Disable colliders
+            // Force-disable renderers so outside chunks are never drawn.
             if (disableRenderersWhenUnloaded)
             {
-                foreach (var collider in chunkColliders)
-                {
-                    if (collider != null)
-                        collider.enabled = false;
-                }
+                SetRenderersEnabled(allChunkRenderers, false);
+            }
+
+            // Disable colliders
+            foreach (var collider in chunkColliders)
+            {
+                if (collider != null)
+                    collider.enabled = false;
             }
         }
 
         private void SetProxyState()
         {
+            if (disableRenderersWhenUnloaded)
+            {
+                SetRenderersEnabled(allChunkRenderers, true);
+            }
+
             // Enable proxy, disable full detail
             if (fullDetailContent != null)
                 fullDetailContent.SetActive(false);
 
             if (proxyContent != null)
                 proxyContent.SetActive(true);
+            else
+                SetRenderersEnabled(fullDetailRenderers, false);
 
             // Disable NPCs in proxy mode
             foreach (var npc in npcVehicles)
@@ -131,17 +139,34 @@ namespace DeliveryDriver.Optimization
             {
                 foreach (var collider in chunkColliders)
                 {
-                    if (collider != null && !(collider is MeshCollider))
-                        collider.enabled = false;
+                    if (collider != null)
+                    {
+                        collider.enabled = collider is MeshCollider;
+                    }
+                }
+            }
+            else
+            {
+                foreach (var collider in chunkColliders)
+                {
+                    if (collider != null)
+                        collider.enabled = true;
                 }
             }
         }
 
         private void SetFullState()
         {
+            if (disableRenderersWhenUnloaded)
+            {
+                SetRenderersEnabled(allChunkRenderers, true);
+            }
+
             // Enable full detail, disable proxy
             if (fullDetailContent != null)
                 fullDetailContent.SetActive(true);
+            else
+                SetRenderersEnabled(fullDetailRenderers, true);
 
             if (proxyContent != null)
                 proxyContent.SetActive(false);
@@ -158,6 +183,19 @@ namespace DeliveryDriver.Optimization
             {
                 if (collider != null)
                     collider.enabled = true;
+            }
+        }
+
+        private static void SetRenderersEnabled(Renderer[] renderers, bool isEnabled)
+        {
+            if (renderers == null) return;
+
+            foreach (var renderer in renderers)
+            {
+                if (renderer != null)
+                {
+                    renderer.enabled = isEnabled;
+                }
             }
         }
 

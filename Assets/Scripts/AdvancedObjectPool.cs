@@ -56,7 +56,7 @@ namespace DeliveryDriver.Optimization
             {
                 if (instance == null)
                 {
-                    instance = FindObjectOfType<AdvancedObjectPool>();
+                    instance = FindFirstObjectByType<AdvancedObjectPool>();
                     if (instance == null)
                     {
                         GameObject go = new GameObject("AdvancedObjectPool");

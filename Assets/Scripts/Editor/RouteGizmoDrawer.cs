@@ -25,7 +25,7 @@ namespace TrafficSystemEditor
             if (!enableGizmos) return;
 
             // Find RoadGraphBuilder in scene
-            RoadGraphBuilder[] builders = Object.FindObjectsOfType<RoadGraphBuilder>();
+            RoadGraphBuilder[] builders = Object.FindObjectsByType<RoadGraphBuilder>(FindObjectsSortMode.None);
             if (builders.Length == 0) return;
 
             foreach (var builder in builders)
