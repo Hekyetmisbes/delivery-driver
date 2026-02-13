@@ -11,6 +11,7 @@ public class DeliveryUI : MonoBehaviour
     [SerializeField] private GameObject deliveryPanel;
     [SerializeField] private TextMeshProUGUI statusText;
     [SerializeField] private TextMeshProUGUI distanceText;
+    [SerializeField] private TextMeshProUGUI neighborhoodText;
 
     private DeliveryManager deliveryManager;
     private Transform playerTransform;
@@ -44,42 +45,64 @@ public class DeliveryUI : MonoBehaviour
 
     private void UpdateUI()
     {
-        // Show/hide panel based on delivery status
-        bool hasActiveDelivery = deliveryManager != null; // You'll need to expose isDeliveryActive in DeliveryManager
+        bool hasObjective = deliveryManager.HasObjectivePoint;
 
         if (deliveryPanel != null)
         {
-            // For now, always show if delivery manager exists
-            deliveryPanel.SetActive(true);
+            deliveryPanel.SetActive(hasObjective);
         }
 
-        // Update status text
+        if (!hasObjective)
+        {
+            return;
+        }
+
+        Vector3 targetPoint = deliveryManager.CurrentObjectivePoint;
+        float distance = Vector3.Distance(playerTransform.position, targetPoint);
+        string pickupNeighborhood = GetNeighborhoodLabel(deliveryManager.CurrentPickupNeighborhoodName);
+        string neighborhoodSummary = deliveryManager.IsDeliveryActive
+            ? $"Mahalle: {pickupNeighborhood} -> {GetNeighborhoodLabel(deliveryManager.CurrentDeliveryNeighborhoodName)}"
+            : $"Alim Mahallesi: {pickupNeighborhood}";
+
         if (statusText != null)
         {
-            statusText.text = "Find the delivery box!";
+            string baseStatus = deliveryManager.IsDeliveryActive
+                ? "Paketi teslim et!"
+                : "Paketi bul!";
+            statusText.text = neighborhoodText == null
+                ? $"{baseStatus}\n{neighborhoodSummary}"
+                : baseStatus;
         }
 
-        // Update distance and direction (this would need delivery manager to expose target position)
-        // For now, just show placeholder
         if (distanceText != null)
         {
-            distanceText.text = "Distance: --m";
+            distanceText.text = $"Mesafe: {distance:F0}m";
+        }
+
+        if (neighborhoodText != null)
+        {
+            neighborhoodText.text = neighborhoodSummary;
         }
     }
 
     /// <summary>
     /// Update UI when box is picked up
     /// </summary>
-    public void OnBoxPickedUp(Vector3 deliveryPoint)
+    public void OnBoxPickedUp(Vector3 deliveryPoint, string pickupNeighborhood = "", string deliveryNeighborhood = "")
     {
         if (statusText != null)
         {
-            statusText.text = "Deliver the box!";
+            statusText.text = "Paketi teslim et!";
         }
 
         if (deliveryPanel != null)
         {
             deliveryPanel.SetActive(true);
+        }
+
+        if (neighborhoodText != null)
+        {
+            neighborhoodText.text = $"Mahalle: {GetNeighborhoodLabel(pickupNeighborhood)} -> {GetNeighborhoodLabel(deliveryNeighborhood)}";
         }
     }
 
@@ -90,7 +113,7 @@ public class DeliveryUI : MonoBehaviour
     {
         if (distanceText != null)
         {
-            distanceText.text = $"Distance: {distance:F0}m";
+            distanceText.text = $"Mesafe: {distance:F0}m";
         }
     }
 
@@ -101,7 +124,12 @@ public class DeliveryUI : MonoBehaviour
     {
         if (statusText != null)
         {
-            statusText.text = "Delivery Complete!";
+            statusText.text = "Teslimat tamamlandi!";
+        }
+
+        if (neighborhoodText != null)
+        {
+            neighborhoodText.text = "";
         }
 
         Invoke(nameof(ResetUI), 2f);
@@ -111,12 +139,22 @@ public class DeliveryUI : MonoBehaviour
     {
         if (statusText != null)
         {
-            statusText.text = "Find the delivery box!";
+            statusText.text = "Paketi bul!";
         }
 
         if (distanceText != null)
         {
             distanceText.text = "";
         }
+
+        if (neighborhoodText != null)
+        {
+            neighborhoodText.text = "";
+        }
+    }
+
+    private string GetNeighborhoodLabel(string neighborhoodName)
+    {
+        return string.IsNullOrWhiteSpace(neighborhoodName) ? "Bilinmiyor" : neighborhoodName;
     }
 }
