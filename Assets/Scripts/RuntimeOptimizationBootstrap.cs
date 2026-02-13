@@ -45,17 +45,23 @@ public class RuntimeOptimizationBootstrap : MonoBehaviour
     {
         EnsureManager<PerformanceOptimizationManager>("PerformanceOptimizationManager");
 
-        WorldChunkManager chunkManager = EnsureManager<WorldChunkManager>("WorldChunkManager");
-        chunkManager.showDebugInfo = false;
-        chunkManager.drawGizmos = false;
-        chunkManager.updateInterval = 0.35f;
-        chunkManager.maxChunkUpdatesPerFrame = 12;
-        chunkManager.enableHardRadiusCulling = true;
-        chunkManager.cullStaticRenderersOnly = true;
+        WorldChunkManager chunkManager = FindAnyObjectByType<WorldChunkManager>();
+        if (chunkManager != null)
+        {
+            chunkManager.showDebugInfo = false;
+            chunkManager.drawGizmos = false;
+            chunkManager.updateInterval = 0.35f;
+            chunkManager.maxChunkUpdatesPerFrame = 12;
+            chunkManager.enableHardRadiusCulling = true;
+            chunkManager.cullStaticRenderersOnly = true;
+        }
 
-        TrafficSimulationOptimizer trafficOptimizer = EnsureManager<TrafficSimulationOptimizer>("TrafficSimulationOptimizer");
-        trafficOptimizer.showPerformanceStats = false;
-        trafficOptimizer.autoFindPlayer = true;
+        TrafficSimulationOptimizer trafficOptimizer = FindAnyObjectByType<TrafficSimulationOptimizer>();
+        if (trafficOptimizer != null)
+        {
+            trafficOptimizer.showPerformanceStats = false;
+            trafficOptimizer.autoFindPlayer = true;
+        }
     }
 
     private void StartPhaseTwoSystems()

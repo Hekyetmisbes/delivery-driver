@@ -144,6 +144,12 @@ namespace TrafficSystem
         [SerializeField] private float minTurnSpeedFactor = 0.35f;
         [Tooltip("Downforce coefficient (N per (m/s)^2) - reduced to prevent suspension collapse")]
         [SerializeField] private float downforceCoefficient = 20f; // Reduced from 100f
+        [Tooltip("Constant downforce baseline (N)")]
+        [SerializeField] private float baseDownforce = 120f;
+        [Tooltip("Clamp extra downforce as a fraction of vehicle weight (0.3 = max 30% of weight)")]
+        [SerializeField] private float maxDownforceWeightFraction = 0.35f;
+        [Tooltip("Apply downforce along vehicle local down instead of world down to reduce slope penetration")]
+        [SerializeField] private bool useLocalDownforceDirection = true;
         [Tooltip("Anti-roll stiffness - higher prevents rollovers")]
         [SerializeField] private float antiRollStiffness = 12000f;
 
@@ -176,6 +182,8 @@ namespace TrafficSystem
         [SerializeField] private float minGroundClearance = 0.1f;
         [Tooltip("Maximum clearance used for spawn/recovery height")]
         [SerializeField] private float maxGroundClearance = 0.5f;
+        [Tooltip("Normalize wheel collider heights at runtime to keep all wheels on same contact plane")]
+        [SerializeField] private bool autoNormalizeWheelColliderHeights = true;
 
         // Runtime state
         private Rigidbody rb;
@@ -337,8 +345,12 @@ namespace TrafficSystem
 
             rb = GetComponent<Rigidbody>();
             SetupRigidbody();
-            ConfigureSuspension(); // New method to tune physics
             AutoFixWheelAssignments();
+            if (autoNormalizeWheelColliderHeights)
+            {
+                NormalizeWheelColliderHeightsRuntime();
+            }
+            ConfigureSuspension(); // New method to tune physics
             CacheWheelGeometry();
             NormalizeModelAxes();
             ConfigureGroundMaskIfNeeded();
@@ -2425,9 +2437,18 @@ namespace TrafficSystem
             // Apply downforce - always apply some base downforce plus speed-based
             if (downforceCoefficient > 0f)
             {
-                float baseDownforce = 500f; // Constant downforce to keep vehicle grounded
-                float speedDownforce = downforceCoefficient * speed * speed;
-                rb.AddForce(Vector3.down * (baseDownforce + speedDownforce));
+                float speedDownforce = Mathf.Max(0f, downforceCoefficient) * speed * speed;
+                float requestedDownforce = Mathf.Max(0f, baseDownforce) + speedDownforce;
+
+                float weight = rb.mass * Mathf.Abs(Physics.gravity.y);
+                float maxDownforce = weight * Mathf.Max(0f, maxDownforceWeightFraction);
+                if (maxDownforce > 0f)
+                {
+                    requestedDownforce = Mathf.Min(requestedDownforce, maxDownforce);
+                }
+
+                Vector3 downDirection = useLocalDownforceDirection ? -GetWorldUp() : Vector3.down;
+                rb.AddForce(downDirection * requestedDownforce, ForceMode.Force);
             }
 
             if (antiRollStiffness > 0f)
@@ -2601,6 +2622,37 @@ namespace TrafficSystem
             
             // Just ensure colliders are assigned, but don't try to guess orientation
             // as that was causing the sideways movement bug
+        }
+
+        private void NormalizeWheelColliderHeightsRuntime()
+        {
+            if (frontLeftCollider == null || frontRightCollider == null || rearLeftCollider == null || rearRightCollider == null)
+                return;
+
+            WheelCollider[] wheels = { frontLeftCollider, frontRightCollider, rearLeftCollider, rearRightCollider };
+            float minContactY = float.MaxValue;
+
+            for (int i = 0; i < wheels.Length; i++)
+            {
+                WheelCollider wheel = wheels[i];
+                if (wheel == null) return;
+
+                Vector3 localPos = transform.InverseTransformPoint(wheel.transform.position);
+                float contactY = localPos.y - wheel.radius;
+                if (contactY < minContactY)
+                    minContactY = contactY;
+            }
+
+            if (Mathf.Abs(minContactY) < 0.001f)
+                return;
+
+            for (int i = 0; i < wheels.Length; i++)
+            {
+                Transform wt = wheels[i].transform;
+                Vector3 localPos = wt.localPosition;
+                localPos.y -= minContactY;
+                wt.localPosition = localPos;
+            }
         }
 
         private void NormalizeModelAxes()

@@ -37,6 +37,8 @@ namespace TrafficSystem
         [SerializeField] private bool generateDualLaneSegmentsForSimplePoly = true;
         [Tooltip("Fallback lane center offset from road centerline (meters)")]
         [SerializeField] private float simplePolyLaneCenterOffset = 1.5f;
+        [Tooltip("If graph build yields too few segments, auto-try SimplePoly dual-lane extraction as recovery")]
+        [SerializeField] private bool autoRecoverSimplePolyLaneExtraction = true;
 
         [Header("Startup")]
         [Tooltip("Build road graph automatically on Start")]
@@ -113,8 +115,10 @@ namespace TrafficSystem
 
             if (includeSimplePolyRoads)
             {
-                ExtractSimplePolyRoadMeshes();
+                ExtractSimplePolyRoadMeshes(generateDualLaneSegmentsForSimplePoly);
             }
+
+            TryAutoRecoverSimplePolyLanes();
 
             // Build connections between road segments
             BuildConnections();
@@ -776,6 +780,11 @@ namespace TrafficSystem
         /// </summary>
         private void ExtractSimplePolyRoadMeshes()
         {
+            ExtractSimplePolyRoadMeshes(generateDualLaneSegmentsForSimplePoly);
+        }
+
+        private void ExtractSimplePolyRoadMeshes(bool dualLaneMode)
+        {
             MeshFilter[] sceneMeshFilters = FindObjectsByType<MeshFilter>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             if (sceneMeshFilters == null || sceneMeshFilters.Length == 0) return;
 
@@ -797,7 +806,7 @@ namespace TrafficSystem
 
                 NormalizeWaypointForwards(centerSegment);
 
-                if (generateDualLaneSegmentsForSimplePoly)
+                if (dualLaneMode)
                 {
                     float laneOffset = EstimateLaneCenterOffset(meshFilter);
                     AddOffsetLaneSegment(centerSegment, -laneOffset, $"{go.name}_Lane_Left");
@@ -813,6 +822,30 @@ namespace TrafficSystem
             if (added > 0)
             {
                 Debug.Log($"[RoadGraphBuilder] Added {added} SimplePoly road segments");
+            }
+        }
+
+        private void TryAutoRecoverSimplePolyLanes()
+        {
+            if (!autoRecoverSimplePolyLaneExtraction || roadGraph == null)
+            {
+                return;
+            }
+
+            bool likelyMisconfigured = !includeSimplePolyRoads || !generateDualLaneSegmentsForSimplePoly;
+            bool graphTooSmall = roadGraph.roadSegments.Count <= 2;
+            if (!likelyMisconfigured || !graphTooSmall)
+            {
+                return;
+            }
+
+            int before = roadGraph.roadSegments.Count;
+            ExtractSimplePolyRoadMeshes(true);
+            int added = roadGraph.roadSegments.Count - before;
+            if (added > 0)
+            {
+                Debug.LogWarning($"[RoadGraphBuilder] Auto-recovery enabled: added {added} SimplePoly dual-lane segments. " +
+                                 $"Consider enabling includeSimplePolyRoads + generateDualLaneSegmentsForSimplePoly on this component.");
             }
         }
 

@@ -130,6 +130,11 @@ public class SimplePolyCityRoadGridTool : EditorWindow
             GenerateRoadGrid();
         }
 
+        if (GUILayout.Button("Generate Neighborhoods Only", GUILayout.Height(34)))
+        {
+            GenerateNeighborhoodsOnly();
+        }
+
         EditorGUILayout.EndScrollView();
     }
 
@@ -414,6 +419,40 @@ public class SimplePolyCityRoadGridTool : EditorWindow
             }
         }
         Debug.Log($"[CityRoadGridTool] Generated {createdCount} roads, {createdBuildings} buildings, and {createdNeighborhoods} neighborhoods across {validTerrainCount} terrain(s). Seed: {randomSeed}, Cell Size: {effectiveCellSize:F2}");
+    }
+
+    private void GenerateNeighborhoodsOnly()
+    {
+        if (targetTerrains == null || targetTerrains.Count == 0)
+        {
+            AutoFindTerrains();
+        }
+
+        float effectiveCellSize = ResolveCellSize();
+        int width = gridWidth;
+        int height = gridHeight;
+        FitGridToTerrain(ref width, ref height, effectiveCellSize);
+
+        if (neighborhoodNames.Count == 0)
+        {
+            bool autoFill = EditorUtility.DisplayDialog(
+                "Neighborhood Names Missing",
+                "Henüz neighborhood ismi tanımlı değil. Otomatik isim doldurulsun mu?",
+                "Evet, Doldur",
+                "İptal");
+
+            if (!autoFill)
+            {
+                return;
+            }
+
+            AutoFillNeighborhoodNames();
+        }
+
+        int createdNeighborhoods = GenerateNeighborhoods(width, height, effectiveCellSize);
+        Selection.activeTransform = neighborhoodParent;
+        EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+        Debug.Log($"[CityRoadGridTool] Generated {createdNeighborhoods} neighborhoods only. Cell Size: {effectiveCellSize:F2}");
     }
 
     private int GenerateBuildings(bool[,] roadMask, int width, int height, float currentCellSize)

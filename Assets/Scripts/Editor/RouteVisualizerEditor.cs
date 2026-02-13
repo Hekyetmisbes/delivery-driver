@@ -62,6 +62,19 @@ namespace TrafficSystemEditor
 
             EditorGUILayout.Space(10);
 
+            SerializedObject builderSO = new SerializedObject(roadGraphBuilder);
+            SerializedProperty includeSimplePolyProp = builderSO.FindProperty("includeSimplePolyRoads");
+            SerializedProperty dualLaneProp = builderSO.FindProperty("generateDualLaneSegmentsForSimplePoly");
+            if (includeSimplePolyProp != null && dualLaneProp != null &&
+                (!includeSimplePolyProp.boolValue || !dualLaneProp.boolValue))
+            {
+                EditorGUILayout.HelpBox(
+                    "SimplePoly lane extraction is partially disabled on RoadGraphBuilder. " +
+                    "This can reduce generated lane routes significantly.",
+                    MessageType.Warning
+                );
+            }
+
             // Visualization settings
             EditorGUILayout.LabelField("Visualization Settings", EditorStyles.boldLabel);
             showWaypoints = EditorGUILayout.Toggle("Show Waypoints", showWaypoints);
