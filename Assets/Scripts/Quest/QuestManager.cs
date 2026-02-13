@@ -2741,6 +2741,11 @@ namespace DeliveryDriver.Quest
                 quest.PickupLocation.ShowMarker();
             }
 
+            // Notify listeners so UI/HUD updates immediately for externally started quests.
+            OnQuestStarted?.Invoke(quest);
+            OnQuestUpdated?.Invoke(quest);
+            questUiDirty = true;
+
             Debug.Log($"[QuestManager] Started quest: {quest.QuestName}");
         }
 

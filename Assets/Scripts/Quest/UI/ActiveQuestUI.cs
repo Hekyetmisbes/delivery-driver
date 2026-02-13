@@ -25,6 +25,11 @@ namespace DeliveryDriver.Quest.UI
         private bool lastCargoPanelActive = false;
         private readonly StringBuilder objectiveBuilder = new StringBuilder(64);
 
+        private void Awake()
+        {
+            AutoBindTextReferences();
+        }
+
         public void UpdateQuestDisplay(QuestData quest)
         {
             currentQuest = quest;
@@ -93,6 +98,11 @@ namespace DeliveryDriver.Quest.UI
 
         public void UpdateDistance(float distanceMeters)
         {
+            if (distanceText == null)
+            {
+                AutoBindTextReferences();
+            }
+
             if (distanceText == null)
             {
                 return;
@@ -221,16 +231,10 @@ namespace DeliveryDriver.Quest.UI
         {
             if (distanceMeters <= 0f)
             {
-                return "--";
+                return "Mesafe: -- m";
             }
 
-            if (distanceMeters >= 1000f)
-            {
-                float km = distanceMeters / 1000f;
-                return $"{km:0.0} km";
-            }
-
-            return $"{distanceMeters:0} m";
+            return $"Mesafe: {Mathf.RoundToInt(distanceMeters)} m";
         }
 
         private static Color GetTimerColor(float timeRemaining, float timeLimit)
@@ -251,6 +255,39 @@ namespace DeliveryDriver.Quest.UI
             }
 
             return Color.red;
+        }
+
+        private void AutoBindTextReferences()
+        {
+            if (objectiveText == null)
+            {
+                objectiveText = FindTextByName("Objective");
+                if (objectiveText == null)
+                {
+                    objectiveText = FindTextByName("QuestName");
+                }
+            }
+
+            if (timerText == null)
+            {
+                timerText = FindTextByName("Timer");
+            }
+
+            if (distanceText == null)
+            {
+                distanceText = FindTextByName("Distance");
+            }
+        }
+
+        private TextMeshProUGUI FindTextByName(string objectName)
+        {
+            Transform target = transform.Find(objectName);
+            if (target == null)
+            {
+                return null;
+            }
+
+            return target.GetComponent<TextMeshProUGUI>();
         }
     }
 }

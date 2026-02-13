@@ -85,6 +85,11 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
+            if (playerTransform == null)
+            {
+                ResolvePlayerTransform();
+            }
+
             UpdateActiveQuestDistance(questManager.CurrentQuest);
             UpdateCargoHealth(questManager.CurrentQuest);
         }
@@ -245,12 +250,35 @@ namespace DeliveryDriver.Quest.UI
             if (controller != null)
             {
                 playerTransform = controller.transform;
+                return;
+            }
+
+            GameObject taggedPlayer = GameObject.FindGameObjectWithTag("Player");
+            if (taggedPlayer != null)
+            {
+                playerTransform = taggedPlayer.transform;
+                return;
+            }
+
+            if (Camera.main != null)
+            {
+                playerTransform = Camera.main.transform.root;
             }
         }
 
         private void UpdateActiveQuestDistance(QuestData quest)
         {
-            if (activeQuestUI == null || playerTransform == null || quest == null)
+            if (quest == null || activeQuestUI == null)
+            {
+                return;
+            }
+
+            if (playerTransform == null)
+            {
+                ResolvePlayerTransform();
+            }
+
+            if (playerTransform == null)
             {
                 return;
             }

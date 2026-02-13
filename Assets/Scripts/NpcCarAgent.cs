@@ -91,6 +91,22 @@ namespace TrafficSystem
         [Tooltip("Extra clearance buffer added to safe gap calculations")]
         [SerializeField] private float collisionBufferDistance = 2f;
 
+        [Header("Reverse Recovery")]
+        [Tooltip("Enable short reverse maneuvers when blocked by obstacles ahead")]
+        [SerializeField] private bool enableReverseRecovery = true;
+        [Tooltip("How long the vehicle must remain blocked before reversing (seconds)")]
+        [SerializeField] private float reverseTriggerDelay = 1.2f;
+        [Tooltip("Max absolute speed counted as stuck (km/h)")]
+        [SerializeField] private float reverseStuckSpeedThreshold = 1.5f;
+        [Tooltip("How long reverse maneuver lasts (seconds)")]
+        [SerializeField] private float reverseDuration = 1.0f;
+        [Tooltip("Cooldown before another reverse attempt (seconds)")]
+        [SerializeField] private float reverseCooldown = 2.0f;
+        [Tooltip("Target reverse speed (km/h)")]
+        [SerializeField] private float reverseTargetSpeed = 8f;
+        [Tooltip("Rear obstacle check distance before reversing (meters)")]
+        [SerializeField] private float reverseRearCheckDistance = 5f;
+
         [Header("Following Distance (Priority 1)")]
         [Tooltip("Following time in seconds (2-3 second rule)")]
         [SerializeField] private float followingTimeSeconds = 2.5f;
@@ -251,6 +267,12 @@ namespace TrafficSystem
         private float environmentalFollowingDistanceMultiplier = 1f;
         private float predictiveSpeedLimiter = 1f;
         private bool imminentCollisionRisk;
+        private bool isReversing;
+        private float reverseTimer;
+        private float reverseCooldownTimer;
+        private float blockedTimer;
+        private bool rearObstacleDetected;
+        private float rearObstacleDistance;
 
         // Public accessors
         public RoadSegment CurrentSegment => currentSegment;
@@ -562,6 +584,8 @@ namespace TrafficSystem
             CheckPredictiveCollisions();
 
             CheckObstacles();
+            CheckRearObstacles();
+            UpdateReverseRecoveryState();
             CheckNearbyVehicles();
             ApplySeparationForce();
             UpdateLaneChange();
@@ -683,7 +707,7 @@ namespace TrafficSystem
         /// </summary>
         private void UpdateLaneChange()
         {
-            if (!enableLaneChange) return;
+            if (!enableLaneChange || isReversing) return;
 
             // Smoothly transition to target lateral offset
             lateralOffset = Mathf.Lerp(lateralOffset, targetLateralOffset, Time.fixedDeltaTime * laneChangeSpeed);
@@ -1149,6 +1173,98 @@ namespace TrafficSystem
                     rightLaneClear = false;
                 }
             }
+        }
+
+        private void CheckRearObstacles()
+        {
+            rearObstacleDetected = false;
+            rearObstacleDistance = float.MaxValue;
+
+            if (!enableReverseRecovery) return;
+
+            Vector3 rayOrigin = transform.position + Vector3.up * 0.5f;
+            Vector3 backward = -GetWorldForward();
+            float checkRadius = Mathf.Max(0.3f, vehicleDetectionRadius * 0.9f);
+
+            if (Physics.SphereCast(rayOrigin, checkRadius, backward, out RaycastHit rearHit, reverseRearCheckDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore))
+            {
+                if (rearHit.collider != null && !rearHit.collider.transform.IsChildOf(transform))
+                {
+                    rearObstacleDetected = true;
+                    rearObstacleDistance = rearHit.distance;
+                }
+            }
+        }
+
+        private void UpdateReverseRecoveryState()
+        {
+            if (!enableReverseRecovery || rb == null)
+            {
+                isReversing = false;
+                blockedTimer = 0f;
+                return;
+            }
+
+            if (reverseCooldownTimer > 0f)
+            {
+                reverseCooldownTimer -= Time.fixedDeltaTime;
+            }
+
+            if (isReversing)
+            {
+                reverseTimer -= Time.fixedDeltaTime;
+                bool rearTooClose = rearObstacleDetected && rearObstacleDistance < 1.2f;
+                if (reverseTimer <= 0f || rearTooClose)
+                {
+                    StopReverse();
+                }
+                return;
+            }
+
+            bool frontBlocked = isObstacleDetected && obstacleDistance < Mathf.Max(criticalBrakingDistance + 1f, safeFollowingDistance * 0.45f);
+            if (isColliding) frontBlocked = true;
+
+            float signedSpeed = Vector3.Dot(rb.linearVelocity, GetWorldForward()) * 3.6f;
+            bool nearlyStopped = Mathf.Abs(signedSpeed) <= Mathf.Max(0.1f, reverseStuckSpeedThreshold);
+
+            if (frontBlocked && nearlyStopped)
+            {
+                blockedTimer += Time.fixedDeltaTime;
+            }
+            else
+            {
+                blockedTimer = Mathf.Max(0f, blockedTimer - Time.fixedDeltaTime * 1.5f);
+            }
+
+            if (reverseCooldownTimer > 0f || blockedTimer < reverseTriggerDelay)
+                return;
+
+            bool rearClearEnough = !rearObstacleDetected || rearObstacleDistance > Mathf.Max(1.5f, reverseRearCheckDistance * 0.7f);
+            if (rearClearEnough)
+            {
+                StartReverse();
+            }
+        }
+
+        private void StartReverse()
+        {
+            isReversing = true;
+            reverseTimer = Mathf.Max(0.2f, reverseDuration);
+            blockedTimer = 0f;
+
+            if (turnSignalController != null)
+            {
+                turnSignalController.DeactivateAll();
+            }
+        }
+
+        private void StopReverse()
+        {
+            isReversing = false;
+            reverseTimer = 0f;
+            reverseCooldownTimer = Mathf.Max(0f, reverseCooldown);
+            SetMotorTorque(0f);
+            SetBrakeTorque(0f);
         }
 
         /// <summary>
@@ -2267,6 +2383,12 @@ namespace TrafficSystem
         /// </summary>
         private void ApplyThrottle()
         {
+            if (isReversing)
+            {
+                ApplyReverseThrottle();
+                return;
+            }
+
             float currentSpeed = CurrentSpeed;
             float effectiveTargetSpeed = GetTurnLimitedTargetSpeed();
 
@@ -2655,6 +2777,34 @@ namespace TrafficSystem
             }
         }
 
+        private void ApplyReverseThrottle()
+        {
+            float signedSpeedKmh = Vector3.Dot(rb.linearVelocity, GetWorldForward()) * 3.6f;
+            float desiredReverseSpeedKmh = -Mathf.Max(1f, reverseTargetSpeed);
+
+            bool rearTooClose = rearObstacleDetected && rearObstacleDistance < 1.2f;
+            if (rearTooClose)
+            {
+                SetMotorTorque(0f);
+                SetBrakeTorque(braking * 0.8f);
+                return;
+            }
+
+            if (signedSpeedKmh > desiredReverseSpeedKmh + 0.5f)
+            {
+                float speedError = Mathf.Abs(desiredReverseSpeedKmh - signedSpeedKmh);
+                float reverseTorque = personalityAcceleration * 0.45f * Mathf.Clamp01(speedError / 10f);
+                reverseTorque = Mathf.Max(80f, reverseTorque);
+                SetBrakeTorque(0f);
+                SetMotorTorque(-reverseTorque);
+            }
+            else
+            {
+                SetMotorTorque(0f);
+                SetBrakeTorque(braking * 0.2f);
+            }
+        }
+
         private void NormalizeModelAxes()
         {
             if (modelForwardLocal.sqrMagnitude < 0.001f)
@@ -2948,6 +3098,16 @@ namespace TrafficSystem
                         float t = i * 0.5f; // 0.5s intervals
                         Vector3 predictedPos = VehicleTrajectoryPredictor.PredictPositionWithPath(this, t);
                         Gizmos.DrawWireSphere(predictedPos, 0.2f);
+                    }
+                }
+
+                if (enableReverseRecovery)
+                {
+                    Gizmos.color = rearObstacleDetected ? new Color(1f, 0.5f, 0f) : Color.gray;
+                    Gizmos.DrawLine(rayOrigin, rayOrigin - forward * reverseRearCheckDistance);
+                    if (rearObstacleDetected && rearObstacleDistance < float.MaxValue)
+                    {
+                        Gizmos.DrawWireSphere(rayOrigin - forward * rearObstacleDistance, 0.35f);
                     }
                 }
             }

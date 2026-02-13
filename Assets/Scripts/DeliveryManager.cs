@@ -268,6 +268,11 @@ public class DeliveryManager : MonoBehaviour
         {
             // Check if this collider belongs to a NeighborhoodZone
             NeighborhoodZone zone = col.GetComponent<NeighborhoodZone>();
+            if (zone == null)
+            {
+                zone = col.GetComponentInParent<NeighborhoodZone>();
+            }
+
             if (zone != null)
             {
                 if (showDebugInfo)
@@ -710,6 +715,11 @@ public class DeliveryManager : MonoBehaviour
 
         bool requireRoadCollider = !(useRoadGraphSpawnPoints && HasRoadGraphData());
         if (requireRoadCollider && !IsRoadCollider(hit.collider))
+        {
+            return false;
+        }
+
+        if (spawnOnlyInNeighborhoods && !IsInsideNeighborhood(position))
         {
             return false;
         }
