@@ -69,6 +69,8 @@ namespace TrafficSystem
         private float offRoadTimer;
         private float lastRecoveryTime;
         private Vector3 boundaryCenter;
+        private string cachedLowerName;
+        private string[] cachedLowerTokens;
 
         // Stats
         private int recoveryCount;
@@ -84,6 +86,19 @@ namespace TrafficSystem
             lastPosition = transform.position;
             nextCheckTime = Time.time + checkInterval;
             boundaryCenter = transform.position;
+
+            // Pre-compute lowered name and tokens for IsRecoveryDisabled
+            cachedLowerName = name.ToLowerInvariant();
+            if (disableRecoveryNameContains != null && disableRecoveryNameContains.Length > 0)
+            {
+                cachedLowerTokens = new string[disableRecoveryNameContains.Length];
+                for (int i = 0; i < disableRecoveryNameContains.Length; i++)
+                {
+                    cachedLowerTokens[i] = string.IsNullOrEmpty(disableRecoveryNameContains[i])
+                        ? null
+                        : disableRecoveryNameContains[i].ToLowerInvariant();
+                }
+            }
 
             // FORCE FIX: Enable recovery for all vehicles
             // This overrides any prefab settings that might be stuck
@@ -477,14 +492,12 @@ namespace TrafficSystem
         private bool IsRecoveryDisabled()
         {
             if (disableRecovery) return true;
-            if (disableRecoveryNameContains == null || disableRecoveryNameContains.Length == 0) return false;
+            if (cachedLowerTokens == null || cachedLowerTokens.Length == 0) return false;
 
-            string n = name.ToLowerInvariant();
-            for (int i = 0; i < disableRecoveryNameContains.Length; i++)
+            for (int i = 0; i < cachedLowerTokens.Length; i++)
             {
-                string token = disableRecoveryNameContains[i];
-                if (string.IsNullOrEmpty(token)) continue;
-                if (n.Contains(token.ToLowerInvariant())) return true;
+                if (cachedLowerTokens[i] == null) continue;
+                if (cachedLowerName.Contains(cachedLowerTokens[i])) return true;
             }
 
             return false;
@@ -500,7 +513,7 @@ namespace TrafficSystem
 
             Vector3 sum = Vector3.zero;
             int count = 0;
-            float maxDist = 0f;
+            float maxDist;
 
             foreach (RoadSegment segment in roadGraphBuilder.RoadGraph.roadSegments)
             {
@@ -521,17 +534,19 @@ namespace TrafficSystem
 
             boundaryCenter = sum / count;
 
+            float maxDistSqr = 0f;
             foreach (RoadSegment segment in roadGraphBuilder.RoadGraph.roadSegments)
             {
                 if (segment == null || segment.waypoints == null) continue;
 
                 foreach (Waypoint wp in segment.waypoints)
                 {
-                    float d = Vector3.Distance(wp.position, boundaryCenter);
-                    if (d > maxDist) maxDist = d;
+                    float dSqr = (wp.position - boundaryCenter).sqrMagnitude;
+                    if (dSqr > maxDistSqr) maxDistSqr = dSqr;
                 }
             }
 
+            maxDist = Mathf.Sqrt(maxDistSqr);
             // Keep user-defined small radii intact, but auto-expand if the road network is larger.
             sceneBoundaryRadius = Mathf.Max(sceneBoundaryRadius, maxDist + 30f);
         }

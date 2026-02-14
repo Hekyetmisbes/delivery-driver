@@ -53,6 +53,7 @@ namespace TrafficSystem
         // Runtime data
         private List<GameObject> activeNpcs = new List<GameObject>();
         private List<GameObject> pooledNpcs = new List<GameObject>();
+        private HashSet<GameObject> pooledNpcSet = new HashSet<GameObject>();
         private Transform npcContainer;
         private Coroutine spawnCoroutine;
 
@@ -347,6 +348,7 @@ namespace TrafficSystem
             {
                 npc = pooledNpcs[0];
                 pooledNpcs.RemoveAt(0);
+                pooledNpcSet.Remove(npc);
                 if (npc.activeSelf)
                 {
                     npc.SetActive(false);
@@ -372,9 +374,10 @@ namespace TrafficSystem
             if (enablePooling)
             {
                 npc.SetActive(false);
-                if (!pooledNpcs.Contains(npc))
+                if (!pooledNpcSet.Contains(npc))
                 {
                     pooledNpcs.Add(npc);
+                    pooledNpcSet.Add(npc);
                 }
             }
             else
@@ -395,6 +398,7 @@ namespace TrafficSystem
                 npc.name = $"NPC_{prefab.name}_Pooled_{i}";
                 npc.SetActive(false);
                 pooledNpcs.Add(npc);
+                pooledNpcSet.Add(npc);
             }
 
             // Debug.Log($"[NpcSpawner] Pre-pooled {count} vehicles");
@@ -426,6 +430,7 @@ namespace TrafficSystem
                     {
                         npc.SetActive(false);
                         pooledNpcs.Add(npc);
+                        pooledNpcSet.Add(npc);
                     }
                 }
             }
@@ -559,6 +564,7 @@ namespace TrafficSystem
             {
                 npc.SetActive(false);
                 pooledNpcs.Add(npc);
+                pooledNpcSet.Add(npc);
             }
             else
             {
@@ -579,6 +585,7 @@ namespace TrafficSystem
             return (activeNpcs.Count, pooledNpcs.Count);
         }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         private void OnGUI()
         {
             if (!showDebugInfo) return;
@@ -600,6 +607,7 @@ namespace TrafficSystem
             }
             GUILayout.EndArea();
         }
+#endif
 
         /// <summary>
         /// Check if spawn position is clear of obstacles using sphere overlap

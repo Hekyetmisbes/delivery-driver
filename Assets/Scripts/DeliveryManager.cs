@@ -57,6 +57,11 @@ public class DeliveryManager : MonoBehaviour
     private List<Vector3> availableSpawnPoints = new List<Vector3>();
     private DeliveryUI deliveryUI;
     private QuestData currentDeliveryQuest;
+    private Transform cachedPlayerTransform;
+    private QuestCompleteUI cachedQuestCompleteUI;
+    private static Collider[] sharedOverlapBuffer = new Collider[32];
+    private Bounds[] cachedTerrainBounds;
+    private bool hasTerrainBounds;
 
     public bool IsDeliveryActive => isDeliveryActive;
     public bool HasBox => currentBox != null;
@@ -93,6 +98,49 @@ public class DeliveryManager : MonoBehaviour
 
         GenerateSpawnPoints();
         SpawnNewBox();
+
+        // Cache player and UI references after scene is ready
+        ResolvePlayerTransform();
+        cachedQuestCompleteUI = FindFirstObjectByType<QuestCompleteUI>();
+        CacheTerrainBounds();
+    }
+
+    private void CacheTerrainBounds()
+    {
+        Terrain[] terrains = Terrain.activeTerrains;
+        if (terrains == null || terrains.Length == 0)
+        {
+            hasTerrainBounds = false;
+            return;
+        }
+
+        var boundsList = new List<Bounds>();
+        foreach (Terrain terrain in terrains)
+        {
+            if (terrain == null || terrain.terrainData == null) continue;
+            Vector3 terrainMin = terrain.transform.position;
+            Vector3 size = terrain.terrainData.size;
+            Vector3 center = terrainMin + size * 0.5f;
+            boundsList.Add(new Bounds(center, size));
+        }
+        cachedTerrainBounds = boundsList.ToArray();
+        hasTerrainBounds = cachedTerrainBounds.Length > 0;
+    }
+
+    private void ResolvePlayerTransform()
+    {
+        CarController car = FindFirstObjectByType<CarController>();
+        if (car != null)
+        {
+            cachedPlayerTransform = car.transform;
+            return;
+        }
+
+        GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+        if (playerObj != null)
+        {
+            cachedPlayerTransform = playerObj.transform;
+        }
     }
 
     private void Update()
@@ -100,16 +148,10 @@ public class DeliveryManager : MonoBehaviour
         // Check delivery proximity
         if (isDeliveryActive && currentBox != null && currentBox.IsPickedUp)
         {
-            Transform player = null;
-            CarController car = FindFirstObjectByType<CarController>();
-            if (car != null)
-            {
-                player = car.transform;
-            }
-            else
-            {
-                player = GameObject.FindGameObjectWithTag("Player")?.transform;
-            }
+            if (cachedPlayerTransform == null)
+                ResolvePlayerTransform();
+
+            Transform player = cachedPlayerTransform;
 
             if (player != null)
             {
@@ -228,16 +270,12 @@ public class DeliveryManager : MonoBehaviour
         }
 
         // Fallback - use player position if available
-        GameObject player = GameObject.FindGameObjectWithTag("Player");
-        if (player == null)
-        {
-            CarController car = FindFirstObjectByType<CarController>();
-            if (car != null) player = car.gameObject;
-        }
+        if (cachedPlayerTransform == null)
+            ResolvePlayerTransform();
 
-        if (player != null)
+        if (cachedPlayerTransform != null)
         {
-            Vector3 playerPos = player.transform.position;
+            Vector3 playerPos = cachedPlayerTransform.position;
             Vector3 offset = Random.insideUnitCircle * 20f;
             Vector3 fallbackPos = new Vector3(playerPos.x + offset.x, raycastStartHeight, playerPos.z + offset.y);
 
@@ -265,10 +303,11 @@ public class DeliveryManager : MonoBehaviour
     private bool IsInsideNeighborhood(Vector3 position)
     {
         // Find all colliders at this position
-        Collider[] colliders = Physics.OverlapSphere(position, neighborhoodCheckRadius, ~0, QueryTriggerInteraction.Collide);
+        int hitCount = Physics.OverlapSphereNonAlloc(position, neighborhoodCheckRadius, sharedOverlapBuffer, ~0, QueryTriggerInteraction.Collide);
 
-        foreach (Collider col in colliders)
+        for (int i = 0; i < hitCount; i++)
         {
+            Collider col = sharedOverlapBuffer[i];
             // Check if this collider belongs to a NeighborhoodZone
             NeighborhoodZone zone = col.GetComponent<NeighborhoodZone>();
             if (zone == null)
@@ -655,23 +694,18 @@ public class DeliveryManager : MonoBehaviour
 
     private bool IsWithinAnyTerrainBounds(Vector3 worldPos)
     {
-        Terrain[] terrains = Terrain.activeTerrains;
-        if (terrains == null || terrains.Length == 0)
+        if (!hasTerrainBounds)
         {
             return true;
         }
 
-        foreach (Terrain terrain in terrains)
+        for (int i = 0; i < cachedTerrainBounds.Length; i++)
         {
-            if (terrain == null || terrain.terrainData == null)
-            {
-                continue;
-            }
-
-            Vector3 terrainMin = terrain.transform.position;
-            Vector3 terrainMax = terrainMin + terrain.terrainData.size;
-            if (worldPos.x >= terrainMin.x && worldPos.x <= terrainMax.x &&
-                worldPos.z >= terrainMin.z && worldPos.z <= terrainMax.z)
+            Bounds b = cachedTerrainBounds[i];
+            float halfX = b.extents.x;
+            float halfZ = b.extents.z;
+            if (worldPos.x >= b.center.x - halfX && worldPos.x <= b.center.x + halfX &&
+                worldPos.z >= b.center.z - halfZ && worldPos.z <= b.center.z + halfZ)
             {
                 return true;
             }
@@ -683,10 +717,11 @@ public class DeliveryManager : MonoBehaviour
     private bool IsSpawnSpaceBlocked(Vector3 position)
     {
         const float checkRadius = 0.6f;
-        Collider[] overlaps = Physics.OverlapSphere(position, checkRadius, ~0, QueryTriggerInteraction.Ignore);
+        int hitCount = Physics.OverlapSphereNonAlloc(position, checkRadius, sharedOverlapBuffer, ~0, QueryTriggerInteraction.Ignore);
 
-        foreach (Collider col in overlaps)
+        for (int i = 0; i < hitCount; i++)
         {
+            Collider col = sharedOverlapBuffer[i];
             if (col == null || col.isTrigger)
             {
                 continue;
@@ -732,9 +767,10 @@ public class DeliveryManager : MonoBehaviour
 
     private string ResolveNeighborhoodName(Vector3 position)
     {
-        Collider[] colliders = Physics.OverlapSphere(position, neighborhoodCheckRadius, ~0, QueryTriggerInteraction.Collide);
-        foreach (Collider col in colliders)
+        int hitCount = Physics.OverlapSphereNonAlloc(position, neighborhoodCheckRadius, sharedOverlapBuffer, ~0, QueryTriggerInteraction.Collide);
+        for (int i = 0; i < hitCount; i++)
         {
+            Collider col = sharedOverlapBuffer[i];
             if (col == null) continue;
 
             NeighborhoodZone zone = col.GetComponent<NeighborhoodZone>();
@@ -932,7 +968,9 @@ public class DeliveryManager : MonoBehaviour
         // Try to find and use the quest complete UI
         if (QuestUIManager.Instance != null)
         {
-            QuestCompleteUI questCompleteUI = FindFirstObjectByType<QuestCompleteUI>();
+            if (cachedQuestCompleteUI == null)
+                cachedQuestCompleteUI = FindFirstObjectByType<QuestCompleteUI>();
+            QuestCompleteUI questCompleteUI = cachedQuestCompleteUI;
             if (questCompleteUI != null)
             {
                 int reward = QuestManager.Instance != null ? QuestManager.Instance.LastCompletionReward : 0;
