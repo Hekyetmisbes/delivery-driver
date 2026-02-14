@@ -57,6 +57,10 @@ namespace DeliveryDriver.Optimization
         private Dictionary<NpcCarAgent, int> npcUpdateIntervals = new Dictionary<NpcCarAgent, int>();
         private Dictionary<NpcCarAgent, float> npcDistances = new Dictionary<NpcCarAgent, float>();
 
+        // Cached component lookups per NPC
+        private Dictionary<NpcCarAgent, TurnSignalController> npcTurnSignals = new Dictionary<NpcCarAgent, TurnSignalController>();
+        private Dictionary<NpcCarAgent, Rigidbody> npcRigidbodies = new Dictionary<NpcCarAgent, Rigidbody>();
+
         // Spatial partitioning
         private Dictionary<Vector2Int, List<NpcCarAgent>> spatialGrid = new Dictionary<Vector2Int, List<NpcCarAgent>>();
 
@@ -119,6 +123,8 @@ namespace DeliveryDriver.Optimization
             registeredNPCs.Add(npc);
             npcUpdateIntervals[npc] = 1; // Start with every frame
             npcDistances[npc] = float.MaxValue;
+            npcTurnSignals[npc] = npc.GetComponent<TurnSignalController>();
+            npcRigidbodies[npc] = npc.GetComponent<Rigidbody>();
 
             totalNPCs++;
         }
@@ -133,6 +139,8 @@ namespace DeliveryDriver.Optimization
             registeredNPCs.Remove(npc);
             npcUpdateIntervals.Remove(npc);
             npcDistances.Remove(npc);
+            npcTurnSignals.Remove(npc);
+            npcRigidbodies.Remove(npc);
 
             totalNPCs--;
         }
@@ -220,7 +228,7 @@ namespace DeliveryDriver.Optimization
             {
                 if (disableFarTurnSignals)
                 {
-                    TurnSignalController turnSignal = npc.GetComponent<TurnSignalController>();
+                    npcTurnSignals.TryGetValue(npc, out TurnSignalController turnSignal);
                     if (turnSignal != null)
                     {
                         turnSignal.enabled = false;
@@ -229,7 +237,7 @@ namespace DeliveryDriver.Optimization
 
                 if (simplifyDistantPhysics)
                 {
-                    Rigidbody rb = npc.GetComponent<Rigidbody>();
+                    npcRigidbodies.TryGetValue(npc, out Rigidbody rb);
                     if (rb != null)
                     {
                         rb.interpolation = RigidbodyInterpolation.None;
@@ -246,14 +254,14 @@ namespace DeliveryDriver.Optimization
         private void DisableNPCBehaviors(NpcCarAgent npc)
         {
             // Disable turn signals
-            TurnSignalController turnSignal = npc.GetComponent<TurnSignalController>();
+            npcTurnSignals.TryGetValue(npc, out TurnSignalController turnSignal);
             if (turnSignal != null)
             {
                 turnSignal.enabled = false;
             }
 
             // Simplify physics
-            Rigidbody rb = npc.GetComponent<Rigidbody>();
+            npcRigidbodies.TryGetValue(npc, out Rigidbody rb);
             if (rb != null)
             {
                 rb.interpolation = RigidbodyInterpolation.None;
@@ -264,14 +272,14 @@ namespace DeliveryDriver.Optimization
         private void EnableNPCBehaviors(NpcCarAgent npc)
         {
             // Enable turn signals
-            TurnSignalController turnSignal = npc.GetComponent<TurnSignalController>();
+            npcTurnSignals.TryGetValue(npc, out TurnSignalController turnSignal);
             if (turnSignal != null)
             {
                 turnSignal.enabled = true;
             }
 
             // Restore physics
-            Rigidbody rb = npc.GetComponent<Rigidbody>();
+            npcRigidbodies.TryGetValue(npc, out Rigidbody rb);
             if (rb != null)
             {
                 rb.isKinematic = false;
