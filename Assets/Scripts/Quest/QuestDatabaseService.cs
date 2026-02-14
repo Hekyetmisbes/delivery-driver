@@ -15,9 +15,10 @@ namespace DeliveryDriver.Quest
         [SerializeField] private string databaseFileName = "quest.db";
         private Type connType;
         private string dbPath;
+        private bool providerHealthy;
 
         public static QuestDatabaseService Instance => instance;
-        public bool IsReady => connType != null && File.Exists(dbPath);
+        public bool IsReady => connType != null && providerHealthy && File.Exists(dbPath);
         public string DatabasePath => dbPath;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -36,7 +37,18 @@ namespace DeliveryDriver.Quest
             DontDestroyOnLoad(gameObject);
             dbPath = Path.Combine(Application.persistentDataPath, databaseFileName);
             connType = Type.GetType(ConnTypeName);
-            if (connType == null) Debug.LogError("[QuestDatabaseService] Mono.Data.Sqlite not available.");
+            if (connType == null)
+            {
+                Debug.LogError("[QuestDatabaseService] Mono.Data.Sqlite not available.");
+                providerHealthy = false;
+                return;
+            }
+
+            providerHealthy = ValidateProvider();
+            if (!providerHealthy)
+            {
+                Debug.LogError("[QuestDatabaseService] SQLite provider initialization failed. Database service disabled.");
+            }
         }
 
         public bool EnsurePlayer(string playerId, string displayName = "Player")
@@ -379,15 +391,102 @@ namespace DeliveryDriver.Quest
             object col = GetProp(cmd, "Parameters");
             foreach (KeyValuePair<string, object> kv in p)
             {
-                object prm = Invoke(cmd, "CreateParameter"); SetProp(prm, "ParameterName", kv.Key); SetProp(prm, "Value", kv.Value ?? DBNull.Value); Invoke(col, "Add", prm);
+                object prm = Invoke(cmd, "CreateParameter");
+                SetProp(prm, "ParameterName", kv.Key);
+                SetProp(prm, "Value", kv.Value ?? DBNull.Value);
+
+                if (col is System.Collections.IList list)
+                {
+                    list.Add(prm);
+                }
+                else
+                {
+                    Invoke(col, "Add", prm);
+                }
             }
             return cmd;
         }
         private static void Close(object c) { if (c != null) try { Invoke(c, "Close"); } catch { } }
         private static void Dispose(object o) { if (o != null) try { Invoke(o, "Dispose"); } catch { } }
-        private static object Invoke(object o, string m, params object[] a) { return o.GetType().GetMethod(m, BindingFlags.Public | BindingFlags.Instance).Invoke(o, a); }
-        private static object GetProp(object o, string p) { return o.GetType().GetProperty(p, BindingFlags.Public | BindingFlags.Instance).GetValue(o); }
-        private static void SetProp(object o, string p, object v) { o.GetType().GetProperty(p, BindingFlags.Public | BindingFlags.Instance).SetValue(o, v); }
+        private static object Invoke(object o, string m, params object[] a)
+        {
+            Type t = o.GetType();
+            object[] args = a ?? Array.Empty<object>();
+            MethodInfo best = null;
+            int bestScore = -1;
+
+            foreach (MethodInfo candidate in t.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (!string.Equals(candidate.Name, m, StringComparison.Ordinal)) continue;
+                ParameterInfo[] ps = candidate.GetParameters();
+                if (ps.Length != args.Length) continue;
+
+                int score = 0;
+                bool compatible = true;
+                for (int i = 0; i < ps.Length; i++)
+                {
+                    Type pt = ps[i].ParameterType;
+                    if (pt.IsByRef) pt = pt.GetElementType();
+
+                    object arg = args[i];
+                    if (arg == null)
+                    {
+                        if (pt.IsValueType && Nullable.GetUnderlyingType(pt) == null)
+                        {
+                            compatible = false;
+                            break;
+                        }
+                        score += 1;
+                        continue;
+                    }
+
+                    Type at = arg.GetType();
+                    if (pt == at) score += 4;
+                    else if (pt.IsAssignableFrom(at)) score += 3;
+                    else if (pt == typeof(object)) score += 2;
+                    else
+                    {
+                        compatible = false;
+                        break;
+                    }
+                }
+
+                if (!compatible) continue;
+                if (score > bestScore)
+                {
+                    best = candidate;
+                    bestScore = score;
+                }
+            }
+
+            if (best == null)
+            {
+                throw new MissingMethodException(t.FullName, m);
+            }
+
+            return best.Invoke(o, args);
+        }
+        private static object GetProp(object o, string p)
+        {
+            PropertyInfo prop = FindProperty(o.GetType(), p);
+            if (prop == null)
+            {
+                throw new MissingMemberException(o.GetType().FullName, p);
+            }
+
+            return prop.GetValue(o);
+        }
+
+        private static void SetProp(object o, string p, object v)
+        {
+            PropertyInfo prop = FindProperty(o.GetType(), p);
+            if (prop == null || !prop.CanWrite)
+            {
+                throw new MissingMemberException(o.GetType().FullName, p);
+            }
+
+            prop.SetValue(o, v);
+        }
         private static string UtcNow() => DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
         private static object Db(object v) => v ?? DBNull.Value;
         private static int CvI(object v, int fb) { try { return v == null || v == DBNull.Value ? fb : Convert.ToInt32(v); } catch { return fb; } }
@@ -395,5 +494,60 @@ namespace DeliveryDriver.Quest
         private static int I(Dictionary<string, object> r, string k, int fb) => r.TryGetValue(k, out object v) ? CvI(v, fb) : fb;
         private static float F(Dictionary<string, object> r, string k, float fb) { try { return r.TryGetValue(k, out object v) && v != null && v != DBNull.Value ? Convert.ToSingle(v) : fb; } catch { return fb; } }
         private static T P<T>(string v, T fb) where T : struct => Enum.TryParse(v, true, out T p) ? p : fb;
+
+        private bool ValidateProvider()
+        {
+            object conn = null;
+            try
+            {
+                conn = Activator.CreateInstance(connType, "URI=file::memory:");
+                Invoke(conn, "Open");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[QuestDatabaseService] Provider validation failed: {FormatExceptionChain(ex)}");
+                return false;
+            }
+            finally
+            {
+                Close(conn);
+            }
+        }
+
+        private static string FormatExceptionChain(Exception ex)
+        {
+            Exception current = ex;
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            while (current != null)
+            {
+                if (sb.Length > 0) sb.Append(" -> ");
+                sb.Append(current.GetType().Name);
+                sb.Append(": ");
+                sb.Append(current.Message);
+                current = current.InnerException;
+            }
+
+            return sb.ToString();
+        }
+
+        private static PropertyInfo FindProperty(Type type, string name)
+        {
+            Type t = type;
+            while (t != null)
+            {
+                PropertyInfo prop = t.GetProperty(
+                    name,
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                if (prop != null)
+                {
+                    return prop;
+                }
+
+                t = t.BaseType;
+            }
+
+            return null;
+        }
     }
 }

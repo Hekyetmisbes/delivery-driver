@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections.Generic;
+using System.Text;
 
 /// <summary>
 /// Central manager for performance optimizations
@@ -122,10 +123,6 @@ public class PerformanceOptimizationManager : MonoBehaviour
             {
                 layerCullingMap[layerId] = layerCulling.distance;
             }
-            else
-            {
-                Debug.LogWarning($"[PerformanceOptimizationManager] Layer '{layerCulling.layerName}' not found in project");
-            }
         }
 
         // Apply culling distances to camera
@@ -140,6 +137,20 @@ public class PerformanceOptimizationManager : MonoBehaviour
         if (showDebugInfo)
         {
             Debug.Log($"[PerformanceOptimizationManager] Applied culling distances to {layerCullingMap.Count} layers");
+            StringBuilder missing = new StringBuilder();
+            foreach (var layerCulling in layerCullingDistances)
+            {
+                if (LayerMask.NameToLayer(layerCulling.layerName) < 0)
+                {
+                    if (missing.Length > 0) missing.Append(", ");
+                    missing.Append(layerCulling.layerName);
+                }
+            }
+
+            if (missing.Length > 0)
+            {
+                Debug.Log($"[PerformanceOptimizationManager] Missing layers skipped: {missing}");
+            }
         }
     }
 

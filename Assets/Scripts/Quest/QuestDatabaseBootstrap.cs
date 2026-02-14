@@ -104,7 +104,7 @@ namespace DeliveryDriver.Quest
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[QuestDatabaseBootstrap] Initialization exception: {ex.Message}");
+                Debug.LogError($"[QuestDatabaseBootstrap] Initialization exception: {FormatExceptionChain(ex)}");
                 return false;
             }
             finally
@@ -182,6 +182,35 @@ namespace DeliveryDriver.Quest
 
             onLoaded?.Invoke(File.ReadAllText(path));
             yield return null;
+        }
+
+        private static Exception UnwrapInvocationException(Exception ex)
+        {
+            Exception current = ex;
+            while (current is TargetInvocationException tie && tie.InnerException != null)
+            {
+                current = tie.InnerException;
+            }
+
+            return current;
+        }
+
+        private static string FormatExceptionChain(Exception ex)
+        {
+            Exception current = UnwrapInvocationException(ex);
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            int depth = 0;
+            while (current != null)
+            {
+                if (depth > 0) sb.Append("\n-- Inner -> ");
+                sb.Append(current.GetType().Name);
+                sb.Append(": ");
+                sb.Append(current.Message);
+                current = current.InnerException;
+                depth++;
+            }
+
+            return sb.ToString();
         }
     }
 }

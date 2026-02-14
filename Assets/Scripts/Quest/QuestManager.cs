@@ -381,57 +381,26 @@ namespace DeliveryDriver.Quest
                 playerLevel = PlayerProgressionManager.Instance.CurrentLevel;
             }
             
-            // Determine difficulty based on level (simple logic)
-            QuestDifficulty difficulty = QuestDifficulty.Easy;
-            if (GameSettings.Instance != null)
-            {
-                difficulty = GameSettings.Instance.ResolveQuestDifficulty(playerLevel);
-            }
-            else
-            {
-                if (playerLevel >= 5) difficulty = QuestDifficulty.Medium;
-                if (playerLevel >= 15) difficulty = QuestDifficulty.Hard;
-                if (playerLevel >= 30) difficulty = QuestDifficulty.Expert;
-            }
-
             for (int i = 0; i < count; i++)
             {
-                QuestData quest = null;
-                
-                // 50% chance to use procedural generation if not daily challenge
-                // or if database is missing/fails
-                bool useProcedural = UnityEngine.Random.value > 0.5f;
-
-                if (!useProcedural && questDatabase != null)
+                if (questDatabase == null)
                 {
-                     quest = questDatabase.GenerateRandomQuestForLevel(playerLevel);
-                     if (quest == null) quest = questDatabase.GetRandomQuest();
-                     
-                     if (quest != null)
-                     {
-                         // For template quests, we still need to assign locations
-                         quest.Status = QuestStatus.NotStarted;
-                         if (!AssignQuestLocations(quest))
-                         {
-                             quest = null; // Failed to assign locations
-                         }
-                     }
-                }
-                
-                if (quest == null)
-                {
-                    // Fallback to procedural generation (Task 9.2)
-                    // Vary difficulty slightly
-                    QuestDifficulty targetDiff = difficulty;
-                    float r = UnityEngine.Random.value;
-                    if (r < 0.2f && targetDiff > QuestDifficulty.Easy) targetDiff--;
-                    else if (r > 0.8f && targetDiff < QuestDifficulty.Expert) targetDiff++;
-                    
-                    quest = GenerateQuestByDifficulty(targetDiff);
+                    Debug.LogError("[QuestManager] QuestDatabase is not assigned. Available quest generation aborted.");
+                    break;
                 }
 
+                QuestData quest = questDatabase.GenerateRandomQuestForLevel(playerLevel);
                 if (quest == null)
                 {
+                    Debug.LogError($"[QuestManager] Could not fetch quest template from QuestDatabase for player level {playerLevel}. Fallback is disabled.");
+                    continue;
+                }
+
+                // For template quests, we still need to assign locations.
+                quest.Status = QuestStatus.NotStarted;
+                if (!AssignQuestLocations(quest))
+                {
+                    Debug.LogError($"[QuestManager] Quest template '{quest.QuestName}' could not be assigned runtime locations. Fallback is disabled.");
                     continue;
                 }
 
