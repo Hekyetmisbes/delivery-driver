@@ -4,7 +4,6 @@ using UnityEngine;
 using DeliveryDriver.Quest;
 using DeliveryDriver.City;
 using TrafficSystem;
-using Random = UnityEngine.Random;
 
 /// <summary>
 /// Manages delivery missions - spawning boxes and delivery points
@@ -304,8 +303,8 @@ public class DeliveryManager : MonoBehaviour
         int maxAttempts = 30;
         for (int i = 0; i < maxAttempts; i++)
         {
-            float x = Random.Range(spawnAreaMin.x, spawnAreaMax.x);
-            float z = Random.Range(spawnAreaMin.y, spawnAreaMax.y);
+            float x = UnityEngine.Random.Range(spawnAreaMin.x, spawnAreaMax.x);
+            float z = UnityEngine.Random.Range(spawnAreaMin.y, spawnAreaMax.y);
             Vector3 position = new Vector3(x, raycastStartHeight, z);
 
             // Raycast down to find ground
@@ -348,7 +347,7 @@ public class DeliveryManager : MonoBehaviour
         if (cachedPlayerTransform != null)
         {
             Vector3 playerPos = cachedPlayerTransform.position;
-            Vector3 offset = Random.insideUnitCircle * 20f;
+            Vector3 offset = UnityEngine.Random.insideUnitCircle * 20f;
             Vector3 fallbackPos = new Vector3(playerPos.x + offset.x, raycastStartHeight, playerPos.z + offset.y);
 
             if (Physics.Raycast(fallbackPos, Vector3.down, out RaycastHit hit, raycastMaxDistance, groundMask, QueryTriggerInteraction.Ignore))
@@ -419,7 +418,7 @@ public class DeliveryManager : MonoBehaviour
         }
 
         // Spawn box with slight rotation variation
-        Quaternion rotation = Quaternion.Euler(0, Random.Range(0f, 360f), 0);
+        Quaternion rotation = Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0);
         GameObject boxObj = Instantiate(boxPrefab, spawnPos, rotation);
 
         currentBox = boxObj.GetComponent<DeliveryBox>();
@@ -721,7 +720,7 @@ public class DeliveryManager : MonoBehaviour
         for (int i = 0; i < maxAttempts; i++)
         {
             Vector3 candidate = availableSpawnPoints.Count > 0
-                ? availableSpawnPoints[Random.Range(0, availableSpawnPoints.Count)]
+                ? availableSpawnPoints[UnityEngine.Random.Range(0, availableSpawnPoints.Count)]
                 : GetRandomGroundPosition();
 
             if (!IsValidSpawnPosition(candidate))
