@@ -90,4 +90,24 @@ INSERT OR IGNORE INTO quest_instance_stops (
 ) VALUES
 (1, 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', 1, 2, 2, 'Pending', 180, NULL, NULL);
 
+-- Step 2 (Live Ops) seed data
+INSERT OR IGNORE INTO quest_events (
+  event_id, quest_instance_id, player_id, event_type, event_time,
+  event_value_num, event_value_text, position_x, position_y, position_z, metadata_json
+) VALUES
+(1, 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', '11111111-1111-1111-1111-111111111111', 'QUEST_ACCEPTED', '2026-02-14 10:05:00', NULL, 'Quest accepted from board', 118.0, 0.0, 336.0, '{"source":"board"}'),
+(2, 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', '11111111-1111-1111-1111-111111111111', 'PICKUP_DONE', '2026-02-14 10:06:00', NULL, 'Cargo picked up', 120.0, 0.0, 340.0, '{"cargo":"Standard Box"}'),
+(3, 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', '11111111-1111-1111-1111-111111111111', 'TIME_WARNING', '2026-02-14 10:09:00', 60, 'One minute remaining warning', 260.0, 0.0, 280.0, '{"threshold_sec":60}');
+
+INSERT OR IGNORE INTO wallet_transactions (
+  tx_id, player_id, quest_instance_id, tx_type, amount, balance_after, created_at, description
+) VALUES
+(1, '11111111-1111-1111-1111-111111111111', NULL, 'REFUND', 100, 1500, '2026-02-14 09:50:00', 'Initial test credit');
+
+INSERT OR IGNORE INTO player_daily_stats (
+  player_id, stat_date, quests_completed, quests_failed, money_earned,
+  distance_traveled_m, avg_delivery_time_sec, fastest_delivery_sec, fragile_undamaged_count
+) VALUES
+('11111111-1111-1111-1111-111111111111', '2026-02-14', 2, 0, 340, 5600.0, 215.0, 180.0, 1);
+
 COMMIT;

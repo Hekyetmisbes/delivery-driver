@@ -37,6 +37,8 @@
 # Gradle cache directory
 .gradle/
 
+QUEST_DATABASE_GUIDE.md
+
 # JetBrains IDE
 .idea/
 

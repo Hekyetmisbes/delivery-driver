@@ -115,6 +115,45 @@ CREATE TABLE IF NOT EXISTS quest_instance_stops (
   UNIQUE (quest_instance_id, stop_order)
 );
 
+-- Step 2 (Live Ops): Analytics and economy tables
+CREATE TABLE IF NOT EXISTS quest_events (
+  event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  quest_instance_id TEXT NOT NULL REFERENCES quest_instances(quest_instance_id) ON DELETE CASCADE,
+  player_id TEXT NOT NULL REFERENCES players(player_id),
+  event_type TEXT NOT NULL,
+  event_time TEXT NOT NULL DEFAULT (datetime('now')),
+  event_value_num REAL,
+  event_value_text TEXT,
+  position_x REAL,
+  position_y REAL,
+  position_z REAL,
+  metadata_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS wallet_transactions (
+  tx_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id TEXT NOT NULL REFERENCES players(player_id),
+  quest_instance_id TEXT REFERENCES quest_instances(quest_instance_id) ON DELETE SET NULL,
+  tx_type TEXT NOT NULL CHECK (tx_type IN ('QUEST_REWARD', 'BONUS', 'PENALTY', 'PURCHASE', 'REFUND')),
+  amount INTEGER NOT NULL,
+  balance_after INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  description TEXT
+);
+
+CREATE TABLE IF NOT EXISTS player_daily_stats (
+  player_id TEXT NOT NULL REFERENCES players(player_id) ON DELETE CASCADE,
+  stat_date TEXT NOT NULL,
+  quests_completed INTEGER NOT NULL DEFAULT 0 CHECK (quests_completed >= 0),
+  quests_failed INTEGER NOT NULL DEFAULT 0 CHECK (quests_failed >= 0),
+  money_earned INTEGER NOT NULL DEFAULT 0,
+  distance_traveled_m REAL NOT NULL DEFAULT 0 CHECK (distance_traveled_m >= 0),
+  avg_delivery_time_sec REAL NOT NULL DEFAULT 0 CHECK (avg_delivery_time_sec >= 0),
+  fastest_delivery_sec REAL NOT NULL DEFAULT 0 CHECK (fastest_delivery_sec >= 0),
+  fragile_undamaged_count INTEGER NOT NULL DEFAULT 0 CHECK (fragile_undamaged_count >= 0),
+  PRIMARY KEY (player_id, stat_date)
+);
+
 CREATE INDEX IF NOT EXISTS idx_quest_instances_player_status
   ON quest_instances(player_id, quest_status);
 
@@ -126,6 +165,12 @@ CREATE INDEX IF NOT EXISTS idx_quest_instances_template
 
 CREATE INDEX IF NOT EXISTS idx_quest_stops_instance_order
   ON quest_instance_stops(quest_instance_id, stop_order);
+
+CREATE INDEX IF NOT EXISTS idx_quest_events_instance_time
+  ON quest_events(quest_instance_id, event_time);
+
+CREATE INDEX IF NOT EXISTS idx_wallet_tx_player_created
+  ON wallet_transactions(player_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_quest_locations_neighborhood_enabled
   ON quest_locations(neighborhood_id, is_enabled);
