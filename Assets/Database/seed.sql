@@ -110,4 +110,34 @@ INSERT OR IGNORE INTO player_daily_stats (
 ) VALUES
 ('11111111-1111-1111-1111-111111111111', '2026-02-14', 2, 0, 340, 5600.0, 215.0, 180.0, 1);
 
+-- Step 3 (Advanced) seed data
+INSERT OR IGNORE INTO pricing_rules (
+  rule_id, neighborhood_id, hour_start, hour_end, difficulty, min_distance_m, max_distance_m,
+  reward_multiplier, time_limit_multiplier, traffic_multiplier, is_active, valid_from, valid_to
+) VALUES
+(1, 1, 7, 10, 'Medium', 0, 5000, 1.20, 0.95, 1.15, 1, '2026-02-01 00:00:00', NULL),
+(2, 3, 17, 20, 'Hard', 1000, NULL, 1.35, 0.90, 1.30, 1, '2026-02-01 00:00:00', NULL);
+
+INSERT OR IGNORE INTO seasonal_events (
+  event_id, event_key, event_name, description, starts_at, ends_at, reward_multiplier, is_active
+) VALUES
+(1, 'winter_courier_2026', 'Winter Courier', 'Limited-time winter delivery contracts.', '2026-12-01 00:00:00', '2026-12-31 23:59:59', 1.25, 1);
+
+INSERT OR IGNORE INTO seasonal_event_templates (
+  event_id, template_id, spawn_weight
+) VALUES
+(1, 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 120),
+(1, 'dddddddd-dddd-dddd-dddd-dddddddddddd', 140);
+
+INSERT OR IGNORE INTO leaderboard_snapshots (
+  snapshot_id, board_key, board_period, period_start, period_end, player_id,
+  score_value, rank_position, metadata_json
+) VALUES
+(1, 'delivery_score', 'weekly', '2026-02-09 00:00:00', '2026-02-15 23:59:59', '11111111-1111-1111-1111-111111111111', 1240, 1, '{"completed_quests":8}');
+
+INSERT OR IGNORE INTO anti_cheat_flags (
+  flag_id, player_id, quest_instance_id, source_event_id, flag_type, severity, confidence, detected_at, status, notes
+) VALUES
+(1, '11111111-1111-1111-1111-111111111111', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', 3, 'ImpossibleCompletionTime', 2, 0.72, '2026-02-14 10:09:05', 'Reviewed', 'Telemetry spike reviewed; accepted as edge case.');
+
 COMMIT;

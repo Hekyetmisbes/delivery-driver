@@ -154,6 +154,68 @@ CREATE TABLE IF NOT EXISTS player_daily_stats (
   PRIMARY KEY (player_id, stat_date)
 );
 
+-- Step 3 (Advanced): Dynamic pricing, seasonal events, leaderboard, anti-cheat
+CREATE TABLE IF NOT EXISTS pricing_rules (
+  rule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  neighborhood_id INTEGER REFERENCES neighborhoods(neighborhood_id),
+  hour_start INTEGER NOT NULL CHECK (hour_start BETWEEN 0 AND 23),
+  hour_end INTEGER NOT NULL CHECK (hour_end BETWEEN 0 AND 23),
+  difficulty TEXT CHECK (difficulty IN ('Easy', 'Medium', 'Hard', 'Expert')),
+  min_distance_m REAL NOT NULL DEFAULT 0 CHECK (min_distance_m >= 0),
+  max_distance_m REAL,
+  reward_multiplier REAL NOT NULL DEFAULT 1.0 CHECK (reward_multiplier > 0),
+  time_limit_multiplier REAL NOT NULL DEFAULT 1.0 CHECK (time_limit_multiplier > 0),
+  traffic_multiplier REAL NOT NULL DEFAULT 1.0 CHECK (traffic_multiplier > 0),
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+  valid_from TEXT,
+  valid_to TEXT,
+  CHECK (max_distance_m IS NULL OR max_distance_m >= min_distance_m)
+);
+
+CREATE TABLE IF NOT EXISTS seasonal_events (
+  event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_key TEXT NOT NULL UNIQUE,
+  event_name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  starts_at TEXT NOT NULL,
+  ends_at TEXT NOT NULL,
+  reward_multiplier REAL NOT NULL DEFAULT 1.0 CHECK (reward_multiplier > 0),
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+  CHECK (ends_at > starts_at)
+);
+
+CREATE TABLE IF NOT EXISTS seasonal_event_templates (
+  event_id INTEGER NOT NULL REFERENCES seasonal_events(event_id) ON DELETE CASCADE,
+  template_id TEXT NOT NULL REFERENCES quest_templates(template_id) ON DELETE CASCADE,
+  spawn_weight INTEGER NOT NULL DEFAULT 100 CHECK (spawn_weight > 0),
+  PRIMARY KEY (event_id, template_id)
+);
+
+CREATE TABLE IF NOT EXISTS leaderboard_snapshots (
+  snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  board_key TEXT NOT NULL,
+  board_period TEXT NOT NULL CHECK (board_period IN ('daily', 'weekly', 'seasonal', 'alltime')),
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  player_id TEXT NOT NULL REFERENCES players(player_id),
+  score_value REAL NOT NULL DEFAULT 0,
+  rank_position INTEGER NOT NULL CHECK (rank_position >= 1),
+  metadata_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS anti_cheat_flags (
+  flag_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id TEXT NOT NULL REFERENCES players(player_id),
+  quest_instance_id TEXT REFERENCES quest_instances(quest_instance_id) ON DELETE SET NULL,
+  source_event_id INTEGER REFERENCES quest_events(event_id) ON DELETE SET NULL,
+  flag_type TEXT NOT NULL CHECK (flag_type IN ('SpeedHack', 'Teleport', 'ImpossibleCompletionTime', 'EconomyAnomaly', 'CollisionTamper')),
+  severity INTEGER NOT NULL DEFAULT 1 CHECK (severity BETWEEN 1 AND 5),
+  confidence REAL NOT NULL DEFAULT 0.5 CHECK (confidence BETWEEN 0 AND 1),
+  detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+  status TEXT NOT NULL DEFAULT 'Open' CHECK (status IN ('Open', 'Reviewed', 'Ignored', 'Actioned')),
+  notes TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_quest_instances_player_status
   ON quest_instances(player_id, quest_status);
 
@@ -171,6 +233,18 @@ CREATE INDEX IF NOT EXISTS idx_quest_events_instance_time
 
 CREATE INDEX IF NOT EXISTS idx_wallet_tx_player_created
   ON wallet_transactions(player_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_pricing_rules_active_scope
+  ON pricing_rules(is_active, neighborhood_id, difficulty, hour_start, hour_end);
+
+CREATE INDEX IF NOT EXISTS idx_seasonal_events_active_window
+  ON seasonal_events(is_active, starts_at, ends_at);
+
+CREATE INDEX IF NOT EXISTS idx_leaderboard_lookup
+  ON leaderboard_snapshots(board_key, board_period, period_start, rank_position);
+
+CREATE INDEX IF NOT EXISTS idx_anticheat_player_status
+  ON anti_cheat_flags(player_id, status, detected_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_quest_locations_neighborhood_enabled
   ON quest_locations(neighborhood_id, is_enabled);
