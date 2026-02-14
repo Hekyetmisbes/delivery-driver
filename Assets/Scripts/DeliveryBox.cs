@@ -24,6 +24,8 @@ public class DeliveryBox : MonoBehaviour
     private Rigidbody rb;
     private MeshRenderer[] meshRenderers;
     private Vector3 spawnPosition;
+    private Transform cachedPlayerTransform;
+    private DeliveryManager cachedDeliveryManager;
 
     public bool IsPickedUp => isPickedUp;
 
@@ -32,6 +34,10 @@ public class DeliveryBox : MonoBehaviour
         rb = GetComponent<Rigidbody>();
         meshRenderers = GetComponentsInChildren<MeshRenderer>();
         spawnPosition = transform.position;
+
+        // Cache references once
+        ResolvePlayerTransform();
+        cachedDeliveryManager = FindFirstObjectByType<DeliveryManager>();
 
         // Setup rigidbody - start as kinematic to prevent falling during spawn
         if (rb != null)
@@ -102,22 +108,32 @@ public class DeliveryBox : MonoBehaviour
         }
     }
 
-    private void CheckForPlayer()
+    private void ResolvePlayerTransform()
     {
-        // Find player
         GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
-        if (playerObj == null)
-        {
-            CarController car = FindFirstObjectByType<CarController>();
-            if (car != null) playerObj = car.gameObject;
-        }
-
         if (playerObj != null)
         {
-            float distance = Vector3.Distance(transform.position, playerObj.transform.position);
+            cachedPlayerTransform = playerObj.transform;
+            return;
+        }
+
+        CarController car = FindFirstObjectByType<CarController>();
+        if (car != null) cachedPlayerTransform = car.transform;
+    }
+
+    private void CheckForPlayer()
+    {
+        if (cachedPlayerTransform == null)
+        {
+            ResolvePlayerTransform();
+        }
+
+        if (cachedPlayerTransform != null)
+        {
+            float distance = Vector3.Distance(transform.position, cachedPlayerTransform.position);
             if (distance < pickupRadius)
             {
-                PickupBox(playerObj.transform);
+                PickupBox(cachedPlayerTransform);
             }
         }
     }
@@ -144,10 +160,11 @@ public class DeliveryBox : MonoBehaviour
         gameObject.SetActive(false);
 
         // Notify delivery manager
-        DeliveryManager deliveryManager = FindFirstObjectByType<DeliveryManager>();
-        if (deliveryManager != null)
+        if (cachedDeliveryManager == null)
+            cachedDeliveryManager = FindFirstObjectByType<DeliveryManager>();
+        if (cachedDeliveryManager != null)
         {
-            deliveryManager.OnBoxPickedUp(this);
+            cachedDeliveryManager.OnBoxPickedUp(this);
         }
 
         Debug.Log("[DeliveryBox] Box picked up by player!");
@@ -161,10 +178,11 @@ public class DeliveryBox : MonoBehaviour
         if (!isPickedUp) return;
 
         // Notify delivery manager
-        DeliveryManager deliveryManager = FindFirstObjectByType<DeliveryManager>();
-        if (deliveryManager != null)
+        if (cachedDeliveryManager == null)
+            cachedDeliveryManager = FindFirstObjectByType<DeliveryManager>();
+        if (cachedDeliveryManager != null)
         {
-            deliveryManager.OnBoxDelivered(this);
+            cachedDeliveryManager.OnBoxDelivered(this);
         }
 
         // Destroy box

@@ -57,6 +57,8 @@ public class DeliveryManager : MonoBehaviour
     private List<Vector3> availableSpawnPoints = new List<Vector3>();
     private DeliveryUI deliveryUI;
     private QuestData currentDeliveryQuest;
+    private Transform cachedPlayerTransform;
+    private QuestCompleteUI cachedQuestCompleteUI;
 
     public bool IsDeliveryActive => isDeliveryActive;
     public bool HasBox => currentBox != null;
@@ -93,6 +95,26 @@ public class DeliveryManager : MonoBehaviour
 
         GenerateSpawnPoints();
         SpawnNewBox();
+
+        // Cache player and UI references after scene is ready
+        ResolvePlayerTransform();
+        cachedQuestCompleteUI = FindFirstObjectByType<QuestCompleteUI>();
+    }
+
+    private void ResolvePlayerTransform()
+    {
+        CarController car = FindFirstObjectByType<CarController>();
+        if (car != null)
+        {
+            cachedPlayerTransform = car.transform;
+            return;
+        }
+
+        GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+        if (playerObj != null)
+        {
+            cachedPlayerTransform = playerObj.transform;
+        }
     }
 
     private void Update()
@@ -100,16 +122,10 @@ public class DeliveryManager : MonoBehaviour
         // Check delivery proximity
         if (isDeliveryActive && currentBox != null && currentBox.IsPickedUp)
         {
-            Transform player = null;
-            CarController car = FindFirstObjectByType<CarController>();
-            if (car != null)
-            {
-                player = car.transform;
-            }
-            else
-            {
-                player = GameObject.FindGameObjectWithTag("Player")?.transform;
-            }
+            if (cachedPlayerTransform == null)
+                ResolvePlayerTransform();
+
+            Transform player = cachedPlayerTransform;
 
             if (player != null)
             {
@@ -228,16 +244,12 @@ public class DeliveryManager : MonoBehaviour
         }
 
         // Fallback - use player position if available
-        GameObject player = GameObject.FindGameObjectWithTag("Player");
-        if (player == null)
-        {
-            CarController car = FindFirstObjectByType<CarController>();
-            if (car != null) player = car.gameObject;
-        }
+        if (cachedPlayerTransform == null)
+            ResolvePlayerTransform();
 
-        if (player != null)
+        if (cachedPlayerTransform != null)
         {
-            Vector3 playerPos = player.transform.position;
+            Vector3 playerPos = cachedPlayerTransform.position;
             Vector3 offset = Random.insideUnitCircle * 20f;
             Vector3 fallbackPos = new Vector3(playerPos.x + offset.x, raycastStartHeight, playerPos.z + offset.y);
 
@@ -932,7 +944,9 @@ public class DeliveryManager : MonoBehaviour
         // Try to find and use the quest complete UI
         if (QuestUIManager.Instance != null)
         {
-            QuestCompleteUI questCompleteUI = FindFirstObjectByType<QuestCompleteUI>();
+            if (cachedQuestCompleteUI == null)
+                cachedQuestCompleteUI = FindFirstObjectByType<QuestCompleteUI>();
+            QuestCompleteUI questCompleteUI = cachedQuestCompleteUI;
             if (questCompleteUI != null)
             {
                 int reward = QuestManager.Instance != null ? QuestManager.Instance.LastCompletionReward : 0;

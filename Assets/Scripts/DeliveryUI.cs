@@ -15,6 +15,7 @@ public class DeliveryUI : MonoBehaviour
 
     private DeliveryManager deliveryManager;
     private Transform playerTransform;
+    private float nextPlayerResolveTime;
 
     private void Start()
     {
@@ -35,8 +36,9 @@ public class DeliveryUI : MonoBehaviour
             return;
         }
 
-        if (playerTransform == null)
+        if (playerTransform == null && Time.time >= nextPlayerResolveTime)
         {
+            nextPlayerResolveTime = Time.time + 1f;
             ResolvePlayerTransform();
         }
 
