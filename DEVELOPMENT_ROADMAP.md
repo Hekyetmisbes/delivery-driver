@@ -30,9 +30,9 @@ Not: Bu bölüm "oynanabilirlik" etkisi en yüksek olan görevleri içerir.
 
 ## 2) İlerleme Sistemi (Para, Seviye, Kilit Açma)
 ### 2.1 Oyuncu progresyonu
-- [ ] **Sürücü seviyesi:** Teslimat performansına göre XP.
-- [ ] **Seviye ödülleri:** Yeni görev türü, yeni bölge, yeni araç parçası açılması.
-- [ ] **Yetenek ağacı (hafif):** Yakıt tasarrufu, kargo dayanıklılığı, rota okuma yardımı.
+- [x] **Sürücü seviyesi:** Teslimat performansına göre XP.
+- [x] **Seviye ödülleri:** Yeni görev türü, yeni bölge, yeni araç parçası açılması.
+- [x] **Yetenek ağacı (hafif):** Yakıt tasarrufu, kargo dayanıklılığı, rota okuma yardımı.
 
 ### 2.2 Garaj ve araç geliştirme
 - [ ] **Garaj UI:** Motor, fren, yol tutuş, süspansiyon yükseltmeleri.
@@ -99,7 +99,7 @@ Not: Minimap ve quest UI zaten mevcut; odak noktası kalite artırımıdır.
 - [x] Sonuç ekranını ve net geri bildirimi ekle.
 
 ### Faz 2 (Hafta 3-4) - Progresyon ve ekonomi
-- [ ] Seviye + XP sistemi.
+- [x] Seviye + XP sistemi.
 - [ ] Garaj yükseltmeleri (ilk sürüm).
 - [ ] Gelir-gider dengesini ayarla.
 

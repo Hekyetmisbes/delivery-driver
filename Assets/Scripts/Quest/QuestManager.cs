@@ -722,6 +722,8 @@ namespace DeliveryDriver.Quest
                 PlayerProgressionManager.Instance.RecordQuestCompletion(quest, finalReward, completionTimeSeconds);
             }
 
+            DriverProgressionSystem.Instance?.OnQuestCompleted(quest, finalReward, completionTimeSeconds);
+
             Debug.Log($"[QuestManager] Quest completed with {quest.Rating} rank! Reward={finalReward}, Penalty={payout.TotalPenalty}, Streak={consecutiveSuccesses} ({streakMultiplier:F2}x)");
 
             // Task 10.1: Play success sound
@@ -1304,6 +1306,10 @@ namespace DeliveryDriver.Quest
 #endif
             {
                 float damage = (force - collisionDamageThreshold) / collisionDamageDivider;
+                if (DriverProgressionSystem.Instance != null)
+                {
+                    damage *= DriverProgressionSystem.Instance.GetCargoDamageMultiplier();
+                }
                 currentQuest.Cargo.TakeDamage(damage);
                 cargoVisual?.PlayDamageEffect();
                 PlayQuestClip(damageClip);
@@ -1956,7 +1962,13 @@ namespace DeliveryDriver.Quest
                 hardBrakes = Mathf.Max(0, quest.HardBrakeCount);
             }
 
-            return SumProgressivePenalty(hardBrakes, hardBrakePenaltyBase, hardBrakePenaltyStep);
+            int penalty = SumProgressivePenalty(hardBrakes, hardBrakePenaltyBase, hardBrakePenaltyStep);
+            if (DriverProgressionSystem.Instance != null)
+            {
+                penalty = Mathf.RoundToInt(penalty * DriverProgressionSystem.Instance.GetRoutePenaltyMultiplier());
+            }
+
+            return penalty;
         }
 
         private int CalculateDelayPenalty(QuestData quest, int grossReward, bool useRuntimeState)
@@ -1984,7 +1996,13 @@ namespace DeliveryDriver.Quest
             }
 
             float missingRatio = (delayPenaltyStartsAtRemainingRatio - remainingRatio) / Mathf.Max(0.01f, delayPenaltyStartsAtRemainingRatio);
-            return Mathf.RoundToInt(maxDelayPenalty * Mathf.Clamp01(missingRatio));
+            int penalty = Mathf.RoundToInt(maxDelayPenalty * Mathf.Clamp01(missingRatio));
+            if (DriverProgressionSystem.Instance != null)
+            {
+                penalty = Mathf.RoundToInt(penalty * DriverProgressionSystem.Instance.GetRoutePenaltyMultiplier());
+            }
+
+            return penalty;
         }
 
         private int CalculateCargoDamagePenalty(QuestData quest, bool useRuntimeState)
@@ -2085,7 +2103,12 @@ namespace DeliveryDriver.Quest
             // Try to use PlayerProgressionManager directly via singleton
             if (PlayerProgressionManager.Instance != null)
             {
-                PlayerProgressionManager.Instance.AwardMoney(reward);
+                int fuelRebate = DriverProgressionSystem.Instance != null
+                    ? DriverProgressionSystem.Instance.CalculateFuelEfficiencyRebate(quest)
+                    : 0;
+                int totalMoneyAward = reward + Mathf.Max(0, fuelRebate);
+
+                PlayerProgressionManager.Instance.AwardMoney(totalMoneyAward);
                 PlayerProgressionManager.Instance.AwardXP(quest.XPReward);
                 PlayerProgressionManager.Instance.IncrementQuestsCompleted();
                 PlayerProgressionManager.Instance.AddDistanceTraveled(quest.TotalDistanceTraveled);
@@ -2463,6 +2486,12 @@ namespace DeliveryDriver.Quest
         /// </summary>
         public QuestData GenerateMultiStopQuest(int stopCount, QuestDifficulty difficulty)
         {
+            if (DriverProgressionSystem.Instance != null &&
+                !DriverProgressionSystem.Instance.IsQuestTypeUnlocked(QuestType.MultiStopDelivery))
+            {
+                return GenerateQuestByDifficulty(difficulty);
+            }
+
             if (stopCount < 2 || stopCount > 4)
             {
                 Debug.LogWarning($"[QuestManager] Invalid stop count {stopCount}. Must be 2-4.");
@@ -2646,6 +2675,12 @@ namespace DeliveryDriver.Quest
         /// </summary>
         public QuestData GenerateExpressDelivery()
         {
+            if (DriverProgressionSystem.Instance != null &&
+                !DriverProgressionSystem.Instance.IsQuestTypeUnlocked(QuestType.ExpressDelivery))
+            {
+                return GenerateQuestByDifficulty(QuestDifficulty.Medium);
+            }
+
             // Pick difficulty weighted toward medium/hard
             QuestDifficulty difficulty = UnityEngine.Random.value < 0.5f ? QuestDifficulty.Medium : QuestDifficulty.Hard;
 
@@ -2744,6 +2779,12 @@ namespace DeliveryDriver.Quest
         /// </summary>
         public QuestData GenerateFragileDelivery()
         {
+            if (DriverProgressionSystem.Instance != null &&
+                !DriverProgressionSystem.Instance.IsQuestTypeUnlocked(QuestType.FragileDelivery))
+            {
+                return GenerateQuestByDifficulty(QuestDifficulty.Medium);
+            }
+
             // Pick difficulty
             QuestDifficulty difficulty = UnityEngine.Random.value < 0.5f ? QuestDifficulty.Easy : QuestDifficulty.Medium;
 
@@ -2933,6 +2974,12 @@ namespace DeliveryDriver.Quest
         public QuestData GenerateRandomQuestWithTypes(QuestDifficulty difficulty)
         {
             float typeRoll = UnityEngine.Random.value;
+            bool expressUnlocked = DriverProgressionSystem.Instance == null ||
+                                   DriverProgressionSystem.Instance.IsQuestTypeUnlocked(QuestType.ExpressDelivery);
+            bool fragileUnlocked = DriverProgressionSystem.Instance == null ||
+                                   DriverProgressionSystem.Instance.IsQuestTypeUnlocked(QuestType.FragileDelivery);
+            bool multiStopUnlocked = DriverProgressionSystem.Instance == null ||
+                                     DriverProgressionSystem.Instance.IsQuestTypeUnlocked(QuestType.MultiStopDelivery);
 
             // Quest type selection logic:
             // 60% Standard Delivery
@@ -2945,22 +2992,24 @@ namespace DeliveryDriver.Quest
                 // Standard Delivery (use existing GenerateQuestByDifficulty)
                 return GenerateQuestByDifficulty(difficulty);
             }
-            else if (typeRoll < 0.80f)
+            else if (typeRoll < 0.80f && expressUnlocked)
             {
                 // Express Delivery (20%)
                 return GenerateExpressDelivery();
             }
-            else if (typeRoll < 0.95f)
+            else if (typeRoll < 0.95f && fragileUnlocked)
             {
                 // Fragile Delivery (15%)
                 return GenerateFragileDelivery();
             }
-            else
+            else if (multiStopUnlocked)
             {
                 // Multi-Stop Delivery (5%)
                 int stopCount = UnityEngine.Random.Range(2, 4); // 2-3 stops
                 return GenerateMultiStopQuest(stopCount, difficulty);
             }
+
+            return GenerateQuestByDifficulty(difficulty);
         }
 
         #endregion
