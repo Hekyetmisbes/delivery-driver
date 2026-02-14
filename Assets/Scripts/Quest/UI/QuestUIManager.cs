@@ -17,11 +17,9 @@ namespace DeliveryDriver.Quest.UI
 
         [Header("Player")]
         [SerializeField] private Transform playerTransform;
-        [SerializeField] private float distanceUpdateThresholdMeters = 1f;
 
         private QuestManager questManager;
         private bool isSubscribed;
-        private float lastDistanceSqr = -1f;
         private QuestLocation lastObjective;
 
         private void Awake()
@@ -90,8 +88,15 @@ namespace DeliveryDriver.Quest.UI
                 ResolvePlayerTransform();
             }
 
-            UpdateActiveQuestDistance(questManager.CurrentQuest);
-            UpdateCargoHealth(questManager.CurrentQuest);
+            QuestData currentQuest = questManager.CurrentQuest;
+
+            if (activeQuestUI != null)
+            {
+                activeQuestUI.UpdateTimer(currentQuest.TimeRemaining, currentQuest.TimeLimit);
+            }
+
+            UpdateActiveQuestDistance(currentQuest);
+            UpdateCargoHealth(currentQuest);
         }
 
         private void HandleQuestListToggleInput()
@@ -179,7 +184,6 @@ namespace DeliveryDriver.Quest.UI
             {
                 activeQuestUI.Show();
                 activeQuestUI.UpdateQuestDisplay(quest);
-                lastDistanceSqr = -1f;
                 lastObjective = null;
                 UpdateActiveQuestDistance(quest);
                 UpdateCargoHealth(quest);
@@ -240,16 +244,16 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            if (questManager != null && questManager.PlayerTransform != null)
-            {
-                playerTransform = questManager.PlayerTransform;
-                return;
-            }
-
             CarController controller = FindAnyObjectByType<CarController>();
             if (controller != null)
             {
                 playerTransform = controller.transform;
+                return;
+            }
+
+            if (questManager != null && questManager.PlayerTransform != null)
+            {
+                playerTransform = questManager.PlayerTransform;
                 return;
             }
 
@@ -287,22 +291,15 @@ namespace DeliveryDriver.Quest.UI
             if (target == null)
             {
                 activeQuestUI.UpdateDistance(0f);
-                lastDistanceSqr = -1f;
                 lastObjective = null;
                 return;
             }
 
             Vector3 delta = playerTransform.position - target.Position;
             float distanceSqr = delta.sqrMagnitude;
-            float thresholdSqr = distanceUpdateThresholdMeters * distanceUpdateThresholdMeters;
-
-            if (target != lastObjective || lastDistanceSqr < 0f || Mathf.Abs(distanceSqr - lastDistanceSqr) >= thresholdSqr)
-            {
-                float distance = Mathf.Sqrt(distanceSqr);
-                activeQuestUI.UpdateDistance(distance);
-                lastDistanceSqr = distanceSqr;
-                lastObjective = target;
-            }
+            float distance = Mathf.Sqrt(distanceSqr);
+            activeQuestUI.UpdateDistance(distance);
+            lastObjective = target;
         }
 
         private void UpdateCargoHealth(QuestData quest)

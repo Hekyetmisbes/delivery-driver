@@ -19,15 +19,7 @@ public class DeliveryUI : MonoBehaviour
     private void Start()
     {
         deliveryManager = FindFirstObjectByType<DeliveryManager>();
-
-        // Find player
-        GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
-        if (playerObj == null)
-        {
-            CarController car = FindFirstObjectByType<CarController>();
-            if (car != null) playerObj = car.gameObject;
-        }
-        if (playerObj != null) playerTransform = playerObj.transform;
+        ResolvePlayerTransform();
 
         // Hide panel initially
         if (deliveryPanel != null)
@@ -38,9 +30,38 @@ public class DeliveryUI : MonoBehaviour
 
     private void Update()
     {
-        if (deliveryManager == null || playerTransform == null) return;
+        if (deliveryManager == null)
+        {
+            return;
+        }
+
+        if (playerTransform == null)
+        {
+            ResolvePlayerTransform();
+        }
+
+        if (playerTransform == null)
+        {
+            return;
+        }
 
         UpdateUI();
+    }
+
+    private void ResolvePlayerTransform()
+    {
+        CarController car = FindFirstObjectByType<CarController>();
+        if (car != null)
+        {
+            playerTransform = car.transform;
+            return;
+        }
+
+        GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+        if (playerObj != null)
+        {
+            playerTransform = playerObj.transform;
+        }
     }
 
     private void UpdateUI()

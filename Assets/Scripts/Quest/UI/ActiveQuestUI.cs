@@ -2,6 +2,7 @@ using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using DeliveryDriver.Quest;
 
 namespace DeliveryDriver.Quest.UI
 {
@@ -24,10 +25,52 @@ namespace DeliveryDriver.Quest.UI
         private float lastCargoHealth = -1f;
         private bool lastCargoPanelActive = false;
         private readonly StringBuilder objectiveBuilder = new StringBuilder(64);
+        private QuestManager questManager;
+        private Transform playerTransform;
+        private bool hasLoggedRuntimeUpdater;
 
         private void Awake()
         {
             AutoBindTextReferences();
+            questManager = QuestManager.Instance;
+        }
+
+        private void Update()
+        {
+            if (currentQuest == null)
+            {
+                return;
+            }
+
+            UpdateTimer(currentQuest.TimeRemaining, currentQuest.TimeLimit);
+
+            if (playerTransform == null)
+            {
+                ResolvePlayerTransform();
+            }
+
+            if (playerTransform == null)
+            {
+                return;
+            }
+
+            QuestLocation objective = GetCurrentObjective(currentQuest);
+            if (objective == null)
+            {
+                UpdateDistance(0f);
+                return;
+            }
+
+            float distance = Vector3.Distance(playerTransform.position, objective.Position);
+            UpdateDistance(distance);
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (!hasLoggedRuntimeUpdater)
+            {
+                hasLoggedRuntimeUpdater = true;
+                Debug.Log($"[ActiveQuestUI] Runtime update active. Player='{playerTransform.name}', Distance={distance:F1}, Time={currentQuest.TimeRemaining:F1}");
+            }
+#endif
         }
 
         public void UpdateQuestDisplay(QuestData quest)
@@ -220,6 +263,21 @@ namespace DeliveryDriver.Quest.UI
             return quest.DeliveryLocations[index];
         }
 
+        private static QuestLocation GetCurrentObjective(QuestData quest)
+        {
+            if (quest == null)
+            {
+                return null;
+            }
+
+            if (!quest.HasPickedUpCargo)
+            {
+                return quest.PickupLocation;
+            }
+
+            return GetCurrentDeliveryLocation(quest);
+        }
+
         private static string FormatTime(int timeSeconds)
         {
             int minutes = Mathf.Max(0, Mathf.FloorToInt(timeSeconds / 60f));
@@ -288,6 +346,33 @@ namespace DeliveryDriver.Quest.UI
             }
 
             return target.GetComponent<TextMeshProUGUI>();
+        }
+
+        private void ResolvePlayerTransform()
+        {
+            CarController car = FindAnyObjectByType<CarController>();
+            if (car != null)
+            {
+                playerTransform = car.transform;
+                return;
+            }
+
+            if (questManager == null)
+            {
+                questManager = QuestManager.Instance;
+            }
+
+            if (questManager != null && questManager.PlayerTransform != null)
+            {
+                playerTransform = questManager.PlayerTransform;
+                return;
+            }
+
+            GameObject taggedPlayer = GameObject.FindGameObjectWithTag("Player");
+            if (taggedPlayer != null)
+            {
+                playerTransform = taggedPlayer.transform;
+            }
         }
     }
 }

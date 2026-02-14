@@ -242,6 +242,19 @@ namespace DeliveryDriver.Quest
                 yield return null;
             }
 
+            bool hasRuntimeQuestState = currentQuest != null || activeQuests.Count > 0 || availableQuests.Count > 0;
+            if (hasRuntimeQuestState)
+            {
+                Debug.Log("[QuestManager] Skipping startup save/quest initialization because runtime quest state already exists.");
+
+                if (IsRoadGraphReady())
+                {
+                    CheckDailyChallenge();
+                }
+
+                yield break;
+            }
+
             if (SaveManager.Instance != null)
             {
                 GameSaveData saveData = SaveManager.Instance.LoadGame();
@@ -581,6 +594,14 @@ namespace DeliveryDriver.Quest
             {
                 AssignQuestLocations(quest);
             }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (debugInfiniteTime)
+            {
+                debugInfiniteTime = false;
+                Debug.Log("[QuestManager] Debug infinite time auto-disabled on quest start.");
+            }
+#endif
 
             quest.StartQuest();
             ClearAllZones();
@@ -2721,6 +2742,20 @@ namespace DeliveryDriver.Quest
                 Debug.LogError("[QuestManager] Cannot start null quest");
                 return;
             }
+
+            if (startupInitCoroutine != null)
+            {
+                StopCoroutine(startupInitCoroutine);
+                startupInitCoroutine = null;
+            }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (debugInfiniteTime)
+            {
+                debugInfiniteTime = false;
+                Debug.Log("[QuestManager] Debug infinite time auto-disabled on external quest start.");
+            }
+#endif
 
             // Set as current quest
             currentQuest = quest;

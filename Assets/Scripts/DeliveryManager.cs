@@ -100,12 +100,15 @@ public class DeliveryManager : MonoBehaviour
         // Check delivery proximity
         if (isDeliveryActive && currentBox != null && currentBox.IsPickedUp)
         {
-            Transform player = GameObject.FindGameObjectWithTag("Player")?.transform;
-            if (player == null)
+            Transform player = null;
+            CarController car = FindFirstObjectByType<CarController>();
+            if (car != null)
             {
-                // Try to find CarController
-                CarController car = FindFirstObjectByType<CarController>();
-                if (car != null) player = car.transform;
+                player = car.transform;
+            }
+            else
+            {
+                player = GameObject.FindGameObjectWithTag("Player")?.transform;
             }
 
             if (player != null)
@@ -825,6 +828,10 @@ public class DeliveryManager : MonoBehaviour
             return;
         }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        QuestManager.Instance.SetDebugInfiniteTime(false);
+#endif
+
         // Create quest data
         currentDeliveryQuest = new QuestData
         {
@@ -886,6 +893,9 @@ public class DeliveryManager : MonoBehaviour
         currentDeliveryQuest.DeliveryLocations.Add(deliveryLocation);
         currentDeliveryQuest.QuestDescription = $"Deliver package to {FormatCoordinates(deliveryPos)}";
         currentDeliveryQuest.Status = QuestStatus.Active;
+        currentDeliveryQuest.HasPickedUpCargo = true;
+        currentDeliveryQuest.CurrentDeliveryIndex = 0;
+        QuestManager.Instance?.OnQuestUpdated?.Invoke(currentDeliveryQuest);
 
         // Show marker
         deliveryLocation.VisualMarker = deliveryIndicatorPrefab;
