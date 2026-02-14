@@ -24,9 +24,9 @@ Not: Bu bölüm "oynanabilirlik" etkisi en yüksek olan görevleri içerir.
 - [x] **Şeffaf görev ekranı:** Göreve başlamadan tahmini kazanç/ceza bilgisi.
 
 ### 1.3 Oyuncu geri bildirimi (feedback)
-- [ ] **Anlık durum paneli:** Kargo durumu, kalan süre, tahmini rota süresi.
-- [ ] **Sürüş geri bildirimi:** Sert fren/çarpışma anında kısa uyarı ve puan etkisi.
-- [ ] **Teslimat sonucu ekranı:** Neden başarılı/başarısız olduğunun net dökümü.
+- [x] **Anlık durum paneli:** Kargo durumu, kalan süre, tahmini rota süresi.
+- [x] **Sürüş geri bildirimi:** Sert fren/çarpışma anında kısa uyarı ve puan etkisi.
+- [x] **Teslimat sonucu ekranı:** Neden başarılı/başarısız olduğunun net dökümü.
 
 ## 2) İlerleme Sistemi (Para, Seviye, Kilit Açma)
 ### 2.1 Oyuncu progresyonu
@@ -96,7 +96,7 @@ Not: Minimap ve quest UI zaten mevcut; odak noktası kalite artırımıdır.
 ### Faz 1 (Hafta 1-2) - Oynanabilir çekirdek
 - [x] Teslimat türlerini artır.
 - [x] Ödül/ceza formülünü kur.
-- [ ] Sonuç ekranını ve net geri bildirimi ekle.
+- [x] Sonuç ekranını ve net geri bildirimi ekle.
 
 ### Faz 2 (Hafta 3-4) - Progresyon ve ekonomi
 - [ ] Seviye + XP sistemi.

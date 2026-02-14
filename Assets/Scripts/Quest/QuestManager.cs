@@ -20,6 +20,7 @@ namespace DeliveryDriver.Quest
             public int SpeedBonus;
             public float StreakMultiplier;
             public int CollisionPenalty;
+            public int HardBrakePenalty;
             public int DelayPenalty;
             public int CargoDamagePenalty;
             public int TotalPenalty;
@@ -137,6 +138,8 @@ namespace DeliveryDriver.Quest
         [SerializeField] private int collisionPenaltyStep = 15;
         [SerializeField] private int npcCollisionPenaltyBase = 75;
         [SerializeField] private int npcCollisionPenaltyStep = 35;
+        [SerializeField] private int hardBrakePenaltyBase = 5;
+        [SerializeField] private int hardBrakePenaltyStep = 5;
         [SerializeField] private float delayPenaltyStartsAtRemainingRatio = 0.2f;
         [SerializeField] private float delayPenaltyMaxRatio = 0.25f;
         [SerializeField] private float cargoDamagePenaltyPerPercent = 3f;
@@ -172,6 +175,7 @@ namespace DeliveryDriver.Quest
         public UnityEvent<QuestData> OnQuestFailed = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnQuestUpdated = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnDailyChallengeGenerated = new UnityEvent<QuestData>();
+        public UnityEvent<string, int> OnDrivingFeedback = new UnityEvent<string, int>();
 
         public QuestData CurrentQuest => currentQuest;
         public IReadOnlyList<QuestData> ActiveQuests => activeQuests;
@@ -181,6 +185,7 @@ namespace DeliveryDriver.Quest
         public string LastFailureReason { get; private set; } = string.Empty;
         public int LastCompletionReward { get; private set; }
         public int LastFailurePenalty { get; private set; }
+        public RewardPenaltyBreakdown LastQuestBreakdown { get; private set; }
         public int ConsecutiveSuccesses => consecutiveSuccesses;
         public float StreakMultiplier => streakMultiplier;
         public QuestData DailyChallenge => dailyChallenge;
@@ -697,6 +702,7 @@ namespace DeliveryDriver.Quest
             LastCompletionReward = finalReward;
             LastFailureReason = string.Empty;
             LastFailurePenalty = 0;
+            LastQuestBreakdown = payout;
 
             // Increment streak after a successful completion.
             consecutiveSuccesses++;
@@ -771,6 +777,9 @@ namespace DeliveryDriver.Quest
             LastFailureReason = reason ?? string.Empty;
             LastCompletionReward = 0;
             LastFailurePenalty = CalculateFailurePenalty(quest, LastFailureReason);
+            RewardPenaltyBreakdown failureBreakdown = CalculateRewardPenaltyBreakdown(quest, streakMultiplier, true);
+            failureBreakdown.FailurePenalty = LastFailurePenalty;
+            LastQuestBreakdown = failureBreakdown;
             TryApplyFailurePenalty(LastFailurePenalty);
             OnQuestFailed.Invoke(quest);
             Debug.LogWarning($"[QuestManager] Quest failed: {quest.QuestName}. Reason: {reason}. Penalty={LastFailurePenalty}");
@@ -1270,6 +1279,8 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
+            int previousCollisionPenalty = CalculateCollisionPenalty(currentQuest, true);
+
             lastCollisionTime = Time.time;
 
             // Record collision for penalty calculation
@@ -1277,6 +1288,13 @@ namespace DeliveryDriver.Quest
                                   SafeCompareTag(collision.gameObject, "Traffic") ||
                                   collision.gameObject.layer == LayerMask.NameToLayer("NPC");
             currentQuest.RecordCollision(isNpcCollision);
+            int currentCollisionPenalty = CalculateCollisionPenalty(currentQuest, true);
+            int deltaPenalty = Mathf.Max(0, currentCollisionPenalty - previousCollisionPenalty);
+            if (deltaPenalty > 0)
+            {
+                string collisionLabel = isNpcCollision ? "NPC Carpisma!" : "Carpisma!";
+                OnDrivingFeedback.Invoke(collisionLabel, -deltaPenalty);
+            }
 
             // Apply damage to fragile cargo
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -1304,6 +1322,29 @@ namespace DeliveryDriver.Quest
             }
 
             MarkQuestUiDirty();
+        }
+
+        public void OnHardBrakeDetected(float decelerationMetersPerSec)
+        {
+            if (currentQuest == null || currentQuest.Status != QuestStatus.Active)
+            {
+                return;
+            }
+
+            int previousHardBrakePenalty = CalculateHardBrakePenalty(currentQuest, true);
+            currentQuest.RecordHardBrake();
+            int currentHardBrakePenalty = CalculateHardBrakePenalty(currentQuest, true);
+            int deltaPenalty = Mathf.Max(0, currentHardBrakePenalty - previousHardBrakePenalty);
+
+            MarkQuestUiDirty();
+
+            if (deltaPenalty <= 0)
+            {
+                return;
+            }
+
+            string label = decelerationMetersPerSec >= 14f ? "Cok Sert Fren!" : "Sert Fren!";
+            OnDrivingFeedback.Invoke(label, -deltaPenalty);
         }
 
         private static bool SafeCompareTag(GameObject gameObject, string tag)
@@ -1751,9 +1792,10 @@ namespace DeliveryDriver.Quest
             breakdown.SpeedBonus = CalculateSpeedBonus(quest, useRuntimePenalties);
 
             breakdown.CollisionPenalty = CalculateCollisionPenalty(quest, useRuntimePenalties);
+            breakdown.HardBrakePenalty = CalculateHardBrakePenalty(quest, useRuntimePenalties);
             breakdown.DelayPenalty = CalculateDelayPenalty(quest, breakdown.GrossReward, useRuntimePenalties);
             breakdown.CargoDamagePenalty = CalculateCargoDamagePenalty(quest, useRuntimePenalties);
-            breakdown.TotalPenalty = breakdown.CollisionPenalty + breakdown.DelayPenalty + breakdown.CargoDamagePenalty;
+            breakdown.TotalPenalty = breakdown.CollisionPenalty + breakdown.HardBrakePenalty + breakdown.DelayPenalty + breakdown.CargoDamagePenalty;
 
             int grossWithSpeed = breakdown.GrossReward + breakdown.SpeedBonus;
             int streakAdjusted = Mathf.RoundToInt(grossWithSpeed * breakdown.StreakMultiplier);
@@ -1904,6 +1946,17 @@ namespace DeliveryDriver.Quest
             int penalty = SumProgressivePenalty(nonNpcCollisions, collisionPenaltyBase, collisionPenaltyStep);
             penalty += SumProgressivePenalty(npcCollisions, npcCollisionPenaltyBase, npcCollisionPenaltyStep);
             return penalty;
+        }
+
+        private int CalculateHardBrakePenalty(QuestData quest, bool useRuntimeState)
+        {
+            int hardBrakes = 0;
+            if (quest != null && useRuntimeState)
+            {
+                hardBrakes = Mathf.Max(0, quest.HardBrakeCount);
+            }
+
+            return SumProgressivePenalty(hardBrakes, hardBrakePenaltyBase, hardBrakePenaltyStep);
         }
 
         private int CalculateDelayPenalty(QuestData quest, int grossReward, bool useRuntimeState)

@@ -110,6 +110,7 @@ namespace DeliveryDriver.Quest.UI
             questManager.OnQuestCompleted.AddListener(HandleQuestCompleted);
             questManager.OnQuestFailed.AddListener(HandleQuestFailed);
             questManager.OnQuestUpdated.AddListener(HandleQuestUpdated);
+            questManager.OnDrivingFeedback.AddListener(HandleDrivingFeedback);
             isSubscribed = true;
         }
 
@@ -124,6 +125,7 @@ namespace DeliveryDriver.Quest.UI
             questManager.OnQuestCompleted.RemoveListener(HandleQuestCompleted);
             questManager.OnQuestFailed.RemoveListener(HandleQuestFailed);
             questManager.OnQuestUpdated.RemoveListener(HandleQuestUpdated);
+            questManager.OnDrivingFeedback.RemoveListener(HandleDrivingFeedback);
             isSubscribed = false;
         }
 
@@ -164,7 +166,10 @@ namespace DeliveryDriver.Quest.UI
             if (questCompleteUI != null)
             {
                 int reward = questManager != null ? questManager.LastCompletionReward : quest.CalculateFinalReward();
-                questCompleteUI.ShowCompleteScreen(quest, reward);
+                QuestManager.RewardPenaltyBreakdown? breakdown = questManager != null
+                    ? questManager.LastQuestBreakdown
+                    : null;
+                questCompleteUI.ShowCompleteScreen(quest, reward, breakdown);
             }
 
             RefreshQuestList();
@@ -181,7 +186,10 @@ namespace DeliveryDriver.Quest.UI
             {
                 string reason = questManager != null ? questManager.LastFailureReason : string.Empty;
                 int penalty = questManager != null ? questManager.LastFailurePenalty : 0;
-                questCompleteUI.ShowFailedScreen(quest, reason, penalty);
+                QuestManager.RewardPenaltyBreakdown? breakdown = questManager != null
+                    ? questManager.LastQuestBreakdown
+                    : null;
+                questCompleteUI.ShowFailedScreen(quest, reason, penalty, breakdown);
             }
 
             RefreshQuestList();
@@ -195,6 +203,16 @@ namespace DeliveryDriver.Quest.UI
             }
 
             activeQuestUI.UpdateQuestDisplay(quest);
+        }
+
+        private void HandleDrivingFeedback(string message, int scoreDelta)
+        {
+            if (activeQuestUI == null)
+            {
+                return;
+            }
+
+            activeQuestUI.ShowDrivingFeedback(message, scoreDelta);
         }
 
         private void HandleContinue()

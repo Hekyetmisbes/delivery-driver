@@ -48,7 +48,7 @@ namespace DeliveryDriver.Quest.UI
             continueAction = action;
         }
 
-        public void ShowCompleteScreen(QuestData quest, int reward)
+        public void ShowCompleteScreen(QuestData quest, int reward, QuestManager.RewardPenaltyBreakdown? breakdown = null)
         {
             SetVisible(true);
 
@@ -74,7 +74,7 @@ namespace DeliveryDriver.Quest.UI
 
             if (statsText != null)
             {
-                statsText.text = BuildStatsText(quest, null);
+                statsText.text = BuildStatsText(quest, null, 0, breakdown);
             }
 
             if (rewardText != null)
@@ -88,7 +88,7 @@ namespace DeliveryDriver.Quest.UI
             }
         }
 
-        public void ShowFailedScreen(QuestData quest, string reason, int penaltyAmount = 0)
+        public void ShowFailedScreen(QuestData quest, string reason, int penaltyAmount = 0, QuestManager.RewardPenaltyBreakdown? breakdown = null)
         {
             SetVisible(true);
 
@@ -114,7 +114,7 @@ namespace DeliveryDriver.Quest.UI
 
             if (statsText != null)
             {
-                statsText.text = BuildStatsText(quest, reason, penaltyAmount);
+                statsText.text = BuildStatsText(quest, reason, penaltyAmount, breakdown);
             }
 
             if (rewardText != null)
@@ -150,7 +150,7 @@ namespace DeliveryDriver.Quest.UI
             gameObject.SetActive(visible);
         }
 
-        private static string BuildStatsText(QuestData quest, string failureReason, int penaltyAmount = 0)
+        private static string BuildStatsText(QuestData quest, string failureReason, int penaltyAmount = 0, QuestManager.RewardPenaltyBreakdown? breakdown = null)
         {
             if (quest == null)
             {
@@ -176,8 +176,17 @@ namespace DeliveryDriver.Quest.UI
 
             string reasonLine = string.IsNullOrWhiteSpace(failureReason) ? string.Empty : $"Reason: {failureReason}";
             string penaltyLine = penaltyAmount > 0 ? $"Penalty: -${penaltyAmount}" : string.Empty;
+            string collisionLine = quest.CollisionCount > 0 ? $"Collisions: {quest.CollisionCount} (NPC: {quest.NpcCollisionCount})" : "Collisions: 0";
+            string hardBrakeLine = quest.HardBrakeCount > 0 ? $"Hard brakes: {quest.HardBrakeCount}" : "Hard brakes: 0";
 
-            string[] lines = { timeLine, stopsLine, cargoLine, reasonLine, penaltyLine };
+            string breakdownLine = string.Empty;
+            if (breakdown.HasValue)
+            {
+                QuestManager.RewardPenaltyBreakdown b = breakdown.Value;
+                breakdownLine = $"Reward: ${b.FinalReward} | Penalties: -${b.TotalPenalty}";
+            }
+
+            string[] lines = { timeLine, stopsLine, cargoLine, collisionLine, hardBrakeLine, breakdownLine, reasonLine, penaltyLine };
             return string.Join("\n", Array.FindAll(lines, line => !string.IsNullOrWhiteSpace(line)));
         }
 

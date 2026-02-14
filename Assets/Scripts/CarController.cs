@@ -5,6 +5,8 @@ using System.Collections.Generic;
 [RequireComponent(typeof(Rigidbody))]
 public class CarController : MonoBehaviour
 {
+    public event System.Action<float> OnHardBrakeDetected;
+
     [Header("--- INPUT SYSTEM ---")]
     [SerializeField] private InputActionAsset inputActions;
     
@@ -76,6 +78,14 @@ public class CarController : MonoBehaviour
     [SerializeField] private float throttleFallRate = 6f;
     [Tooltip("Direksiyon girdisinin ne kadar hizli degisecegi (birim/s).")]
     [SerializeField] private float steeringInputRate = 5f;
+
+    [Header("--- FEEDBACK ---")]
+    [Tooltip("Sert fren bildirimi icin minimum hiz (km/s).")]
+    [SerializeField] private float hardBrakeMinSpeedKmh = 35f;
+    [Tooltip("Sert fren bildirimi icin minimum yavaslama (m/s^2).")]
+    [SerializeField] private float hardBrakeMinDeceleration = 8f;
+    [Tooltip("Sert fren bildirimleri arasindaki min sure (s).")]
+    [SerializeField] private float hardBrakeNotifyCooldown = 1.2f;
     
     // Private Runtime Variables
     private Rigidbody rb;
@@ -88,6 +98,8 @@ public class CarController : MonoBehaviour
     private float currentCargoWeight;
     private float smoothedThrottleInput;
     private float smoothedSteerInput;
+    private float previousSpeedMetersPerSec;
+    private float lastHardBrakeNotifyTime = -999f;
     
     // Input Action References
     private InputAction moveAction;
@@ -171,6 +183,7 @@ public class CarController : MonoBehaviour
         ApplyAntiRollBars();
         UpdateWheels();
         ApplyDownforce(); // Yuksek hizda yol tutusu icin
+        EvaluateHardBrakeFeedback(Time.fixedDeltaTime);
     }
 
     private void UpdateSmoothedInputs(float deltaTime)
@@ -366,6 +379,44 @@ public class CarController : MonoBehaviour
         }
 
         rb.AddForce(-transform.up * requested, ForceMode.Force);
+    }
+
+    private void EvaluateHardBrakeFeedback(float deltaTime)
+    {
+        if (rb == null || deltaTime <= 0f)
+        {
+            return;
+        }
+
+        float currentSpeed = rb.linearVelocity.magnitude;
+        float previousSpeed = previousSpeedMetersPerSec;
+        previousSpeedMetersPerSec = currentSpeed;
+
+        if (!isBraking && !isHandbraking)
+        {
+            return;
+        }
+
+        float previousSpeedKmh = previousSpeed * 3.6f;
+        if (previousSpeedKmh < hardBrakeMinSpeedKmh)
+        {
+            return;
+        }
+
+        float deceleration = (previousSpeed - currentSpeed) / deltaTime;
+        if (deceleration < hardBrakeMinDeceleration)
+        {
+            return;
+        }
+
+        if (Time.time - lastHardBrakeNotifyTime < hardBrakeNotifyCooldown)
+        {
+            return;
+        }
+
+        lastHardBrakeNotifyTime = Time.time;
+        OnHardBrakeDetected?.Invoke(deceleration);
+        DeliveryDriver.Quest.QuestManager.Instance?.OnHardBrakeDetected(deceleration);
     }
 
     private void ConfigureBodyCollidersForStability()

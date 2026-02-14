@@ -12,18 +12,30 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private TextMeshProUGUI objectiveText;
         [SerializeField] private TextMeshProUGUI timerText;
         [SerializeField] private TextMeshProUGUI distanceText;
+        [SerializeField] private TextMeshProUGUI feedbackText;
 
         [Header("Cargo Health")]
         [SerializeField] private Image cargoHealthFill;
         [SerializeField] private GameObject cargoHealthPanel;
 
+        [Header("Route Estimate")]
+        [SerializeField] private float estimatedAverageSpeedMetersPerSec = 11f;
+
+        [Header("Driving Feedback")]
+        [SerializeField] private float feedbackDuration = 1.3f;
+
         private QuestData currentQuest;
+        private string objectiveBaseText = string.Empty;
         private string lastObjectiveText = string.Empty;
         private int lastTimerSeconds = -1;
         private Color lastTimerColor = Color.clear;
         private string lastDistanceText = string.Empty;
         private float lastCargoHealth = -1f;
         private bool lastCargoPanelActive = false;
+        private string currentFeedbackText = string.Empty;
+        private Color currentFeedbackColor = Color.white;
+        private float feedbackExpireAt;
+        private bool feedbackVisible;
         private readonly StringBuilder objectiveBuilder = new StringBuilder(64);
         private QuestManager questManager;
         private Transform playerTransform;
@@ -63,6 +75,7 @@ namespace DeliveryDriver.Quest.UI
 
             float distance = Vector3.Distance(playerTransform.position, objective.Position);
             UpdateDistance(distance);
+            TryExpireFeedback();
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (!hasLoggedRuntimeUpdater)
@@ -84,10 +97,10 @@ namespace DeliveryDriver.Quest.UI
             }
 
             string objective = BuildObjectiveText(currentQuest);
-            if (objectiveText != null && !string.Equals(lastObjectiveText, objective, System.StringComparison.Ordinal))
+            if (!string.Equals(objectiveBaseText, objective, System.StringComparison.Ordinal))
             {
-                lastObjectiveText = objective;
-                objectiveText.text = objective;
+                objectiveBaseText = objective;
+                RefreshObjectiveText();
             }
 
             UpdateTimer(currentQuest.TimeRemaining, currentQuest.TimeLimit);
@@ -151,12 +164,28 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            string formatted = FormatDistance(distanceMeters);
+            string formatted = FormatDistanceWithEta(distanceMeters, estimatedAverageSpeedMetersPerSec);
             if (!string.Equals(lastDistanceText, formatted, System.StringComparison.Ordinal))
             {
                 lastDistanceText = formatted;
                 distanceText.text = formatted;
             }
+        }
+
+        public void ShowDrivingFeedback(string message, int scoreDelta)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            string scoreText = scoreDelta == 0 ? string.Empty : $" ({(scoreDelta > 0 ? "+" : "")}${scoreDelta})";
+            currentFeedbackText = $"{message}{scoreText}";
+            currentFeedbackColor = scoreDelta < 0 ? new Color(1f, 0.45f, 0.35f) : new Color(0.55f, 1f, 0.55f);
+            feedbackExpireAt = Time.time + Mathf.Max(0.25f, feedbackDuration);
+            feedbackVisible = true;
+            RefreshObjectiveText();
+            UpdateFeedbackTextComponent();
         }
 
         public void UpdateCargoHealth(float health)
@@ -202,17 +231,25 @@ namespace DeliveryDriver.Quest.UI
                 distanceText.text = "--";
             }
 
+            if (feedbackText != null)
+            {
+                feedbackText.text = string.Empty;
+            }
+
             if (cargoHealthPanel != null)
             {
                 cargoHealthPanel.SetActive(false);
             }
 
             lastObjectiveText = string.Empty;
+            objectiveBaseText = string.Empty;
             lastTimerSeconds = -1;
             lastTimerColor = Color.clear;
             lastDistanceText = string.Empty;
             lastCargoHealth = -1f;
             lastCargoPanelActive = false;
+            currentFeedbackText = string.Empty;
+            feedbackVisible = false;
         }
 
         private string BuildObjectiveText(QuestData quest)
@@ -285,14 +322,17 @@ namespace DeliveryDriver.Quest.UI
             return $"{minutes:00}:{seconds:00}";
         }
 
-        private static string FormatDistance(float distanceMeters)
+        private static string FormatDistanceWithEta(float distanceMeters, float estimatedSpeed)
         {
             if (distanceMeters <= 0f)
             {
-                return "Mesafe: -- m";
+                return "Mesafe: -- m | ETA: --:--";
             }
 
-            return $"Mesafe: {Mathf.RoundToInt(distanceMeters)} m";
+            int etaSeconds = estimatedSpeed > 0.1f
+                ? Mathf.CeilToInt(distanceMeters / estimatedSpeed)
+                : 0;
+            return $"Mesafe: {Mathf.RoundToInt(distanceMeters)} m | ETA: {FormatTime(etaSeconds)}";
         }
 
         private static Color GetTimerColor(float timeRemaining, float timeLimit)
@@ -335,6 +375,11 @@ namespace DeliveryDriver.Quest.UI
             {
                 distanceText = FindTextByName("Distance");
             }
+
+            if (feedbackText == null)
+            {
+                feedbackText = FindTextByName("Feedback");
+            }
         }
 
         private TextMeshProUGUI FindTextByName(string objectName)
@@ -373,6 +418,56 @@ namespace DeliveryDriver.Quest.UI
             {
                 playerTransform = taggedPlayer.transform;
             }
+        }
+
+        private void RefreshObjectiveText()
+        {
+            if (objectiveText == null)
+            {
+                return;
+            }
+
+            string composed = objectiveBaseText;
+            if (feedbackVisible && !string.IsNullOrWhiteSpace(currentFeedbackText))
+            {
+                composed = $"{objectiveBaseText}\n<color=#{ColorUtility.ToHtmlStringRGB(currentFeedbackColor)}>{currentFeedbackText}</color>";
+            }
+
+            if (!string.Equals(lastObjectiveText, composed, System.StringComparison.Ordinal))
+            {
+                lastObjectiveText = composed;
+                objectiveText.text = composed;
+            }
+        }
+
+        private void TryExpireFeedback()
+        {
+            if (!feedbackVisible || Time.time < feedbackExpireAt)
+            {
+                return;
+            }
+
+            feedbackVisible = false;
+            currentFeedbackText = string.Empty;
+            UpdateFeedbackTextComponent();
+            RefreshObjectiveText();
+        }
+
+        private void UpdateFeedbackTextComponent()
+        {
+            if (feedbackText == null)
+            {
+                return;
+            }
+
+            if (!feedbackVisible || string.IsNullOrWhiteSpace(currentFeedbackText))
+            {
+                feedbackText.text = string.Empty;
+                return;
+            }
+
+            feedbackText.text = currentFeedbackText;
+            feedbackText.color = currentFeedbackColor;
         }
     }
 }
