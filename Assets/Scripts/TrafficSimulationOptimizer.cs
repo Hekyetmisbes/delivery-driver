@@ -309,7 +309,11 @@ namespace DeliveryDriver.Optimization
 
         private void UpdateSpatialPartitioning()
         {
-            spatialGrid.Clear();
+            // Clear existing lists instead of discarding them to avoid allocations
+            foreach (var kvp in spatialGrid)
+            {
+                kvp.Value.Clear();
+            }
 
             foreach (var npc in registeredNPCs)
             {
@@ -317,12 +321,13 @@ namespace DeliveryDriver.Optimization
 
                 Vector2Int gridCell = WorldToGridCell(npc.transform.position);
 
-                if (!spatialGrid.ContainsKey(gridCell))
+                if (!spatialGrid.TryGetValue(gridCell, out List<NpcCarAgent> list))
                 {
-                    spatialGrid[gridCell] = new List<NpcCarAgent>();
+                    list = new List<NpcCarAgent>();
+                    spatialGrid[gridCell] = list;
                 }
 
-                spatialGrid[gridCell].Add(npc);
+                list.Add(npc);
             }
         }
 
@@ -339,10 +344,24 @@ namespace DeliveryDriver.Optimization
         /// </summary>
         public List<NpcCarAgent> GetNearbyNPCs(Vector3 position, int cellRadius = 1)
         {
-            if (!useSpatialPartitioning)
-                return registeredNPCs;
-
             List<NpcCarAgent> nearby = new List<NpcCarAgent>();
+            GetNearbyNPCs(position, nearby, cellRadius);
+            return nearby;
+        }
+
+        /// <summary>
+        /// Get NPCs in nearby grid cells into a reusable list (zero-alloc overload)
+        /// </summary>
+        public void GetNearbyNPCs(Vector3 position, List<NpcCarAgent> results, int cellRadius = 1)
+        {
+            results.Clear();
+
+            if (!useSpatialPartitioning)
+            {
+                results.AddRange(registeredNPCs);
+                return;
+            }
+
             Vector2Int centerCell = WorldToGridCell(position);
 
             for (int x = -cellRadius; x <= cellRadius; x++)
@@ -350,14 +369,12 @@ namespace DeliveryDriver.Optimization
                 for (int z = -cellRadius; z <= cellRadius; z++)
                 {
                     Vector2Int cell = centerCell + new Vector2Int(x, z);
-                    if (spatialGrid.ContainsKey(cell))
+                    if (spatialGrid.TryGetValue(cell, out List<NpcCarAgent> list))
                     {
-                        nearby.AddRange(spatialGrid[cell]);
+                        results.AddRange(list);
                     }
                 }
             }
-
-            return nearby;
         }
 
         private void UpdateStatistics()
@@ -365,6 +382,7 @@ namespace DeliveryDriver.Optimization
             // Statistics are updated in UpdateNPCStates
         }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         private void OnGUI()
         {
             if (!showPerformanceStats) return;
@@ -384,6 +402,7 @@ namespace DeliveryDriver.Optimization
             GUILayout.EndVertical();
             GUILayout.EndArea();
         }
+#endif
 
 #if UNITY_EDITOR
         private void OnDrawGizmosSelected()

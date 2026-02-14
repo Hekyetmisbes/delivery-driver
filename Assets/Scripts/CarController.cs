@@ -439,6 +439,7 @@ public class CarController : MonoBehaviour
         }
     }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
     private void OnGUI()
     {
         if (!showDebugGUI) return;
@@ -453,6 +454,7 @@ public class CarController : MonoBehaviour
         GUILayout.Label($"Is Grounded (RL): {rearLeftCollider.isGrounded}");
         GUILayout.EndArea();
     }
+#endif
 
     private void OnDrawGizmos()
     {

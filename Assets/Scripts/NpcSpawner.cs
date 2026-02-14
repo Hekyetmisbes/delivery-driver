@@ -585,6 +585,7 @@ namespace TrafficSystem
             return (activeNpcs.Count, pooledNpcs.Count);
         }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         private void OnGUI()
         {
             if (!showDebugInfo) return;
@@ -606,6 +607,7 @@ namespace TrafficSystem
             }
             GUILayout.EndArea();
         }
+#endif
 
         /// <summary>
         /// Check if spawn position is clear of obstacles using sphere overlap
