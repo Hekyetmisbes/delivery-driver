@@ -222,6 +222,7 @@ namespace TrafficSystem
         private bool shouldUpdateThisFrame = true;
 
         // Collision handling
+        private static Collider[] sharedOverlapBuffer = new Collider[32];
         private bool isColliding;
         private float collisionTimer;
         private Vector3 separationDirection;
@@ -603,11 +604,12 @@ namespace TrafficSystem
             isColliding = false;
 
             float dynamicCheckRadius = Mathf.Lerp(3f, 6f, Mathf.Clamp01(CurrentSpeed / 80f));
-            Collider[] colliders = Physics.OverlapSphere(transform.position, dynamicCheckRadius, obstacleLayerMask, QueryTriggerInteraction.Ignore);
+            int hitCount = Physics.OverlapSphereNonAlloc(transform.position, dynamicCheckRadius, sharedOverlapBuffer, obstacleLayerMask, QueryTriggerInteraction.Ignore);
             Vector3 selfReference = GetReferencePosition();
 
-            foreach (Collider col in colliders)
+            for (int i = 0; i < hitCount; i++)
             {
+                Collider col = sharedOverlapBuffer[i];
                 if (col == null || col.transform.IsChildOf(transform))
                     continue;
 
