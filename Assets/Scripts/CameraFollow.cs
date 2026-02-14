@@ -61,14 +61,14 @@ public class CameraFollow : MonoBehaviour
         }
     }
 
-    void FixedUpdate()
+    void LateUpdate()
     {
         if (target == null) return;
 
-        HandleCameraMovement();
+        HandleCameraMovement(Time.deltaTime);
     }
 
-    void HandleCameraMovement()
+    void HandleCameraMovement(float deltaTime)
     {
         // 1. Aracın yerel hızına bak (İleri mi gidiyor geri mi?)
         float localZVelocity = 0f;
@@ -121,7 +121,13 @@ public class CameraFollow : MonoBehaviour
         }
 
         // 5. Pozisyonu yumuşatarak uygula
-        transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref currentVelocity, translateSmoothTime);
+        transform.position = Vector3.SmoothDamp(
+            transform.position,
+            desiredPosition,
+            ref currentVelocity,
+            translateSmoothTime,
+            Mathf.Infinity,
+            Mathf.Max(0.0001f, deltaTime));
 
         // 6. Rotasyon ayarı
         if (followRotation)
@@ -133,7 +139,7 @@ public class CameraFollow : MonoBehaviour
             if (direction != Vector3.zero)
             {
                 Quaternion targetRotation = Quaternion.LookRotation(direction);
-                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSmoothSpeed * Time.deltaTime);
+                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSmoothSpeed * deltaTime);
             }
         }
         else
@@ -145,7 +151,7 @@ public class CameraFollow : MonoBehaviour
             if (direction != Vector3.zero)
             {
                 Quaternion targetRotation = Quaternion.LookRotation(direction);
-                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSmoothSpeed * Time.deltaTime);
+                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSmoothSpeed * deltaTime);
             }
         }
     }

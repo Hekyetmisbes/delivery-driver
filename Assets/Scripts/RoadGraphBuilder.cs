@@ -37,6 +37,14 @@ namespace TrafficSystem
         [SerializeField] private bool generateDualLaneSegmentsForSimplePoly = true;
         [Tooltip("Fallback lane center offset from road centerline (meters)")]
         [SerializeField] private float simplePolyLaneCenterOffset = 1.5f;
+        [Tooltip("If graph build yields too few segments, auto-try SimplePoly dual-lane extraction as recovery")]
+        [SerializeField] private bool autoRecoverSimplePolyLaneExtraction = true;
+
+        [Header("Startup")]
+        [Tooltip("Build road graph automatically on Start")]
+        [SerializeField] private bool buildOnStart = true;
+        [Tooltip("Delay before road graph build starts")]
+        [SerializeField] private float startupBuildDelay = 0f;
 
         [Header("Debug Visualization")]
         [SerializeField] private bool showWaypoints = true;
@@ -47,10 +55,35 @@ namespace TrafficSystem
         // Built road graph
         private RoadGraph roadGraph;
         public RoadGraph RoadGraph => roadGraph;
+        private Coroutine deferredBuildCoroutine;
 
         private void Start()
         {
+            if (buildOnStart)
+            {
+                BeginBuildWithDelay(startupBuildDelay);
+            }
+        }
+
+        public void BeginBuildWithDelay(float delaySeconds)
+        {
+            if (deferredBuildCoroutine != null)
+            {
+                StopCoroutine(deferredBuildCoroutine);
+            }
+
+            deferredBuildCoroutine = StartCoroutine(BuildRoadGraphDeferred(Mathf.Max(0f, delaySeconds)));
+        }
+
+        private IEnumerator BuildRoadGraphDeferred(float delaySeconds)
+        {
+            if (delaySeconds > 0f)
+            {
+                yield return new WaitForSeconds(delaySeconds);
+            }
+
             BuildRoadGraph();
+            deferredBuildCoroutine = null;
         }
 
         /// <summary>
@@ -82,8 +115,10 @@ namespace TrafficSystem
 
             if (includeSimplePolyRoads)
             {
-                ExtractSimplePolyRoadMeshes();
+                ExtractSimplePolyRoadMeshes(generateDualLaneSegmentsForSimplePoly);
             }
+
+            TryAutoRecoverSimplePolyLanes();
 
             // Build connections between road segments
             BuildConnections();
@@ -162,7 +197,7 @@ namespace TrafficSystem
                 Component roadNetwork = FindEasyRoadsNetworkComponent(network);
                 if (roadNetwork == null)
                 {
-                    Debug.LogWarning("[RoadGraphBuilder] EasyRoads3D network component not found");
+                    Debug.Log("[RoadGraphBuilder] EasyRoads3D network component not found. Falling back to transform extraction.");
                     return false;
                 }
 
@@ -745,6 +780,11 @@ namespace TrafficSystem
         /// </summary>
         private void ExtractSimplePolyRoadMeshes()
         {
+            ExtractSimplePolyRoadMeshes(generateDualLaneSegmentsForSimplePoly);
+        }
+
+        private void ExtractSimplePolyRoadMeshes(bool dualLaneMode)
+        {
             MeshFilter[] sceneMeshFilters = FindObjectsByType<MeshFilter>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             if (sceneMeshFilters == null || sceneMeshFilters.Length == 0) return;
 
@@ -766,7 +806,7 @@ namespace TrafficSystem
 
                 NormalizeWaypointForwards(centerSegment);
 
-                if (generateDualLaneSegmentsForSimplePoly)
+                if (dualLaneMode)
                 {
                     float laneOffset = EstimateLaneCenterOffset(meshFilter);
                     AddOffsetLaneSegment(centerSegment, -laneOffset, $"{go.name}_Lane_Left");
@@ -782,6 +822,30 @@ namespace TrafficSystem
             if (added > 0)
             {
                 Debug.Log($"[RoadGraphBuilder] Added {added} SimplePoly road segments");
+            }
+        }
+
+        private void TryAutoRecoverSimplePolyLanes()
+        {
+            if (!autoRecoverSimplePolyLaneExtraction || roadGraph == null)
+            {
+                return;
+            }
+
+            bool likelyMisconfigured = !includeSimplePolyRoads || !generateDualLaneSegmentsForSimplePoly;
+            bool graphTooSmall = roadGraph.roadSegments.Count <= 2;
+            if (!likelyMisconfigured || !graphTooSmall)
+            {
+                return;
+            }
+
+            int before = roadGraph.roadSegments.Count;
+            ExtractSimplePolyRoadMeshes(true);
+            int added = roadGraph.roadSegments.Count - before;
+            if (added > 0)
+            {
+                Debug.LogWarning($"[RoadGraphBuilder] Auto-recovery enabled: added {added} SimplePoly dual-lane segments. " +
+                                 $"Consider enabling includeSimplePolyRoads + generateDualLaneSegmentsForSimplePoly on this component.");
             }
         }
 
@@ -1416,6 +1480,11 @@ namespace TrafficSystem
 
             foreach (var segment in roadGraph.roadSegments)
             {
+                if (segment == null || segment.waypoints == null || segment.waypoints.Count == 0)
+                {
+                    continue;
+                }
+
                 if (showWaypoints)
                 {
                     Gizmos.color = Color.cyan;
@@ -1441,9 +1510,27 @@ namespace TrafficSystem
 
                 if (showConnections)
                 {
+                    if (segment.connections == null)
+                    {
+                        continue;
+                    }
+
                     Gizmos.color = Color.yellow;
                     foreach (var connection in segment.connections)
                     {
+                        if (connection == null || connection.toSegment == null || connection.toSegment.waypoints == null)
+                        {
+                            continue;
+                        }
+
+                        if (connection.fromWaypointIndex < 0 ||
+                            connection.fromWaypointIndex >= segment.waypoints.Count ||
+                            connection.toWaypointIndex < 0 ||
+                            connection.toWaypointIndex >= connection.toSegment.waypoints.Count)
+                        {
+                            continue;
+                        }
+
                         Vector3 from = segment.waypoints[connection.fromWaypointIndex].position;
                         Vector3 to = connection.toSegment.waypoints[connection.toWaypointIndex].position;
                         Gizmos.DrawLine(from, to);

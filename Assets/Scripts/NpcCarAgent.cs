@@ -91,6 +91,22 @@ namespace TrafficSystem
         [Tooltip("Extra clearance buffer added to safe gap calculations")]
         [SerializeField] private float collisionBufferDistance = 2f;
 
+        [Header("Reverse Recovery")]
+        [Tooltip("Enable short reverse maneuvers when blocked by obstacles ahead")]
+        [SerializeField] private bool enableReverseRecovery = true;
+        [Tooltip("How long the vehicle must remain blocked before reversing (seconds)")]
+        [SerializeField] private float reverseTriggerDelay = 1.2f;
+        [Tooltip("Max absolute speed counted as stuck (km/h)")]
+        [SerializeField] private float reverseStuckSpeedThreshold = 1.5f;
+        [Tooltip("How long reverse maneuver lasts (seconds)")]
+        [SerializeField] private float reverseDuration = 1.0f;
+        [Tooltip("Cooldown before another reverse attempt (seconds)")]
+        [SerializeField] private float reverseCooldown = 2.0f;
+        [Tooltip("Target reverse speed (km/h)")]
+        [SerializeField] private float reverseTargetSpeed = 8f;
+        [Tooltip("Rear obstacle check distance before reversing (meters)")]
+        [SerializeField] private float reverseRearCheckDistance = 5f;
+
         [Header("Following Distance (Priority 1)")]
         [Tooltip("Following time in seconds (2-3 second rule)")]
         [SerializeField] private float followingTimeSeconds = 2.5f;
@@ -144,6 +160,12 @@ namespace TrafficSystem
         [SerializeField] private float minTurnSpeedFactor = 0.35f;
         [Tooltip("Downforce coefficient (N per (m/s)^2) - reduced to prevent suspension collapse")]
         [SerializeField] private float downforceCoefficient = 20f; // Reduced from 100f
+        [Tooltip("Constant downforce baseline (N)")]
+        [SerializeField] private float baseDownforce = 120f;
+        [Tooltip("Clamp extra downforce as a fraction of vehicle weight (0.3 = max 30% of weight)")]
+        [SerializeField] private float maxDownforceWeightFraction = 0.35f;
+        [Tooltip("Apply downforce along vehicle local down instead of world down to reduce slope penetration")]
+        [SerializeField] private bool useLocalDownforceDirection = true;
         [Tooltip("Anti-roll stiffness - higher prevents rollovers")]
         [SerializeField] private float antiRollStiffness = 12000f;
 
@@ -158,10 +180,10 @@ namespace TrafficSystem
         [SerializeField] private int solverVelocityIterations = 12;
 
         [Header("Debug")]
-        [SerializeField] private bool showDebugGizmos = true;
+        [SerializeField] private bool showDebugGizmos = false;
         [SerializeField] private bool logPathChanges = false;
-        [SerializeField] private bool logCollisions = true;
-        [SerializeField] private bool logOvertakes = true;  // Log overtaking behavior
+        [SerializeField] private bool logCollisions = false;
+        [SerializeField] private bool logOvertakes = false;  // Log overtaking behavior
 
         [Header("Grounding")]
         [Tooltip("Raycast mask for grounding the vehicle to the road surface")]
@@ -176,6 +198,8 @@ namespace TrafficSystem
         [SerializeField] private float minGroundClearance = 0.1f;
         [Tooltip("Maximum clearance used for spawn/recovery height")]
         [SerializeField] private float maxGroundClearance = 0.5f;
+        [Tooltip("Normalize wheel collider heights at runtime to keep all wheels on same contact plane")]
+        [SerializeField] private bool autoNormalizeWheelColliderHeights = true;
 
         // Runtime state
         private Rigidbody rb;
@@ -191,6 +215,11 @@ namespace TrafficSystem
         private float obstacleDistance;
         private bool isPotentiallyOffRoad;
         private float wheelBase;
+
+        // Performance optimization
+        private static int nextNpcId = 0;
+        private int npcId;
+        private bool shouldUpdateThisFrame = true;
 
         // Collision handling
         private bool isColliding;
@@ -238,6 +267,12 @@ namespace TrafficSystem
         private float environmentalFollowingDistanceMultiplier = 1f;
         private float predictiveSpeedLimiter = 1f;
         private bool imminentCollisionRisk;
+        private bool isReversing;
+        private float reverseTimer;
+        private float reverseCooldownTimer;
+        private float blockedTimer;
+        private bool rearObstacleDetected;
+        private float rearObstacleDistance;
 
         // Public accessors
         public RoadSegment CurrentSegment => currentSegment;
@@ -262,7 +297,7 @@ namespace TrafficSystem
 
             offset = Mathf.Clamp(offset, minGroundClearance, maxGroundClearance);
 
-            Debug.Log($"[NpcCarAgent] {name} - Ground clearance: {offset:F2}m");
+            // Debug.Log($"[NpcCarAgent] {name} - Ground clearance: {offset:F2}m");
             return offset;
         }
 
@@ -327,10 +362,17 @@ namespace TrafficSystem
 
         private void Awake()
         {
+            // Assign unique NPC ID for update throttling
+            npcId = nextNpcId++;
+
             rb = GetComponent<Rigidbody>();
             SetupRigidbody();
-            ConfigureSuspension(); // New method to tune physics
             AutoFixWheelAssignments();
+            if (autoNormalizeWheelColliderHeights)
+            {
+                NormalizeWheelColliderHeightsRuntime();
+            }
+            ConfigureSuspension(); // New method to tune physics
             CacheWheelGeometry();
             NormalizeModelAxes();
             ConfigureGroundMaskIfNeeded();
@@ -445,11 +487,11 @@ namespace TrafficSystem
             isInitialized = true;
 
             // Always log initialization for debugging
-            Debug.Log($"[NpcCarAgent] {name} initialized on segment '{segment.name}' (waypoints: {segment.waypoints.Count}) at index {waypointIndex}");
+            // Debug.Log($"[NpcCarAgent] {name} initialized on segment '{segment.name}' (waypoints: {segment.waypoints.Count}) at index {waypointIndex}");
 
             if (segment.waypoints.Count == 0)
             {
-                Debug.LogError($"[NpcCarAgent] {name} - Segment '{segment.name}' has ZERO waypoints!");
+                // Debug.LogError($"[NpcCarAgent] {name} - Segment '{segment.name}' has ZERO waypoints!");
             }
         }
 
@@ -460,7 +502,7 @@ namespace TrafficSystem
         {
             if (builder == null || builder.RoadGraph == null)
             {
-                Debug.LogError($"[NpcCarAgent] {name} - RoadGraphBuilder or RoadGraph is null!");
+                // Debug.LogError($"[NpcCarAgent] {name} - RoadGraphBuilder or RoadGraph is null!");
                 return;
             }
 
@@ -487,11 +529,23 @@ namespace TrafficSystem
 
         private void FixedUpdate()
         {
+            // Performance optimization: Distance-based update throttling
+            if (PerformanceOptimizationManager.Instance != null)
+            {
+                shouldUpdateThisFrame = PerformanceOptimizationManager.Instance.ShouldNpcUpdate(transform.position, npcId);
+                if (!shouldUpdateThisFrame)
+                {
+                    // Still update wheel visuals even when throttled for smooth appearance
+                    UpdateWheelVisuals();
+                    return;
+                }
+            }
+
             if (!isInitialized)
             {
                 if (Time.frameCount % 120 == 0) // Log every 2 seconds
                 {
-                    Debug.LogWarning($"[NpcCarAgent] {name} - Not initialized!");
+                    // Debug.LogWarning($"[NpcCarAgent] {name} - Not initialized!");
                 }
                 return;
             }
@@ -500,7 +554,7 @@ namespace TrafficSystem
             {
                 if (Time.frameCount % 120 == 0) // Log every 2 seconds
                 {
-                    Debug.LogWarning($"[NpcCarAgent] {name} - No current segment!");
+                    // Debug.LogWarning($"[NpcCarAgent] {name} - No current segment!");
                 }
                 return;
             }
@@ -509,7 +563,7 @@ namespace TrafficSystem
             {
                 if (Time.frameCount % 120 == 0) // Log every 2 seconds
                 {
-                    Debug.LogWarning($"[NpcCarAgent] {name} - Segment '{currentSegment.name}' has no waypoints!");
+                    // Debug.LogWarning($"[NpcCarAgent] {name} - Segment '{currentSegment.name}' has no waypoints!");
                 }
                 return;
             }
@@ -530,6 +584,8 @@ namespace TrafficSystem
             CheckPredictiveCollisions();
 
             CheckObstacles();
+            CheckRearObstacles();
+            UpdateReverseRecoveryState();
             CheckNearbyVehicles();
             ApplySeparationForce();
             UpdateLaneChange();
@@ -651,7 +707,7 @@ namespace TrafficSystem
         /// </summary>
         private void UpdateLaneChange()
         {
-            if (!enableLaneChange) return;
+            if (!enableLaneChange || isReversing) return;
 
             // Smoothly transition to target lateral offset
             lateralOffset = Mathf.Lerp(lateralOffset, targetLateralOffset, Time.fixedDeltaTime * laneChangeSpeed);
@@ -1119,6 +1175,98 @@ namespace TrafficSystem
             }
         }
 
+        private void CheckRearObstacles()
+        {
+            rearObstacleDetected = false;
+            rearObstacleDistance = float.MaxValue;
+
+            if (!enableReverseRecovery) return;
+
+            Vector3 rayOrigin = transform.position + Vector3.up * 0.5f;
+            Vector3 backward = -GetWorldForward();
+            float checkRadius = Mathf.Max(0.3f, vehicleDetectionRadius * 0.9f);
+
+            if (Physics.SphereCast(rayOrigin, checkRadius, backward, out RaycastHit rearHit, reverseRearCheckDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore))
+            {
+                if (rearHit.collider != null && !rearHit.collider.transform.IsChildOf(transform))
+                {
+                    rearObstacleDetected = true;
+                    rearObstacleDistance = rearHit.distance;
+                }
+            }
+        }
+
+        private void UpdateReverseRecoveryState()
+        {
+            if (!enableReverseRecovery || rb == null)
+            {
+                isReversing = false;
+                blockedTimer = 0f;
+                return;
+            }
+
+            if (reverseCooldownTimer > 0f)
+            {
+                reverseCooldownTimer -= Time.fixedDeltaTime;
+            }
+
+            if (isReversing)
+            {
+                reverseTimer -= Time.fixedDeltaTime;
+                bool rearTooClose = rearObstacleDetected && rearObstacleDistance < 1.2f;
+                if (reverseTimer <= 0f || rearTooClose)
+                {
+                    StopReverse();
+                }
+                return;
+            }
+
+            bool frontBlocked = isObstacleDetected && obstacleDistance < Mathf.Max(criticalBrakingDistance + 1f, safeFollowingDistance * 0.45f);
+            if (isColliding) frontBlocked = true;
+
+            float signedSpeed = Vector3.Dot(rb.linearVelocity, GetWorldForward()) * 3.6f;
+            bool nearlyStopped = Mathf.Abs(signedSpeed) <= Mathf.Max(0.1f, reverseStuckSpeedThreshold);
+
+            if (frontBlocked && nearlyStopped)
+            {
+                blockedTimer += Time.fixedDeltaTime;
+            }
+            else
+            {
+                blockedTimer = Mathf.Max(0f, blockedTimer - Time.fixedDeltaTime * 1.5f);
+            }
+
+            if (reverseCooldownTimer > 0f || blockedTimer < reverseTriggerDelay)
+                return;
+
+            bool rearClearEnough = !rearObstacleDetected || rearObstacleDistance > Mathf.Max(1.5f, reverseRearCheckDistance * 0.7f);
+            if (rearClearEnough)
+            {
+                StartReverse();
+            }
+        }
+
+        private void StartReverse()
+        {
+            isReversing = true;
+            reverseTimer = Mathf.Max(0.2f, reverseDuration);
+            blockedTimer = 0f;
+
+            if (turnSignalController != null)
+            {
+                turnSignalController.DeactivateAll();
+            }
+        }
+
+        private void StopReverse()
+        {
+            isReversing = false;
+            reverseTimer = 0f;
+            reverseCooldownTimer = Mathf.Max(0f, reverseCooldown);
+            SetMotorTorque(0f);
+            SetBrakeTorque(0f);
+        }
+
         /// <summary>
         /// Check if collider belongs to a vehicle
         /// </summary>
@@ -1148,15 +1296,15 @@ namespace TrafficSystem
             if (obstacle == null) return ObstacleType.Unknown;
 
             // Check for vehicles
-            if (obstacle.CompareTag("NPC") || obstacle.CompareTag("Player"))
+            if (SafeCompareTag(obstacle.gameObject, "NPC") || SafeCompareTag(obstacle.gameObject, "Player"))
                 return ObstacleType.Vehicle;
 
             // Check for emergency vehicles
-            if (obstacle.CompareTag("Emergency"))
+            if (SafeCompareTag(obstacle.gameObject, "Emergency"))
                 return ObstacleType.EmergencyVehicle;
 
             // Check for pedestrians
-            if (obstacle.CompareTag("Pedestrian"))
+            if (SafeCompareTag(obstacle.gameObject, "Pedestrian"))
                 return ObstacleType.Pedestrian;
 
             // Check if it's a vehicle by component
@@ -1172,6 +1320,14 @@ namespace TrafficSystem
                 return ObstacleType.StaticObject;
 
             return ObstacleType.Unknown;
+        }
+
+        private static bool SafeCompareTag(GameObject gameObject, string tag)
+        {
+            if (gameObject == null || string.IsNullOrEmpty(tag))
+                return false;
+
+            return string.Equals(gameObject.tag, tag, System.StringComparison.Ordinal);
         }
 
         /// <summary>
@@ -2227,6 +2383,12 @@ namespace TrafficSystem
         /// </summary>
         private void ApplyThrottle()
         {
+            if (isReversing)
+            {
+                ApplyReverseThrottle();
+                return;
+            }
+
             float currentSpeed = CurrentSpeed;
             float effectiveTargetSpeed = GetTurnLimitedTargetSpeed();
 
@@ -2397,9 +2559,18 @@ namespace TrafficSystem
             // Apply downforce - always apply some base downforce plus speed-based
             if (downforceCoefficient > 0f)
             {
-                float baseDownforce = 500f; // Constant downforce to keep vehicle grounded
-                float speedDownforce = downforceCoefficient * speed * speed;
-                rb.AddForce(Vector3.down * (baseDownforce + speedDownforce));
+                float speedDownforce = Mathf.Max(0f, downforceCoefficient) * speed * speed;
+                float requestedDownforce = Mathf.Max(0f, baseDownforce) + speedDownforce;
+
+                float weight = rb.mass * Mathf.Abs(Physics.gravity.y);
+                float maxDownforce = weight * Mathf.Max(0f, maxDownforceWeightFraction);
+                if (maxDownforce > 0f)
+                {
+                    requestedDownforce = Mathf.Min(requestedDownforce, maxDownforce);
+                }
+
+                Vector3 downDirection = useLocalDownforceDirection ? -GetWorldUp() : Vector3.down;
+                rb.AddForce(downDirection * requestedDownforce, ForceMode.Force);
             }
 
             if (antiRollStiffness > 0f)
@@ -2573,6 +2744,65 @@ namespace TrafficSystem
             
             // Just ensure colliders are assigned, but don't try to guess orientation
             // as that was causing the sideways movement bug
+        }
+
+        private void NormalizeWheelColliderHeightsRuntime()
+        {
+            if (frontLeftCollider == null || frontRightCollider == null || rearLeftCollider == null || rearRightCollider == null)
+                return;
+
+            WheelCollider[] wheels = { frontLeftCollider, frontRightCollider, rearLeftCollider, rearRightCollider };
+            float minContactY = float.MaxValue;
+
+            for (int i = 0; i < wheels.Length; i++)
+            {
+                WheelCollider wheel = wheels[i];
+                if (wheel == null) return;
+
+                Vector3 localPos = transform.InverseTransformPoint(wheel.transform.position);
+                float contactY = localPos.y - wheel.radius;
+                if (contactY < minContactY)
+                    minContactY = contactY;
+            }
+
+            if (Mathf.Abs(minContactY) < 0.001f)
+                return;
+
+            for (int i = 0; i < wheels.Length; i++)
+            {
+                Transform wt = wheels[i].transform;
+                Vector3 localPos = wt.localPosition;
+                localPos.y -= minContactY;
+                wt.localPosition = localPos;
+            }
+        }
+
+        private void ApplyReverseThrottle()
+        {
+            float signedSpeedKmh = Vector3.Dot(rb.linearVelocity, GetWorldForward()) * 3.6f;
+            float desiredReverseSpeedKmh = -Mathf.Max(1f, reverseTargetSpeed);
+
+            bool rearTooClose = rearObstacleDetected && rearObstacleDistance < 1.2f;
+            if (rearTooClose)
+            {
+                SetMotorTorque(0f);
+                SetBrakeTorque(braking * 0.8f);
+                return;
+            }
+
+            if (signedSpeedKmh > desiredReverseSpeedKmh + 0.5f)
+            {
+                float speedError = Mathf.Abs(desiredReverseSpeedKmh - signedSpeedKmh);
+                float reverseTorque = personalityAcceleration * 0.45f * Mathf.Clamp01(speedError / 10f);
+                reverseTorque = Mathf.Max(80f, reverseTorque);
+                SetBrakeTorque(0f);
+                SetMotorTorque(-reverseTorque);
+            }
+            else
+            {
+                SetMotorTorque(0f);
+                SetBrakeTorque(braking * 0.2f);
+            }
         }
 
         private void NormalizeModelAxes()
@@ -2868,6 +3098,16 @@ namespace TrafficSystem
                         float t = i * 0.5f; // 0.5s intervals
                         Vector3 predictedPos = VehicleTrajectoryPredictor.PredictPositionWithPath(this, t);
                         Gizmos.DrawWireSphere(predictedPos, 0.2f);
+                    }
+                }
+
+                if (enableReverseRecovery)
+                {
+                    Gizmos.color = rearObstacleDetected ? new Color(1f, 0.5f, 0f) : Color.gray;
+                    Gizmos.DrawLine(rayOrigin, rayOrigin - forward * reverseRearCheckDistance);
+                    if (rearObstacleDetected && rearObstacleDistance < float.MaxValue)
+                    {
+                        Gizmos.DrawWireSphere(rayOrigin - forward * rearObstacleDistance, 0.35f);
                     }
                 }
             }

@@ -2,6 +2,8 @@ using System.Collections.Generic;
 using UnityEngine;
 using DeliveryDriver.Quest;
 using DeliveryDriver.Quest.UI;
+using DeliveryDriver.City;
+using TrafficSystem;
 
 /// <summary>
 /// Manages delivery missions - spawning boxes and delivery points
@@ -19,6 +21,9 @@ public class DeliveryManager : MonoBehaviour
     [SerializeField] private float spawnHeight = 0.5f;
     [SerializeField] private float minDistanceBetweenPoints = 20f;
     [SerializeField] private LayerMask groundMask = ~0;
+    [SerializeField] private LayerMask roadSurfaceMask;
+    [SerializeField] private RoadGraphBuilder roadGraphBuilder;
+    [SerializeField] private bool useRoadGraphSpawnPoints = true;
 
     [Header("Delivery Settings")]
     [SerializeField] private float deliveryRadius = 5f;
@@ -33,6 +38,10 @@ public class DeliveryManager : MonoBehaviour
     [SerializeField] private bool useQuestSystem = true;
     [SerializeField] private CargoLibrary cargoLibrary;
 
+    [Header("Neighborhood Integration")]
+    [SerializeField] private bool spawnOnlyInNeighborhoods = true;
+    [SerializeField] private float neighborhoodCheckRadius = 2f;
+
     [Header("Debug")]
     [SerializeField] private bool showDebugInfo = true;
 
@@ -42,18 +51,46 @@ public class DeliveryManager : MonoBehaviour
     private GameObject currentDeliveryPreview; // Ghost box at delivery location
     private Vector3 currentPickupPoint;
     private Vector3 currentDeliveryPoint;
+    private string currentPickupNeighborhoodName = "";
+    private string currentDeliveryNeighborhoodName = "";
     private bool isDeliveryActive = false;
     private List<Vector3> availableSpawnPoints = new List<Vector3>();
     private DeliveryUI deliveryUI;
     private QuestData currentDeliveryQuest;
 
     public bool IsDeliveryActive => isDeliveryActive;
+    public bool HasBox => currentBox != null;
+    public bool IsCarryingBox => currentBox != null && currentBox.IsPickedUp;
+    public bool HasObjectivePoint => HasBox || isDeliveryActive;
+    public Vector3 CurrentObjectivePoint => isDeliveryActive ? currentDeliveryPoint : currentPickupPoint;
     public Vector3 CurrentDeliveryPoint => currentDeliveryPoint;
     public Vector3 CurrentPickupPoint => currentPickupPoint;
+    public string CurrentPickupNeighborhoodName => currentPickupNeighborhoodName;
+    public string CurrentDeliveryNeighborhoodName => currentDeliveryNeighborhoodName;
 
-    private void Start()
+    private void Awake()
     {
+        EnsureRoadSurfaceMask();
+    }
+
+    private System.Collections.IEnumerator Start()
+    {
+        EnsureRoadSurfaceMask();
         deliveryUI = FindFirstObjectByType<DeliveryUI>();
+
+        if (roadGraphBuilder == null)
+        {
+            roadGraphBuilder = FindFirstObjectByType<RoadGraphBuilder>();
+        }
+
+        // Wait a short time so RoadGraphBuilder can finish building on scene start.
+        int waitFrames = 0;
+        while (useRoadGraphSpawnPoints && waitFrames < 120 && !HasRoadGraphData())
+        {
+            waitFrames++;
+            yield return null;
+        }
+
         GenerateSpawnPoints();
         SpawnNewBox();
     }
@@ -63,12 +100,15 @@ public class DeliveryManager : MonoBehaviour
         // Check delivery proximity
         if (isDeliveryActive && currentBox != null && currentBox.IsPickedUp)
         {
-            Transform player = GameObject.FindGameObjectWithTag("Player")?.transform;
-            if (player == null)
+            Transform player = null;
+            CarController car = FindFirstObjectByType<CarController>();
+            if (car != null)
             {
-                // Try to find CarController
-                CarController car = FindFirstObjectByType<CarController>();
-                if (car != null) player = car.transform;
+                player = car.transform;
+            }
+            else
+            {
+                player = GameObject.FindGameObjectWithTag("Player")?.transform;
             }
 
             if (player != null)
@@ -103,17 +143,36 @@ public class DeliveryManager : MonoBehaviour
             {
                 if (point != null)
                 {
-                    availableSpawnPoints.Add(point.position);
+                    if (IsValidSpawnPosition(point.position))
+                    {
+                        availableSpawnPoints.Add(point.position);
+                    }
+                    else if (showDebugInfo)
+                    {
+                        Debug.LogWarning($"[DeliveryManager] Ignoring invalid manual spawn point at {point.position}");
+                    }
                 }
             }
         }
         else
         {
+            if (useRoadGraphSpawnPoints && TryGenerateSpawnPointsFromRoadGraph())
+            {
+                if (showDebugInfo)
+                {
+                    Debug.Log($"[DeliveryManager] Generated {availableSpawnPoints.Count} road-graph spawn points");
+                }
+                return;
+            }
+
             // Auto-generate spawn points
             for (int i = 0; i < numberOfAutoSpawnPoints; i++)
             {
                 Vector3 randomPoint = GetRandomGroundPosition();
-                availableSpawnPoints.Add(randomPoint);
+                if (IsValidSpawnPosition(randomPoint))
+                {
+                    availableSpawnPoints.Add(randomPoint);
+                }
             }
         }
 
@@ -138,13 +197,25 @@ public class DeliveryManager : MonoBehaviour
             // Raycast down to find ground
             if (Physics.Raycast(position, Vector3.down, out RaycastHit hit, raycastMaxDistance, groundMask, QueryTriggerInteraction.Ignore))
             {
+                // Spawn only on road colliders, never on buildings/other meshes.
+                if (!IsRoadCollider(hit.collider))
+                {
+                    continue;
+                }
+
+                // Keep points inside terrain bounds.
+                if (!IsWithinAnyTerrainBounds(hit.point))
+                {
+                    continue;
+                }
+
                 // Make sure it's not too steep and not a trigger
                 if (Vector3.Dot(hit.normal, Vector3.up) > 0.7f && !hit.collider.isTrigger)
                 {
                     Vector3 spawnPos = hit.point + Vector3.up * spawnHeight;
 
-                    // Validate spawn position with sphere check (ensure there's space)
-                    if (!Physics.CheckSphere(spawnPos, 1f, groundMask, QueryTriggerInteraction.Ignore))
+                    // Validate spawn position (ensure there's space and no blocking geometry)
+                    if (!IsSpawnSpaceBlocked(spawnPos) && IsValidSpawnPosition(spawnPos))
                     {
                         if (showDebugInfo && i > 0)
                         {
@@ -172,13 +243,50 @@ public class DeliveryManager : MonoBehaviour
 
             if (Physics.Raycast(fallbackPos, Vector3.down, out RaycastHit hit, raycastMaxDistance, groundMask, QueryTriggerInteraction.Ignore))
             {
-                Debug.LogWarning($"[DeliveryManager] Using fallback spawn near player at {hit.point}");
-                return hit.point + Vector3.up * spawnHeight;
+                Vector3 fallbackSpawn = hit.point + Vector3.up * spawnHeight;
+                if (IsRoadCollider(hit.collider) && IsValidSpawnPosition(fallbackSpawn))
+                {
+                    if (showDebugInfo)
+                    {
+                        Debug.Log($"[DeliveryManager] Using fallback spawn near player at {hit.point}");
+                    }
+                    return fallbackSpawn;
+                }
             }
         }
 
         Debug.LogError("[DeliveryManager] Failed to find valid spawn position! Using fallback.");
         return new Vector3(0, 10f, 0);
+    }
+
+    /// <summary>
+    /// Check if a position is inside any neighborhood zone
+    /// </summary>
+    private bool IsInsideNeighborhood(Vector3 position)
+    {
+        // Find all colliders at this position
+        Collider[] colliders = Physics.OverlapSphere(position, neighborhoodCheckRadius, ~0, QueryTriggerInteraction.Collide);
+
+        foreach (Collider col in colliders)
+        {
+            // Check if this collider belongs to a NeighborhoodZone
+            NeighborhoodZone zone = col.GetComponent<NeighborhoodZone>();
+            if (zone == null)
+            {
+                zone = col.GetComponentInParent<NeighborhoodZone>();
+            }
+
+            if (zone != null)
+            {
+                if (showDebugInfo)
+                {
+                    Debug.Log($"[DeliveryManager] Position {position} is inside neighborhood: {zone.NeighborhoodName}");
+                }
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -192,10 +300,12 @@ public class DeliveryManager : MonoBehaviour
             return;
         }
 
-        // Get random spawn point
-        Vector3 spawnPos = availableSpawnPoints.Count > 0 ?
-            availableSpawnPoints[Random.Range(0, availableSpawnPoints.Count)] :
-            GetRandomGroundPosition();
+        // Get a valid random spawn point
+        if (!TryGetValidSpawnPoint(Vector3.zero, false, out Vector3 spawnPos))
+        {
+            Debug.LogError("[DeliveryManager] Could not find a valid road spawn position.");
+            return;
+        }
 
         // Spawn box with slight rotation variation
         Quaternion rotation = Quaternion.Euler(0, Random.Range(0f, 360f), 0);
@@ -255,6 +365,8 @@ public class DeliveryManager : MonoBehaviour
 
         // Store pickup point
         currentPickupPoint = spawnPos;
+        currentPickupNeighborhoodName = ResolveNeighborhoodName(currentPickupPoint);
+        currentDeliveryNeighborhoodName = "";
 
         // Create quest in quest system
         if (useQuestSystem)
@@ -277,6 +389,7 @@ public class DeliveryManager : MonoBehaviour
 
         // Generate delivery point (different from pickup)
         currentDeliveryPoint = GetDeliveryPoint(box.transform.position);
+        currentDeliveryNeighborhoodName = ResolveNeighborhoodName(currentDeliveryPoint);
         isDeliveryActive = true;
 
         // Spawn delivery indicator
@@ -302,7 +415,7 @@ public class DeliveryManager : MonoBehaviour
         // Notify UI
         if (deliveryUI != null)
         {
-            deliveryUI.OnBoxPickedUp(currentDeliveryPoint);
+            deliveryUI.OnBoxPickedUp(currentDeliveryPoint, currentPickupNeighborhoodName, currentDeliveryNeighborhoodName);
         }
 
         if (showDebugInfo)
@@ -394,21 +507,249 @@ public class DeliveryManager : MonoBehaviour
     /// </summary>
     private Vector3 GetDeliveryPoint(Vector3 pickupPoint)
     {
-        Vector3 deliveryPoint;
+        Vector3 deliveryPoint = pickupPoint;
         int maxAttempts = 20;
         int attempts = 0;
 
-        do
+        while (attempts < maxAttempts)
         {
-            deliveryPoint = availableSpawnPoints.Count > 0 ?
-                availableSpawnPoints[Random.Range(0, availableSpawnPoints.Count)] :
-                GetRandomGroundPosition();
+            if (TryGetValidSpawnPoint(pickupPoint, true, out Vector3 candidate))
+            {
+                deliveryPoint = candidate;
+                if (Vector3.Distance(pickupPoint, deliveryPoint) >= minDistanceBetweenPoints)
+                {
+                    return deliveryPoint;
+                }
+            }
 
             attempts++;
         }
-        while (Vector3.Distance(pickupPoint, deliveryPoint) < minDistanceBetweenPoints && attempts < maxAttempts);
 
-        return deliveryPoint;
+        if (TryGetValidSpawnPoint(pickupPoint, false, out Vector3 fallbackPoint))
+        {
+            return fallbackPoint;
+        }
+
+        return pickupPoint;
+    }
+
+    private bool TryGetValidSpawnPoint(Vector3 referencePoint, bool enforceMinDistance, out Vector3 spawnPoint)
+    {
+        const int maxAttempts = 40;
+
+        for (int i = 0; i < maxAttempts; i++)
+        {
+            Vector3 candidate = availableSpawnPoints.Count > 0
+                ? availableSpawnPoints[Random.Range(0, availableSpawnPoints.Count)]
+                : GetRandomGroundPosition();
+
+            if (!IsValidSpawnPosition(candidate))
+            {
+                continue;
+            }
+
+            if (enforceMinDistance && Vector3.Distance(referencePoint, candidate) < minDistanceBetweenPoints)
+            {
+                continue;
+            }
+
+            spawnPoint = candidate;
+            return true;
+        }
+
+        spawnPoint = Vector3.zero;
+        return false;
+    }
+
+    private bool HasRoadGraphData()
+    {
+        return roadGraphBuilder != null &&
+               roadGraphBuilder.RoadGraph != null &&
+               roadGraphBuilder.RoadGraph.roadSegments != null &&
+               roadGraphBuilder.RoadGraph.roadSegments.Count > 0;
+    }
+
+    private bool TryGenerateSpawnPointsFromRoadGraph()
+    {
+        if (!HasRoadGraphData())
+        {
+            return false;
+        }
+
+        int targetCount = Mathf.Max(1, numberOfAutoSpawnPoints);
+        int maxAttempts = targetCount * 20;
+        int attempts = 0;
+
+        while (availableSpawnPoints.Count < targetCount && attempts < maxAttempts)
+        {
+            attempts++;
+            if (!TryGetRandomRoadGraphPoint(out Vector3 point))
+            {
+                continue;
+            }
+
+            if (!IsWithinAnyTerrainBounds(point))
+            {
+                continue;
+            }
+
+            if (IsSpawnSpaceBlocked(point))
+            {
+                continue;
+            }
+
+            availableSpawnPoints.Add(point);
+        }
+
+        return availableSpawnPoints.Count > 0;
+    }
+
+    private bool TryGetRandomRoadGraphPoint(out Vector3 point)
+    {
+        point = Vector3.zero;
+
+        if (!HasRoadGraphData())
+        {
+            return false;
+        }
+
+        var randomWp = roadGraphBuilder.RoadGraph.GetRandomWaypoint();
+        if (randomWp.segment == null)
+        {
+            return false;
+        }
+
+        Waypoint wp = randomWp.segment.GetWaypoint(randomWp.waypointIndex);
+        if (wp == null)
+        {
+            return false;
+        }
+
+        point = wp.position + Vector3.up * spawnHeight;
+        return true;
+    }
+
+    private void EnsureRoadSurfaceMask()
+    {
+        if (roadSurfaceMask.value != 0)
+        {
+            return;
+        }
+
+        int roadLayer = LayerMask.NameToLayer("Road");
+        if (roadLayer >= 0)
+        {
+            roadSurfaceMask = 1 << roadLayer;
+        }
+    }
+
+    private bool IsRoadCollider(Collider collider)
+    {
+        if (collider == null)
+        {
+            return false;
+        }
+
+        return (roadSurfaceMask.value & (1 << collider.gameObject.layer)) != 0;
+    }
+
+    private bool IsWithinAnyTerrainBounds(Vector3 worldPos)
+    {
+        Terrain[] terrains = Terrain.activeTerrains;
+        if (terrains == null || terrains.Length == 0)
+        {
+            return true;
+        }
+
+        foreach (Terrain terrain in terrains)
+        {
+            if (terrain == null || terrain.terrainData == null)
+            {
+                continue;
+            }
+
+            Vector3 terrainMin = terrain.transform.position;
+            Vector3 terrainMax = terrainMin + terrain.terrainData.size;
+            if (worldPos.x >= terrainMin.x && worldPos.x <= terrainMax.x &&
+                worldPos.z >= terrainMin.z && worldPos.z <= terrainMax.z)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsSpawnSpaceBlocked(Vector3 position)
+    {
+        const float checkRadius = 0.6f;
+        Collider[] overlaps = Physics.OverlapSphere(position, checkRadius, ~0, QueryTriggerInteraction.Ignore);
+
+        foreach (Collider col in overlaps)
+        {
+            if (col == null || col.isTrigger)
+            {
+                continue;
+            }
+
+            if (col is TerrainCollider || IsRoadCollider(col))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool IsValidSpawnPosition(Vector3 position)
+    {
+        if (!IsWithinAnyTerrainBounds(position))
+        {
+            return false;
+        }
+
+        Vector3 rayOrigin = position + Vector3.up * 5f;
+        if (!Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, 20f, ~0, QueryTriggerInteraction.Ignore))
+        {
+            return false;
+        }
+
+        bool requireRoadCollider = !(useRoadGraphSpawnPoints && HasRoadGraphData());
+        if (requireRoadCollider && !IsRoadCollider(hit.collider))
+        {
+            return false;
+        }
+
+        if (spawnOnlyInNeighborhoods && !IsInsideNeighborhood(position))
+        {
+            return false;
+        }
+
+        return !IsSpawnSpaceBlocked(position);
+    }
+
+    private string ResolveNeighborhoodName(Vector3 position)
+    {
+        Collider[] colliders = Physics.OverlapSphere(position, neighborhoodCheckRadius, ~0, QueryTriggerInteraction.Collide);
+        foreach (Collider col in colliders)
+        {
+            if (col == null) continue;
+
+            NeighborhoodZone zone = col.GetComponent<NeighborhoodZone>();
+            if (zone == null)
+            {
+                zone = col.GetComponentInParent<NeighborhoodZone>();
+            }
+
+            if (zone != null && !string.IsNullOrWhiteSpace(zone.NeighborhoodName))
+            {
+                return zone.NeighborhoodName;
+            }
+        }
+
+        return "Bilinmiyor";
     }
 
     /// <summary>
@@ -464,6 +805,8 @@ public class DeliveryManager : MonoBehaviour
         ShowQuestCompleteUI(questToShow);
 
         currentDeliveryQuest = null;
+        currentPickupNeighborhoodName = "";
+        currentDeliveryNeighborhoodName = "";
 
         if (showDebugInfo)
         {
@@ -485,6 +828,10 @@ public class DeliveryManager : MonoBehaviour
             return;
         }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        QuestManager.Instance.SetDebugInfiniteTime(false);
+#endif
+
         // Create quest data
         currentDeliveryQuest = new QuestData
         {
@@ -501,6 +848,13 @@ public class DeliveryManager : MonoBehaviour
             PickupLocation = new QuestLocation(pickupPos, $"Pickup: {FormatCoordinates(pickupPos)}", deliveryRadius),
             DeliveryLocations = new List<QuestLocation>()
         };
+
+        if (currentDeliveryQuest.PickupLocation != null)
+        {
+            currentDeliveryQuest.PickupLocation.VisualMarker = pickupIndicatorPrefab != null
+                ? pickupIndicatorPrefab
+                : deliveryIndicatorPrefab;
+        }
 
         // Add cargo if available
         if (cargoLibrary != null)
@@ -539,6 +893,9 @@ public class DeliveryManager : MonoBehaviour
         currentDeliveryQuest.DeliveryLocations.Add(deliveryLocation);
         currentDeliveryQuest.QuestDescription = $"Deliver package to {FormatCoordinates(deliveryPos)}";
         currentDeliveryQuest.Status = QuestStatus.Active;
+        currentDeliveryQuest.HasPickedUpCargo = true;
+        currentDeliveryQuest.CurrentDeliveryIndex = 0;
+        QuestManager.Instance?.OnQuestUpdated?.Invoke(currentDeliveryQuest);
 
         // Show marker
         deliveryLocation.VisualMarker = deliveryIndicatorPrefab;

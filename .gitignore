@@ -110,3 +110,6 @@ InitTestScene*.unity*
 
 # EasyRoads3D generated files (root level)
 /EasyRoads3Dv3/
+
+# Unity auto-recovery files
+/[Aa]ssets/_Recovery/

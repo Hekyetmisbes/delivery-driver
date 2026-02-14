@@ -42,6 +42,41 @@ public class CarController : MonoBehaviour
     [Tooltip("Kargo yuklendiginde agirlik merkezine uygulanacak ek yukseklik.")]
     [SerializeField] private float cargoCenterOfMassYOffset = 0.2f;
     
+    [Header("--- STABILITY ---")]
+    [Tooltip("Araci yere bastirma kuvveti katsayisi (N per m/s).")]
+    [SerializeField] private float downforcePerSpeed = 35f;
+    [Tooltip("Downforce maksimumu: aracin agirliginin bu oranini gecmez.")]
+    [SerializeField] private float maxDownforceWeightFraction = 0.3f;
+    [Tooltip("Baslangicta wheel collider yuksekliklerini ayni temas duzlemine hizalar.")]
+    [SerializeField] private bool autoNormalizeWheelColliderHeights = true;
+    [Tooltip("Hiz arttikca direksiyon etkinligini azaltir.")]
+    [SerializeField] private bool speedSensitiveSteering = true;
+    [Tooltip("Bu hizda (km/s) direksiyon azaltmasi maksimuma ulasir.")]
+    [SerializeField] private float steeringReductionFullSpeedKmh = 120f;
+    [Tooltip("Maksimum hizda direksiyon acisinin korunacak orani.")]
+    [Range(0.15f, 1f)]
+    [SerializeField] private float steeringAtHighSpeedFactor = 0.45f;
+    [Tooltip("On aks anti-roll sertligi.")]
+    [SerializeField] private float frontAntiRollStiffness = 6000f;
+    [Tooltip("Arka aks anti-roll sertligi.")]
+    [SerializeField] private float rearAntiRollStiffness = 6500f;
+    [Tooltip("Rigidbody'de surekli carpisma tespiti kullanir (zemine girme/firlamayi azaltir).")]
+    [SerializeField] private bool useContinuousCollisionDetection = true;
+    [Tooltip("Rigidbody interpolasyonunu acarak daha stabil temas saglar.")]
+    [SerializeField] private bool useInterpolation = true;
+    [Tooltip("Arac govdesindeki MeshCollider'lari devre disi birakip tek BoxCollider kullanir.")]
+    [SerializeField] private bool useSimpleBodyCollider = true;
+    [SerializeField] private Vector3 simpleBodyColliderCenter = new Vector3(0f, 0.75f, 0.05f);
+    [SerializeField] private Vector3 simpleBodyColliderSize = new Vector3(1.85f, 1.35f, 4.35f);
+
+    [Header("--- INPUT SMOOTHING ---")]
+    [Tooltip("Gaz/fren girdisinin ne kadar hizli artacagi (birim/s).")]
+    [SerializeField] private float throttleRiseRate = 4f;
+    [Tooltip("Gaz/fren girdisinin ne kadar hizli azalacagi (birim/s).")]
+    [SerializeField] private float throttleFallRate = 6f;
+    [Tooltip("Direksiyon girdisinin ne kadar hizli degisecegi (birim/s).")]
+    [SerializeField] private float steeringInputRate = 5f;
+    
     [Header("--- DEBUG ---")]
     [SerializeField] private bool showDebugGUI = true;
 
@@ -54,6 +89,8 @@ public class CarController : MonoBehaviour
     private Vector2 moveInput;
     private float baseRigidbodyMass;
     private float currentCargoWeight;
+    private float smoothedThrottleInput;
+    private float smoothedSteerInput;
     
     // Input Action References
     private InputAction moveAction;
@@ -61,8 +98,14 @@ public class CarController : MonoBehaviour
 
     private void Awake()
     {
+        if (autoNormalizeWheelColliderHeights)
+        {
+            NormalizeWheelColliderHeightsRuntime();
+        }
+
         rb = GetComponent<Rigidbody>();
         SetupRigidbody();
+        ConfigureBodyCollidersForStability();
         SetupInput();
     }
 
@@ -76,6 +119,15 @@ public class CarController : MonoBehaviour
         rb.angularDamping = 0.5f; 
         // BUG FIX: Uyuyan fizik motoru sorunu için
         rb.sleepThreshold = 0.0f; 
+        if (useContinuousCollisionDetection)
+        {
+            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        }
+        if (useInterpolation)
+        {
+            rb.interpolation = RigidbodyInterpolation.Interpolate;
+        }
+        rb.maxAngularVelocity = 30f;
     }
 
     public void AddCargoWeight(float weight)
@@ -116,10 +168,25 @@ public class CarController : MonoBehaviour
 
     private void FixedUpdate()
     {
+        UpdateSmoothedInputs(Time.fixedDeltaTime);
         HandleMotor();
         HandleSteering();
+        ApplyAntiRollBars();
         UpdateWheels();
-        ApplyDownforce(); // Yüksek hızda yol tutuşu için
+        ApplyDownforce(); // Yuksek hizda yol tutusu icin
+    }
+
+    private void UpdateSmoothedInputs(float deltaTime)
+    {
+        float targetThrottle = Mathf.Clamp(moveInput.y, -1f, 1f);
+        float targetSteer = Mathf.Clamp(moveInput.x, -1f, 1f);
+
+        float throttleRate = Mathf.Abs(targetThrottle) > Mathf.Abs(smoothedThrottleInput)
+            ? throttleRiseRate
+            : throttleFallRate;
+
+        smoothedThrottleInput = Mathf.MoveTowards(smoothedThrottleInput, targetThrottle, throttleRate * deltaTime);
+        smoothedSteerInput = Mathf.MoveTowards(smoothedSteerInput, targetSteer, steeringInputRate * deltaTime);
     }
 
     private void HandleInput()
@@ -133,7 +200,7 @@ public class CarController : MonoBehaviour
 
     private void HandleMotor()
     {
-        float accelInput = moveInput.y;
+        float accelInput = smoothedThrottleInput;
         
         // BUG FIX: "Teker dönüyor ama gitmiyor" sorununun ana kaynaklarından biri:
         // Fren torku 0 değilse motor torku çalışmaz. Gaz veriyorsak freni kesinlikle 0 yapmalıyız.
@@ -200,12 +267,71 @@ public class CarController : MonoBehaviour
 
     private void HandleSteering()
     {
-        float steerInput = moveInput.x;
-        currentSteerAngle = maxSteeringAngle * steerInput;
+        float steerInput = smoothedSteerInput;
+
+        float steerFactor = 1f;
+        if (speedSensitiveSteering)
+        {
+            float speedKmh = rb.linearVelocity.magnitude * 3.6f;
+            float t = steeringReductionFullSpeedKmh > 0.1f
+                ? Mathf.Clamp01(speedKmh / steeringReductionFullSpeedKmh)
+                : 1f;
+            steerFactor = Mathf.Lerp(1f, steeringAtHighSpeedFactor, t);
+        }
+
+        currentSteerAngle = maxSteeringAngle * steerInput * steerFactor;
 
         // Sadece ön tekerler döner
         frontLeftCollider.steerAngle = currentSteerAngle;
         frontRightCollider.steerAngle = currentSteerAngle;
+    }
+
+    private void ApplyAntiRollBars()
+    {
+        ApplyAntiRollOnAxle(frontLeftCollider, frontRightCollider, frontAntiRollStiffness);
+        ApplyAntiRollOnAxle(rearLeftCollider, rearRightCollider, rearAntiRollStiffness);
+    }
+
+    private void ApplyAntiRollOnAxle(WheelCollider left, WheelCollider right, float stiffness)
+    {
+        if (left == null || right == null || stiffness <= 0f)
+        {
+            return;
+        }
+
+        float leftTravel = 1f;
+        float rightTravel = 1f;
+        bool leftGrounded = false;
+        bool rightGrounded = false;
+        float leftSuspension = Mathf.Max(0.001f, left.suspensionDistance);
+        float rightSuspension = Mathf.Max(0.001f, right.suspensionDistance);
+
+        WheelHit hit;
+        if (left.GetGroundHit(out hit))
+        {
+            leftGrounded = true;
+            leftTravel = (-left.transform.InverseTransformPoint(hit.point).y - left.radius) / leftSuspension;
+            leftTravel = Mathf.Clamp01(leftTravel);
+        }
+
+        if (right.GetGroundHit(out hit))
+        {
+            rightGrounded = true;
+            rightTravel = (-right.transform.InverseTransformPoint(hit.point).y - right.radius) / rightSuspension;
+            rightTravel = Mathf.Clamp01(rightTravel);
+        }
+
+        float antiRollForce = (leftTravel - rightTravel) * stiffness;
+
+        if (leftGrounded)
+        {
+            rb.AddForceAtPosition(left.transform.up * -antiRollForce, left.transform.position, ForceMode.Force);
+        }
+
+        if (rightGrounded)
+        {
+            rb.AddForceAtPosition(right.transform.up * antiRollForce, right.transform.position, ForceMode.Force);
+        }
     }
 
     private void UpdateWheels()
@@ -232,8 +358,85 @@ public class CarController : MonoBehaviour
 
     private void ApplyDownforce()
     {
-        // Yüksek hızda uçmayı engellemek için yere bastırma kuvveti
-        rb.AddForce(-transform.up * rb.linearVelocity.magnitude * 50f);
+        float speed = rb.linearVelocity.magnitude;
+        float requested = Mathf.Max(0f, downforcePerSpeed) * speed;
+        float weight = rb.mass * Mathf.Abs(Physics.gravity.y);
+        float maxAllowed = Mathf.Max(0f, maxDownforceWeightFraction) * weight;
+
+        if (maxAllowed > 0f)
+        {
+            requested = Mathf.Min(requested, maxAllowed);
+        }
+
+        rb.AddForce(-transform.up * requested, ForceMode.Force);
+    }
+
+    private void ConfigureBodyCollidersForStability()
+    {
+        if (!useSimpleBodyCollider)
+        {
+            return;
+        }
+
+        MeshCollider[] meshColliders = GetComponentsInChildren<MeshCollider>(true);
+        for (int i = 0; i < meshColliders.Length; i++)
+        {
+            if (meshColliders[i] != null && !meshColliders[i].isTrigger)
+            {
+                meshColliders[i].enabled = false;
+            }
+        }
+
+        BoxCollider bodyBox = GetComponent<BoxCollider>();
+        if (bodyBox == null)
+        {
+            bodyBox = gameObject.AddComponent<BoxCollider>();
+        }
+
+        bodyBox.center = simpleBodyColliderCenter;
+        bodyBox.size = simpleBodyColliderSize;
+        bodyBox.isTrigger = false;
+        bodyBox.enabled = true;
+    }
+
+    private void NormalizeWheelColliderHeightsRuntime()
+    {
+        if (frontLeftCollider == null || frontRightCollider == null || rearLeftCollider == null || rearRightCollider == null)
+        {
+            return;
+        }
+
+        WheelCollider[] wheels = { frontLeftCollider, frontRightCollider, rearLeftCollider, rearRightCollider };
+        float minContactY = float.MaxValue;
+
+        for (int i = 0; i < wheels.Length; i++)
+        {
+            WheelCollider wheel = wheels[i];
+            if (wheel == null)
+            {
+                return;
+            }
+
+            Vector3 localPos = transform.InverseTransformPoint(wheel.transform.position);
+            float contactY = localPos.y - wheel.radius;
+            if (contactY < minContactY)
+            {
+                minContactY = contactY;
+            }
+        }
+
+        if (Mathf.Abs(minContactY) < 0.001f)
+        {
+            return;
+        }
+
+        for (int i = 0; i < wheels.Length; i++)
+        {
+            Transform wt = wheels[i].transform;
+            Vector3 localPos = wt.localPosition;
+            localPos.y -= minContactY;
+            wt.localPosition = localPos;
+        }
     }
 
     private void OnGUI()
@@ -267,3 +470,4 @@ public class CarController : MonoBehaviour
     }
 
 }
+

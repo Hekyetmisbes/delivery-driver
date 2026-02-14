@@ -1,6 +1,8 @@
 using UnityEngine;
 using UnityEditor;
 using UnityEditor.SceneManagement;
+using System.Collections.Generic;
+using DeliveryDriver.City;
 
 public class SimplePolyCityRoadGridTool : EditorWindow
 {
@@ -10,8 +12,10 @@ public class SimplePolyCityRoadGridTool : EditorWindow
     private const int West = 8;
 
     [Header("Scene References")]
-    [SerializeField] private Terrain targetTerrain;
+    [SerializeField] private List<Terrain> targetTerrains = new List<Terrain>();
     [SerializeField] private Transform roadParent;
+    [SerializeField] private Transform buildingParent;
+    [SerializeField] private Transform neighborhoodParent;
 
     [Header("Grid")]
     [SerializeField] private int gridWidth = 40;
@@ -46,6 +50,31 @@ public class SimplePolyCityRoadGridTool : EditorWindow
     [SerializeField] private float crossRotationOffset;
     [SerializeField] private float deadEndRotationOffset;
 
+    [Header("Buildings")]
+    [SerializeField] private bool generateBuildings = true;
+    [SerializeField] private bool clearBuildingsBeforeGenerate = true;
+    [SerializeField, Range(0f, 1f)] private float buildingSpawnChance = 0.9f;
+    [SerializeField] private float buildingSetbackFromRoad = 1.1f;
+    [SerializeField] private float buildingTowardRoadOffset = 4f;
+    [SerializeField] private float buildingHeightOffset;
+    [SerializeField] private bool randomizeBuildingYaw = false;
+    [SerializeField] private float buildingRandomYawRange = 6f;
+    [SerializeField] private bool randomizeBuildingScale = true;
+    [SerializeField] private Vector2 buildingScaleRange = new Vector2(0.95f, 1.08f);
+    [SerializeField] private bool autoScaleBuildingsToFitLot = true;
+    [SerializeField] private float buildingMinSpacing = 0.4f;
+    [SerializeField] private float buildingFootprintPadding = 0.15f;
+    [SerializeField] private List<GameObject> buildingPrefabs = new List<GameObject>();
+
+    [Header("Neighborhoods")]
+    [SerializeField] private bool generateNeighborhoods = true;
+    [SerializeField] private bool clearNeighborhoodsBeforeGenerate = true;
+    [SerializeField] private int neighborhoodSize = 12;
+    [SerializeField] private float neighborhoodZoneHeight = 30f;
+    [SerializeField] private List<string> neighborhoodNames = new List<string>();
+
+    private Vector2 scrollPosition;
+
     [MenuItem("Tools/SimplePoly/City Road Grid Tool")]
     public static void ShowWindow()
     {
@@ -54,6 +83,7 @@ public class SimplePolyCityRoadGridTool : EditorWindow
 
     private void OnGUI()
     {
+        scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
         EditorGUILayout.LabelField("SimplePoly City Grid Road Builder", EditorStyles.boldLabel);
         EditorGUILayout.Space();
 
@@ -66,6 +96,10 @@ public class SimplePolyCityRoadGridTool : EditorWindow
         DrawPrefabSection();
         EditorGUILayout.Space();
         DrawRotationSection();
+        EditorGUILayout.Space();
+        DrawBuildingSection();
+        EditorGUILayout.Space();
+        DrawNeighborhoodSection();
         EditorGUILayout.Space(8);
 
         using (new EditorGUILayout.HorizontalScope())
@@ -79,19 +113,69 @@ public class SimplePolyCityRoadGridTool : EditorWindow
             {
                 ClearRoads();
             }
+
+            if (GUILayout.Button("Clear Buildings", GUILayout.Height(28)))
+            {
+                ClearBuildings();
+            }
+
+            if (GUILayout.Button("Clear Neighborhoods", GUILayout.Height(28)))
+            {
+                ClearNeighborhoods();
+            }
         }
 
-        if (GUILayout.Button("Generate Grid Roads", GUILayout.Height(42)))
+        if (GUILayout.Button("Generate City (Roads + Buildings + Neighborhoods)", GUILayout.Height(42)))
         {
             GenerateRoadGrid();
         }
+
+        if (GUILayout.Button("Generate Neighborhoods Only", GUILayout.Height(34)))
+        {
+            GenerateNeighborhoodsOnly();
+        }
+
+        EditorGUILayout.EndScrollView();
     }
 
     private void DrawSceneSection()
     {
         EditorGUILayout.LabelField("Scene References", EditorStyles.boldLabel);
-        targetTerrain = (Terrain)EditorGUILayout.ObjectField("Target Terrain", targetTerrain, typeof(Terrain), true);
+
+        // Draw terrain list
+        EditorGUILayout.LabelField($"Target Terrains ({targetTerrains.Count})", EditorStyles.boldLabel);
+        if (GUILayout.Button("Auto Find All Terrains", GUILayout.Height(24)))
+        {
+            AutoFindTerrains();
+        }
+
+        int removeTerrainIndex = -1;
+        for (int i = 0; i < targetTerrains.Count; i++)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                targetTerrains[i] = (Terrain)EditorGUILayout.ObjectField($"Terrain {i + 1}", targetTerrains[i], typeof(Terrain), true);
+                if (GUILayout.Button("X", GUILayout.Width(24)))
+                {
+                    removeTerrainIndex = i;
+                }
+            }
+        }
+
+        if (removeTerrainIndex >= 0)
+        {
+            targetTerrains.RemoveAt(removeTerrainIndex);
+        }
+
+        if (GUILayout.Button("Add Terrain Slot", GUILayout.Height(20)))
+        {
+            targetTerrains.Add(null);
+        }
+
+        EditorGUILayout.Space(4);
         roadParent = (Transform)EditorGUILayout.ObjectField("Road Parent", roadParent, typeof(Transform), true);
+        buildingParent = (Transform)EditorGUILayout.ObjectField("Building Parent", buildingParent, typeof(Transform), true);
+        neighborhoodParent = (Transform)EditorGUILayout.ObjectField("Neighborhood Parent", neighborhoodParent, typeof(Transform), true);
     }
 
     private void DrawGridSection()
@@ -139,6 +223,102 @@ public class SimplePolyCityRoadGridTool : EditorWindow
         deadEndRotationOffset = EditorGUILayout.FloatField("Dead End Offset", deadEndRotationOffset);
     }
 
+    private void DrawBuildingSection()
+    {
+        EditorGUILayout.LabelField("Buildings", EditorStyles.boldLabel);
+        generateBuildings = EditorGUILayout.Toggle("Generate Buildings", generateBuildings);
+        clearBuildingsBeforeGenerate = EditorGUILayout.Toggle("Clear Buildings First", clearBuildingsBeforeGenerate);
+        buildingSpawnChance = EditorGUILayout.Slider("Spawn Chance", buildingSpawnChance, 0f, 1f);
+        buildingSetbackFromRoad = Mathf.Clamp(EditorGUILayout.FloatField("Setback From Road", buildingSetbackFromRoad), 0f, cellSize * 0.49f);
+        buildingTowardRoadOffset = Mathf.Max(0f, EditorGUILayout.FloatField("Toward Road Offset", buildingTowardRoadOffset));
+        buildingHeightOffset = EditorGUILayout.FloatField("Height Offset", buildingHeightOffset);
+        randomizeBuildingYaw = EditorGUILayout.Toggle("Randomize Yaw", randomizeBuildingYaw);
+        buildingRandomYawRange = Mathf.Max(0f, EditorGUILayout.FloatField("Yaw Range (+/-)", buildingRandomYawRange));
+        randomizeBuildingScale = EditorGUILayout.Toggle("Randomize Scale", randomizeBuildingScale);
+        buildingScaleRange = EditorGUILayout.Vector2Field("Scale Range", buildingScaleRange);
+        buildingScaleRange.x = Mathf.Clamp(buildingScaleRange.x, 0.05f, 5f);
+        buildingScaleRange.y = Mathf.Clamp(buildingScaleRange.y, buildingScaleRange.x, 5f);
+        autoScaleBuildingsToFitLot = EditorGUILayout.Toggle("Auto Scale To Fit Lot", autoScaleBuildingsToFitLot);
+        buildingMinSpacing = Mathf.Max(0f, EditorGUILayout.FloatField("Min Spacing", buildingMinSpacing));
+        buildingFootprintPadding = Mathf.Max(0f, EditorGUILayout.FloatField("Footprint Padding", buildingFootprintPadding));
+
+        if (GUILayout.Button("Auto Load Building Prefabs", GUILayout.Height(24)))
+        {
+            AutoLoadBuildingPrefabs();
+        }
+
+        EditorGUILayout.LabelField($"Building Prefabs ({buildingPrefabs.Count})");
+        int removeIndex = -1;
+        for (int i = 0; i < buildingPrefabs.Count; i++)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                buildingPrefabs[i] = (GameObject)EditorGUILayout.ObjectField(buildingPrefabs[i], typeof(GameObject), false);
+                if (GUILayout.Button("X", GUILayout.Width(24)))
+                {
+                    removeIndex = i;
+                }
+            }
+        }
+
+        if (removeIndex >= 0)
+        {
+            buildingPrefabs.RemoveAt(removeIndex);
+        }
+
+        if (GUILayout.Button("Add Building Slot", GUILayout.Height(20)))
+        {
+            buildingPrefabs.Add(null);
+        }
+    }
+
+    private void DrawNeighborhoodSection()
+    {
+        EditorGUILayout.LabelField("Neighborhoods", EditorStyles.boldLabel);
+        generateNeighborhoods = EditorGUILayout.Toggle("Generate Neighborhoods", generateNeighborhoods);
+        clearNeighborhoodsBeforeGenerate = EditorGUILayout.Toggle("Clear Neighborhoods First", clearNeighborhoodsBeforeGenerate);
+        neighborhoodSize = Mathf.Max(1, EditorGUILayout.IntField("Neighborhood Size (NxN)", neighborhoodSize));
+        neighborhoodZoneHeight = Mathf.Max(1f, EditorGUILayout.FloatField("Zone Height", neighborhoodZoneHeight));
+
+        EditorGUILayout.Space(4);
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUILayout.LabelField($"Neighborhood Names ({neighborhoodNames.Count})", EditorStyles.boldLabel);
+            if (GUILayout.Button("Auto Fill Names", GUILayout.Width(120)))
+            {
+                AutoFillNeighborhoodNames();
+            }
+            if (GUILayout.Button("Clear Names", GUILayout.Width(100)))
+            {
+                neighborhoodNames.Clear();
+            }
+        }
+
+        int removeNameIndex = -1;
+        for (int i = 0; i < neighborhoodNames.Count; i++)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                neighborhoodNames[i] = EditorGUILayout.TextField($"Name {i + 1}", neighborhoodNames[i]);
+                if (GUILayout.Button("X", GUILayout.Width(24)))
+                {
+                    removeNameIndex = i;
+                }
+            }
+        }
+
+        if (removeNameIndex >= 0)
+        {
+            neighborhoodNames.RemoveAt(removeNameIndex);
+        }
+
+        if (GUILayout.Button("Add Neighborhood Name", GUILayout.Height(20)))
+        {
+            neighborhoodNames.Add("Yeni Mahalle");
+        }
+    }
+
     private void GenerateRoadGrid()
     {
         if (straightPrefab == null || cornerPrefab == null || tIntersectionPrefab == null || crossIntersectionPrefab == null)
@@ -150,9 +330,9 @@ public class SimplePolyCityRoadGridTool : EditorWindow
             return;
         }
 
-        if (targetTerrain == null)
+        if (targetTerrains == null || targetTerrains.Count == 0)
         {
-            targetTerrain = FindFirstObjectByType<Terrain>();
+            AutoFindTerrains();
         }
 
         if (roadParent == null)
@@ -169,6 +349,12 @@ public class SimplePolyCityRoadGridTool : EditorWindow
 
         Random.InitState(randomSeed);
         ClearRoads();
+        EnsureBuildingParent();
+
+        if (clearBuildingsBeforeGenerate)
+        {
+            ClearBuildings();
+        }
 
         float effectiveCellSize = ResolveCellSize();
         int width = gridWidth;
@@ -210,9 +396,380 @@ public class SimplePolyCityRoadGridTool : EditorWindow
             }
         }
 
+        int createdBuildings = 0;
+        if (generateBuildings)
+        {
+            createdBuildings = GenerateBuildings(roadMask, width, height, effectiveCellSize);
+        }
+
+        int createdNeighborhoods = 0;
+        if (generateNeighborhoods)
+        {
+            createdNeighborhoods = GenerateNeighborhoods(width, height, effectiveCellSize);
+        }
+
         Selection.activeTransform = roadParent;
         EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
-        Debug.Log($"[CityRoadGridTool] Generated {createdCount} road tiles. Seed: {randomSeed}, Cell Size: {effectiveCellSize:F2}");
+        int validTerrainCount = 0;
+        if (targetTerrains != null)
+        {
+            foreach (Terrain t in targetTerrains)
+            {
+                if (t != null && t.terrainData != null) validTerrainCount++;
+            }
+        }
+        Debug.Log($"[CityRoadGridTool] Generated {createdCount} roads, {createdBuildings} buildings, and {createdNeighborhoods} neighborhoods across {validTerrainCount} terrain(s). Seed: {randomSeed}, Cell Size: {effectiveCellSize:F2}");
+    }
+
+    private void GenerateNeighborhoodsOnly()
+    {
+        if (targetTerrains == null || targetTerrains.Count == 0)
+        {
+            AutoFindTerrains();
+        }
+
+        float effectiveCellSize = ResolveCellSize();
+        int width = gridWidth;
+        int height = gridHeight;
+        FitGridToTerrain(ref width, ref height, effectiveCellSize);
+
+        if (neighborhoodNames.Count == 0)
+        {
+            bool autoFill = EditorUtility.DisplayDialog(
+                "Neighborhood Names Missing",
+                "Henüz neighborhood ismi tanımlı değil. Otomatik isim doldurulsun mu?",
+                "Evet, Doldur",
+                "İptal");
+
+            if (!autoFill)
+            {
+                return;
+            }
+
+            AutoFillNeighborhoodNames();
+        }
+
+        int createdNeighborhoods = GenerateNeighborhoods(width, height, effectiveCellSize);
+        Selection.activeTransform = neighborhoodParent;
+        EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+        Debug.Log($"[CityRoadGridTool] Generated {createdNeighborhoods} neighborhoods only. Cell Size: {effectiveCellSize:F2}");
+    }
+
+    private int GenerateBuildings(bool[,] roadMask, int width, int height, float currentCellSize)
+    {
+        EnsureBuildingParent();
+
+        if (buildingPrefabs == null || buildingPrefabs.Count == 0)
+        {
+            Debug.LogWarning("[CityRoadGridTool] Building generation enabled but no building prefabs are assigned.");
+            return 0;
+        }
+
+        List<GameObject> validPrefabs = new List<GameObject>(buildingPrefabs.Count);
+        for (int i = 0; i < buildingPrefabs.Count; i++)
+        {
+            if (buildingPrefabs[i] != null)
+            {
+                validPrefabs.Add(buildingPrefabs[i]);
+            }
+        }
+
+        if (validPrefabs.Count == 0)
+        {
+            Debug.LogWarning("[CityRoadGridTool] Building generation skipped because all building prefab slots are empty.");
+            return 0;
+        }
+
+        int invalidPrefabSkips = 0;
+        int noNeighborSkips = 0;
+        int chanceSkips = 0;
+        int tooLargeSkips = 0;
+        int overlapSkips = 0;
+
+        int created = 0;
+        float halfCell = currentCellSize * 0.5f;
+        float roadClearance = Mathf.Max(0f, buildingSetbackFromRoad);
+        float safeHalfCell = Mathf.Max(0.01f, halfCell - roadClearance);
+        List<PlacedBuildingInfo> placedBuildings = new List<PlacedBuildingInfo>();
+
+        for (int z = 0; z < height; z++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                if (roadMask[x, z])
+                {
+                    continue;
+                }
+
+                int roadNeighbors = GetNeighborMask(roadMask, x, z, width, height);
+                if (roadNeighbors == 0)
+                {
+                    noNeighborSkips++;
+                    continue;
+                }
+
+                if (Random.value > buildingSpawnChance)
+                {
+                    chanceSkips++;
+                    continue;
+                }
+
+                if (!TryPickFittingBuilding(validPrefabs, safeHalfCell, currentCellSize, out GameObject prefab, out float scale, out float radius))
+                {
+                    // Skip lots where no assigned prefab can fit.
+                    tooLargeSkips++;
+                    continue;
+                }
+
+                Vector3 lotCenter = CalculateWorldPosition(x, z, width, height, currentCellSize);
+                Vector3 toRoadDirection = GetDirectionToRoad(roadNeighbors);
+                Vector3 spawnPos = lotCenter;
+                float maxTowardRoadOffset = Mathf.Max(0f, safeHalfCell - radius);
+                float towardRoadOffset = Mathf.Min(buildingTowardRoadOffset, maxTowardRoadOffset);
+                spawnPos += toRoadDirection * towardRoadOffset;
+                spawnPos.y = SampleY(spawnPos.x, spawnPos.z, buildingHeightOffset);
+
+                if (IsOverlappingPlacedBuildings(spawnPos, radius, placedBuildings))
+                {
+                    overlapSkips++;
+                    continue;
+                }
+
+                float yaw = Mathf.Atan2(toRoadDirection.x, toRoadDirection.z) * Mathf.Rad2Deg;
+                if (randomizeBuildingYaw && buildingRandomYawRange > 0f)
+                {
+                    yaw += Random.Range(-buildingRandomYawRange, buildingRandomYawRange);
+                }
+
+                GameObject instance = InstantiateForScene(prefab, buildingParent);
+                if (instance == null)
+                {
+                    continue;
+                }
+
+                if (!HasRenderableGeometry(instance))
+                {
+                    Undo.DestroyObjectImmediate(instance);
+                    invalidPrefabSkips++;
+                    continue;
+                }
+
+                Undo.RegisterCreatedObjectUndo(instance, "Create Building");
+                instance.transform.SetPositionAndRotation(spawnPos, Quaternion.Euler(0f, yaw, 0f));
+
+                instance.transform.localScale *= scale;
+
+                placedBuildings.Add(new PlacedBuildingInfo(new Vector2(spawnPos.x, spawnPos.z), radius));
+                created++;
+            }
+        }
+
+        if (invalidPrefabSkips > 0)
+        {
+            Debug.LogWarning($"[CityRoadGridTool] Skipped {invalidPrefabSkips} spawned buildings because instantiated object had no renderable geometry.");
+        }
+
+        Debug.Log(
+            $"[CityRoadGridTool] Building pass summary: created={created}, " +
+            $"noRoadNeighbor={noNeighborSkips}, chanceSkip={chanceSkips}, tooLarge={tooLargeSkips}, overlap={overlapSkips}, invalidPrefab={invalidPrefabSkips}, validPrefabs={validPrefabs.Count}");
+
+        return created;
+    }
+
+    private float EstimateBuildingRadius(GameObject prefab, float scale, float fallbackCellSize)
+    {
+        if (prefab != null && TryGetPrefabFootprint(prefab, out Vector2 footprint))
+        {
+            // Use max axis half-extent instead of diagonal radius to avoid over-rejecting valid buildings.
+            float paddedX = footprint.x * scale + buildingFootprintPadding * 2f;
+            float paddedZ = footprint.y * scale + buildingFootprintPadding * 2f;
+            return Mathf.Max(paddedX, paddedZ) * 0.5f;
+        }
+
+        float fallbackSize = fallbackCellSize * 0.45f;
+        return fallbackSize * 0.5f;
+    }
+
+    private bool TryPickFittingBuilding(
+        List<GameObject> validPrefabs,
+        float safeHalfCell,
+        float fallbackCellSize,
+        out GameObject selectedPrefab,
+        out float selectedScale,
+        out float selectedRadius)
+    {
+        List<BuildingChoice> choices = new List<BuildingChoice>(validPrefabs.Count);
+
+        for (int i = 0; i < validPrefabs.Count; i++)
+        {
+            GameObject prefab = validPrefabs[i];
+            if (prefab == null)
+            {
+                continue;
+            }
+
+            float scale = randomizeBuildingScale ? Random.Range(buildingScaleRange.x, buildingScaleRange.y) : 1f;
+            if (autoScaleBuildingsToFitLot)
+            {
+                float maxScale = GetMaxScaleToFit(prefab, safeHalfCell, fallbackCellSize);
+                if (maxScale <= 0f)
+                {
+                    continue;
+                }
+
+                scale = Mathf.Min(scale, maxScale);
+            }
+
+            float radius = EstimateBuildingRadius(prefab, scale, fallbackCellSize);
+            if (radius >= safeHalfCell)
+            {
+                continue;
+            }
+
+            choices.Add(new BuildingChoice(prefab, scale, radius));
+        }
+
+        if (choices.Count == 0)
+        {
+            selectedPrefab = null;
+            selectedScale = 1f;
+            selectedRadius = 0f;
+            return false;
+        }
+
+        BuildingChoice choice = choices[Random.Range(0, choices.Count)];
+        selectedPrefab = choice.prefab;
+        selectedScale = choice.scale;
+        selectedRadius = choice.radius;
+        return true;
+    }
+
+    private float GetMaxScaleToFit(GameObject prefab, float safeHalfCell, float fallbackCellSize)
+    {
+        if (prefab != null && TryGetPrefabFootprint(prefab, out Vector2 footprint))
+        {
+            float maxFootprint = Mathf.Max(footprint.x, footprint.y);
+            if (maxFootprint <= 0.001f)
+            {
+                return 1f;
+            }
+
+            float allowedWidth = safeHalfCell * 2f - buildingFootprintPadding * 2f;
+            if (allowedWidth <= 0.001f)
+            {
+                return 0f;
+            }
+
+            return Mathf.Clamp(allowedWidth / maxFootprint, 0f, 5f);
+        }
+
+        float fallbackRadius = EstimateBuildingRadius(prefab, 1f, fallbackCellSize);
+        if (fallbackRadius <= 0.001f)
+        {
+            return 1f;
+        }
+
+        return Mathf.Clamp(safeHalfCell / fallbackRadius, 0f, 5f);
+    }
+
+    private bool IsOverlappingPlacedBuildings(Vector3 worldPos, float radius, List<PlacedBuildingInfo> placedBuildings)
+    {
+        Vector2 position2D = new Vector2(worldPos.x, worldPos.z);
+        for (int i = 0; i < placedBuildings.Count; i++)
+        {
+            float minDistance = radius + placedBuildings[i].radius + buildingMinSpacing;
+            if ((position2D - placedBuildings[i].position).sqrMagnitude < minDistance * minDistance)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private GameObject InstantiateForScene(GameObject prefab, Transform parent)
+    {
+        if (prefab == null)
+        {
+            return null;
+        }
+
+        GameObject instance = null;
+        if (PrefabUtility.IsPartOfPrefabAsset(prefab))
+        {
+            instance = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+        }
+
+        if (instance == null)
+        {
+            instance = Instantiate(prefab);
+        }
+
+        if (instance != null)
+        {
+            instance.transform.SetParent(parent, true);
+        }
+
+        return instance;
+    }
+
+    private bool HasRenderableGeometry(GameObject go)
+    {
+        if (go == null)
+        {
+            return false;
+        }
+
+        Renderer[] renderers = go.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            if (renderers[i] != null)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void EnsureBuildingParent()
+    {
+        if (buildingParent != null)
+        {
+            return;
+        }
+
+        GameObject parent = new GameObject("SimplePoly_Buildings");
+        Undo.RegisterCreatedObjectUndo(parent, "Create Building Parent");
+        buildingParent = parent.transform;
+    }
+
+    private Vector3 GetDirectionToRoad(int roadNeighborsMask)
+    {
+        List<Vector3> options = new List<Vector3>(4);
+        if ((roadNeighborsMask & North) != 0) options.Add(Vector3.forward);
+        if ((roadNeighborsMask & East) != 0) options.Add(Vector3.right);
+        if ((roadNeighborsMask & South) != 0) options.Add(Vector3.back);
+        if ((roadNeighborsMask & West) != 0) options.Add(Vector3.left);
+
+        if (options.Count == 0)
+        {
+            return Vector3.forward;
+        }
+
+        return options[Random.Range(0, options.Count)];
+    }
+
+    private float SampleY(float worldX, float worldZ, float extraOffset)
+    {
+        Terrain terrain = GetTerrainAt(worldX, worldZ);
+        if (terrain != null && terrain.terrainData != null)
+        {
+            float y = terrain.SampleHeight(new Vector3(worldX, terrain.transform.position.y, worldZ));
+            return y + terrain.transform.position.y + extraOffset;
+        }
+
+        return extraOffset;
     }
 
     private float ResolveCellSize()
@@ -252,24 +809,23 @@ public class SimplePolyCityRoadGridTool : EditorWindow
 
     private void FitGridToTerrain(ref int width, ref int height, float currentCellSize)
     {
-        if (!autoFitGridToTerrain || targetTerrain == null || targetTerrain.terrainData == null)
+        if (!autoFitGridToTerrain || targetTerrains == null || targetTerrains.Count == 0)
         {
             return;
         }
 
-        Vector3 size = targetTerrain.terrainData.size;
+        Bounds combinedBounds = GetCombinedTerrainBounds();
+        Vector3 size = combinedBounds.size;
         float usableX = Mathf.Max(1f, size.x - terrainInset * 2f);
         float usableZ = Mathf.Max(1f, size.z - terrainInset * 2f);
 
-        int maxWidth = Mathf.Max(2, Mathf.FloorToInt(usableX / currentCellSize));
-        int maxHeight = Mathf.Max(2, Mathf.FloorToInt(usableZ / currentCellSize));
+        int calculatedWidth = Mathf.Max(2, Mathf.FloorToInt(usableX / currentCellSize));
+        int calculatedHeight = Mathf.Max(2, Mathf.FloorToInt(usableZ / currentCellSize));
 
-        if (width > maxWidth || height > maxHeight)
-        {
-            width = Mathf.Min(width, maxWidth);
-            height = Mathf.Min(height, maxHeight);
-            Debug.Log($"[CityRoadGridTool] Grid clamped to terrain: {width}x{height}");
-        }
+        // Auto-fit: Set grid size to fill all terrains
+        width = calculatedWidth;
+        height = calculatedHeight;
+        Debug.Log($"[CityRoadGridTool] Grid auto-fitted to cover all {targetTerrains.Count} terrain(s): {width}x{height} cells (Combined terrain size: {size.x:F1}x{size.z:F1}m, Cell size: {currentCellSize:F2}m)");
     }
 
     private bool[,] BuildRoadMask(int width, int height, bool cleanGapsEnabled, int iterations)
@@ -419,25 +975,26 @@ public class SimplePolyCityRoadGridTool : EditorWindow
 
     private Vector3 CalculateWorldPosition(int x, int z, int width, int height, float currentCellSize)
     {
-        if (targetTerrain != null && targetTerrain.terrainData != null)
+        if (targetTerrains != null && targetTerrains.Count > 0)
         {
-            Vector3 terrainPos = targetTerrain.transform.position;
-            Vector3 terrainSize = targetTerrain.terrainData.size;
+            Bounds combinedBounds = GetCombinedTerrainBounds();
+            Vector3 boundsMin = combinedBounds.min;
+            Vector3 boundsSize = combinedBounds.size;
 
-            float startX = terrainPos.x + terrainInset + currentCellSize * 0.5f;
-            float startZ = terrainPos.z + terrainInset + currentCellSize * 0.5f;
+            float startX = boundsMin.x + terrainInset + currentCellSize * 0.5f;
+            float startZ = boundsMin.z + terrainInset + currentCellSize * 0.5f;
 
             if (!autoFitGridToTerrain)
             {
-                float centeredOffsetX = (terrainSize.x - width * currentCellSize) * 0.5f;
-                float centeredOffsetZ = (terrainSize.z - height * currentCellSize) * 0.5f;
-                startX = terrainPos.x + Mathf.Max(terrainInset, centeredOffsetX) + currentCellSize * 0.5f;
-                startZ = terrainPos.z + Mathf.Max(terrainInset, centeredOffsetZ) + currentCellSize * 0.5f;
+                float centeredOffsetX = (boundsSize.x - width * currentCellSize) * 0.5f;
+                float centeredOffsetZ = (boundsSize.z - height * currentCellSize) * 0.5f;
+                startX = boundsMin.x + Mathf.Max(terrainInset, centeredOffsetX) + currentCellSize * 0.5f;
+                startZ = boundsMin.z + Mathf.Max(terrainInset, centeredOffsetZ) + currentCellSize * 0.5f;
             }
 
             float worldX = startX + x * currentCellSize;
             float worldZ = startZ + z * currentCellSize;
-            float sampledY = targetTerrain.SampleHeight(new Vector3(worldX, terrainPos.y, worldZ)) + terrainPos.y + heightOffset;
+            float sampledY = SampleY(worldX, worldZ, heightOffset);
             return new Vector3(worldX, sampledY, worldZ);
         }
 
@@ -495,6 +1052,100 @@ public class SimplePolyCityRoadGridTool : EditorWindow
         EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
     }
 
+    private void ClearBuildings()
+    {
+        if (buildingParent == null)
+        {
+            return;
+        }
+
+        for (int i = buildingParent.childCount - 1; i >= 0; i--)
+        {
+            Undo.DestroyObjectImmediate(buildingParent.GetChild(i).gameObject);
+        }
+
+        EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+    }
+
+    private void AutoFindTerrains()
+    {
+        Terrain[] allTerrains = FindObjectsByType<Terrain>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        targetTerrains.Clear();
+        foreach (Terrain terrain in allTerrains)
+        {
+            if (terrain != null)
+            {
+                targetTerrains.Add(terrain);
+            }
+        }
+        Debug.Log($"[CityRoadGridTool] Found {targetTerrains.Count} terrains in scene.");
+    }
+
+    private Bounds GetCombinedTerrainBounds()
+    {
+        if (targetTerrains == null || targetTerrains.Count == 0)
+        {
+            return new Bounds(Vector3.zero, Vector3.one * 100f);
+        }
+
+        Terrain firstValidTerrain = null;
+        foreach (Terrain t in targetTerrains)
+        {
+            if (t != null && t.terrainData != null)
+            {
+                firstValidTerrain = t;
+                break;
+            }
+        }
+
+        if (firstValidTerrain == null)
+        {
+            return new Bounds(Vector3.zero, Vector3.one * 100f);
+        }
+
+        Vector3 min = firstValidTerrain.transform.position;
+        Vector3 max = min + firstValidTerrain.terrainData.size;
+
+        foreach (Terrain terrain in targetTerrains)
+        {
+            if (terrain == null || terrain.terrainData == null) continue;
+
+            Vector3 terrainMin = terrain.transform.position;
+            Vector3 terrainMax = terrainMin + terrain.terrainData.size;
+
+            min = Vector3.Min(min, terrainMin);
+            max = Vector3.Max(max, terrainMax);
+        }
+
+        Vector3 center = (min + max) * 0.5f;
+        Vector3 size = max - min;
+        return new Bounds(center, size);
+    }
+
+    private Terrain GetTerrainAt(float worldX, float worldZ)
+    {
+        if (targetTerrains == null || targetTerrains.Count == 0)
+        {
+            return null;
+        }
+
+        foreach (Terrain terrain in targetTerrains)
+        {
+            if (terrain == null || terrain.terrainData == null) continue;
+
+            Vector3 terrainPos = terrain.transform.position;
+            Vector3 terrainSize = terrain.terrainData.size;
+
+            if (worldX >= terrainPos.x && worldX <= terrainPos.x + terrainSize.x &&
+                worldZ >= terrainPos.z && worldZ <= terrainPos.z + terrainSize.z)
+            {
+                return terrain;
+            }
+        }
+
+        return targetTerrains.Count > 0 ? targetTerrains[0] : null;
+    }
+
     private void AutoLoadPrefabs()
     {
         straightPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/SimplePoly City - Low Poly Assets/Prefab/Roads/Road Lane_01.prefab");
@@ -502,6 +1153,172 @@ public class SimplePolyCityRoadGridTool : EditorWindow
         tIntersectionPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/SimplePoly City - Low Poly Assets/Prefab/Roads/Road T_Intersection_01.prefab");
         crossIntersectionPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/SimplePoly City - Low Poly Assets/Prefab/Roads/Road Intersection_01.prefab");
         deadEndPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/SimplePoly City - Low Poly Assets/Prefab/Roads/Road Lane Half.prefab");
+        AutoLoadBuildingPrefabs();
+    }
+
+    private void AutoLoadBuildingPrefabs()
+    {
+        string[] guids = AssetDatabase.FindAssets("t:Prefab", new[] { "Assets/SimplePoly City - Low Poly Assets/Prefab/Buildings" });
+        buildingPrefabs.Clear();
+
+        for (int i = 0; i < guids.Length; i++)
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guids[i]);
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (prefab != null)
+            {
+                buildingPrefabs.Add(prefab);
+            }
+        }
+
+        Debug.Log($"[CityRoadGridTool] Auto loaded {buildingPrefabs.Count} building prefabs.");
+    }
+
+    private void AutoFillNeighborhoodNames()
+    {
+        float effectiveCellSize = ResolveCellSize();
+        int width = gridWidth;
+        int height = gridHeight;
+        FitGridToTerrain(ref width, ref height, effectiveCellSize);
+
+        int neighborhoodsX = Mathf.CeilToInt((float)width / neighborhoodSize);
+        int neighborhoodsZ = Mathf.CeilToInt((float)height / neighborhoodSize);
+        int totalNeighborhoods = neighborhoodsX * neighborhoodsZ;
+
+        neighborhoodNames.Clear();
+        NeighborhoodNameGenerator.ResetUsedNames();
+
+        for (int i = 0; i < totalNeighborhoods; i++)
+        {
+            neighborhoodNames.Add(NeighborhoodNameGenerator.GetRandomName(false));
+        }
+
+        Debug.Log($"[CityRoadGridTool] Auto-filled {totalNeighborhoods} neighborhood names.");
+    }
+
+    private int GenerateNeighborhoods(int width, int height, float currentCellSize)
+    {
+        EnsureNeighborhoodParent();
+
+        if (clearNeighborhoodsBeforeGenerate)
+        {
+            ClearNeighborhoods();
+        }
+
+        if (neighborhoodNames.Count == 0)
+        {
+            Debug.LogWarning("[CityRoadGridTool] No neighborhood names defined. Use 'Auto Fill Names' button.");
+            return 0;
+        }
+
+        int neighborhoodsX = Mathf.CeilToInt((float)width / neighborhoodSize);
+        int neighborhoodsZ = Mathf.CeilToInt((float)height / neighborhoodSize);
+        int createdCount = 0;
+        int nameIndex = 0;
+
+        for (int nz = 0; nz < neighborhoodsZ; nz++)
+        {
+            for (int nx = 0; nx < neighborhoodsX; nx++)
+            {
+                int startX = nx * neighborhoodSize;
+                int startZ = nz * neighborhoodSize;
+                int endX = Mathf.Min(startX + neighborhoodSize, width);
+                int endZ = Mathf.Min(startZ + neighborhoodSize, height);
+
+                List<Vector2Int> cells = new List<Vector2Int>();
+                for (int z = startZ; z < endZ; z++)
+                {
+                    for (int x = startX; x < endX; x++)
+                    {
+                        cells.Add(new Vector2Int(x, z));
+                    }
+                }
+
+                string neighborhoodName = nameIndex < neighborhoodNames.Count
+                    ? neighborhoodNames[nameIndex]
+                    : $"Mahalle {nameIndex + 1}";
+
+                Neighborhood neighborhood = new Neighborhood(neighborhoodName);
+                neighborhood.AddGridCells(cells);
+
+                Bounds bounds = neighborhood.GetBounds(currentCellSize, GetGridOrigin(width, height, currentCellSize));
+                Vector3 center = bounds.center;
+                Vector3 size = bounds.size;
+
+                GameObject zoneObj = new GameObject($"Zone_{neighborhoodName}");
+                zoneObj.transform.SetParent(neighborhoodParent);
+                zoneObj.transform.position = center;
+
+                NeighborhoodZone zone = zoneObj.AddComponent<NeighborhoodZone>();
+                zone.NeighborhoodName = neighborhoodName;
+                zone.DebugColor = neighborhood.DebugColor;
+
+                BoxCollider boxCollider = zoneObj.GetComponent<BoxCollider>();
+                boxCollider.center = Vector3.up * (neighborhoodZoneHeight * 0.5f);
+                boxCollider.size = new Vector3(size.x, neighborhoodZoneHeight, size.z);
+                boxCollider.isTrigger = true;
+
+                Undo.RegisterCreatedObjectUndo(zoneObj, "Create Neighborhood Zone");
+
+                createdCount++;
+                nameIndex++;
+            }
+        }
+
+        Debug.Log($"[CityRoadGridTool] Created {createdCount} neighborhoods ({neighborhoodsX}x{neighborhoodsZ}).");
+        return createdCount;
+    }
+
+    private void EnsureNeighborhoodParent()
+    {
+        if (neighborhoodParent != null)
+        {
+            return;
+        }
+
+        GameObject parent = new GameObject("Neighborhoods");
+        Undo.RegisterCreatedObjectUndo(parent, "Create Neighborhood Parent");
+        neighborhoodParent = parent.transform;
+    }
+
+    private void ClearNeighborhoods()
+    {
+        if (neighborhoodParent == null)
+        {
+            return;
+        }
+
+        for (int i = neighborhoodParent.childCount - 1; i >= 0; i--)
+        {
+            Undo.DestroyObjectImmediate(neighborhoodParent.GetChild(i).gameObject);
+        }
+
+        EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+    }
+
+    private Vector3 GetGridOrigin(int width, int height, float currentCellSize)
+    {
+        if (targetTerrains != null && targetTerrains.Count > 0)
+        {
+            Bounds combinedBounds = GetCombinedTerrainBounds();
+            Vector3 boundsMin = combinedBounds.min;
+            Vector3 boundsSize = combinedBounds.size;
+
+            float startX = boundsMin.x + terrainInset;
+            float startZ = boundsMin.z + terrainInset;
+
+            if (!autoFitGridToTerrain)
+            {
+                float centeredOffsetX = (boundsSize.x - width * currentCellSize) * 0.5f;
+                float centeredOffsetZ = (boundsSize.z - height * currentCellSize) * 0.5f;
+                startX = boundsMin.x + Mathf.Max(terrainInset, centeredOffsetX);
+                startZ = boundsMin.z + Mathf.Max(terrainInset, centeredOffsetZ);
+            }
+
+            return new Vector3(startX, boundsMin.y, startZ);
+        }
+
+        return Vector3.zero;
     }
 
     private readonly struct RoadTileChoice
@@ -513,6 +1330,32 @@ public class SimplePolyCityRoadGridTool : EditorWindow
         {
             this.prefab = prefab;
             this.yaw = yaw;
+        }
+    }
+
+    private readonly struct PlacedBuildingInfo
+    {
+        public readonly Vector2 position;
+        public readonly float radius;
+
+        public PlacedBuildingInfo(Vector2 position, float radius)
+        {
+            this.position = position;
+            this.radius = radius;
+        }
+    }
+
+    private readonly struct BuildingChoice
+    {
+        public readonly GameObject prefab;
+        public readonly float scale;
+        public readonly float radius;
+
+        public BuildingChoice(GameObject prefab, float scale, float radius)
+        {
+            this.prefab = prefab;
+            this.scale = scale;
+            this.radius = radius;
         }
     }
 }

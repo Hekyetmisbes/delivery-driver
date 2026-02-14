@@ -202,22 +202,22 @@ namespace DeliveryDriver.Quest.UI
 
             ActiveQuestUI activeQuestUI = activeQuestObj.AddComponent<ActiveQuestUI>();
 
-            // Create quest name text
-            GameObject nameObj = new GameObject("QuestName");
-            RectTransform nameRect = nameObj.AddComponent<RectTransform>();
-            nameRect.SetParent(rectTransform, false);
-            nameRect.anchorMin = new Vector2(0, 1);
-            nameRect.anchorMax = new Vector2(1, 1);
-            nameRect.pivot = new Vector2(0.5f, 1);
-            nameRect.anchoredPosition = new Vector2(0, -10);
-            nameRect.sizeDelta = new Vector2(-20, 30);
+            // Create objective text
+            GameObject objectiveObj = new GameObject("Objective");
+            RectTransform objectiveRect = objectiveObj.AddComponent<RectTransform>();
+            objectiveRect.SetParent(rectTransform, false);
+            objectiveRect.anchorMin = new Vector2(0, 1);
+            objectiveRect.anchorMax = new Vector2(1, 1);
+            objectiveRect.pivot = new Vector2(0.5f, 1);
+            objectiveRect.anchoredPosition = new Vector2(0, -10);
+            objectiveRect.sizeDelta = new Vector2(-20, 55);
 
-            TextMeshProUGUI nameText = nameObj.AddComponent<TextMeshProUGUI>();
-            nameText.text = "Teslimat Görevi";
-            nameText.fontSize = 20;
-            nameText.fontStyle = FontStyles.Bold;
-            nameText.alignment = TextAlignmentOptions.TopLeft;
-            nameText.color = new Color(1f, 0.9f, 0.3f);
+            TextMeshProUGUI objectiveText = objectiveObj.AddComponent<TextMeshProUGUI>();
+            objectiveText.text = "Teslimat Görevi";
+            objectiveText.fontSize = 20;
+            objectiveText.fontStyle = FontStyles.Bold;
+            objectiveText.alignment = TextAlignmentOptions.TopLeft;
+            objectiveText.color = new Color(1f, 0.9f, 0.3f);
 
             // Create distance text
             GameObject distObj = new GameObject("Distance");
@@ -230,18 +230,37 @@ namespace DeliveryDriver.Quest.UI
             distRect.sizeDelta = new Vector2(-20, 25);
 
             TextMeshProUGUI distText = distObj.AddComponent<TextMeshProUGUI>();
-            distText.text = "Mesafe: --m";
+            distText.text = "--";
             distText.fontSize = 18;
             distText.alignment = TextAlignmentOptions.TopLeft;
             distText.color = Color.white;
 
+            // Create timer text
+            GameObject timerObj = new GameObject("Timer");
+            RectTransform timerRect = timerObj.AddComponent<RectTransform>();
+            timerRect.SetParent(rectTransform, false);
+            timerRect.anchorMin = new Vector2(0, 1);
+            timerRect.anchorMax = new Vector2(1, 1);
+            timerRect.pivot = new Vector2(0.5f, 1);
+            timerRect.anchoredPosition = new Vector2(0, -80);
+            timerRect.sizeDelta = new Vector2(-20, 25);
+
+            TextMeshProUGUI timerText = timerObj.AddComponent<TextMeshProUGUI>();
+            timerText.text = "00:00";
+            timerText.fontSize = 16;
+            timerText.alignment = TextAlignmentOptions.TopLeft;
+            timerText.color = Color.white;
+
             // Wire references using reflection
-            var nameField = typeof(ActiveQuestUI).GetField("questNameText",
+            var objectiveField = typeof(ActiveQuestUI).GetField("objectiveText",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var timerField = typeof(ActiveQuestUI).GetField("timerText",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var distField = typeof(ActiveQuestUI).GetField("distanceText",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
-            nameField?.SetValue(activeQuestUI, nameText);
+            objectiveField?.SetValue(activeQuestUI, objectiveText);
+            timerField?.SetValue(activeQuestUI, timerText);
             distField?.SetValue(activeQuestUI, distText);
 
             activeQuestObj.SetActive(false); // Start hidden

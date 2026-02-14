@@ -91,7 +91,6 @@ namespace DeliveryDriver.Quest
         {
             if (VisualMarker == null)
             {
-                Debug.LogWarning($"QuestLocation.ShowMarker: No visual marker prefab assigned for location '{LocationName}'");
                 return;
             }
 

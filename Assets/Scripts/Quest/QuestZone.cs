@@ -6,7 +6,6 @@ using UnityEditor;
 
 namespace DeliveryDriver.Quest
 {
-    [RequireComponent(typeof(Collider))]
     public class QuestZone : MonoBehaviour
     {
         [SerializeField] private QuestLocation location;
