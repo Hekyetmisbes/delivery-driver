@@ -9,6 +9,24 @@ namespace DeliveryDriver.Quest
 {
     public class QuestManager : MonoBehaviour
     {
+        [Serializable]
+        public struct RewardPenaltyBreakdown
+        {
+            public int DistanceReward;
+            public float TimePressureMultiplier;
+            public float CargoDifficultyMultiplier;
+            public float NeighborhoodRiskMultiplier;
+            public int GrossReward;
+            public int SpeedBonus;
+            public float StreakMultiplier;
+            public int CollisionPenalty;
+            public int DelayPenalty;
+            public int CargoDamagePenalty;
+            public int TotalPenalty;
+            public int FinalReward;
+            public int FailurePenalty;
+        }
+
         public static QuestManager Instance { get; private set; }
 
         [Header("References")]
@@ -98,6 +116,33 @@ namespace DeliveryDriver.Quest
         [SerializeField] private float maxStreakMultiplier = 2.0f;
         [SerializeField] private float streakMultiplierIncrement = 0.1f;
 
+        [Header("Reward Formula")]
+        [SerializeField] private float payoutAverageSpeedMetersPerSecond = 11f;
+        [SerializeField] private float minTimePressureMultiplier = 0.85f;
+        [SerializeField] private float maxTimePressureMultiplier = 1.6f;
+        [SerializeField] private float fragileCargoDifficultyBonus = 0.2f;
+        [SerializeField] private float heavyCargoWeightStartKg = 120f;
+        [SerializeField] private float heavyCargoWeightMaxBonus = 0.2f;
+
+        [Header("Neighborhood Risk Multipliers")]
+        [SerializeField] private float mediumRiskMultiplier = 1.1f;
+        [SerializeField] private float hardRiskMultiplier = 1.22f;
+        [SerializeField] private float expertRiskMultiplier = 1.35f;
+        [SerializeField] private float expressRiskBonus = 0.06f;
+        [SerializeField] private float fragileRiskBonus = 0.08f;
+        [SerializeField] private float multiStopRiskBonus = 0.1f;
+
+        [Header("Penalty System")]
+        [SerializeField] private int collisionPenaltyBase = 25;
+        [SerializeField] private int collisionPenaltyStep = 15;
+        [SerializeField] private int npcCollisionPenaltyBase = 75;
+        [SerializeField] private int npcCollisionPenaltyStep = 35;
+        [SerializeField] private float delayPenaltyStartsAtRemainingRatio = 0.2f;
+        [SerializeField] private float delayPenaltyMaxRatio = 0.25f;
+        [SerializeField] private float cargoDamagePenaltyPerPercent = 3f;
+        [SerializeField] private int timeExpiredFailurePenalty = 120;
+        [SerializeField] private int cargoDestroyedFailurePenalty = 180;
+
         [Header("Daily Challenge")]
         [SerializeField] private QuestData dailyChallenge;
         [SerializeField] private string lastDailyChallengeDate = "";
@@ -135,6 +180,7 @@ namespace DeliveryDriver.Quest
         public Transform PlayerTransform => playerTransform;
         public string LastFailureReason { get; private set; } = string.Empty;
         public int LastCompletionReward { get; private set; }
+        public int LastFailurePenalty { get; private set; }
         public int ConsecutiveSuccesses => consecutiveSuccesses;
         public float StreakMultiplier => streakMultiplier;
         public QuestData DailyChallenge => dailyChallenge;
@@ -643,19 +689,22 @@ namespace DeliveryDriver.Quest
             }
 
             quest.Status = QuestStatus.Completed;
+            quest.CalculateFinalReward(); // Keeps EarnedBonus state up-to-date for rating/stats.
+
+            float completionStreakMultiplier = CalculateStreakMultiplier(consecutiveSuccesses + 1);
+            RewardPenaltyBreakdown payout = CalculateRewardPenaltyBreakdown(quest, completionStreakMultiplier, true);
+            int finalReward = payout.FinalReward;
+            LastCompletionReward = finalReward;
+            LastFailureReason = string.Empty;
+            LastFailurePenalty = 0;
+
+            // Increment streak after a successful completion.
+            consecutiveSuccesses++;
+            streakMultiplier = completionStreakMultiplier;
 
             // Calculate performance rating
             quest.CalculateRating();
 
-            // Increment streak
-            consecutiveSuccesses++;
-            streakMultiplier = Mathf.Min(1.0f + (consecutiveSuccesses * streakMultiplierIncrement), maxStreakMultiplier);
-
-            // Calculate base reward and apply streak multiplier
-            int baseReward = quest.CalculateFinalReward();
-            int finalReward = Mathf.RoundToInt(baseReward * streakMultiplier);
-            LastCompletionReward = finalReward;
-            LastFailureReason = string.Empty;
             float completionTimeSeconds = Mathf.Max(0f, quest.TimeLimit - quest.TimeRemaining);
 
             completedQuests.Add(quest);
@@ -667,7 +716,7 @@ namespace DeliveryDriver.Quest
                 PlayerProgressionManager.Instance.RecordQuestCompletion(quest, finalReward, completionTimeSeconds);
             }
 
-            Debug.Log($"[QuestManager] Quest completed with {quest.Rating} rank! Streak: {consecutiveSuccesses}x (Multiplier: {streakMultiplier:F1}x)");
+            Debug.Log($"[QuestManager] Quest completed with {quest.Rating} rank! Reward={finalReward}, Penalty={payout.TotalPenalty}, Streak={consecutiveSuccesses} ({streakMultiplier:F2}x)");
 
             // Task 10.1: Play success sound
             PlayQuestClip(deliveryClip);
@@ -720,8 +769,11 @@ namespace DeliveryDriver.Quest
             streakMultiplier = 1.0f;
 
             LastFailureReason = reason ?? string.Empty;
+            LastCompletionReward = 0;
+            LastFailurePenalty = CalculateFailurePenalty(quest, LastFailureReason);
+            TryApplyFailurePenalty(LastFailurePenalty);
             OnQuestFailed.Invoke(quest);
-            Debug.LogWarning($"[QuestManager] Quest failed: {quest.QuestName}. Reason: {reason}");
+            Debug.LogWarning($"[QuestManager] Quest failed: {quest.QuestName}. Reason: {reason}. Penalty={LastFailurePenalty}");
 
             if (PlayerProgressionManager.Instance != null)
             {
@@ -1659,6 +1711,315 @@ namespace DeliveryDriver.Quest
             }
 
             return quests;
+        }
+
+        public RewardPenaltyBreakdown GetQuestRewardPreview(QuestData quest)
+        {
+            return CalculateRewardPenaltyBreakdown(quest, CalculateStreakMultiplier(consecutiveSuccesses + 1), false);
+        }
+
+        private RewardPenaltyBreakdown CalculateRewardPenaltyBreakdown(QuestData quest, float appliedStreakMultiplier, bool useRuntimePenalties)
+        {
+            RewardPenaltyBreakdown breakdown = new RewardPenaltyBreakdown
+            {
+                TimePressureMultiplier = 1f,
+                CargoDifficultyMultiplier = 1f,
+                NeighborhoodRiskMultiplier = 1f,
+                StreakMultiplier = Mathf.Max(1f, appliedStreakMultiplier)
+            };
+
+            if (quest == null)
+            {
+                return breakdown;
+            }
+
+            float routeDistance = GetQuestRouteDistance(quest);
+            float rewardPerMeter = questSystemSettings != null ? questSystemSettings.BaseRewardPerMeter : 0.1f;
+            breakdown.DistanceReward = Mathf.RoundToInt(routeDistance * rewardPerMeter);
+
+            breakdown.TimePressureMultiplier = CalculateTimePressureMultiplier(routeDistance, quest.TimeLimit);
+            breakdown.CargoDifficultyMultiplier = CalculateCargoDifficultyMultiplier(quest.Cargo);
+            breakdown.NeighborhoodRiskMultiplier = CalculateNeighborhoodRiskMultiplier(quest);
+
+            int staticDifficultyBonus = questSystemSettings != null ? questSystemSettings.GetDifficultyBonus(quest.Difficulty) : 0;
+            float grossFloat = (breakdown.DistanceReward + staticDifficultyBonus) *
+                               breakdown.TimePressureMultiplier *
+                               breakdown.CargoDifficultyMultiplier *
+                               breakdown.NeighborhoodRiskMultiplier;
+            breakdown.GrossReward = Mathf.Max(0, Mathf.RoundToInt(grossFloat));
+
+            breakdown.SpeedBonus = CalculateSpeedBonus(quest, useRuntimePenalties);
+
+            breakdown.CollisionPenalty = CalculateCollisionPenalty(quest, useRuntimePenalties);
+            breakdown.DelayPenalty = CalculateDelayPenalty(quest, breakdown.GrossReward, useRuntimePenalties);
+            breakdown.CargoDamagePenalty = CalculateCargoDamagePenalty(quest, useRuntimePenalties);
+            breakdown.TotalPenalty = breakdown.CollisionPenalty + breakdown.DelayPenalty + breakdown.CargoDamagePenalty;
+
+            int grossWithSpeed = breakdown.GrossReward + breakdown.SpeedBonus;
+            int streakAdjusted = Mathf.RoundToInt(grossWithSpeed * breakdown.StreakMultiplier);
+            breakdown.FinalReward = Mathf.Max(0, streakAdjusted - breakdown.TotalPenalty);
+
+            breakdown.FailurePenalty = CalculateFailurePenalty(quest, LastFailureReason);
+            return breakdown;
+        }
+
+        private float CalculateStreakMultiplier(int successCountAfterCompletion)
+        {
+            int bonusCount = Mathf.Max(0, successCountAfterCompletion - 1);
+            return Mathf.Min(1.0f + (bonusCount * streakMultiplierIncrement), maxStreakMultiplier);
+        }
+
+        private float GetQuestRouteDistance(QuestData quest)
+        {
+            if (quest == null)
+            {
+                return 0f;
+            }
+
+            float routeDistance = quest.GetOptimalRouteDistance();
+            if (routeDistance > 0f)
+            {
+                return routeDistance;
+            }
+
+            if (quest.PickupLocation == null || quest.DeliveryLocations == null || quest.DeliveryLocations.Count == 0)
+            {
+                return 0f;
+            }
+
+            float totalDistance = 0f;
+            Vector3 start = quest.PickupLocation.Position;
+            for (int i = 0; i < quest.DeliveryLocations.Count; i++)
+            {
+                QuestLocation stop = quest.DeliveryLocations[i];
+                if (stop == null)
+                {
+                    continue;
+                }
+
+                totalDistance += Vector3.Distance(start, stop.Position);
+                start = stop.Position;
+            }
+
+            return totalDistance;
+        }
+
+        private float CalculateTimePressureMultiplier(float routeDistance, float timeLimit)
+        {
+            if (routeDistance <= 0f || timeLimit <= 0f)
+            {
+                return 1f;
+            }
+
+            float baselineTime = routeDistance / Mathf.Max(1f, payoutAverageSpeedMetersPerSecond);
+            float pressureRatio = baselineTime / Mathf.Max(1f, timeLimit);
+            float normalized = Mathf.InverseLerp(0.45f, 1.15f, pressureRatio);
+            return Mathf.Lerp(minTimePressureMultiplier, maxTimePressureMultiplier, Mathf.Clamp01(normalized));
+        }
+
+        private float CalculateCargoDifficultyMultiplier(CargoData cargo)
+        {
+            if (cargo == null)
+            {
+                return 1f;
+            }
+
+            float multiplier = 1f;
+            if (cargo.IsFragile)
+            {
+                multiplier += fragileCargoDifficultyBonus;
+            }
+
+            if (cargo.Weight > heavyCargoWeightStartKg)
+            {
+                float extraWeight = cargo.Weight - heavyCargoWeightStartKg;
+                float weightFactor = Mathf.Clamp01(extraWeight / Mathf.Max(1f, heavyCargoWeightStartKg));
+                multiplier += heavyCargoWeightMaxBonus * weightFactor;
+            }
+
+            return Mathf.Clamp(multiplier, 1f, 1.8f);
+        }
+
+        private float CalculateNeighborhoodRiskMultiplier(QuestData quest)
+        {
+            if (quest == null)
+            {
+                return 1f;
+            }
+
+            float multiplier = quest.Difficulty switch
+            {
+                QuestDifficulty.Medium => mediumRiskMultiplier,
+                QuestDifficulty.Hard => hardRiskMultiplier,
+                QuestDifficulty.Expert => expertRiskMultiplier,
+                _ => 1f
+            };
+
+            multiplier += quest.QuestType switch
+            {
+                QuestType.ExpressDelivery => expressRiskBonus,
+                QuestType.FragileDelivery => fragileRiskBonus,
+                QuestType.MultiStopDelivery => multiStopRiskBonus,
+                _ => 0f
+            };
+
+            return Mathf.Clamp(multiplier, 1f, 2f);
+        }
+
+        private int CalculateSpeedBonus(QuestData quest, bool useRuntimeState)
+        {
+            if (quest == null)
+            {
+                return 0;
+            }
+
+            float completionPercent = 0.55f;
+            if (useRuntimeState && quest.TimeLimit > 0f)
+            {
+                completionPercent = Mathf.Clamp01(quest.TimeRemaining / quest.TimeLimit);
+            }
+
+            if (completionPercent < quest.BonusTimeThreshold)
+            {
+                return 0;
+            }
+
+            float bonusMultiplier = completionPercent >= 0.75f ? 1.5f : 1.0f;
+            int configuredBonus = quest.BonusReward > 0 ? quest.BonusReward : Mathf.RoundToInt(quest.BaseReward * 0.5f);
+            return Mathf.RoundToInt(configuredBonus * bonusMultiplier);
+        }
+
+        private int CalculateCollisionPenalty(QuestData quest, bool useRuntimeState)
+        {
+            int totalCollisions = 0;
+            int npcCollisions = 0;
+
+            if (quest != null && useRuntimeState)
+            {
+                totalCollisions = Mathf.Max(0, quest.CollisionCount);
+                npcCollisions = Mathf.Clamp(quest.NpcCollisionCount, 0, totalCollisions);
+            }
+
+            int nonNpcCollisions = Mathf.Max(0, totalCollisions - npcCollisions);
+            int penalty = SumProgressivePenalty(nonNpcCollisions, collisionPenaltyBase, collisionPenaltyStep);
+            penalty += SumProgressivePenalty(npcCollisions, npcCollisionPenaltyBase, npcCollisionPenaltyStep);
+            return penalty;
+        }
+
+        private int CalculateDelayPenalty(QuestData quest, int grossReward, bool useRuntimeState)
+        {
+            if (quest == null)
+            {
+                return 0;
+            }
+
+            int maxDelayPenalty = Mathf.RoundToInt(grossReward * Mathf.Clamp01(delayPenaltyMaxRatio));
+            if (!useRuntimeState)
+            {
+                return maxDelayPenalty;
+            }
+
+            if (quest.TimeLimit <= 0f)
+            {
+                return 0;
+            }
+
+            float remainingRatio = Mathf.Clamp01(quest.TimeRemaining / quest.TimeLimit);
+            if (remainingRatio >= delayPenaltyStartsAtRemainingRatio)
+            {
+                return 0;
+            }
+
+            float missingRatio = (delayPenaltyStartsAtRemainingRatio - remainingRatio) / Mathf.Max(0.01f, delayPenaltyStartsAtRemainingRatio);
+            return Mathf.RoundToInt(maxDelayPenalty * Mathf.Clamp01(missingRatio));
+        }
+
+        private int CalculateCargoDamagePenalty(QuestData quest, bool useRuntimeState)
+        {
+            if (quest?.Cargo == null || !quest.Cargo.IsFragile)
+            {
+                return 0;
+            }
+
+            if (!useRuntimeState)
+            {
+                return Mathf.RoundToInt(100f * cargoDamagePenaltyPerPercent);
+            }
+
+            float damagedPercent = Mathf.Clamp(100f - quest.Cargo.CargoHealth, 0f, 100f);
+            return Mathf.RoundToInt(damagedPercent * cargoDamagePenaltyPerPercent);
+        }
+
+        private int SumProgressivePenalty(int count, int basePenalty, int stepPenalty)
+        {
+            int total = 0;
+            for (int i = 0; i < count; i++)
+            {
+                total += basePenalty + (i * stepPenalty);
+            }
+
+            return total;
+        }
+
+        private int CalculateFailurePenalty(QuestData quest, string reason)
+        {
+            if (quest == null)
+            {
+                return 0;
+            }
+
+            int failurePenalty = 0;
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                if (reason.IndexOf("Time", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    failurePenalty += timeExpiredFailurePenalty;
+                }
+                else if (reason.IndexOf("Cargo", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    failurePenalty += cargoDestroyedFailurePenalty;
+                }
+            }
+
+            failurePenalty += CalculateCollisionPenalty(quest, true);
+            failurePenalty += CalculateCargoDamagePenalty(quest, true);
+            return Mathf.Max(0, failurePenalty);
+        }
+
+        private void TryApplyFailurePenalty(int amount)
+        {
+            if (amount <= 0)
+            {
+                return;
+            }
+
+            if (PlayerProgressionManager.Instance != null)
+            {
+                PlayerProgressionManager.Instance.SpendMoney(amount);
+                return;
+            }
+
+            Type progressionType = Type.GetType("PlayerProgressionManager");
+            if (progressionType == null)
+            {
+                return;
+            }
+
+            UnityEngine.Object manager = FindAnyObjectByType(progressionType);
+            if (manager == null)
+            {
+                return;
+            }
+
+            foreach (string methodName in new[] { "SpendMoney", "RemoveCurrency", "DeductMoney" })
+            {
+                var method = progressionType.GetMethod(methodName, new[] { typeof(int) });
+                if (method != null)
+                {
+                    method.Invoke(manager, new object[] { amount });
+                    return;
+                }
+            }
         }
 
         private void TryAwardRewards(QuestData quest, int reward)

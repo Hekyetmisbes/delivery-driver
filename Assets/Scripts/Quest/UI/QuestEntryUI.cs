@@ -47,7 +47,6 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            // Check if quest is locked based on player level
             int playerLevel = 1;
             if (PlayerProgressionManager.Instance != null)
             {
@@ -58,7 +57,6 @@ namespace DeliveryDriver.Quest.UI
 
             if (questNameText != null)
             {
-                // Show quest name with location coordinates
                 string locationInfo = GetLocationInfo(questData);
                 if (!string.IsNullOrEmpty(locationInfo))
                 {
@@ -82,7 +80,7 @@ namespace DeliveryDriver.Quest.UI
 
             if (rewardText != null)
             {
-                rewardText.text = $"${questData.BaseReward}";
+                rewardText.text = BuildRewardPreviewText(questData);
             }
 
             if (difficultyBar != null)
@@ -96,10 +94,8 @@ namespace DeliveryDriver.Quest.UI
                 typeIcon.enabled = typeIcon.sprite != null;
             }
 
-            // Setup locked/unlocked state
             SetLockedState(isLocked);
 
-            // Check if this is a daily challenge
             bool isDailyChallenge = questData.QuestName.StartsWith("DAILY:");
             if (dailyChallengeIndicator != null)
             {
@@ -116,31 +112,28 @@ namespace DeliveryDriver.Quest.UI
 
         private void SetLockedState(bool isLocked)
         {
-            // Show/hide lock indicator
             if (lockedIndicator != null)
             {
                 lockedIndicator.SetActive(isLocked);
             }
 
-            // Update locked text
             if (lockedText != null && isLocked)
             {
                 lockedText.text = $"Requires Level {questData.RequiredLevel}";
             }
 
-            // Gray out quest entry if locked
             if (questEntryCanvasGroup != null)
             {
                 questEntryCanvasGroup.alpha = isLocked ? 0.5f : 1f;
             }
             else if (isLocked)
             {
-                // Fallback: reduce alpha of all graphics
                 CanvasGroup cg = gameObject.GetComponent<CanvasGroup>();
                 if (cg == null)
                 {
                     cg = gameObject.AddComponent<CanvasGroup>();
                 }
+
                 cg.alpha = 0.5f;
             }
         }
@@ -162,7 +155,7 @@ namespace DeliveryDriver.Quest.UI
         {
             if (quest == null)
             {
-                return "";
+                return string.Empty;
             }
 
             QuestLocation pickup = quest.PickupLocation;
@@ -173,22 +166,20 @@ namespace DeliveryDriver.Quest.UI
                 delivery = quest.DeliveryLocations[0];
             }
 
-            // Show pickup location if no delivery yet (quest not accepted)
             if (pickup != null && delivery == null)
             {
-                return $"📍 Pickup: {FormatCoordinates(pickup.Position)}";
+                return $"Pickup: {FormatCoordinates(pickup.Position)}";
             }
 
-            // Show delivery location if quest is active
             if (delivery != null)
             {
-                return $"📦 Deliver to: {FormatCoordinates(delivery.Position)}";
+                return $"Deliver to: {FormatCoordinates(delivery.Position)}";
             }
 
-            return "";
+            return string.Empty;
         }
 
-        private string FormatCoordinates(Vector3 position)
+        private static string FormatCoordinates(Vector3 position)
         {
             return $"({position.x:F0}, {position.z:F0})";
         }
@@ -242,6 +233,23 @@ namespace DeliveryDriver.Quest.UI
             int minutes = Mathf.FloorToInt(timeSeconds / 60f);
             int seconds = Mathf.FloorToInt(timeSeconds % 60f);
             return $"{minutes:00}:{seconds:00}";
+        }
+
+        private static string BuildRewardPreviewText(QuestData quest)
+        {
+            if (quest == null)
+            {
+                return "$0";
+            }
+
+            QuestManager manager = QuestManager.Instance;
+            if (manager == null)
+            {
+                return $"${quest.BaseReward}";
+            }
+
+            QuestManager.RewardPenaltyBreakdown preview = manager.GetQuestRewardPreview(quest);
+            return $"Tahmini: ${preview.FinalReward}\nCeza riski: -${preview.TotalPenalty}";
         }
 
         private static Color GetDifficultyColor(QuestDifficulty difficulty)

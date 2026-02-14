@@ -88,7 +88,7 @@ namespace DeliveryDriver.Quest.UI
             }
         }
 
-        public void ShowFailedScreen(QuestData quest, string reason)
+        public void ShowFailedScreen(QuestData quest, string reason, int penaltyAmount = 0)
         {
             SetVisible(true);
 
@@ -114,12 +114,12 @@ namespace DeliveryDriver.Quest.UI
 
             if (statsText != null)
             {
-                statsText.text = BuildStatsText(quest, reason);
+                statsText.text = BuildStatsText(quest, reason, penaltyAmount);
             }
 
             if (rewardText != null)
             {
-                rewardText.text = "$0";
+                rewardText.text = penaltyAmount > 0 ? $"- ${penaltyAmount}" : "$0";
             }
 
             if (failureSound != null)
@@ -150,7 +150,7 @@ namespace DeliveryDriver.Quest.UI
             gameObject.SetActive(visible);
         }
 
-        private static string BuildStatsText(QuestData quest, string failureReason)
+        private static string BuildStatsText(QuestData quest, string failureReason, int penaltyAmount = 0)
         {
             if (quest == null)
             {
@@ -175,8 +175,9 @@ namespace DeliveryDriver.Quest.UI
             }
 
             string reasonLine = string.IsNullOrWhiteSpace(failureReason) ? string.Empty : $"Reason: {failureReason}";
+            string penaltyLine = penaltyAmount > 0 ? $"Penalty: -${penaltyAmount}" : string.Empty;
 
-            string[] lines = { timeLine, stopsLine, cargoLine, reasonLine };
+            string[] lines = { timeLine, stopsLine, cargoLine, reasonLine, penaltyLine };
             return string.Join("\n", Array.FindAll(lines, line => !string.IsNullOrWhiteSpace(line)));
         }
 

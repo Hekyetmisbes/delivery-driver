@@ -180,7 +180,8 @@ namespace DeliveryDriver.Quest.UI
             if (questCompleteUI != null)
             {
                 string reason = questManager != null ? questManager.LastFailureReason : string.Empty;
-                questCompleteUI.ShowFailedScreen(quest, reason);
+                int penalty = questManager != null ? questManager.LastFailurePenalty : 0;
+                questCompleteUI.ShowFailedScreen(quest, reason, penalty);
             }
 
             RefreshQuestList();
