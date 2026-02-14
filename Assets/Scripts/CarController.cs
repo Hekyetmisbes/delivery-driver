@@ -77,9 +77,6 @@ public class CarController : MonoBehaviour
     [Tooltip("Direksiyon girdisinin ne kadar hizli degisecegi (birim/s).")]
     [SerializeField] private float steeringInputRate = 5f;
     
-    [Header("--- DEBUG ---")]
-    [SerializeField] private bool showDebugGUI = true;
-
     // Private Runtime Variables
     private Rigidbody rb;
     private float currentSteerAngle;
@@ -438,23 +435,6 @@ public class CarController : MonoBehaviour
             wt.localPosition = localPos;
         }
     }
-
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-    private void OnGUI()
-    {
-        if (!showDebugGUI) return;
-
-        GUI.color = Color.green;
-        GUILayout.BeginArea(new Rect(10, 10, 300, 200));
-        GUILayout.Label($"<b>CAR DEBUG SYSTEM</b>");
-        GUILayout.Label($"Speed: {(rb.linearVelocity.magnitude * 3.6f):F0} km/h");
-        GUILayout.Label($"Motor Torque: {rearLeftCollider.motorTorque:F0} / {motorTorque}");
-        GUILayout.Label($"Brake Torque: {rearLeftCollider.brakeTorque:F0}");
-        GUILayout.Label($"Handbrake: {isHandbraking}");
-        GUILayout.Label($"Is Grounded (RL): {rearLeftCollider.isGrounded}");
-        GUILayout.EndArea();
-    }
-#endif
 
     private void OnDrawGizmos()
     {

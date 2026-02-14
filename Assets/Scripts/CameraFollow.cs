@@ -24,9 +24,6 @@ public class CameraFollow : MonoBehaviour
     [Tooltip("Hangi hızdan sonra geri görüşe geçsin (Negatif değer)")]
     [SerializeField] private float reverseSpeedThreshold = -1f;
 
-    [Header("Debug")]
-    [SerializeField] private bool showDebugInfo = true;
-
     // Runtime variables
     private Vector3 currentVelocity;
     private Rigidbody targetRb;
@@ -156,17 +153,4 @@ public class CameraFollow : MonoBehaviour
         }
     }
 
-    void OnGUI()
-    {
-        if (!showDebugInfo) return;
-
-        GUI.color = Color.yellow;
-        GUILayout.BeginArea(new Rect(10, 250, 350, 150));
-        GUILayout.Label("<b>CAMERA DEBUG</b>");
-        GUILayout.Label($"Local Z Velocity: {currentLocalZVelocity:F2}");
-        GUILayout.Label($"Reverse Threshold: {reverseSpeedThreshold:F2}");
-        GUILayout.Label($"Is Reversing: {isReversing}");
-        GUILayout.Label($"Target RB Found: {(targetRb != null ? "YES" : "NO")}");
-        GUILayout.EndArea();
-    }
 }

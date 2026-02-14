@@ -73,7 +73,7 @@ namespace DeliveryDriver.Quest.UI
             questCompleteField?.SetValue(uiManager, questCompleteUI);
 
             Debug.Log("[QuestUISetup] Quest UI setup complete!");
-            Debug.Log("- Quest List UI: Created (Press TAB to toggle)");
+            Debug.Log("- Quest List UI: Created");
             Debug.Log("- Active Quest UI: Created");
             Debug.Log("- Quest Complete UI: Created");
         }
@@ -128,7 +128,7 @@ namespace DeliveryDriver.Quest.UI
             titleRect.sizeDelta = new Vector2(-20, 40);
 
             TextMeshProUGUI titleText = titleObj.AddComponent<TextMeshProUGUI>();
-            titleText.text = "GÖREVLER (TAB)";
+            titleText.text = "GÖREVLER";
             titleText.fontSize = 24;
             titleText.fontStyle = FontStyles.Bold;
             titleText.alignment = TextAlignmentOptions.Center;
@@ -176,7 +176,7 @@ namespace DeliveryDriver.Quest.UI
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             containerField?.SetValue(questListUI, contentRect);
 
-            // Start hidden (will toggle with Tab)
+            // Start hidden
             questListObj.SetActive(false);
 
             Debug.Log("[QuestUISetup] Created Quest List UI");

@@ -33,7 +33,6 @@ namespace DeliveryDriver.City
         [Header("Runtime")]
         [SerializeField] private NeighborhoodZone currentNeighborhood;
         [SerializeField] private List<Neighborhood> neighborhoods = new List<Neighborhood>();
-        [SerializeField] private bool enableDebugOverlay = true;
 
         private NeighborhoodUI neighborhoodUI;
         private bool initialized = false;
@@ -189,19 +188,5 @@ namespace DeliveryDriver.City
             Debug.LogWarning("[NeighborhoodManager] NeighborhoodUI missing. Created runtime fallback UI.");
         }
 
-        private void OnGUI()
-        {
-            if (!enableDebugOverlay)
-            {
-                return;
-            }
-
-            GUI.color = Color.yellow;
-            GUILayout.BeginArea(new Rect(10, 560, 500, 80));
-            string name = currentNeighborhood != null ? currentNeighborhood.NeighborhoodName : "None";
-            GUILayout.Label($"<b>NEIGHBORHOOD DEBUG</b>");
-            GUILayout.Label($"Current: {name}");
-            GUILayout.EndArea();
-        }
     }
 }

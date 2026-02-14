@@ -13,7 +13,7 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private Animator panelAnimator;
 
         private readonly List<GameObject> spawnedEntries = new List<GameObject>();
-        private bool isOpen = false; // Start closed, toggle with Tab
+        private bool isOpen = false;
         private Image backgroundImage;
 
         private static readonly int IsOpenHash = Animator.StringToHash("IsOpen");
