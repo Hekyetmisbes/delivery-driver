@@ -3,6 +3,8 @@ using System.Linq;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.UI;
 using UnityEngine.UI;
 
 namespace DeliveryDriver.Quest.UI
@@ -12,7 +14,7 @@ namespace DeliveryDriver.Quest.UI
     /// </summary>
     public class ProgressionSkillTreeUI : MonoBehaviour
     {
-        [SerializeField] private KeyCode toggleSkillTreeKey = KeyCode.K;
+        [SerializeField] private Key toggleSkillTreeKey = Key.K;
 
         private GameObject rootCanvasObject;
         private GameObject skillTreeWindow;
@@ -35,7 +37,7 @@ namespace DeliveryDriver.Quest.UI
 
         private void Update()
         {
-            if (Input.GetKeyDown(toggleSkillTreeKey) && skillTreeWindow != null)
+            if (Keyboard.current != null && Keyboard.current[toggleSkillTreeKey].wasPressedThisFrame && skillTreeWindow != null)
             {
                 skillTreeWindow.SetActive(!skillTreeWindow.activeSelf);
             }
@@ -297,7 +299,7 @@ namespace DeliveryDriver.Quest.UI
 
             GameObject eventSystemObject = new GameObject("EventSystem");
             eventSystemObject.AddComponent<EventSystem>();
-            eventSystemObject.AddComponent<StandaloneInputModule>();
+            eventSystemObject.AddComponent<InputSystemUIInputModule>();
         }
 
         private static GameObject CreatePanel(
