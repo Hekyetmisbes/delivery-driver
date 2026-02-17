@@ -16,8 +16,12 @@ public class DeliveryBox : MonoBehaviour
     [SerializeField] private LayerMask playerLayer = ~0;
 
     [Header("Safety Settings")]
-    [SerializeField] private float fallThreshold = -10f;
+    [SerializeField] private float fallDistanceFromSpawn = 25f;
     [SerializeField] private bool enableFallProtection = true;
+    [SerializeField] private LayerMask groundMask = ~0;
+    [SerializeField] private float groundRayStartHeight = 200f;
+    [SerializeField] private float groundRayDistance = 500f;
+    [SerializeField] private float respawnHeightOffset = 0.75f;
 
     private bool isPickedUp = false;
     private Transform playerTransform;
@@ -26,6 +30,7 @@ public class DeliveryBox : MonoBehaviour
     private Vector3 spawnPosition;
     private Transform cachedPlayerTransform;
     private DeliveryManager cachedDeliveryManager;
+    private float runtimeFallThreshold;
 
     public bool IsPickedUp => isPickedUp;
 
@@ -34,6 +39,8 @@ public class DeliveryBox : MonoBehaviour
         rb = GetComponent<Rigidbody>();
         meshRenderers = GetComponentsInChildren<MeshRenderer>();
         spawnPosition = transform.position;
+        SnapSpawnToGround();
+        runtimeFallThreshold = spawnPosition.y - Mathf.Abs(fallDistanceFromSpawn);
 
         // Cache references once
         ResolvePlayerTransform();
@@ -83,7 +90,7 @@ public class DeliveryBox : MonoBehaviour
             CheckForPlayer();
 
             // Fall protection - respawn if box falls through world
-            if (enableFallProtection && transform.position.y < fallThreshold)
+            if (enableFallProtection && transform.position.y < runtimeFallThreshold)
             {
                 RespawnBox();
             }
@@ -97,6 +104,7 @@ public class DeliveryBox : MonoBehaviour
     {
         Debug.LogWarning("[DeliveryBox] Box fell below world! Respawning...");
 
+        SnapSpawnToGround();
         transform.position = spawnPosition;
 
         if (rb != null)
@@ -104,7 +112,17 @@ public class DeliveryBox : MonoBehaviour
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
             rb.isKinematic = true;
+            CancelInvoke(nameof(EnablePhysics));
             Invoke(nameof(EnablePhysics), 0.5f);
+        }
+    }
+
+    private void SnapSpawnToGround()
+    {
+        Vector3 rayStart = new Vector3(spawnPosition.x, spawnPosition.y + groundRayStartHeight, spawnPosition.z);
+        if (Physics.Raycast(rayStart, Vector3.down, out RaycastHit hit, groundRayDistance, groundMask, QueryTriggerInteraction.Ignore))
+        {
+            spawnPosition = hit.point + Vector3.up * respawnHeightOffset;
         }
     }
 

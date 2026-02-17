@@ -434,6 +434,17 @@ public class DeliveryManager : MonoBehaviour
         Quaternion rotation = Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0);
         GameObject boxObj = Instantiate(boxPrefab, spawnPos, rotation);
 
+        // Ensure rigidbody exists before adding DeliveryBox (avoids RequireComponent auto-add log spam).
+        Rigidbody boxRb = boxObj.GetComponent<Rigidbody>();
+        if (boxRb == null)
+        {
+            boxRb = boxObj.AddComponent<Rigidbody>();
+        }
+        boxRb.mass = 5f;
+        boxRb.linearDamping = 0.5f;
+        boxRb.angularDamping = 0.5f;
+        boxRb.isKinematic = true; // Start kinematic
+
         currentBox = boxObj.GetComponent<DeliveryBox>();
         if (currentBox == null)
         {
@@ -467,17 +478,6 @@ public class DeliveryManager : MonoBehaviour
             triggerCollider.center = Vector3.zero;
             triggerCollider.size = new Vector3(3f, 3f, 3f); // Large pickup area
         }
-
-        // Ensure rigidbody exists
-        Rigidbody boxRb = boxObj.GetComponent<Rigidbody>();
-        if (boxRb == null)
-        {
-            boxRb = boxObj.AddComponent<Rigidbody>();
-            boxRb.mass = 5f;
-            boxRb.linearDamping = 0.5f;
-            boxRb.angularDamping = 0.5f;
-        }
-        boxRb.isKinematic = true; // Start kinematic
 
         // Spawn pickup indicator
         if (pickupIndicatorPrefab != null)

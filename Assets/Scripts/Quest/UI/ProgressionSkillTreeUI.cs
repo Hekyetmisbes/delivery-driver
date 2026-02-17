@@ -199,7 +199,7 @@ namespace DeliveryDriver.Quest.UI
             rewardsTitle.rectTransform.anchoredPosition = new Vector2(16f, y - 2f);
 
             rewardsText = CreateText("RewardsText", skillTreeWindow.transform, "-", 16, FontStyles.Normal);
-            rewardsText.enableWordWrapping = true;
+            rewardsText.textWrappingMode = TextWrappingModes.Normal;
             rewardsText.alignment = TextAlignmentOptions.TopLeft;
             rewardsText.rectTransform.anchorMin = new Vector2(0f, 0f);
             rewardsText.rectTransform.anchorMax = new Vector2(1f, 0f);
