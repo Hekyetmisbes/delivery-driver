@@ -67,6 +67,14 @@ public class DeliveryManager : MonoBehaviour
     [Header("Debug")]
     [SerializeField] private bool showDebugInfo = true;
 
+    [Header("MiniMap Objective Marker")]
+    [SerializeField] private bool enableMiniMapObjectiveMarker = true;
+    [SerializeField] private float miniMapMarkerHeight = 18f;
+    [SerializeField] private Vector3 miniMapMarkerScale = new Vector3(2.5f, 7f, 2.5f);
+    [SerializeField] private float miniMapMarkerSpinSpeed = 70f;
+    [SerializeField] private Color miniMapPickupMarkerColor = new Color(0.15f, 0.9f, 0.95f, 0.95f);
+    [SerializeField] private Color miniMapDeliveryMarkerColor = new Color(1f, 0.82f, 0.1f, 0.95f);
+
     private DeliveryBox currentBox;
     private GameObject currentPickupIndicator;
     private GameObject currentDeliveryIndicator;
@@ -94,6 +102,8 @@ public class DeliveryManager : MonoBehaviour
     private Bounds[] cachedTerrainBounds;
     private bool hasTerrainBounds;
     private bool isFinishingDeliveryLifecycle;
+    private GameObject miniMapObjectiveMarker;
+    private Material miniMapObjectiveMarkerMaterial;
 
     public bool IsDeliveryActive => isDeliveryActive;
     public bool HasBox => currentBox != null;
@@ -140,6 +150,7 @@ public class DeliveryManager : MonoBehaviour
     private void OnDestroy()
     {
         UnsubscribeFromQuestEvents();
+        RemoveMiniMapObjectiveMarker();
     }
 
     private void CacheTerrainBounds()
@@ -204,6 +215,8 @@ public class DeliveryManager : MonoBehaviour
 
     private void Update()
     {
+        UpdateMiniMapObjectiveMarker();
+
         if (!isDeliveryActive || currentBox == null || !currentBox.IsPickedUp)
         {
             return;
@@ -495,6 +508,8 @@ public class DeliveryManager : MonoBehaviour
         {
             Debug.Log($"[DeliveryManager] Spawned box at {spawnPos}. MissionType={currentMissionType}, Conditions x{currentMissionRewardMultiplier:F2}");
         }
+
+        UpdateMiniMapObjectiveMarker();
     }
 
     /// <summary>
@@ -547,6 +562,8 @@ public class DeliveryManager : MonoBehaviour
             float distance = Vector3.Distance(box.transform.position, currentDeliveryPoint);
             Debug.Log($"[DeliveryManager] Delivery route prepared. Stops={currentDeliveryStops.Count}, FirstTarget={currentDeliveryPoint}, Distance={distance:F1}m");
         }
+
+        UpdateMiniMapObjectiveMarker();
     }
 
     /// <summary>
@@ -1201,6 +1218,8 @@ public class DeliveryManager : MonoBehaviour
             currentBox = null;
         }
 
+        RemoveMiniMapObjectiveMarker();
+
         currentDeliveryStops.Clear();
         currentDeliveryStopNeighborhoods.Clear();
         currentDeliveryStopIndex = 0;
@@ -1246,6 +1265,96 @@ public class DeliveryManager : MonoBehaviour
         {
             currentDeliveryQuest.QuestDescription = BuildDeliveryObjectiveDescription(currentDeliveryStopIndex);
             QuestManager.Instance?.OnQuestUpdated?.Invoke(currentDeliveryQuest);
+        }
+
+        UpdateMiniMapObjectiveMarker();
+    }
+
+    private void EnsureMiniMapObjectiveMarker()
+    {
+        if (miniMapObjectiveMarker != null)
+        {
+            return;
+        }
+
+        miniMapObjectiveMarker = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        miniMapObjectiveMarker.name = "MiniMapObjectiveMarker";
+        miniMapObjectiveMarker.transform.localScale = miniMapMarkerScale;
+
+        Collider markerCollider = miniMapObjectiveMarker.GetComponent<Collider>();
+        if (markerCollider != null)
+        {
+            Destroy(markerCollider);
+        }
+
+        Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+        if (shader == null)
+        {
+            shader = Shader.Find("Unlit/Color");
+        }
+
+        if (shader != null)
+        {
+            miniMapObjectiveMarkerMaterial = new Material(shader);
+            miniMapObjectiveMarker.GetComponent<MeshRenderer>().material = miniMapObjectiveMarkerMaterial;
+        }
+    }
+
+    private void UpdateMiniMapObjectiveMarker()
+    {
+        if (!enableMiniMapObjectiveMarker)
+        {
+            RemoveMiniMapObjectiveMarker();
+            return;
+        }
+
+        bool hasPickupTarget = currentBox != null && !currentBox.IsPickedUp;
+        bool hasDeliveryTarget = isDeliveryActive;
+        bool hasTarget = hasPickupTarget || hasDeliveryTarget;
+
+        if (!hasTarget)
+        {
+            if (miniMapObjectiveMarker != null)
+            {
+                miniMapObjectiveMarker.SetActive(false);
+            }
+            return;
+        }
+
+        EnsureMiniMapObjectiveMarker();
+        if (miniMapObjectiveMarker == null)
+        {
+            return;
+        }
+
+        Vector3 targetPoint = hasDeliveryTarget
+            ? currentDeliveryPoint
+            : (currentBox != null ? currentBox.transform.position : currentPickupPoint);
+        miniMapObjectiveMarker.SetActive(true);
+        miniMapObjectiveMarker.transform.position = targetPoint + Vector3.up * miniMapMarkerHeight;
+        miniMapObjectiveMarker.transform.localScale = miniMapMarkerScale;
+        miniMapObjectiveMarker.transform.Rotate(Vector3.up, miniMapMarkerSpinSpeed * Time.deltaTime, Space.World);
+
+        if (miniMapObjectiveMarkerMaterial != null)
+        {
+            miniMapObjectiveMarkerMaterial.color = hasDeliveryTarget
+                ? miniMapDeliveryMarkerColor
+                : miniMapPickupMarkerColor;
+        }
+    }
+
+    private void RemoveMiniMapObjectiveMarker()
+    {
+        if (miniMapObjectiveMarker != null)
+        {
+            Destroy(miniMapObjectiveMarker);
+            miniMapObjectiveMarker = null;
+        }
+
+        if (miniMapObjectiveMarkerMaterial != null)
+        {
+            Destroy(miniMapObjectiveMarkerMaterial);
+            miniMapObjectiveMarkerMaterial = null;
         }
     }
 
