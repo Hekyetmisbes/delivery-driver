@@ -69,11 +69,14 @@ public class DeliveryManager : MonoBehaviour
 
     [Header("MiniMap Objective Marker")]
     [SerializeField] private bool enableMiniMapObjectiveMarker = true;
-    [SerializeField] private float miniMapMarkerHeight = 18f;
-    [SerializeField] private Vector3 miniMapMarkerScale = new Vector3(2.5f, 7f, 2.5f);
-    [SerializeField] private float miniMapMarkerSpinSpeed = 70f;
-    [SerializeField] private Color miniMapPickupMarkerColor = new Color(0.15f, 0.9f, 0.95f, 0.95f);
-    [SerializeField] private Color miniMapDeliveryMarkerColor = new Color(1f, 0.82f, 0.1f, 0.95f);
+    [SerializeField] private float miniMapMarkerHeight = 24f;
+    [SerializeField] private Vector3 miniMapMarkerScale = new Vector3(4f, 10f, 4f);
+    [SerializeField] private float miniMapMarkerSpinSpeed = 120f;
+    [SerializeField] private float miniMapMarkerPulseSpeed = 3f;
+    [SerializeField] private float miniMapMarkerPulseAmount = 0.2f;
+    [SerializeField] private Color miniMapPickupMarkerColor = new Color(0.1f, 1f, 1f, 1f);
+    [SerializeField] private Color miniMapDeliveryMarkerColor = new Color(1f, 0.9f, 0.05f, 1f);
+    [SerializeField] private string miniMapMarkerLayerName = "MiniMapMarker";
 
     private DeliveryBox currentBox;
     private GameObject currentPickupIndicator;
@@ -104,6 +107,7 @@ public class DeliveryManager : MonoBehaviour
     private bool isFinishingDeliveryLifecycle;
     private GameObject miniMapObjectiveMarker;
     private Material miniMapObjectiveMarkerMaterial;
+    private int cachedMiniMapMarkerLayer = int.MinValue;
 
     public bool IsDeliveryActive => isDeliveryActive;
     public bool HasBox => currentBox != null;
@@ -1280,6 +1284,11 @@ public class DeliveryManager : MonoBehaviour
         miniMapObjectiveMarker = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         miniMapObjectiveMarker.name = "MiniMapObjectiveMarker";
         miniMapObjectiveMarker.transform.localScale = miniMapMarkerScale;
+        int markerLayer = ResolveMiniMapMarkerLayer();
+        if (markerLayer >= 0)
+        {
+            miniMapObjectiveMarker.layer = markerLayer;
+        }
 
         Collider markerCollider = miniMapObjectiveMarker.GetComponent<Collider>();
         if (markerCollider != null)
@@ -1298,6 +1307,16 @@ public class DeliveryManager : MonoBehaviour
             miniMapObjectiveMarkerMaterial = new Material(shader);
             miniMapObjectiveMarker.GetComponent<MeshRenderer>().material = miniMapObjectiveMarkerMaterial;
         }
+    }
+
+    private int ResolveMiniMapMarkerLayer()
+    {
+        if (cachedMiniMapMarkerLayer == int.MinValue)
+        {
+            cachedMiniMapMarkerLayer = LayerMask.NameToLayer(miniMapMarkerLayerName);
+        }
+
+        return cachedMiniMapMarkerLayer;
     }
 
     private void UpdateMiniMapObjectiveMarker()
@@ -1332,7 +1351,8 @@ public class DeliveryManager : MonoBehaviour
             : (currentBox != null ? currentBox.transform.position : currentPickupPoint);
         miniMapObjectiveMarker.SetActive(true);
         miniMapObjectiveMarker.transform.position = targetPoint + Vector3.up * miniMapMarkerHeight;
-        miniMapObjectiveMarker.transform.localScale = miniMapMarkerScale;
+        float pulse = 1f + Mathf.Sin(Time.time * miniMapMarkerPulseSpeed) * miniMapMarkerPulseAmount;
+        miniMapObjectiveMarker.transform.localScale = miniMapMarkerScale * pulse;
         miniMapObjectiveMarker.transform.Rotate(Vector3.up, miniMapMarkerSpinSpeed * Time.deltaTime, Space.World);
 
         if (miniMapObjectiveMarkerMaterial != null)
