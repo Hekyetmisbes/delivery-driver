@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 using DeliveryDriver.Quest;
 using DeliveryDriver.City;
 using TrafficSystem;
@@ -77,6 +78,13 @@ public class DeliveryManager : MonoBehaviour
     [SerializeField] private Color miniMapPickupMarkerColor = new Color(0.1f, 1f, 1f, 1f);
     [SerializeField] private Color miniMapDeliveryMarkerColor = new Color(1f, 0.9f, 0.05f, 1f);
     [SerializeField] private string miniMapMarkerLayerName = "MiniMapMarker";
+    [SerializeField] private bool clampMiniMapMarkerToEdgeWhenOffscreen = true;
+    [SerializeField, Range(0f, 0.45f)] private float miniMapMarkerEdgePadding = 0.08f;
+    [SerializeField] private bool showMiniMapEdgeIndicator = true;
+    [SerializeField] private float miniMapEdgeIndicatorSize = 22f;
+    [SerializeField] private float miniMapEdgeIndicatorOffset = 0f;
+    [SerializeField] private float miniMapEdgeIndicatorPulseSpeed = 4f;
+    [SerializeField, Range(0f, 0.6f)] private float miniMapEdgeIndicatorPulseAmount = 0.2f;
 
     private DeliveryBox currentBox;
     private GameObject currentPickupIndicator;
@@ -108,6 +116,10 @@ public class DeliveryManager : MonoBehaviour
     private GameObject miniMapObjectiveMarker;
     private Material miniMapObjectiveMarkerMaterial;
     private int cachedMiniMapMarkerLayer = int.MinValue;
+    private Camera cachedMiniMapCamera;
+    private Canvas miniMapEdgeCanvas;
+    private RectTransform miniMapEdgeIndicatorRect;
+    private Image miniMapEdgeIndicatorImage;
 
     public bool IsDeliveryActive => isDeliveryActive;
     public bool HasBox => currentBox != null;
@@ -155,6 +167,7 @@ public class DeliveryManager : MonoBehaviour
     {
         UnsubscribeFromQuestEvents();
         RemoveMiniMapObjectiveMarker();
+        RemoveMiniMapEdgeIndicator();
     }
 
     private void CacheTerrainBounds()
@@ -1333,6 +1346,7 @@ public class DeliveryManager : MonoBehaviour
 
         if (!hasTarget)
         {
+            HideMiniMapEdgeIndicator();
             if (miniMapObjectiveMarker != null)
             {
                 miniMapObjectiveMarker.SetActive(false);
@@ -1349,22 +1363,208 @@ public class DeliveryManager : MonoBehaviour
         Vector3 targetPoint = hasDeliveryTarget
             ? currentDeliveryPoint
             : (currentBox != null ? currentBox.transform.position : currentPickupPoint);
-        miniMapObjectiveMarker.SetActive(true);
-        miniMapObjectiveMarker.transform.position = targetPoint + Vector3.up * miniMapMarkerHeight;
-        float pulse = 1f + Mathf.Sin(Time.time * miniMapMarkerPulseSpeed) * miniMapMarkerPulseAmount;
-        miniMapObjectiveMarker.transform.localScale = miniMapMarkerScale * pulse;
-        miniMapObjectiveMarker.transform.Rotate(Vector3.up, miniMapMarkerSpinSpeed * Time.deltaTime, Space.World);
+        bool targetIsOffscreen = false;
+        Vector3 markerPoint = GetMiniMapMarkerTargetPoint(targetPoint, out targetIsOffscreen);
+        Color markerColor = hasDeliveryTarget ? miniMapDeliveryMarkerColor : miniMapPickupMarkerColor;
+        if (targetIsOffscreen)
+        {
+            miniMapObjectiveMarker.SetActive(false);
+            if (showMiniMapEdgeIndicator)
+            {
+                UpdateMiniMapEdgeIndicator(targetPoint, markerColor);
+            }
+            else
+            {
+                HideMiniMapEdgeIndicator();
+            }
+        }
+        else
+        {
+            miniMapObjectiveMarker.SetActive(true);
+            miniMapObjectiveMarker.transform.position = markerPoint + Vector3.up * miniMapMarkerHeight;
+            float pulse = 1f + Mathf.Sin(Time.time * miniMapMarkerPulseSpeed) * miniMapMarkerPulseAmount;
+            miniMapObjectiveMarker.transform.localScale = miniMapMarkerScale * pulse;
+            miniMapObjectiveMarker.transform.Rotate(Vector3.up, miniMapMarkerSpinSpeed * Time.deltaTime, Space.World);
+            HideMiniMapEdgeIndicator();
+        }
 
         if (miniMapObjectiveMarkerMaterial != null)
         {
-            miniMapObjectiveMarkerMaterial.color = hasDeliveryTarget
-                ? miniMapDeliveryMarkerColor
-                : miniMapPickupMarkerColor;
+            miniMapObjectiveMarkerMaterial.color = markerColor;
+        }
+    }
+
+    private Vector3 GetMiniMapMarkerTargetPoint(Vector3 worldTargetPoint, out bool targetIsOffscreen)
+    {
+        targetIsOffscreen = false;
+
+        if (!clampMiniMapMarkerToEdgeWhenOffscreen)
+        {
+            return worldTargetPoint;
+        }
+
+        if (!TryGetMiniMapCamera(out Camera miniMapCamera))
+        {
+            return worldTargetPoint;
+        }
+
+        Vector3 viewportPoint = miniMapCamera.WorldToViewportPoint(worldTargetPoint);
+        if (viewportPoint.z <= 0f)
+        {
+            return worldTargetPoint;
+        }
+
+        bool isOutsideViewport =
+            viewportPoint.x < 0f || viewportPoint.x > 1f ||
+            viewportPoint.y < 0f || viewportPoint.y > 1f;
+        targetIsOffscreen = isOutsideViewport;
+
+        if (!isOutsideViewport)
+        {
+            return worldTargetPoint;
+        }
+
+        float padding = Mathf.Clamp(miniMapMarkerEdgePadding, 0f, 0.45f);
+        viewportPoint.x = Mathf.Clamp(viewportPoint.x, padding, 1f - padding);
+        viewportPoint.y = Mathf.Clamp(viewportPoint.y, padding, 1f - padding);
+
+        Vector3 edgePoint = miniMapCamera.ViewportToWorldPoint(viewportPoint);
+        edgePoint.y = worldTargetPoint.y;
+        return edgePoint;
+    }
+
+    private bool TryGetMiniMapCamera(out Camera miniMapCamera)
+    {
+        if (cachedMiniMapCamera == null)
+        {
+            GameObject miniMapCameraObject = GameObject.Find("MiniMapCamera");
+            if (miniMapCameraObject != null)
+            {
+                cachedMiniMapCamera = miniMapCameraObject.GetComponent<Camera>();
+            }
+        }
+
+        miniMapCamera = cachedMiniMapCamera;
+        return miniMapCamera != null && miniMapCamera.gameObject.activeInHierarchy && miniMapCamera.enabled;
+    }
+
+    private void UpdateMiniMapEdgeIndicator(Vector3 worldTargetPoint, Color indicatorColor)
+    {
+        if (!TryGetMiniMapCamera(out Camera miniMapCamera))
+        {
+            HideMiniMapEdgeIndicator();
+            return;
+        }
+
+        EnsureMiniMapEdgeIndicator();
+        if (miniMapEdgeIndicatorRect == null || miniMapEdgeCanvas == null)
+        {
+            return;
+        }
+
+        Vector3 viewportPoint = miniMapCamera.WorldToViewportPoint(worldTargetPoint);
+        if (viewportPoint.z < 0f)
+        {
+            viewportPoint.x = 1f - viewportPoint.x;
+            viewportPoint.y = 1f - viewportPoint.y;
+            viewportPoint.z = -viewportPoint.z;
+        }
+
+        Vector2 direction = new Vector2(viewportPoint.x - 0.5f, viewportPoint.y - 0.5f);
+        if (direction.sqrMagnitude < 0.0001f)
+        {
+            direction = Vector2.up;
+        }
+        direction.Normalize();
+
+        Rect miniMapRect = miniMapCamera.rect;
+        float rectCenterX = (miniMapRect.x + (miniMapRect.width * 0.5f)) * Screen.width;
+        float rectCenterY = (miniMapRect.y + (miniMapRect.height * 0.5f)) * Screen.height;
+        float rectHalfWidth = miniMapRect.width * Screen.width * 0.5f;
+        float rectHalfHeight = miniMapRect.height * Screen.height * 0.5f;
+
+        float inset = Mathf.Max(0f, miniMapEdgeIndicatorOffset);
+        float usableHalfWidth = Mathf.Max(1f, rectHalfWidth - inset);
+        float usableHalfHeight = Mathf.Max(1f, rectHalfHeight - inset);
+        float tx = Mathf.Approximately(direction.x, 0f) ? float.PositiveInfinity : usableHalfWidth / Mathf.Abs(direction.x);
+        float ty = Mathf.Approximately(direction.y, 0f) ? float.PositiveInfinity : usableHalfHeight / Mathf.Abs(direction.y);
+        float t = Mathf.Min(tx, ty);
+        Vector2 screenPoint = new Vector2(rectCenterX, rectCenterY) + direction * t;
+
+        RectTransform canvasRect = miniMapEdgeCanvas.transform as RectTransform;
+        if (canvasRect != null &&
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, screenPoint, null, out Vector2 localPoint))
+        {
+            miniMapEdgeIndicatorRect.anchoredPosition = localPoint;
+        }
+
+        float edgePulse = 1f + Mathf.Sin(Time.time * miniMapEdgeIndicatorPulseSpeed) * Mathf.Clamp(miniMapEdgeIndicatorPulseAmount, 0f, 0.6f);
+        float size = Mathf.Max(8f, miniMapEdgeIndicatorSize) * edgePulse;
+        miniMapEdgeIndicatorRect.sizeDelta = new Vector2(size, size);
+        miniMapEdgeIndicatorRect.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg - 45f);
+
+        if (miniMapEdgeIndicatorImage != null)
+        {
+            miniMapEdgeIndicatorImage.color = indicatorColor;
+            miniMapEdgeIndicatorImage.enabled = true;
+        }
+    }
+
+    private void EnsureMiniMapEdgeIndicator()
+    {
+        if (miniMapEdgeCanvas == null)
+        {
+            GameObject canvasObject = new GameObject("MiniMapEdgeIndicatorCanvas");
+            miniMapEdgeCanvas = canvasObject.AddComponent<Canvas>();
+            miniMapEdgeCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            miniMapEdgeCanvas.sortingOrder = 1000;
+            canvasObject.AddComponent<CanvasScaler>();
+            canvasObject.AddComponent<GraphicRaycaster>();
+        }
+
+        if (miniMapEdgeIndicatorRect == null)
+        {
+            GameObject indicatorObject = new GameObject("MiniMapEdgeIndicator");
+            indicatorObject.transform.SetParent(miniMapEdgeCanvas.transform, false);
+            miniMapEdgeIndicatorRect = indicatorObject.AddComponent<RectTransform>();
+            miniMapEdgeIndicatorRect.anchorMin = new Vector2(0.5f, 0.5f);
+            miniMapEdgeIndicatorRect.anchorMax = new Vector2(0.5f, 0.5f);
+            miniMapEdgeIndicatorRect.pivot = new Vector2(0.5f, 0.5f);
+
+            miniMapEdgeIndicatorImage = indicatorObject.AddComponent<Image>();
+            miniMapEdgeIndicatorImage.raycastTarget = false;
+            miniMapEdgeIndicatorImage.sprite = Resources.GetBuiltinResource<Sprite>("UI/Skin/UISprite.psd");
+        }
+    }
+
+    private void HideMiniMapEdgeIndicator()
+    {
+        if (miniMapEdgeIndicatorImage != null)
+        {
+            miniMapEdgeIndicatorImage.enabled = false;
+        }
+    }
+
+    private void RemoveMiniMapEdgeIndicator()
+    {
+        if (miniMapEdgeIndicatorRect != null)
+        {
+            Destroy(miniMapEdgeIndicatorRect.gameObject);
+            miniMapEdgeIndicatorRect = null;
+            miniMapEdgeIndicatorImage = null;
+        }
+
+        if (miniMapEdgeCanvas != null)
+        {
+            Destroy(miniMapEdgeCanvas.gameObject);
+            miniMapEdgeCanvas = null;
         }
     }
 
     private void RemoveMiniMapObjectiveMarker()
     {
+        HideMiniMapEdgeIndicator();
+
         if (miniMapObjectiveMarker != null)
         {
             Destroy(miniMapObjectiveMarker);
