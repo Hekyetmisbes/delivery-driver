@@ -16,6 +16,7 @@ public class DeliveryUI : MonoBehaviour
     private DeliveryManager deliveryManager;
     private Transform playerTransform;
     private float nextPlayerResolveTime;
+    private bool isShowingCompletionMessage;
 
     private void Start()
     {
@@ -68,6 +69,16 @@ public class DeliveryUI : MonoBehaviour
 
     private void UpdateUI()
     {
+        if (isShowingCompletionMessage)
+        {
+            if (deliveryPanel != null)
+            {
+                deliveryPanel.SetActive(true);
+            }
+
+            return;
+        }
+
         bool hasObjective = deliveryManager.HasObjectivePoint;
 
         if (deliveryPanel != null)
@@ -145,6 +156,8 @@ public class DeliveryUI : MonoBehaviour
     /// </summary>
     public void OnDeliveryComplete()
     {
+        isShowingCompletionMessage = true;
+
         if (statusText != null)
         {
             statusText.text = "Teslimat tamamlandi!";
@@ -160,6 +173,8 @@ public class DeliveryUI : MonoBehaviour
 
     private void ResetUI()
     {
+        isShowingCompletionMessage = false;
+
         if (statusText != null)
         {
             statusText.text = "Paketi bul!";
