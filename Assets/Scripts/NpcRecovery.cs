@@ -349,11 +349,13 @@ namespace TrafficSystem
         {
             // CRITICAL FIX: Make rigidbody kinematic during snap to prevent physics explosions
             bool wasKinematic = rb.isKinematic;
+            if (!wasKinematic)
+            {
+                // Unity does not allow velocity writes on kinematic bodies.
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
             rb.isKinematic = true;
-
-            // Reset all physics
-            rb.linearVelocity = Vector3.zero;
-            rb.angularVelocity = Vector3.zero;
 
             // Set position and rotation using rigidbody (not transform)
             rb.position = position;

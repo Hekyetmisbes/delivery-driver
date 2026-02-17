@@ -1,7 +1,7 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using DeliveryDriver.Quest;
-using DeliveryDriver.Quest.UI;
 using DeliveryDriver.City;
 using TrafficSystem;
 
@@ -11,6 +11,14 @@ using TrafficSystem;
 /// </summary>
 public class DeliveryManager : MonoBehaviour
 {
+    private enum DeliveryMissionType
+    {
+        Standard,
+        Timed,
+        Fragile,
+        MultiStop
+    }
+
     [Header("Prefabs")]
     [SerializeField] private GameObject boxPrefab;
     [SerializeField] private GameObject pickupIndicatorPrefab;
@@ -34,6 +42,20 @@ public class DeliveryManager : MonoBehaviour
     [SerializeField] private float raycastStartHeight = 300f;
     [SerializeField] private float raycastMaxDistance = 400f;
 
+    [Header("Mission Variety (Roadmap 1.1)")]
+    [SerializeField] private int standardMissionWeight = 45;
+    [SerializeField] private int timedMissionWeight = 25;
+    [SerializeField] private int fragileMissionWeight = 20;
+    [SerializeField] private int multiStopMissionWeight = 10;
+    [SerializeField] private int multiStopMinStops = 2;
+    [SerializeField] private int multiStopMaxStops = 3;
+    [SerializeField] private bool preventConsecutiveSameDeliveryNeighborhood = true;
+
+    [Header("Mission Conditions (Roadmap 1.1)")]
+    [SerializeField] private float rushHourRewardMultiplier = 1.15f;
+    [SerializeField] private float nightRewardMultiplier = 1.12f;
+    [SerializeField] private float rainyRiskRewardMultiplier = 1.20f;
+
     [Header("Quest Integration")]
     [SerializeField] private bool useQuestSystem = true;
     [SerializeField] private CargoLibrary cargoLibrary;
@@ -53,15 +75,25 @@ public class DeliveryManager : MonoBehaviour
     private Vector3 currentDeliveryPoint;
     private string currentPickupNeighborhoodName = "";
     private string currentDeliveryNeighborhoodName = "";
+    private string lastCompletedDeliveryNeighborhoodName = "";
     private bool isDeliveryActive = false;
+    private DeliveryMissionType currentMissionType = DeliveryMissionType.Standard;
+    private readonly List<Vector3> currentDeliveryStops = new List<Vector3>();
+    private readonly List<string> currentDeliveryStopNeighborhoods = new List<string>();
+    private int currentDeliveryStopIndex;
+    private int lastObservedQuestDeliveryIndex = -1;
+    private float currentMissionRewardMultiplier = 1f;
+    private bool hasRushHourBonus;
+    private bool hasNightBonus;
+    private bool hasRainRiskBonus;
     private List<Vector3> availableSpawnPoints = new List<Vector3>();
     private DeliveryUI deliveryUI;
     private QuestData currentDeliveryQuest;
     private Transform cachedPlayerTransform;
-    private QuestCompleteUI cachedQuestCompleteUI;
     private static Collider[] sharedOverlapBuffer = new Collider[32];
     private Bounds[] cachedTerrainBounds;
     private bool hasTerrainBounds;
+    private bool isFinishingDeliveryLifecycle;
 
     public bool IsDeliveryActive => isDeliveryActive;
     public bool HasBox => currentBox != null;
@@ -101,8 +133,13 @@ public class DeliveryManager : MonoBehaviour
 
         // Cache player and UI references after scene is ready
         ResolvePlayerTransform();
-        cachedQuestCompleteUI = FindFirstObjectByType<QuestCompleteUI>();
         CacheTerrainBounds();
+        SubscribeToQuestEvents();
+    }
+
+    private void OnDestroy()
+    {
+        UnsubscribeFromQuestEvents();
     }
 
     private void CacheTerrainBounds()
@@ -143,30 +180,64 @@ public class DeliveryManager : MonoBehaviour
         }
     }
 
+    private void SubscribeToQuestEvents()
+    {
+        if (QuestManager.Instance == null)
+        {
+            return;
+        }
+
+        QuestManager.Instance.OnQuestCompleted.AddListener(HandleQuestCompleted);
+        QuestManager.Instance.OnQuestFailed.AddListener(HandleQuestFailed);
+    }
+
+    private void UnsubscribeFromQuestEvents()
+    {
+        if (QuestManager.Instance == null)
+        {
+            return;
+        }
+
+        QuestManager.Instance.OnQuestCompleted.RemoveListener(HandleQuestCompleted);
+        QuestManager.Instance.OnQuestFailed.RemoveListener(HandleQuestFailed);
+    }
+
     private void Update()
     {
-        // Check delivery proximity
-        if (isDeliveryActive && currentBox != null && currentBox.IsPickedUp)
+        if (!isDeliveryActive || currentBox == null || !currentBox.IsPickedUp)
         {
-            if (cachedPlayerTransform == null)
-                ResolvePlayerTransform();
+            return;
+        }
 
-            Transform player = cachedPlayerTransform;
+        if (cachedPlayerTransform == null)
+        {
+            ResolvePlayerTransform();
+        }
 
-            if (player != null)
+        Transform player = cachedPlayerTransform;
+        if (player == null)
+        {
+            return;
+        }
+
+        SyncDeliveryTargetFromQuestProgress();
+
+        float distance = Vector3.Distance(player.position, currentDeliveryPoint);
+        if (deliveryUI != null)
+        {
+            deliveryUI.UpdateDistance(distance);
+        }
+
+        // Wrong neighborhood delivery attempts are treated as hard failure for mission clarity.
+        if (distance <= deliveryRadius * 1.1f && !IsPlayerInExpectedNeighborhood(player.position))
+        {
+            if (QuestManager.Instance != null && currentDeliveryQuest != null && currentDeliveryQuest.Status == QuestStatus.Active)
             {
-                float distance = Vector3.Distance(player.position, currentDeliveryPoint);
-
-                // Update UI with distance
-                if (deliveryUI != null)
-                {
-                    deliveryUI.UpdateDistance(distance);
-                }
-
-                if (distance < deliveryRadius)
-                {
-                    CompleteDelivery();
-                }
+                QuestManager.Instance.FailQuest(currentDeliveryQuest, "Wrong neighborhood delivery");
+            }
+            else
+            {
+                HandleDeliveryFailure("Wrong neighborhood delivery");
             }
         }
     }
@@ -232,8 +303,8 @@ public class DeliveryManager : MonoBehaviour
         int maxAttempts = 30;
         for (int i = 0; i < maxAttempts; i++)
         {
-            float x = Random.Range(spawnAreaMin.x, spawnAreaMax.x);
-            float z = Random.Range(spawnAreaMin.y, spawnAreaMax.y);
+            float x = UnityEngine.Random.Range(spawnAreaMin.x, spawnAreaMax.x);
+            float z = UnityEngine.Random.Range(spawnAreaMin.y, spawnAreaMax.y);
             Vector3 position = new Vector3(x, raycastStartHeight, z);
 
             // Raycast down to find ground
@@ -276,7 +347,7 @@ public class DeliveryManager : MonoBehaviour
         if (cachedPlayerTransform != null)
         {
             Vector3 playerPos = cachedPlayerTransform.position;
-            Vector3 offset = Random.insideUnitCircle * 20f;
+            Vector3 offset = UnityEngine.Random.insideUnitCircle * 20f;
             Vector3 fallbackPos = new Vector3(playerPos.x + offset.x, raycastStartHeight, playerPos.z + offset.y);
 
             if (Physics.Raycast(fallbackPos, Vector3.down, out RaycastHit hit, raycastMaxDistance, groundMask, QueryTriggerInteraction.Ignore))
@@ -347,7 +418,7 @@ public class DeliveryManager : MonoBehaviour
         }
 
         // Spawn box with slight rotation variation
-        Quaternion rotation = Quaternion.Euler(0, Random.Range(0f, 360f), 0);
+        Quaternion rotation = Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0);
         GameObject boxObj = Instantiate(boxPrefab, spawnPos, rotation);
 
         currentBox = boxObj.GetComponent<DeliveryBox>();
@@ -406,16 +477,23 @@ public class DeliveryManager : MonoBehaviour
         currentPickupPoint = spawnPos;
         currentPickupNeighborhoodName = ResolveNeighborhoodName(currentPickupPoint);
         currentDeliveryNeighborhoodName = "";
+        currentDeliveryStops.Clear();
+        currentDeliveryStopNeighborhoods.Clear();
+        currentDeliveryStopIndex = 0;
+        lastObservedQuestDeliveryIndex = -1;
+        isDeliveryActive = false;
+        currentMissionType = PickMissionType();
+        EvaluateMissionConditions();
 
         // Create quest in quest system
         if (useQuestSystem)
         {
-            CreateDeliveryQuest(spawnPos);
+            CreateDeliveryQuest(spawnPos, currentMissionType);
         }
 
         if (showDebugInfo)
         {
-            Debug.Log($"[DeliveryManager] Spawned box at {spawnPos}");
+            Debug.Log($"[DeliveryManager] Spawned box at {spawnPos}. MissionType={currentMissionType}, Conditions x{currentMissionRewardMultiplier:F2}");
         }
     }
 
@@ -426,9 +504,16 @@ public class DeliveryManager : MonoBehaviour
     {
         if (box != currentBox) return;
 
-        // Generate delivery point (different from pickup)
-        currentDeliveryPoint = GetDeliveryPoint(box.transform.position);
-        currentDeliveryNeighborhoodName = ResolveNeighborhoodName(currentDeliveryPoint);
+        BuildDeliveryStops(box.transform.position);
+        if (currentDeliveryStops.Count == 0)
+        {
+            HandleDeliveryFailure("No valid delivery location");
+            return;
+        }
+
+        currentDeliveryStopIndex = 0;
+        currentDeliveryPoint = currentDeliveryStops[currentDeliveryStopIndex];
+        currentDeliveryNeighborhoodName = currentDeliveryStopNeighborhoods[currentDeliveryStopIndex];
         isDeliveryActive = true;
 
         // Spawn delivery indicator
@@ -448,7 +533,7 @@ public class DeliveryManager : MonoBehaviour
         // Update quest with delivery location
         if (useQuestSystem)
         {
-            UpdateQuestWithDelivery(currentDeliveryPoint);
+            UpdateQuestWithDelivery(currentDeliveryStops, currentDeliveryStopNeighborhoods);
         }
 
         // Notify UI
@@ -460,7 +545,7 @@ public class DeliveryManager : MonoBehaviour
         if (showDebugInfo)
         {
             float distance = Vector3.Distance(box.transform.position, currentDeliveryPoint);
-            Debug.Log($"[DeliveryManager] Delivery point set at {currentDeliveryPoint} (Distance: {distance:F1}m)");
+            Debug.Log($"[DeliveryManager] Delivery route prepared. Stops={currentDeliveryStops.Count}, FirstTarget={currentDeliveryPoint}, Distance={distance:F1}m");
         }
     }
 
@@ -542,34 +627,90 @@ public class DeliveryManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Get delivery point far from pickup location
+    /// Builds delivery stops based on mission type and neighborhood repetition rules.
     /// </summary>
-    private Vector3 GetDeliveryPoint(Vector3 pickupPoint)
+    private void BuildDeliveryStops(Vector3 pickupPoint)
     {
-        Vector3 deliveryPoint = pickupPoint;
-        int maxAttempts = 20;
-        int attempts = 0;
+        currentDeliveryStops.Clear();
+        currentDeliveryStopNeighborhoods.Clear();
 
-        while (attempts < maxAttempts)
+        int requestedStops = currentMissionType == DeliveryMissionType.MultiStop
+            ? Mathf.Max(2, UnityEngine.Random.Range(multiStopMinStops, multiStopMaxStops + 1))
+            : 1;
+
+        HashSet<string> usedNeighborhoods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(currentPickupNeighborhoodName))
         {
-            if (TryGetValidSpawnPoint(pickupPoint, true, out Vector3 candidate))
+            usedNeighborhoods.Add(currentPickupNeighborhoodName);
+        }
+
+        if (preventConsecutiveSameDeliveryNeighborhood && !string.IsNullOrWhiteSpace(lastCompletedDeliveryNeighborhoodName))
+        {
+            usedNeighborhoods.Add(lastCompletedDeliveryNeighborhoodName);
+        }
+
+        Vector3 referencePoint = pickupPoint;
+        for (int i = 0; i < requestedStops; i++)
+        {
+            bool requireMinDistance = i == 0;
+            if (!TryGetDeliveryPoint(referencePoint, requireMinDistance, usedNeighborhoods, out Vector3 point, out string neighborhood))
             {
-                deliveryPoint = candidate;
-                if (Vector3.Distance(pickupPoint, deliveryPoint) >= minDistanceBetweenPoints)
+                // Fallback keeps progression moving even in dense maps.
+                if (TryGetValidSpawnPoint(referencePoint, false, out Vector3 fallback))
                 {
-                    return deliveryPoint;
+                    point = fallback;
+                    neighborhood = ResolveNeighborhoodName(fallback);
+                }
+                else
+                {
+                    break;
                 }
             }
 
-            attempts++;
-        }
+            currentDeliveryStops.Add(point);
+            currentDeliveryStopNeighborhoods.Add(neighborhood);
+            referencePoint = point;
 
-        if (TryGetValidSpawnPoint(pickupPoint, false, out Vector3 fallbackPoint))
+            if (!string.IsNullOrWhiteSpace(neighborhood))
+            {
+                usedNeighborhoods.Add(neighborhood);
+            }
+        }
+    }
+
+    private bool TryGetDeliveryPoint(
+        Vector3 referencePoint,
+        bool requireMinDistance,
+        HashSet<string> excludedNeighborhoods,
+        out Vector3 point,
+        out string neighborhood)
+    {
+        point = Vector3.zero;
+        neighborhood = string.Empty;
+
+        const int maxAttempts = 70;
+        for (int i = 0; i < maxAttempts; i++)
         {
-            return fallbackPoint;
+            if (!TryGetValidSpawnPoint(referencePoint, requireMinDistance, out Vector3 candidate))
+            {
+                continue;
+            }
+
+            string candidateNeighborhood = ResolveNeighborhoodName(candidate);
+            bool isExcludedNeighborhood = !string.IsNullOrWhiteSpace(candidateNeighborhood) &&
+                                          excludedNeighborhoods != null &&
+                                          excludedNeighborhoods.Contains(candidateNeighborhood);
+            if (isExcludedNeighborhood && i < maxAttempts - 8)
+            {
+                continue;
+            }
+
+            point = candidate;
+            neighborhood = candidateNeighborhood;
+            return true;
         }
 
-        return pickupPoint;
+        return false;
     }
 
     private bool TryGetValidSpawnPoint(Vector3 referencePoint, bool enforceMinDistance, out Vector3 spawnPoint)
@@ -579,7 +720,7 @@ public class DeliveryManager : MonoBehaviour
         for (int i = 0; i < maxAttempts; i++)
         {
             Vector3 candidate = availableSpawnPoints.Count > 0
-                ? availableSpawnPoints[Random.Range(0, availableSpawnPoints.Count)]
+                ? availableSpawnPoints[UnityEngine.Random.Range(0, availableSpawnPoints.Count)]
                 : GetRandomGroundPosition();
 
             if (!IsValidSpawnPosition(candidate))
@@ -797,66 +938,28 @@ public class DeliveryManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Complete current delivery and spawn new box
+    /// Fallback completion path. Normal flow completes through QuestManager events.
     /// </summary>
     private void CompleteDelivery()
     {
-        if (!isDeliveryActive) return;
+        if (!isDeliveryActive && currentBox == null)
+        {
+            return;
+        }
 
-        isDeliveryActive = false;
-
-        QuestData questToShow = currentDeliveryQuest;
-
-        // Complete quest
-        if (useQuestSystem)
+        if (useQuestSystem && currentDeliveryQuest != null && QuestManager.Instance != null && currentDeliveryQuest.Status == QuestStatus.Active)
         {
             CompleteDeliveryQuest();
+            return;
         }
 
-        // Notify UI
-        if (deliveryUI != null)
-        {
-            deliveryUI.OnDeliveryComplete();
-        }
-
-        // Destroy indicators
-        if (currentDeliveryIndicator != null)
-        {
-            Destroy(currentDeliveryIndicator);
-        }
-
-        // Destroy ghost box preview
-        if (currentDeliveryPreview != null)
-        {
-            Destroy(currentDeliveryPreview);
-        }
-
-        // Destroy box
-        if (currentBox != null)
-        {
-            Destroy(currentBox.gameObject);
-        }
-
-        // Show quest complete UI
-        ShowQuestCompleteUI(questToShow);
-
-        currentDeliveryQuest = null;
-        currentPickupNeighborhoodName = "";
-        currentDeliveryNeighborhoodName = "";
-
-        if (showDebugInfo)
-        {
-            Debug.Log("[DeliveryManager] Delivery completed! Spawning new box...");
-        }
-
-        // Spawn new box after delay
-        Invoke(nameof(SpawnNewBox), 2f);
+        FinalizeDeliveryLifecycle(true);
     }
 
     /// <summary>
     /// Create a delivery quest in the quest system
     /// </summary>
-    private void CreateDeliveryQuest(Vector3 pickupPos)
+    private void CreateDeliveryQuest(Vector3 pickupPos, DeliveryMissionType missionType)
     {
         if (QuestManager.Instance == null)
         {
@@ -868,19 +971,65 @@ public class DeliveryManager : MonoBehaviour
         QuestManager.Instance.SetDebugInfiniteTime(false);
 #endif
 
+        QuestType questType = ToQuestType(missionType);
+        QuestDifficulty difficulty = missionType switch
+        {
+            DeliveryMissionType.MultiStop => QuestDifficulty.Medium,
+            DeliveryMissionType.Fragile => QuestDifficulty.Medium,
+            DeliveryMissionType.Timed => QuestDifficulty.Medium,
+            _ => QuestDifficulty.Easy
+        };
+
+        float baseTimeLimit = missionType switch
+        {
+            DeliveryMissionType.Timed => 180f,
+            DeliveryMissionType.Fragile => 260f,
+            DeliveryMissionType.MultiStop => 420f,
+            _ => 300f
+        };
+
+        int baseReward = missionType switch
+        {
+            DeliveryMissionType.Timed => 150,
+            DeliveryMissionType.Fragile => 175,
+            DeliveryMissionType.MultiStop => 220,
+            _ => 100
+        };
+
+        int bonusReward = missionType switch
+        {
+            DeliveryMissionType.Timed => 95,
+            DeliveryMissionType.Fragile => 110,
+            DeliveryMissionType.MultiStop => 140,
+            _ => 50
+        };
+
+        baseReward = Mathf.RoundToInt(baseReward * currentMissionRewardMultiplier);
+        bonusReward = Mathf.RoundToInt(bonusReward * currentMissionRewardMultiplier);
+
+        string missionLabel = missionType switch
+        {
+            DeliveryMissionType.Timed => "Timed Run",
+            DeliveryMissionType.Fragile => "Fragile Cargo",
+            DeliveryMissionType.MultiStop => "Multi-Stop Route",
+            _ => "Package Delivery"
+        };
+
+        string conditionLine = BuildMissionConditionSummary();
+
         // Create quest data
         currentDeliveryQuest = new QuestData
         {
             QuestID = System.Guid.NewGuid().ToString(),
-            QuestName = "Package Delivery",
-            QuestDescription = $"Pick up package at {FormatCoordinates(pickupPos)}",
-            QuestType = QuestType.StandardDelivery,
-            Difficulty = QuestDifficulty.Easy,
+            QuestName = missionLabel,
+            QuestDescription = $"Pick up package at {FormatCoordinates(pickupPos)}{conditionLine}",
+            QuestType = questType,
+            Difficulty = difficulty,
             Status = QuestStatus.NotStarted,
-            TimeLimit = 300f, // 5 minutes
-            TimeRemaining = 300f,
-            BaseReward = 100,
-            BonusReward = 50,
+            TimeLimit = baseTimeLimit,
+            TimeRemaining = baseTimeLimit,
+            BaseReward = baseReward,
+            BonusReward = bonusReward,
             PickupLocation = new QuestLocation(pickupPos, $"Pickup: {FormatCoordinates(pickupPos)}", deliveryRadius),
             DeliveryLocations = new List<QuestLocation>()
         };
@@ -902,6 +1051,17 @@ public class DeliveryManager : MonoBehaviour
             }
         }
 
+        if (currentDeliveryQuest.Cargo == null)
+        {
+            currentDeliveryQuest.Cargo = new CargoData("Package", 50f, false, "Delivery package");
+        }
+
+        if (missionType == DeliveryMissionType.Fragile)
+        {
+            currentDeliveryQuest.Cargo.IsFragile = true;
+            currentDeliveryQuest.Cargo.CargoHealth = 100f;
+        }
+
         // Add quest to QuestManager
         QuestManager.Instance.AddAvailableQuest(currentDeliveryQuest);
         QuestManager.Instance.StartQuest(currentDeliveryQuest);
@@ -915,31 +1075,40 @@ public class DeliveryManager : MonoBehaviour
     /// <summary>
     /// Update quest with delivery location
     /// </summary>
-    private void UpdateQuestWithDelivery(Vector3 deliveryPos)
+    private void UpdateQuestWithDelivery(List<Vector3> deliveryStops, List<string> deliveryNeighborhoods)
     {
-        if (currentDeliveryQuest == null) return;
+        if (currentDeliveryQuest == null || deliveryStops == null || deliveryStops.Count == 0)
+        {
+            return;
+        }
 
-        // Add delivery location
-        QuestLocation deliveryLocation = new QuestLocation(
-            deliveryPos,
-            $"Delivery: {FormatCoordinates(deliveryPos)}",
-            deliveryRadius
-        );
+        currentDeliveryQuest.DeliveryLocations.Clear();
+        float questTriggerRadius = Mathf.Max(2f, deliveryRadius * 0.65f);
+        for (int i = 0; i < deliveryStops.Count; i++)
+        {
+            Vector3 stop = deliveryStops[i];
+            string neighborhood = (deliveryNeighborhoods != null && i < deliveryNeighborhoods.Count)
+                ? deliveryNeighborhoods[i]
+                : ResolveNeighborhoodName(stop);
+            QuestLocation deliveryLocation = new QuestLocation(
+                stop,
+                $"Delivery {i + 1}: {FormatCoordinates(stop)} ({neighborhood})",
+                questTriggerRadius
+            );
+            deliveryLocation.VisualMarker = deliveryIndicatorPrefab;
+            currentDeliveryQuest.DeliveryLocations.Add(deliveryLocation);
+        }
 
-        currentDeliveryQuest.DeliveryLocations.Add(deliveryLocation);
-        currentDeliveryQuest.QuestDescription = $"Deliver package to {FormatCoordinates(deliveryPos)}";
+        currentDeliveryQuest.QuestDescription = BuildDeliveryObjectiveDescription(0);
         currentDeliveryQuest.Status = QuestStatus.Active;
         currentDeliveryQuest.HasPickedUpCargo = true;
         currentDeliveryQuest.CurrentDeliveryIndex = 0;
+        lastObservedQuestDeliveryIndex = 0;
         QuestManager.Instance?.OnQuestUpdated?.Invoke(currentDeliveryQuest);
-
-        // Show marker
-        deliveryLocation.VisualMarker = deliveryIndicatorPrefab;
-        deliveryLocation.ShowMarker();
 
         if (showDebugInfo)
         {
-            Debug.Log($"[DeliveryManager] Updated quest with delivery location: {FormatCoordinates(deliveryPos)}");
+            Debug.Log($"[DeliveryManager] Updated quest with {deliveryStops.Count} delivery stop(s).");
         }
     }
 
@@ -950,38 +1119,228 @@ public class DeliveryManager : MonoBehaviour
     {
         if (currentDeliveryQuest == null || QuestManager.Instance == null) return;
 
-        currentDeliveryQuest.Status = QuestStatus.Completed;
-        QuestManager.Instance.CompleteQuest(currentDeliveryQuest);
-
-        if (showDebugInfo)
+        if (currentDeliveryQuest.Status == QuestStatus.Active)
         {
-            Debug.Log($"[DeliveryManager] Completed delivery quest!");
+            currentDeliveryQuest.Status = QuestStatus.Completed;
+            QuestManager.Instance.CompleteQuest(currentDeliveryQuest);
         }
-
     }
 
-    /// <summary>
-    /// Show quest complete UI
-    /// </summary>
-    private void ShowQuestCompleteUI(QuestData quest)
+    private void HandleQuestCompleted(QuestData quest)
     {
-        // Try to find and use the quest complete UI
-        if (QuestUIManager.Instance != null)
+        if (quest == null || currentDeliveryQuest == null || !ReferenceEquals(quest, currentDeliveryQuest))
         {
-            if (cachedQuestCompleteUI == null)
-                cachedQuestCompleteUI = FindFirstObjectByType<QuestCompleteUI>();
-            QuestCompleteUI questCompleteUI = cachedQuestCompleteUI;
-            if (questCompleteUI != null)
+            return;
+        }
+
+        FinalizeDeliveryLifecycle(true);
+    }
+
+    private void HandleQuestFailed(QuestData quest)
+    {
+        if (quest == null || currentDeliveryQuest == null || !ReferenceEquals(quest, currentDeliveryQuest))
+        {
+            return;
+        }
+
+        HandleDeliveryFailure(QuestManager.Instance != null ? QuestManager.Instance.LastFailureReason : "Delivery failed");
+    }
+
+    private void HandleDeliveryFailure(string reason)
+    {
+        if (showDebugInfo)
+        {
+            Debug.LogWarning($"[DeliveryManager] Delivery failed: {reason}");
+        }
+
+        FinalizeDeliveryLifecycle(false);
+    }
+
+    private void FinalizeDeliveryLifecycle(bool success)
+    {
+        if (isFinishingDeliveryLifecycle)
+        {
+            return;
+        }
+
+        isFinishingDeliveryLifecycle = true;
+        isDeliveryActive = false;
+
+        if (success && currentDeliveryStopNeighborhoods.Count > 0)
+        {
+            lastCompletedDeliveryNeighborhoodName = currentDeliveryStopNeighborhoods[currentDeliveryStopNeighborhoods.Count - 1];
+        }
+
+        if (deliveryUI != null)
+        {
+            if (success)
             {
-                int reward = QuestManager.Instance != null ? QuestManager.Instance.LastCompletionReward : 0;
-                questCompleteUI.ShowCompleteScreen(quest, reward);
+                deliveryUI.OnDeliveryComplete();
+            }
+            else
+            {
+                deliveryUI.OnDeliveryComplete();
             }
         }
-        else
+
+        if (currentDeliveryIndicator != null)
         {
-            // Fallback: simple debug message
-            Debug.Log("=== QUEST COMPLETED ===");
+            Destroy(currentDeliveryIndicator);
+            currentDeliveryIndicator = null;
         }
+
+        if (currentDeliveryPreview != null)
+        {
+            Destroy(currentDeliveryPreview);
+            currentDeliveryPreview = null;
+        }
+
+        if (currentBox != null)
+        {
+            Destroy(currentBox.gameObject);
+            currentBox = null;
+        }
+
+        currentDeliveryStops.Clear();
+        currentDeliveryStopNeighborhoods.Clear();
+        currentDeliveryStopIndex = 0;
+        lastObservedQuestDeliveryIndex = -1;
+        currentPickupNeighborhoodName = string.Empty;
+        currentDeliveryNeighborhoodName = string.Empty;
+        currentDeliveryQuest = null;
+
+        CancelInvoke(nameof(SpawnNewBox));
+        Invoke(nameof(SpawnNewBox), success ? 2f : 2.5f);
+        isFinishingDeliveryLifecycle = false;
+    }
+
+    private void SyncDeliveryTargetFromQuestProgress()
+    {
+        if (currentDeliveryQuest == null || currentDeliveryStops.Count == 0)
+        {
+            return;
+        }
+
+        int questIndex = Mathf.Clamp(currentDeliveryQuest.CurrentDeliveryIndex, 0, currentDeliveryStops.Count - 1);
+        if (questIndex == lastObservedQuestDeliveryIndex)
+        {
+            return;
+        }
+
+        lastObservedQuestDeliveryIndex = questIndex;
+        currentDeliveryStopIndex = questIndex;
+        currentDeliveryPoint = currentDeliveryStops[currentDeliveryStopIndex];
+        currentDeliveryNeighborhoodName = currentDeliveryStopNeighborhoods[currentDeliveryStopIndex];
+
+        if (currentDeliveryIndicator != null)
+        {
+            currentDeliveryIndicator.transform.position = currentDeliveryPoint + Vector3.up * 2f;
+        }
+
+        if (currentDeliveryPreview != null)
+        {
+            currentDeliveryPreview.transform.position = currentDeliveryPoint;
+        }
+
+        if (currentDeliveryQuest != null)
+        {
+            currentDeliveryQuest.QuestDescription = BuildDeliveryObjectiveDescription(currentDeliveryStopIndex);
+            QuestManager.Instance?.OnQuestUpdated?.Invoke(currentDeliveryQuest);
+        }
+    }
+
+    private bool IsPlayerInExpectedNeighborhood(Vector3 playerPosition)
+    {
+        if (string.IsNullOrWhiteSpace(currentDeliveryNeighborhoodName) || currentDeliveryNeighborhoodName == "Bilinmiyor")
+        {
+            return true;
+        }
+
+        string playerNeighborhood = ResolveNeighborhoodName(playerPosition);
+        if (string.IsNullOrWhiteSpace(playerNeighborhood) || playerNeighborhood == "Bilinmiyor")
+        {
+            return false;
+        }
+
+        return string.Equals(playerNeighborhood, currentDeliveryNeighborhoodName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private DeliveryMissionType PickMissionType()
+    {
+        int standard = Mathf.Max(0, standardMissionWeight);
+        int timed = Mathf.Max(0, timedMissionWeight);
+        int fragile = Mathf.Max(0, fragileMissionWeight);
+        int multiStop = Mathf.Max(0, multiStopMissionWeight);
+        int totalWeight = standard + timed + fragile + multiStop;
+        if (totalWeight <= 0)
+        {
+            return DeliveryMissionType.Standard;
+        }
+
+        int roll = UnityEngine.Random.Range(0, totalWeight);
+        if (roll < standard) return DeliveryMissionType.Standard;
+        roll -= standard;
+        if (roll < timed) return DeliveryMissionType.Timed;
+        roll -= timed;
+        if (roll < fragile) return DeliveryMissionType.Fragile;
+        return DeliveryMissionType.MultiStop;
+    }
+
+    private void EvaluateMissionConditions()
+    {
+        int hour = DateTime.Now.Hour;
+        hasRushHourBonus = (hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 19);
+        hasNightBonus = hour >= 22 || hour <= 5;
+        hasRainRiskBonus = WeatherManager.Instance != null &&
+                           WeatherManager.Instance.GetCurrentWeather() == WeatherCondition.Rain;
+
+        currentMissionRewardMultiplier = 1f;
+        if (hasRushHourBonus)
+        {
+            currentMissionRewardMultiplier *= Mathf.Max(1f, rushHourRewardMultiplier);
+        }
+
+        if (hasNightBonus)
+        {
+            currentMissionRewardMultiplier *= Mathf.Max(1f, nightRewardMultiplier);
+        }
+
+        if (hasRainRiskBonus)
+        {
+            currentMissionRewardMultiplier *= Mathf.Max(1f, rainyRiskRewardMultiplier);
+        }
+    }
+
+    private string BuildMissionConditionSummary()
+    {
+        List<string> tags = new List<string>();
+        if (hasRushHourBonus) tags.Add("Rush Hour");
+        if (hasNightBonus) tags.Add("Night");
+        if (hasRainRiskBonus) tags.Add("Rain Risk");
+
+        return tags.Count == 0
+            ? string.Empty
+            : $"\nConditions: {string.Join(", ", tags)} (x{currentMissionRewardMultiplier:F2} reward)";
+    }
+
+    private QuestType ToQuestType(DeliveryMissionType missionType)
+    {
+        return missionType switch
+        {
+            DeliveryMissionType.Timed => QuestType.ExpressDelivery,
+            DeliveryMissionType.Fragile => QuestType.FragileDelivery,
+            DeliveryMissionType.MultiStop => QuestType.MultiStopDelivery,
+            _ => QuestType.StandardDelivery
+        };
+    }
+
+    private string BuildDeliveryObjectiveDescription(int currentStopIndex)
+    {
+        int totalStops = Mathf.Max(1, currentDeliveryStops.Count);
+        int shownIndex = Mathf.Clamp(currentStopIndex + 1, 1, totalStops);
+        string target = FormatCoordinates(currentDeliveryPoint);
+        string neighborhood = string.IsNullOrWhiteSpace(currentDeliveryNeighborhoodName) ? "Bilinmiyor" : currentDeliveryNeighborhoodName;
+        return $"Deliver package to stop {shownIndex}/{totalStops} at {target} ({neighborhood}){BuildMissionConditionSummary()}";
     }
 
     /// <summary>

@@ -149,6 +149,11 @@ namespace DeliveryDriver.Quest
         public int NpcCollisionCount;
 
         /// <summary>
+        /// Number of hard braking events during quest
+        /// </summary>
+        public int HardBrakeCount;
+
+        /// <summary>
         /// Performance rating for this quest
         /// </summary>
         public PerformanceRating Rating { get; private set; }
@@ -183,6 +188,7 @@ namespace DeliveryDriver.Quest
             LastPosition = Vector3.zero;
             CollisionCount = 0;
             NpcCollisionCount = 0;
+            HardBrakeCount = 0;
             Rating = PerformanceRating.C;
         }
 
@@ -209,6 +215,7 @@ namespace DeliveryDriver.Quest
             LastPosition = Vector3.zero;
             CollisionCount = 0;
             NpcCollisionCount = 0;
+            HardBrakeCount = 0;
 
             // Initialize cargo health if fragile
             if (Cargo != null && Cargo.IsFragile)
@@ -426,6 +433,14 @@ namespace DeliveryDriver.Quest
             {
                 NpcCollisionCount++;
             }
+        }
+
+        /// <summary>
+        /// Increments hard brake count.
+        /// </summary>
+        public void RecordHardBrake()
+        {
+            HardBrakeCount++;
         }
 
         /// <summary>

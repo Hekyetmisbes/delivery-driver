@@ -1,7 +1,4 @@
 using UnityEngine;
-#if ENABLE_INPUT_SYSTEM
-using UnityEngine.InputSystem;
-#endif
 using TrafficSystem;
 
 namespace DeliveryDriver.Quest.UI
@@ -76,8 +73,6 @@ namespace DeliveryDriver.Quest.UI
 
         private void Update()
         {
-            HandleQuestListToggleInput();
-
             if (questManager == null || questManager.CurrentQuest == null)
             {
                 return;
@@ -99,37 +94,6 @@ namespace DeliveryDriver.Quest.UI
             UpdateCargoHealth(currentQuest);
         }
 
-        private void HandleQuestListToggleInput()
-        {
-#if ENABLE_INPUT_SYSTEM
-            if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame)
-            {
-                if (questListUI != null)
-                {
-                    Debug.Log("[QuestUIManager] Tab pressed - Toggling quest list");
-                    questListUI.TogglePanel();
-                }
-                else
-                {
-                    Debug.LogWarning("[QuestUIManager] questListUI is null!");
-                }
-            }
-#else
-            if (Input.GetKeyDown(KeyCode.Tab))
-            {
-                if (questListUI != null)
-                {
-                    Debug.Log("[QuestUIManager] Tab pressed - Toggling quest list");
-                    questListUI.TogglePanel();
-                }
-                else
-                {
-                    Debug.LogWarning("[QuestUIManager] questListUI is null!");
-                }
-            }
-#endif
-        }
-
         private void SubscribeToQuestEvents()
         {
             if (questManager == null)
@@ -146,6 +110,7 @@ namespace DeliveryDriver.Quest.UI
             questManager.OnQuestCompleted.AddListener(HandleQuestCompleted);
             questManager.OnQuestFailed.AddListener(HandleQuestFailed);
             questManager.OnQuestUpdated.AddListener(HandleQuestUpdated);
+            questManager.OnDrivingFeedback.AddListener(HandleDrivingFeedback);
             isSubscribed = true;
         }
 
@@ -160,6 +125,7 @@ namespace DeliveryDriver.Quest.UI
             questManager.OnQuestCompleted.RemoveListener(HandleQuestCompleted);
             questManager.OnQuestFailed.RemoveListener(HandleQuestFailed);
             questManager.OnQuestUpdated.RemoveListener(HandleQuestUpdated);
+            questManager.OnDrivingFeedback.RemoveListener(HandleDrivingFeedback);
             isSubscribed = false;
         }
 
@@ -200,7 +166,10 @@ namespace DeliveryDriver.Quest.UI
             if (questCompleteUI != null)
             {
                 int reward = questManager != null ? questManager.LastCompletionReward : quest.CalculateFinalReward();
-                questCompleteUI.ShowCompleteScreen(quest, reward);
+                QuestManager.RewardPenaltyBreakdown? breakdown = questManager != null
+                    ? questManager.LastQuestBreakdown
+                    : null;
+                questCompleteUI.ShowCompleteScreen(quest, reward, breakdown);
             }
 
             RefreshQuestList();
@@ -216,7 +185,11 @@ namespace DeliveryDriver.Quest.UI
             if (questCompleteUI != null)
             {
                 string reason = questManager != null ? questManager.LastFailureReason : string.Empty;
-                questCompleteUI.ShowFailedScreen(quest, reason);
+                int penalty = questManager != null ? questManager.LastFailurePenalty : 0;
+                QuestManager.RewardPenaltyBreakdown? breakdown = questManager != null
+                    ? questManager.LastQuestBreakdown
+                    : null;
+                questCompleteUI.ShowFailedScreen(quest, reason, penalty, breakdown);
             }
 
             RefreshQuestList();
@@ -230,6 +203,16 @@ namespace DeliveryDriver.Quest.UI
             }
 
             activeQuestUI.UpdateQuestDisplay(quest);
+        }
+
+        private void HandleDrivingFeedback(string message, int scoreDelta)
+        {
+            if (activeQuestUI == null)
+            {
+                return;
+            }
+
+            activeQuestUI.ShowDrivingFeedback(message, scoreDelta);
         }
 
         private void HandleContinue()

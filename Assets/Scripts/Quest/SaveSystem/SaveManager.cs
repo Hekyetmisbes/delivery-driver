@@ -96,7 +96,7 @@ namespace DeliveryDriver.Quest
 
                 // Update timestamp
                 saveData.SaveDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-                saveData.SaveVersion = 2;
+                saveData.SaveVersion = 3;
 
                 // Serialize to JSON
                 string json = JsonUtility.ToJson(saveData, true);

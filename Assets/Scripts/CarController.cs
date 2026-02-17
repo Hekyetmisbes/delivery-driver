@@ -5,6 +5,8 @@ using System.Collections.Generic;
 [RequireComponent(typeof(Rigidbody))]
 public class CarController : MonoBehaviour
 {
+    public event System.Action<float> OnHardBrakeDetected;
+
     [Header("--- INPUT SYSTEM ---")]
     [SerializeField] private InputActionAsset inputActions;
     
@@ -76,10 +78,15 @@ public class CarController : MonoBehaviour
     [SerializeField] private float throttleFallRate = 6f;
     [Tooltip("Direksiyon girdisinin ne kadar hizli degisecegi (birim/s).")]
     [SerializeField] private float steeringInputRate = 5f;
-    
-    [Header("--- DEBUG ---")]
-    [SerializeField] private bool showDebugGUI = true;
 
+    [Header("--- FEEDBACK ---")]
+    [Tooltip("Sert fren bildirimi icin minimum hiz (km/s).")]
+    [SerializeField] private float hardBrakeMinSpeedKmh = 35f;
+    [Tooltip("Sert fren bildirimi icin minimum yavaslama (m/s^2).")]
+    [SerializeField] private float hardBrakeMinDeceleration = 8f;
+    [Tooltip("Sert fren bildirimleri arasindaki min sure (s).")]
+    [SerializeField] private float hardBrakeNotifyCooldown = 1.2f;
+    
     // Private Runtime Variables
     private Rigidbody rb;
     private float currentSteerAngle;
@@ -91,6 +98,8 @@ public class CarController : MonoBehaviour
     private float currentCargoWeight;
     private float smoothedThrottleInput;
     private float smoothedSteerInput;
+    private float previousSpeedMetersPerSec;
+    private float lastHardBrakeNotifyTime = -999f;
     
     // Input Action References
     private InputAction moveAction;
@@ -174,6 +183,7 @@ public class CarController : MonoBehaviour
         ApplyAntiRollBars();
         UpdateWheels();
         ApplyDownforce(); // Yuksek hizda yol tutusu icin
+        EvaluateHardBrakeFeedback(Time.fixedDeltaTime);
     }
 
     private void UpdateSmoothedInputs(float deltaTime)
@@ -371,6 +381,44 @@ public class CarController : MonoBehaviour
         rb.AddForce(-transform.up * requested, ForceMode.Force);
     }
 
+    private void EvaluateHardBrakeFeedback(float deltaTime)
+    {
+        if (rb == null || deltaTime <= 0f)
+        {
+            return;
+        }
+
+        float currentSpeed = rb.linearVelocity.magnitude;
+        float previousSpeed = previousSpeedMetersPerSec;
+        previousSpeedMetersPerSec = currentSpeed;
+
+        if (!isBraking && !isHandbraking)
+        {
+            return;
+        }
+
+        float previousSpeedKmh = previousSpeed * 3.6f;
+        if (previousSpeedKmh < hardBrakeMinSpeedKmh)
+        {
+            return;
+        }
+
+        float deceleration = (previousSpeed - currentSpeed) / deltaTime;
+        if (deceleration < hardBrakeMinDeceleration)
+        {
+            return;
+        }
+
+        if (Time.time - lastHardBrakeNotifyTime < hardBrakeNotifyCooldown)
+        {
+            return;
+        }
+
+        lastHardBrakeNotifyTime = Time.time;
+        OnHardBrakeDetected?.Invoke(deceleration);
+        DeliveryDriver.Quest.QuestManager.Instance?.OnHardBrakeDetected(deceleration);
+    }
+
     private void ConfigureBodyCollidersForStability()
     {
         if (!useSimpleBodyCollider)
@@ -438,23 +486,6 @@ public class CarController : MonoBehaviour
             wt.localPosition = localPos;
         }
     }
-
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-    private void OnGUI()
-    {
-        if (!showDebugGUI) return;
-
-        GUI.color = Color.green;
-        GUILayout.BeginArea(new Rect(10, 10, 300, 200));
-        GUILayout.Label($"<b>CAR DEBUG SYSTEM</b>");
-        GUILayout.Label($"Speed: {(rb.linearVelocity.magnitude * 3.6f):F0} km/h");
-        GUILayout.Label($"Motor Torque: {rearLeftCollider.motorTorque:F0} / {motorTorque}");
-        GUILayout.Label($"Brake Torque: {rearLeftCollider.brakeTorque:F0}");
-        GUILayout.Label($"Handbrake: {isHandbraking}");
-        GUILayout.Label($"Is Grounded (RL): {rearLeftCollider.isGrounded}");
-        GUILayout.EndArea();
-    }
-#endif
 
     private void OnDrawGizmos()
     {

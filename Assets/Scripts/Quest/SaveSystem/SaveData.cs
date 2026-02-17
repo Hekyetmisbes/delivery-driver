@@ -20,7 +20,7 @@ namespace DeliveryDriver.Quest
             PlayerData = new PlayerProgressionData();
             QuestData = new QuestSaveData();
             SaveDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-            SaveVersion = 2;
+            SaveVersion = 3;
         }
     }
 
@@ -50,6 +50,7 @@ namespace DeliveryDriver.Quest
         public List<PlayerProgressionManager.DailyStat> DailyStats = new List<PlayerProgressionManager.DailyStat>();
         public List<PlayerProgressionManager.LevelSnapshot> LevelSnapshots = new List<PlayerProgressionManager.LevelSnapshot>();
         public List<string> UnlockedAchievements = new List<string>();
+        public DriverProgressionSaveData DriverProgressionData = new DriverProgressionSaveData();
 
         /// <summary>
         /// Creates PlayerProgressionData from PlayerProgressionManager
@@ -82,7 +83,10 @@ namespace DeliveryDriver.Quest
                 CargoTypeStats = new List<PlayerProgressionManager.CargoTypeStat>(manager.CargoTypeStats),
                 DailyStats = new List<PlayerProgressionManager.DailyStat>(manager.DailyStats),
                 LevelSnapshots = new List<PlayerProgressionManager.LevelSnapshot>(manager.LevelSnapshots),
-                UnlockedAchievements = new List<string>()
+                UnlockedAchievements = new List<string>(),
+                DriverProgressionData = DriverProgressionSystem.Instance != null
+                    ? DriverProgressionSystem.Instance.GetSaveData()
+                    : new DriverProgressionSaveData()
             };
 
             // Store unlocked achievement IDs

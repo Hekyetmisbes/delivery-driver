@@ -585,30 +585,6 @@ namespace TrafficSystem
             return (activeNpcs.Count, pooledNpcs.Count);
         }
 
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-        private void OnGUI()
-        {
-            if (!showDebugInfo) return;
-
-            GUILayout.BeginArea(new Rect(10, 150, 300, 150));
-            GUI.color = Color.cyan;
-            GUILayout.Label("<b>NPC SPAWNER</b>");
-            GUILayout.Label($"Active NPCs: {activeNpcs.Count}");
-            GUILayout.Label($"Pooled NPCs: {pooledNpcs.Count}");
-            GUILayout.Label($"Total Roads: {(roadGraphBuilder?.RoadGraph?.roadSegments.Count ?? 0)}");
-
-            if (GUILayout.Button("Spawn NPCs"))
-            {
-                SpawnNpcs();
-            }
-            if (GUILayout.Button("Clear NPCs"))
-            {
-                ClearAllNpcs();
-            }
-            GUILayout.EndArea();
-        }
-#endif
-
         /// <summary>
         /// Check if spawn position is clear of obstacles using sphere overlap
         /// </summary>
