@@ -20,6 +20,7 @@ namespace DeliveryDriver.Quest.UI
 
         [Header("Route Estimate")]
         [SerializeField] private float estimatedAverageSpeedMetersPerSec = 11f;
+        [SerializeField] private float distanceDisplayMultiplier = 10f;
 
         [Header("Driving Feedback")]
         [SerializeField] private float feedbackDuration = 1.3f;
@@ -164,7 +165,7 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            string formatted = FormatDistanceWithEta(distanceMeters, estimatedAverageSpeedMetersPerSec);
+            string formatted = FormatDistanceWithEta(distanceMeters, estimatedAverageSpeedMetersPerSec, distanceDisplayMultiplier);
             if (!string.Equals(lastDistanceText, formatted, System.StringComparison.Ordinal))
             {
                 lastDistanceText = formatted;
@@ -322,7 +323,7 @@ namespace DeliveryDriver.Quest.UI
             return $"{minutes:00}:{seconds:00}";
         }
 
-        private static string FormatDistanceWithEta(float distanceMeters, float estimatedSpeed)
+        private static string FormatDistanceWithEta(float distanceMeters, float estimatedSpeed, float displayMultiplier = 1f)
         {
             if (distanceMeters <= 0f)
             {
@@ -332,7 +333,9 @@ namespace DeliveryDriver.Quest.UI
             int etaSeconds = estimatedSpeed > 0.1f
                 ? Mathf.CeilToInt(distanceMeters / estimatedSpeed)
                 : 0;
-            return $"Mesafe: {Mathf.RoundToInt(distanceMeters)} m | ETA: {FormatTime(etaSeconds)}";
+            float d = distanceMeters * displayMultiplier;
+            string distStr = d >= 1000f ? $"{d / 1000f:F1}km" : $"{Mathf.RoundToInt(d)} m";
+            return $"Mesafe: {distStr} | ETA: {FormatTime(etaSeconds)}";
         }
 
         private static Color GetTimerColor(float timeRemaining, float timeLimit)
