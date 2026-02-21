@@ -1566,7 +1566,16 @@ public class DeliveryManager : MonoBehaviour
 
     private Sprite GetFallbackSprite()
     {
-        return Resources.GetBuiltinResource<Sprite>("UI/Skin/UISprite.psd");
+        // Unity 2022+ builtin sprite yolu degisti, null donerse beyaz kare olustur
+        Sprite s = Resources.GetBuiltinResource<Sprite>("UI/Skin/UISprite.psd");
+        if (s != null) return s;
+
+        Texture2D tex = new Texture2D(4, 4);
+        Color[] pixels = new Color[16];
+        for (int i = 0; i < pixels.Length; i++) pixels[i] = Color.white;
+        tex.SetPixels(pixels);
+        tex.Apply();
+        return Sprite.Create(tex, new Rect(0, 0, 4, 4), new Vector2(0.5f, 0.5f));
     }
 
     private int ResolveMiniMapMarkerLayer()
@@ -1816,6 +1825,8 @@ public class DeliveryManager : MonoBehaviour
             {
                 fallbackCircle = Resources.GetBuiltinResource<Sprite>("UI/Skin/UISprite.psd");
             }
+            // Knob/UISprite bulunamazsa GetFallbackSprite ile beyaz kare kullan
+            if (fallbackCircle == null) fallbackCircle = GetFallbackSprite();
             miniMapEdgeIndicatorImage.sprite = miniMapEdgeIndicatorSprite != null
                 ? miniMapEdgeIndicatorSprite
                 : fallbackCircle;
