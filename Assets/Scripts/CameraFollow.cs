@@ -20,13 +20,18 @@ public class CameraFollow : MonoBehaviour
     [SerializeField] private float tightenFollowStartSpeedKmh = 70f;
     [Tooltip("Bu hizda minimum smooth time degerine ulasir (km/h)")]
     [SerializeField] private float tightenFollowFullSpeedKmh = 170f;
-    [Tooltip("Kamera arac merkezinden bu mesafeden fazla uzaklasamaz")]
-    [SerializeField] private float maxDistanceFromTarget = 12f;
     [Tooltip("Donus yumusakligi (Dusuk = daha gecikmeli, Yuksek = daha hizli)")]
     [SerializeField] private float rotationSmoothSpeed = 1.5f;
     [Tooltip("Kamera rotasyonu tamamen arabayi takip etsin mi?")]
     [SerializeField] private bool followRotation = false;
 
+    [Header("Dinamik Mesafe")]
+    [Tooltip("İleri giderken kameranın geri çekildiği maksimum ekstra mesafe (m)")]
+    [SerializeField] private float forwardZoomOutExtra = 2.5f;
+    [Tooltip("Bu hızda (km/h) maksimum geri çekilme sağlanır")]
+    [SerializeField] private float forwardZoomOutSpeedKmh = 80f;
+    [Tooltip("Mesafe değişim yumuşaklığı (düşük = daha yavaş uzaklaşma)")]
+    [SerializeField] private float dynamicZoomLerpSpeed = 1.2f;
 
     [Header("Speed Feel")]
     [Tooltip("Arac hizina gore kamera FOV degissin mi")]
@@ -70,6 +75,23 @@ public class CameraFollow : MonoBehaviour
     [SerializeField] private bool limitMiniMapToBounds = true;
     [Tooltip("Minimap kamera merkezi bu collider sinirlari icinde kalir")]
     [SerializeField] private BoxCollider miniMapBounds;
+    [Header("Geri Görüş Kamerası (HUD)")]
+    [Tooltip("Araç geri giderken ekranın üstünde geri görüş kamerası göster")]
+    [SerializeField] private bool enableReverseCamera = true;
+    [Tooltip("Araç arkasındaki kamera konumu (lokal). Z negatif = aracın arkası.")]
+    [SerializeField] private Vector3 reverseCamOffset = new Vector3(0f, 1.1f, -2.0f);
+    [Tooltip("Kamera açısı. Y=180 geriye bakar, X pozitif = aşağı eğimli.")]
+    [SerializeField] private Vector3 reverseCamEuler = new Vector3(12f, 180f, 0f);
+    [SerializeField] private float reverseCamFov = 95f;
+    [Tooltip("Viewport sol kenarı (0-1)")]
+    [SerializeField] private float reverseCamVpX = 0.2f;
+    [Tooltip("Viewport alt kenarı (0=alt, 1=üst). 0.74 → ekranın üst kısmı.")]
+    [SerializeField] private float reverseCamVpY = 0.74f;
+    [SerializeField] private float reverseCamVpW = 0.60f;
+    [SerializeField] private float reverseCamVpH = 0.24f;
+    [Tooltip("Bu hızın (m/s) altında araç durağan sayılır; geri tuşu kamerayı açar.")]
+    [SerializeField] private float reverseCamStationaryThreshold = 1.0f;
+
     [Header("MiniMap Marker")]
     [SerializeField] private bool showMiniMapPlayerMarker = true;
     [SerializeField] private float miniMapPlayerMarkerHeight = 20f;
@@ -89,6 +111,9 @@ public class CameraFollow : MonoBehaviour
     private GameObject miniMapPlayerMarker;
     private Material miniMapPlayerMarkerMaterial;
     private int cachedMiniMapMarkerLayer = int.MinValue;
+    private Camera reverseCamHUD;
+    private bool reverseCamShowing;
+    private float currentZoomOffset;
 
     void Start()
     {
@@ -129,6 +154,7 @@ public class CameraFollow : MonoBehaviour
             ResolveMiniMapBounds();
             ConfigureMiniMapLayerFilter();
             SetupMiniMapCamera();
+            SetupReverseCameraHUD();
         }
         else
         {
@@ -146,6 +172,7 @@ public class CameraFollow : MonoBehaviour
         HandleCameraMovement(Time.deltaTime);
         UpdateSpeedFov(Time.deltaTime);
         UpdateMiniMapCamera();
+        UpdateReverseCameraHUD();
     }
 
     void UpdateSpeedFov(float deltaTime)
@@ -163,49 +190,67 @@ public class CameraFollow : MonoBehaviour
 
     void HandleCameraMovement(float deltaTime)
     {
-        // Kamera her zaman arabanin arkasinda normal takip modunda kalir
-        // HUD (ReverseCameraHUD) geri gorusu kendi saglar
-        Vector3 targetOffset = offset;
+        // --- Geri/İleri tespiti ve dinamik Z offset ---
+        bool isReversing = false;
+        if (targetRb != null)
+        {
+            float localVelZ = target.InverseTransformDirection(targetRb.linearVelocity).z;
+            isReversing = localVelZ < -0.3f;
 
-        // 4. Pozisyon hesaplama
+            if (isReversing)
+            {
+                // Geri viteste: SmoothDamp ataletini sıfırla → kamera arabaya yaklaşmaz
+                currentVelocity = Vector3.zero;
+                currentZoomOffset = Mathf.Lerp(currentZoomOffset, 0f, 10f * deltaTime);
+            }
+            else
+            {
+                // İleri giderken: hıza göre kamerayı yavaşça geri çek
+                float forwardKmh = Mathf.Max(0f, localVelZ * 3.6f);
+                float zoomT = Mathf.Clamp01(forwardKmh / Mathf.Max(1f, forwardZoomOutSpeedKmh));
+                float targetZoom = -zoomT * forwardZoomOutExtra;
+                currentZoomOffset = Mathf.Lerp(currentZoomOffset, targetZoom, dynamicZoomLerpSpeed * deltaTime);
+            }
+        }
+
+        Vector3 targetOffset = new Vector3(offset.x, offset.y, offset.z + currentZoomOffset);
+
+        // --- Pozisyon hesaplama ---
         Vector3 desiredPosition;
-
         if (followRotation)
         {
-            // Kamera arabayi tum rotasyonlarla takip eder (pitch/roll dahil)
             desiredPosition = target.TransformPoint(targetOffset);
         }
         else
         {
-            // Aracin sadece yatay yonunu (yaw) baz al, boylece geri viteste ters kamera dogru tarafta olur.
             Quaternion yawRotation = Quaternion.Euler(0f, target.eulerAngles.y, 0f);
             desiredPosition = target.position + (yawRotation * targetOffset);
         }
 
-        float smoothTime = translateSmoothTime;
-        if (targetRb != null)
+        // --- Pozisyonu uygula ---
+        if (isReversing)
         {
-            float speedKmh = targetRb.linearVelocity.magnitude * 3.6f;
-            float tightenT = Mathf.InverseLerp(tightenFollowStartSpeedKmh, tightenFollowFullSpeedKmh, speedKmh);
-            smoothTime = Mathf.Lerp(translateSmoothTime, minTranslateSmoothTime, tightenT);
+            // Geri viteste lag sıfır: kamera arabaya hiç yaklaşmaz
+            currentVelocity = Vector3.zero;
+            transform.position = desiredPosition;
         }
-
-        // 5. Pozisyonu yumusatarak uygula
-        transform.position = Vector3.SmoothDamp(
-            transform.position,
-            desiredPosition,
-            ref currentVelocity,
-            Mathf.Max(0.01f, smoothTime),
-            Mathf.Infinity,
-            Mathf.Max(0.0001f, deltaTime));
-
-        if (maxDistanceFromTarget > 0.1f)
+        else
         {
-            Vector3 fromTarget = transform.position - target.position;
-            if (fromTarget.sqrMagnitude > maxDistanceFromTarget * maxDistanceFromTarget)
+            float smoothTime = translateSmoothTime;
+            if (targetRb != null)
             {
-                transform.position = target.position + (fromTarget.normalized * maxDistanceFromTarget);
+                float speedKmh = targetRb.linearVelocity.magnitude * 3.6f;
+                float tightenT = Mathf.InverseLerp(tightenFollowStartSpeedKmh, tightenFollowFullSpeedKmh, speedKmh);
+                smoothTime = Mathf.Lerp(translateSmoothTime, minTranslateSmoothTime, tightenT);
             }
+
+            transform.position = Vector3.SmoothDamp(
+                transform.position,
+                desiredPosition,
+                ref currentVelocity,
+                Mathf.Max(0.01f, smoothTime),
+                Mathf.Infinity,
+                Mathf.Max(0.0001f, deltaTime));
         }
 
         // 6. Rotasyon ayari — her zaman arabanin biraz ustune bak
@@ -600,5 +645,62 @@ public class CameraFollow : MonoBehaviour
     void OnDestroy()
     {
         RemoveMiniMapPlayerMarker();
+        if (reverseCamHUD != null) Destroy(reverseCamHUD.gameObject);
+    }
+
+    // ── Geri Görüş Kamerası ──────────────────────────────────────────────────
+
+    void SetupReverseCameraHUD()
+    {
+        if (!enableReverseCamera) return;
+
+        var go = new GameObject("_ReverseCameraHUD");
+        reverseCamHUD = go.AddComponent<Camera>();
+        reverseCamHUD.fieldOfView = reverseCamFov;
+        reverseCamHUD.nearClipPlane = 0.15f;
+        reverseCamHUD.farClipPlane = 300f;
+        reverseCamHUD.depth = 2f;   // Main cam (0) üzerinde, minimap (10) altında
+        reverseCamHUD.rect = new Rect(reverseCamVpX, reverseCamVpY, reverseCamVpW, reverseCamVpH);
+        reverseCamHUD.enabled = false;
+    }
+
+    void UpdateReverseCameraHUD()
+    {
+        if (!enableReverseCamera || reverseCamHUD == null) return;
+
+        bool shouldShow = IsCarReversing();
+        if (shouldShow != reverseCamShowing)
+        {
+            reverseCamShowing = shouldShow;
+            reverseCamHUD.enabled = reverseCamShowing;
+        }
+
+        if (!reverseCamShowing) return;
+
+        // Yalnızca yaw (Y ekseni) — pitch/roll titremesini önler
+        Quaternion yaw = Quaternion.Euler(0f, target.eulerAngles.y, 0f);
+        reverseCamHUD.transform.position = target.position + yaw * reverseCamOffset;
+        reverseCamHUD.transform.rotation = yaw * Quaternion.Euler(reverseCamEuler);
+    }
+
+    bool IsCarReversing()
+    {
+        if (targetRb == null)
+            return carController != null && carController.IsReverseInputActive;
+
+        float localZ = target.InverseTransformDirection(targetRb.linearVelocity).z;
+
+        // Araç gerçekten geri gidiyorsa
+        if (localZ < -0.1f) return true;
+
+        // Araç durağan haldeyken geri tuşuna basılıyorsa
+        if (targetRb.linearVelocity.magnitude < reverseCamStationaryThreshold
+            && carController != null
+            && carController.IsReverseInputActive)
+        {
+            return true;
+        }
+
+        return false;
     }
 }
