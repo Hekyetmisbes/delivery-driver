@@ -25,6 +25,14 @@ public class CameraFollow : MonoBehaviour
     [Tooltip("Hangi hizdan sonra geri goruse gecsin (Negatif deger)")]
     [SerializeField] private float reverseSpeedThreshold = -1f;
 
+    [Header("Speed Feel")]
+    [Tooltip("Arac hizina gore kamera FOV degissin mi")]
+    [SerializeField] private bool enableSpeedFov = true;
+    [SerializeField] private float baseFov = 60f;
+    [SerializeField] private float maxSpeedFov = 78f;
+    [SerializeField] private float fovMaxSpeedKmh = 190f;
+    [SerializeField] private float fovLerpSpeed = 6f;
+
     [Header("MiniMap Settings")]
     [Tooltip("Sol altta minimap goster")]
     [SerializeField] private bool enableMiniMap = true;
@@ -69,6 +77,7 @@ public class CameraFollow : MonoBehaviour
     // Runtime variables
     private Vector3 currentVelocity;
     private Rigidbody targetRb;
+    private Camera mainCamera;
     private bool isReversing = false;
     private float currentLocalZVelocity = 0f;
     private Camera miniMapCamera;
@@ -102,6 +111,7 @@ public class CameraFollow : MonoBehaviour
 
         if (target != null)
         {
+            mainCamera = GetComponent<Camera>();
             targetRb = target.GetComponent<Rigidbody>();
             limitMiniMapToBounds = true;
             ResolveMiniMapBounds();
@@ -122,7 +132,21 @@ public class CameraFollow : MonoBehaviour
         }
 
         HandleCameraMovement(Time.deltaTime);
+        UpdateSpeedFov(Time.deltaTime);
         UpdateMiniMapCamera();
+    }
+
+    void UpdateSpeedFov(float deltaTime)
+    {
+        if (!enableSpeedFov || mainCamera == null || targetRb == null)
+        {
+            return;
+        }
+
+        float speedKmh = targetRb.linearVelocity.magnitude * 3.6f;
+        float t = fovMaxSpeedKmh > 1f ? Mathf.Clamp01(speedKmh / fovMaxSpeedKmh) : 0f;
+        float desiredFov = Mathf.Lerp(baseFov, maxSpeedFov, t);
+        mainCamera.fieldOfView = Mathf.Lerp(mainCamera.fieldOfView, desiredFov, Mathf.Max(0.01f, fovLerpSpeed) * deltaTime);
     }
 
     void HandleCameraMovement(float deltaTime)
