@@ -18,6 +18,7 @@ namespace DeliveryDriver.Quest
             public float NeighborhoodRiskMultiplier;
             public int GrossReward;
             public int SpeedBonus;
+            public int DriftBonus;
             public float StreakMultiplier;
             public int CollisionPenalty;
             public int HardBrakePenalty;
@@ -145,6 +146,12 @@ namespace DeliveryDriver.Quest
         [SerializeField] private float cargoDamagePenaltyPerPercent = 3f;
         [SerializeField] private int timeExpiredFailurePenalty = 120;
         [SerializeField] private int cargoDestroyedFailurePenalty = 180;
+
+        [Header("Drift Bonus")]
+        [SerializeField] private bool enableDriftBonus = true;
+        [SerializeField] private int driftPointsPerRewardStep = 10;
+        [SerializeField] private int driftRewardStepAmount = 8;
+        [SerializeField] private int maxDriftBonusReward = 600;
 
         [Header("Daily Challenge")]
         [SerializeField] private QuestData dailyChallenge;
@@ -1353,6 +1360,26 @@ namespace DeliveryDriver.Quest
             OnDrivingFeedback.Invoke(label, -deltaPenalty);
         }
 
+        public void OnDriftDetected(int driftScoreDelta)
+        {
+            if (currentQuest == null || currentQuest.Status != QuestStatus.Active || driftScoreDelta <= 0)
+            {
+                return;
+            }
+
+            int previousDriftBonus = CalculateDriftBonus(currentQuest, true);
+            currentQuest.RecordDriftScore(driftScoreDelta);
+            int currentDriftBonus = CalculateDriftBonus(currentQuest, true);
+            int deltaBonus = Mathf.Max(0, currentDriftBonus - previousDriftBonus);
+
+            MarkQuestUiDirty();
+
+            if (deltaBonus > 0)
+            {
+                OnDrivingFeedback.Invoke("Drift Bonus!", deltaBonus);
+            }
+        }
+
         private static bool SafeCompareTag(GameObject gameObject, string tag)
         {
             if (gameObject == null || string.IsNullOrEmpty(tag))
@@ -1796,6 +1823,7 @@ namespace DeliveryDriver.Quest
             breakdown.GrossReward = Mathf.Max(0, Mathf.RoundToInt(grossFloat));
 
             breakdown.SpeedBonus = CalculateSpeedBonus(quest, useRuntimePenalties);
+            breakdown.DriftBonus = CalculateDriftBonus(quest, useRuntimePenalties);
 
             breakdown.CollisionPenalty = CalculateCollisionPenalty(quest, useRuntimePenalties);
             breakdown.HardBrakePenalty = CalculateHardBrakePenalty(quest, useRuntimePenalties);
@@ -1803,7 +1831,7 @@ namespace DeliveryDriver.Quest
             breakdown.CargoDamagePenalty = CalculateCargoDamagePenalty(quest, useRuntimePenalties);
             breakdown.TotalPenalty = breakdown.CollisionPenalty + breakdown.HardBrakePenalty + breakdown.DelayPenalty + breakdown.CargoDamagePenalty;
 
-            int grossWithSpeed = breakdown.GrossReward + breakdown.SpeedBonus;
+            int grossWithSpeed = breakdown.GrossReward + breakdown.SpeedBonus + breakdown.DriftBonus;
             int streakAdjusted = Mathf.RoundToInt(grossWithSpeed * breakdown.StreakMultiplier);
             breakdown.FinalReward = Mathf.Max(0, streakAdjusted - breakdown.TotalPenalty);
 
@@ -1935,6 +1963,25 @@ namespace DeliveryDriver.Quest
             float bonusMultiplier = completionPercent >= 0.75f ? 1.5f : 1.0f;
             int configuredBonus = quest.BonusReward > 0 ? quest.BonusReward : Mathf.RoundToInt(quest.BaseReward * 0.5f);
             return Mathf.RoundToInt(configuredBonus * bonusMultiplier);
+        }
+
+        private int CalculateDriftBonus(QuestData quest, bool useRuntimeState)
+        {
+            if (!enableDriftBonus || quest == null || !useRuntimeState)
+            {
+                return 0;
+            }
+
+            int driftPoints = Mathf.Max(0, quest.DriftScorePoints);
+            if (driftPoints <= 0)
+            {
+                return 0;
+            }
+
+            int stepPoints = Mathf.Max(1, driftPointsPerRewardStep);
+            int steps = driftPoints / stepPoints;
+            int bonus = steps * Mathf.Max(0, driftRewardStepAmount);
+            return Mathf.Clamp(bonus, 0, Mathf.Max(0, maxDriftBonusReward));
         }
 
         private int CalculateCollisionPenalty(QuestData quest, bool useRuntimeState)

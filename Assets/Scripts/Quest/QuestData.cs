@@ -154,6 +154,11 @@ namespace DeliveryDriver.Quest
         public int HardBrakeCount;
 
         /// <summary>
+        /// Accumulated drift score gathered during quest.
+        /// </summary>
+        public int DriftScorePoints;
+
+        /// <summary>
         /// Performance rating for this quest
         /// </summary>
         public PerformanceRating Rating { get; private set; }
@@ -189,6 +194,7 @@ namespace DeliveryDriver.Quest
             CollisionCount = 0;
             NpcCollisionCount = 0;
             HardBrakeCount = 0;
+            DriftScorePoints = 0;
             Rating = PerformanceRating.C;
         }
 
@@ -216,6 +222,7 @@ namespace DeliveryDriver.Quest
             CollisionCount = 0;
             NpcCollisionCount = 0;
             HardBrakeCount = 0;
+            DriftScorePoints = 0;
 
             // Initialize cargo health if fragile
             if (Cargo != null && Cargo.IsFragile)
@@ -325,6 +332,12 @@ namespace DeliveryDriver.Quest
             if (CollisionCount == 0)
             {
                 totalReward += 200; // $200 perfect delivery bonus
+            }
+
+            // Drift bonus rewards controlled sliding during delivery.
+            if (DriftScorePoints > 0)
+            {
+                totalReward += Mathf.RoundToInt(DriftScorePoints * 2f);
             }
 
             // Apply collision penalties
@@ -441,6 +454,19 @@ namespace DeliveryDriver.Quest
         public void RecordHardBrake()
         {
             HardBrakeCount++;
+        }
+
+        /// <summary>
+        /// Adds drift score points for the active quest.
+        /// </summary>
+        public void RecordDriftScore(int points)
+        {
+            if (points <= 0)
+            {
+                return;
+            }
+
+            DriftScorePoints += points;
         }
 
         /// <summary>
