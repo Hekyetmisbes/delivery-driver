@@ -21,6 +21,7 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private float rotationSpeed = 10f;
         [SerializeField] private bool showDistance = true;
         [SerializeField] private bool showCardinalDirection = true;
+        [SerializeField] private float distanceDisplayMultiplier = 10f;
 
         [Header("Colors")]
         [SerializeField] private Color pickupColor = new Color(0.2f, 0.5f, 1f, 1f); // Blue
@@ -200,14 +201,15 @@ namespace DeliveryDriver.Quest.UI
             }
 
             float distance = Vector3.Distance(playerTransform.position, currentObjectivePosition);
+            float displayedDistance = distance * distanceDisplayMultiplier;
 
-            if (distance < 1000f)
+            if (displayedDistance < 1000f)
             {
-                distanceText.text = $"{distance:F0}m";
+                distanceText.text = $"{displayedDistance:F0}m";
             }
             else
             {
-                distanceText.text = $"{distance / 1000f:F1}km";
+                distanceText.text = $"{displayedDistance / 1000f:F1}km";
             }
         }
 
