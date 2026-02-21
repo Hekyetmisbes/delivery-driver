@@ -91,6 +91,13 @@ public class CarController : MonoBehaviour
     [SerializeField] private float handbrakeDriftAssistTorque = 1100f;
     [Tooltip("Drift desteginin devreye girmesi icin minimum hiz (km/s).")]
     [SerializeField] private float handbrakeDriftMinSpeedKmh = 15f;
+    [Tooltip("Drift puani icin gereken minimum yan kayma hizi (m/s).")]
+    [SerializeField] private float driftScoreMinLateralSpeed = 2.2f;
+    [Tooltip("Drift puanini saymak icin gereken minimum direksiyon girdisi.")]
+    [Range(0.05f, 1f)]
+    [SerializeField] private float driftScoreMinSteerInput = 0.2f;
+    [Tooltip("Saniye basina temel drift puani.")]
+    [SerializeField] private float driftScorePerSecond = 14f;
 
     [Header("--- FEEDBACK ---")]
     [Tooltip("Sert fren bildirimi icin minimum hiz (km/s).")]
@@ -113,6 +120,8 @@ public class CarController : MonoBehaviour
     private float smoothedSteerInput;
     private float previousSpeedMetersPerSec;
     private float lastHardBrakeNotifyTime = -999f;
+    private float accumulatedDriftScore;
+    private int committedDriftScore;
     private WheelFrictionCurve rearLeftSidewaysFrictionBase;
     private WheelFrictionCurve rearRightSidewaysFrictionBase;
     private bool rearFrictionCached;
@@ -201,6 +210,7 @@ public class CarController : MonoBehaviour
         ApplyAntiRollBars();
         UpdateWheels();
         ApplyDownforce(); // Yuksek hizda yol tutusu icin
+        EvaluateDriftFeedback(Time.fixedDeltaTime);
         EvaluateHardBrakeFeedback(Time.fixedDeltaTime);
     }
 
@@ -451,6 +461,43 @@ public class CarController : MonoBehaviour
 
         rearLeftCollider.sidewaysFriction = left;
         rearRightCollider.sidewaysFriction = right;
+    }
+
+    private void EvaluateDriftFeedback(float deltaTime)
+    {
+        if (rb == null || deltaTime <= 0f)
+        {
+            return;
+        }
+
+        Vector3 localVelocity = transform.InverseTransformDirection(rb.linearVelocity);
+        float lateralSpeed = Mathf.Abs(localVelocity.x);
+        float speedKmh = rb.linearVelocity.magnitude * 3.6f;
+        float steerMagnitude = Mathf.Abs(smoothedSteerInput);
+
+        bool driftScoringActive = isHandbraking
+            && speedKmh >= handbrakeDriftMinSpeedKmh
+            && lateralSpeed >= driftScoreMinLateralSpeed
+            && steerMagnitude >= driftScoreMinSteerInput;
+
+        if (!driftScoringActive)
+        {
+            return;
+        }
+
+        float lateralFactor = Mathf.InverseLerp(driftScoreMinLateralSpeed, driftScoreMinLateralSpeed + 7f, lateralSpeed);
+        float speedFactor = Mathf.InverseLerp(handbrakeDriftMinSpeedKmh, handbrakeDriftMinSpeedKmh + 70f, speedKmh);
+        float gain = Mathf.Max(0f, driftScorePerSecond) * (0.35f + (lateralFactor * 0.65f)) * (0.5f + (speedFactor * 0.5f));
+
+        accumulatedDriftScore += gain * deltaTime;
+        int driftDelta = Mathf.FloorToInt(accumulatedDriftScore) - committedDriftScore;
+        if (driftDelta <= 0)
+        {
+            return;
+        }
+
+        committedDriftScore += driftDelta;
+        DeliveryDriver.Quest.QuestManager.Instance?.OnDriftDetected(driftDelta);
     }
 
     private void EvaluateHardBrakeFeedback(float deltaTime)
