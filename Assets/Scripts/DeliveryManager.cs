@@ -86,6 +86,9 @@ public class DeliveryManager : MonoBehaviour
     [SerializeField] private float miniMapEdgeIndicatorOffset = 0f;
     [SerializeField] private float miniMapEdgeIndicatorPulseSpeed = 4f;
     [SerializeField, Range(0f, 0.6f)] private float miniMapEdgeIndicatorPulseAmount = 0.2f;
+    [SerializeField] private float miniMapMarkerFollowSmoothTime = 0.08f;
+    [SerializeField] private float miniMapEdgeFollowSmoothTime = 0.12f;
+    [SerializeField] private Sprite miniMapEdgeIndicatorSprite;
 
     [Header("Speedometer UI")]
     [SerializeField] private bool showSpeedometer = true;
@@ -146,6 +149,10 @@ public class DeliveryManager : MonoBehaviour
     private Canvas miniMapEdgeCanvas;
     private RectTransform miniMapEdgeIndicatorRect;
     private Image miniMapEdgeIndicatorImage;
+    private Vector3 miniMapMarkerVelocity;
+    private Vector2 miniMapEdgeIndicatorVelocity;
+    private bool hasMiniMapMarkerPosition;
+    private bool hasMiniMapEdgeIndicatorPosition;
     private RectTransform speedometerPanelRect;
     private Image speedometerPanelImage;
     private Image speedometerIconImage;
@@ -1591,6 +1598,7 @@ public class DeliveryManager : MonoBehaviour
             {
                 miniMapObjectiveMarker.SetActive(false);
             }
+            hasMiniMapMarkerPosition = false;
             return;
         }
 
@@ -1609,6 +1617,7 @@ public class DeliveryManager : MonoBehaviour
         if (targetIsOffscreen)
         {
             miniMapObjectiveMarker.SetActive(false);
+            hasMiniMapMarkerPosition = false;
             if (showMiniMapEdgeIndicator)
             {
                 UpdateMiniMapEdgeIndicator(targetPoint, markerColor);
@@ -1621,7 +1630,22 @@ public class DeliveryManager : MonoBehaviour
         else
         {
             miniMapObjectiveMarker.SetActive(true);
-            miniMapObjectiveMarker.transform.position = markerPoint + Vector3.up * miniMapMarkerHeight;
+            Vector3 desiredMarkerPosition = markerPoint + Vector3.up * miniMapMarkerHeight;
+            if (!hasMiniMapMarkerPosition)
+            {
+                miniMapObjectiveMarker.transform.position = desiredMarkerPosition;
+                miniMapMarkerVelocity = Vector3.zero;
+                hasMiniMapMarkerPosition = true;
+            }
+            else
+            {
+                float smoothTime = Mathf.Max(0.01f, miniMapMarkerFollowSmoothTime);
+                miniMapObjectiveMarker.transform.position = Vector3.SmoothDamp(
+                    miniMapObjectiveMarker.transform.position,
+                    desiredMarkerPosition,
+                    ref miniMapMarkerVelocity,
+                    smoothTime);
+            }
             float pulse = 1f + Mathf.Sin(Time.time * miniMapMarkerPulseSpeed) * miniMapMarkerPulseAmount;
             miniMapObjectiveMarker.transform.localScale = miniMapMarkerScale * pulse;
             miniMapObjectiveMarker.transform.Rotate(Vector3.up, miniMapMarkerSpinSpeed * Time.deltaTime, Space.World);
@@ -1735,13 +1759,27 @@ public class DeliveryManager : MonoBehaviour
         if (canvasRect != null &&
             RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, screenPoint, null, out Vector2 localPoint))
         {
-            miniMapEdgeIndicatorRect.anchoredPosition = localPoint;
+            if (!hasMiniMapEdgeIndicatorPosition)
+            {
+                miniMapEdgeIndicatorRect.anchoredPosition = localPoint;
+                miniMapEdgeIndicatorVelocity = Vector2.zero;
+                hasMiniMapEdgeIndicatorPosition = true;
+            }
+            else
+            {
+                float smoothTime = Mathf.Max(0.01f, miniMapEdgeFollowSmoothTime);
+                miniMapEdgeIndicatorRect.anchoredPosition = Vector2.SmoothDamp(
+                    miniMapEdgeIndicatorRect.anchoredPosition,
+                    localPoint,
+                    ref miniMapEdgeIndicatorVelocity,
+                    smoothTime);
+            }
         }
 
         float edgePulse = 1f + Mathf.Sin(Time.time * miniMapEdgeIndicatorPulseSpeed) * Mathf.Clamp(miniMapEdgeIndicatorPulseAmount, 0f, 0.6f);
         float size = Mathf.Max(8f, miniMapEdgeIndicatorSize) * edgePulse;
         miniMapEdgeIndicatorRect.sizeDelta = new Vector2(size, size);
-        miniMapEdgeIndicatorRect.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg - 45f);
+        miniMapEdgeIndicatorRect.localRotation = Quaternion.identity;
 
         if (miniMapEdgeIndicatorImage != null)
         {
@@ -1773,7 +1811,15 @@ public class DeliveryManager : MonoBehaviour
 
             miniMapEdgeIndicatorImage = indicatorObject.AddComponent<Image>();
             miniMapEdgeIndicatorImage.raycastTarget = false;
-            miniMapEdgeIndicatorImage.sprite = Resources.GetBuiltinResource<Sprite>("UI/Skin/UISprite.psd");
+            Sprite fallbackCircle = Resources.GetBuiltinResource<Sprite>("UI/Skin/Knob.psd");
+            if (fallbackCircle == null)
+            {
+                fallbackCircle = Resources.GetBuiltinResource<Sprite>("UI/Skin/UISprite.psd");
+            }
+            miniMapEdgeIndicatorImage.sprite = miniMapEdgeIndicatorSprite != null
+                ? miniMapEdgeIndicatorSprite
+                : fallbackCircle;
+            miniMapEdgeIndicatorImage.preserveAspect = true;
         }
     }
 
@@ -1783,6 +1829,7 @@ public class DeliveryManager : MonoBehaviour
         {
             miniMapEdgeIndicatorImage.enabled = false;
         }
+        hasMiniMapEdgeIndicatorPosition = false;
     }
 
     private void RemoveMiniMapEdgeIndicator()
@@ -1809,6 +1856,7 @@ public class DeliveryManager : MonoBehaviour
         {
             Destroy(miniMapObjectiveMarker);
             miniMapObjectiveMarker = null;
+            hasMiniMapMarkerPosition = false;
         }
 
         if (miniMapObjectiveMarkerMaterial != null)
