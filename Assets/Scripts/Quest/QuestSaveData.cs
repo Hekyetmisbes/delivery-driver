@@ -31,6 +31,7 @@ namespace DeliveryDriver.Quest
             public int XPReward;
             public bool HasPickedUpCargo;
             public int CurrentDeliveryIndex;
+            public int DriftScorePoints;
             public CargoRecord Cargo;
             public QuestLocationRecord PickupLocation;
             public List<QuestLocationRecord> DeliveryLocations = new List<QuestLocationRecord>();
@@ -55,6 +56,7 @@ namespace DeliveryDriver.Quest
                     XPReward = quest.XPReward,
                     HasPickedUpCargo = quest.HasPickedUpCargo,
                     CurrentDeliveryIndex = quest.CurrentDeliveryIndex,
+                    DriftScorePoints = quest.DriftScorePoints,
                     Cargo = CargoRecord.FromCargoData(quest.Cargo),
                     PickupLocation = QuestLocationRecord.FromQuestLocation(quest.PickupLocation)
                 };
@@ -89,7 +91,8 @@ namespace DeliveryDriver.Quest
                     IsRepeatable = IsRepeatable,
                     XPReward = XPReward,
                     HasPickedUpCargo = HasPickedUpCargo,
-                    CurrentDeliveryIndex = CurrentDeliveryIndex
+                    CurrentDeliveryIndex = CurrentDeliveryIndex,
+                    DriftScorePoints = DriftScorePoints
                 };
 
                 quest.Cargo = CargoRecord.ToCargoData(Cargo);
