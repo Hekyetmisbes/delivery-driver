@@ -157,6 +157,7 @@ public class DeliveryManager : MonoBehaviour
     private Image speedometerPanelImage;
     private Image speedometerIconImage;
     private TextMeshProUGUI speedometerText;
+    private Sprite _cachedFallbackSprite;
 
     public bool IsDeliveryActive => isDeliveryActive;
     public bool HasBox => currentBox != null;
@@ -1401,7 +1402,7 @@ public class DeliveryManager : MonoBehaviour
         speedometerPanelImage.color = speedometerPanelBaseColor;
         speedometerPanelImage.raycastTarget = false;
         speedometerPanelImage.sprite = GetFallbackSprite();
-        speedometerPanelImage.type = Image.Type.Sliced;
+        speedometerPanelImage.type = Image.Type.Simple;
 
         GameObject iconObject = new GameObject("SpeedometerIcon");
         iconObject.transform.SetParent(panelObject.transform, false);
@@ -1566,16 +1567,15 @@ public class DeliveryManager : MonoBehaviour
 
     private Sprite GetFallbackSprite()
     {
-        // Unity 2022+ builtin sprite yolu degisti, null donerse beyaz kare olustur
-        Sprite s = Resources.GetBuiltinResource<Sprite>("UI/Skin/UISprite.psd");
-        if (s != null) return s;
+        if (_cachedFallbackSprite != null) return _cachedFallbackSprite;
 
         Texture2D tex = new Texture2D(4, 4);
         Color[] pixels = new Color[16];
         for (int i = 0; i < pixels.Length; i++) pixels[i] = Color.white;
         tex.SetPixels(pixels);
         tex.Apply();
-        return Sprite.Create(tex, new Rect(0, 0, 4, 4), new Vector2(0.5f, 0.5f));
+        _cachedFallbackSprite = Sprite.Create(tex, new Rect(0, 0, 4, 4), new Vector2(0.5f, 0.5f));
+        return _cachedFallbackSprite;
     }
 
     private int ResolveMiniMapMarkerLayer()
@@ -1820,16 +1820,9 @@ public class DeliveryManager : MonoBehaviour
 
             miniMapEdgeIndicatorImage = indicatorObject.AddComponent<Image>();
             miniMapEdgeIndicatorImage.raycastTarget = false;
-            Sprite fallbackCircle = Resources.GetBuiltinResource<Sprite>("UI/Skin/Knob.psd");
-            if (fallbackCircle == null)
-            {
-                fallbackCircle = Resources.GetBuiltinResource<Sprite>("UI/Skin/UISprite.psd");
-            }
-            // Knob/UISprite bulunamazsa GetFallbackSprite ile beyaz kare kullan
-            if (fallbackCircle == null) fallbackCircle = GetFallbackSprite();
             miniMapEdgeIndicatorImage.sprite = miniMapEdgeIndicatorSprite != null
                 ? miniMapEdgeIndicatorSprite
-                : fallbackCircle;
+                : GetFallbackSprite();
             miniMapEdgeIndicatorImage.preserveAspect = true;
         }
     }
