@@ -1,36 +1,32 @@
 using UnityEngine;
 
 /// <summary>
-/// Araba geri giderken (veya geri tusuna basilinca) ekranin ustunde
-/// geri goruntusu gosteren HUD kamerasi.
-/// Herhangi bir sahne objesine (ornegin Main Camera) component olarak ekle.
+/// Bağımsız geri görüş kamerası. CameraFollow sahnedeyse bu script kendini
+/// otomatik devre dışı bırakır; geri görüş kamerası CameraFollow tarafından yönetilir.
+/// CameraFollow yoksa bu script devreye girer.
 /// </summary>
 public class ReverseCameraHUD : MonoBehaviour
 {
-    [Header("Hedef Arac")]
-    [Tooltip("Takip edilecek arac. Bos birakilirsa CarController olan objeyi bulur.")]
+    [Header("Hedef Araç")]
+    [Tooltip("Takip edilecek araç. Boş bırakılırsa CarController olan objeyi bulur.")]
     public Transform carTarget;
 
-    [Header("Kamera Pozisyonu (Arac Uzerinde Lokal)")]
-    [Tooltip("Arabanin arkasindaki kamera konumu (lokal). Z negatif = aracin arkasi.")]
+    [Header("Kamera Pozisyonu (Araç Üzerinde Lokal)")]
+    [Tooltip("Arabanın arkasındaki kamera konumu (lokal). Z negatif = aracın arkası.")]
     [SerializeField] private Vector3 cameraLocalOffset = new Vector3(0f, 1.1f, -2.0f);
-    [Tooltip("Kamera acisi (lokal). Y=180 geriye bakar, X pozitif = asagi egimli.")]
+    [Tooltip("Kamera açısı (lokal). Y=180 geriye bakar, X pozitif = aşağı eğimli.")]
     [SerializeField] private Vector3 cameraLocalEuler = new Vector3(12f, 180f, 0f);
     [SerializeField] private float fieldOfView = 95f;
 
     [Header("Ekran Konumu (Viewport 0-1)")]
-    [Tooltip("Sol kenar (0 = sol, 0.5 = orta)")]
     [SerializeField] private float vpX = 0.2f;
-    [Tooltip("Alt kenar (0 = alt, 1 = ust). 0.74 ile 0.24 yukseklik -> usttte gozukur.")]
     [SerializeField] private float vpY = 0.74f;
-    [Tooltip("Genislik")]
     [SerializeField] private float vpWidth = 0.60f;
-    [Tooltip("Yukseklik")]
     [SerializeField] private float vpHeight = 0.24f;
 
     [Header("Tetikleyici")]
-    [Tooltip("Geri gitme hizi esigi (m/s). Bu degerden daha hizli geri gidince gozukur.")]
     [SerializeField] private float reverseVelocityThreshold = -0.1f;
+    [SerializeField] private float stationarySpeedThreshold = 1.0f;
 
     // Runtime
     private Camera reverseCam;
@@ -40,29 +36,23 @@ public class ReverseCameraHUD : MonoBehaviour
 
     void Start()
     {
-        Debug.Log($"[ReverseHUD] Start() calistirildi. gameObject={gameObject.name}, enabled={enabled}");
+        // CameraFollow zaten geri kamerayı yönetiyorsa bu script çalışmaz
+        CameraFollow cf = FindFirstObjectByType<CameraFollow>();
+        if (cf != null)
+        {
+            enabled = false;
+            return;
+        }
 
         if (carTarget == null)
         {
             var cc = FindFirstObjectByType<CarController>();
-            if (cc != null)
-            {
-                carTarget = cc.transform;
-                Debug.Log($"[ReverseHUD] carTarget otomatik bulundu: {carTarget.name}");
-            }
-            else
-            {
-                Debug.LogError("[ReverseHUD] Sahnede CarController bulunamadi!");
-            }
-        }
-        else
-        {
-            Debug.Log($"[ReverseHUD] carTarget Inspector'dan atanmis: {carTarget.name}");
+            if (cc != null) carTarget = cc.transform;
         }
 
         if (carTarget == null)
         {
-            Debug.LogError("ReverseCameraHUD: Arac bulunamadi, devre disi birakiliyor.");
+            Debug.LogError("[ReverseCameraHUD] Sahnede CarController bulunamadı, devre dışı bırakılıyor.");
             enabled = false;
             return;
         }
@@ -74,10 +64,7 @@ public class ReverseCameraHUD : MonoBehaviour
         carRb = carTarget.GetComponent<Rigidbody>()
              ?? carTarget.GetComponentInParent<Rigidbody>();
 
-        Debug.Log($"[ReverseHUD] carController={carController != null}, carRb={carRb != null}");
-
         CreateCamera();
-        Debug.Log($"[ReverseHUD] reverseCam olusturuldu: {reverseCam != null}, rect=({vpX},{vpY},{vpWidth},{vpHeight})");
     }
 
     void CreateCamera()
@@ -87,57 +74,38 @@ public class ReverseCameraHUD : MonoBehaviour
         reverseCam.fieldOfView = fieldOfView;
         reverseCam.nearClipPlane = 0.15f;
         reverseCam.farClipPlane = 300f;
-        reverseCam.depth = 2f;          // Main cam (0) uzerinde, minimap (10) altinda
+        reverseCam.depth = 2f;
         reverseCam.rect = new Rect(vpX, vpY, vpWidth, vpHeight);
         reverseCam.enabled = false;
     }
 
-    private float debugLogTimer = 0f;
-    private const float DEBUG_LOG_INTERVAL = 2f;
-
     void LateUpdate()
     {
-        if (carTarget == null || reverseCam == null)
-        {
-            Debug.LogError($"[ReverseHUD] LateUpdate: carTarget={carTarget != null}, reverseCam={reverseCam != null} — ERKEN CIKIS");
-            return;
-        }
+        if (carTarget == null || reverseCam == null) return;
 
         bool shouldShow = IsReversing();
-
         if (shouldShow != isShowing)
         {
             isShowing = shouldShow;
             reverseCam.enabled = isShowing;
-            Debug.Log($"[ReverseHUD] HUD durumu degisti -> isShowing={isShowing}, reverseCam.enabled={reverseCam.enabled}");
         }
 
-        // Her 2 saniyede bir durum raporla
-        debugLogTimer += Time.deltaTime;
-        if (debugLogTimer >= DEBUG_LOG_INTERVAL)
-        {
-            debugLogTimer = 0f;
-            bool inputActive = carController != null && carController.IsReverseInputActive;
-            float localZ = carRb != null ? carTarget.InverseTransformDirection(carRb.linearVelocity).z : 0f;
-            Debug.Log($"[ReverseHUD] Durum: isShowing={isShowing} | reverseInput={inputActive} | localZ={localZ:F2} (esik={reverseVelocityThreshold}) | camEnabled={reverseCam.enabled}");
-        }
-
-        if (isShowing)
-        {
-            PositionCamera();
-        }
+        if (isShowing) PositionCamera();
     }
 
     bool IsReversing()
     {
-        // Geri tusuna basiliyorsa
-        if (carController != null && carController.IsReverseInputActive) return true;
+        if (carRb == null)
+            return carController != null && carController.IsReverseInputActive;
 
-        // Veya araç gerçekten geri gidiyorsa
-        if (carRb != null)
+        float localZ = carTarget.InverseTransformDirection(carRb.linearVelocity).z;
+        if (localZ < reverseVelocityThreshold) return true;
+
+        if (carRb.linearVelocity.magnitude < stationarySpeedThreshold
+            && carController != null
+            && carController.IsReverseInputActive)
         {
-            float localZ = carTarget.InverseTransformDirection(carRb.linearVelocity).z;
-            if (localZ < reverseVelocityThreshold) return true;
+            return true;
         }
 
         return false;
@@ -145,7 +113,6 @@ public class ReverseCameraHUD : MonoBehaviour
 
     void PositionCamera()
     {
-        // Sadece yaw (Y ekseni) kullan - pitch/roll'da titreme olmaz
         Quaternion yaw = Quaternion.Euler(0f, carTarget.eulerAngles.y, 0f);
         reverseCam.transform.position = carTarget.position + yaw * cameraLocalOffset;
         reverseCam.transform.rotation = yaw * Quaternion.Euler(cameraLocalEuler);
