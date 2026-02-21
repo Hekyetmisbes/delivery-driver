@@ -178,15 +178,17 @@ namespace DeliveryDriver.Quest.UI
             string penaltyLine = penaltyAmount > 0 ? $"Penalty: -${penaltyAmount}" : string.Empty;
             string collisionLine = quest.CollisionCount > 0 ? $"Collisions: {quest.CollisionCount} (NPC: {quest.NpcCollisionCount})" : "Collisions: 0";
             string hardBrakeLine = quest.HardBrakeCount > 0 ? $"Hard brakes: {quest.HardBrakeCount}" : "Hard brakes: 0";
+            string driftLine = quest.DriftScorePoints > 0 ? $"Drift score: {quest.DriftScorePoints}" : "Drift score: 0";
 
             string breakdownLine = string.Empty;
             if (breakdown.HasValue)
             {
                 QuestManager.RewardPenaltyBreakdown b = breakdown.Value;
-                breakdownLine = $"Reward: ${b.FinalReward} | Penalties: -${b.TotalPenalty}";
+                string driftBonusText = b.DriftBonus > 0 ? $" | Drift bonus: +${b.DriftBonus}" : string.Empty;
+                breakdownLine = $"Reward: ${b.FinalReward} | Penalties: -${b.TotalPenalty}{driftBonusText}";
             }
 
-            string[] lines = { timeLine, stopsLine, cargoLine, collisionLine, hardBrakeLine, breakdownLine, reasonLine, penaltyLine };
+            string[] lines = { timeLine, stopsLine, cargoLine, collisionLine, hardBrakeLine, driftLine, breakdownLine, reasonLine, penaltyLine };
             return string.Join("\n", Array.FindAll(lines, line => !string.IsNullOrWhiteSpace(line)));
         }
 

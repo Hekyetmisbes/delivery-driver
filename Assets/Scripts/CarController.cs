@@ -32,13 +32,17 @@ public class CarController : MonoBehaviour
 
     [Header("--- CAR SETTINGS ---")]
     [Tooltip("Motorun maksimum tork gücü (Newton-metre). Araç gitmiyorsa bunu artır.")]
-    [SerializeField] private float motorTorque = 1500f;
+    [SerializeField] private float motorTorque = 2200f;
     [Tooltip("Fren yapıldığında uygulanan tork gücü.")]
-    [SerializeField] private float brakeTorque = 3000f;
+    [SerializeField] private float brakeTorque = 3600f;
     [Tooltip("Maksimum direksiyon açısı.")]
-    [SerializeField] private float maxSteeringAngle = 30f;
+    [SerializeField] private float maxSteeringAngle = 33f;
     [Tooltip("El freni çekildiğinde arka tekerlere uygulanan sürtünme.")]
     [SerializeField] private float handbrakeFrictionMultiplier = 2f;
+    [SerializeField] private float maxForwardSpeedKmh = 210f;
+    [Range(0.05f, 1f)]
+    [SerializeField] private float topSpeedMinTorqueFactor = 0.18f;
+    [SerializeField] private float coastBrakeTorque = 45f;
     [Tooltip("Aracın ağırlık merkezi dengesi (Yere yakın olmalı).")]
     [SerializeField] private Vector3 centerOfMassOffset = new Vector3(0, -0.5f, 0.3f);
     [Tooltip("Kargo yuklendiginde agirlik merkezine uygulanacak ek yukseklik.")]
@@ -54,10 +58,10 @@ public class CarController : MonoBehaviour
     [Tooltip("Hiz arttikca direksiyon etkinligini azaltir.")]
     [SerializeField] private bool speedSensitiveSteering = true;
     [Tooltip("Bu hizda (km/s) direksiyon azaltmasi maksimuma ulasir.")]
-    [SerializeField] private float steeringReductionFullSpeedKmh = 120f;
+    [SerializeField] private float steeringReductionFullSpeedKmh = 170f;
     [Tooltip("Maksimum hizda direksiyon acisinin korunacak orani.")]
     [Range(0.15f, 1f)]
-    [SerializeField] private float steeringAtHighSpeedFactor = 0.45f;
+    [SerializeField] private float steeringAtHighSpeedFactor = 0.58f;
     [Tooltip("On aks anti-roll sertligi.")]
     [SerializeField] private float frontAntiRollStiffness = 6000f;
     [Tooltip("Arka aks anti-roll sertligi.")]
@@ -73,11 +77,27 @@ public class CarController : MonoBehaviour
 
     [Header("--- INPUT SMOOTHING ---")]
     [Tooltip("Gaz/fren girdisinin ne kadar hizli artacagi (birim/s).")]
-    [SerializeField] private float throttleRiseRate = 4f;
+    [SerializeField] private float throttleRiseRate = 6.5f;
     [Tooltip("Gaz/fren girdisinin ne kadar hizli azalacagi (birim/s).")]
-    [SerializeField] private float throttleFallRate = 6f;
+    [SerializeField] private float throttleFallRate = 8f;
     [Tooltip("Direksiyon girdisinin ne kadar hizli degisecegi (birim/s).")]
-    [SerializeField] private float steeringInputRate = 5f;
+    [SerializeField] private float steeringInputRate = 7.5f;
+
+    [Header("--- HANDBRAKE DRIFT ---")]
+    [Tooltip("El freni aktifken arka teker yan tutusunun korunacak orani.")]
+    [Range(0.2f, 1f)]
+    [SerializeField] private float handbrakeRearSidewaysGripFactor = 0.55f;
+    [Tooltip("El freni aktifken direksiyon yonune verilen hafif donus destegi.")]
+    [SerializeField] private float handbrakeDriftAssistTorque = 1100f;
+    [Tooltip("Drift desteginin devreye girmesi icin minimum hiz (km/s).")]
+    [SerializeField] private float handbrakeDriftMinSpeedKmh = 15f;
+    [Tooltip("Drift puani icin gereken minimum yan kayma hizi (m/s).")]
+    [SerializeField] private float driftScoreMinLateralSpeed = 2.2f;
+    [Tooltip("Drift puanini saymak icin gereken minimum direksiyon girdisi.")]
+    [Range(0.05f, 1f)]
+    [SerializeField] private float driftScoreMinSteerInput = 0.2f;
+    [Tooltip("Saniye basina temel drift puani.")]
+    [SerializeField] private float driftScorePerSecond = 14f;
 
     [Header("--- FEEDBACK ---")]
     [Tooltip("Sert fren bildirimi icin minimum hiz (km/s).")]
@@ -100,6 +120,11 @@ public class CarController : MonoBehaviour
     private float smoothedSteerInput;
     private float previousSpeedMetersPerSec;
     private float lastHardBrakeNotifyTime = -999f;
+    private float accumulatedDriftScore;
+    private int committedDriftScore;
+    private WheelFrictionCurve rearLeftSidewaysFrictionBase;
+    private WheelFrictionCurve rearRightSidewaysFrictionBase;
+    private bool rearFrictionCached;
     
     // Input Action References
     private InputAction moveAction;
@@ -115,6 +140,7 @@ public class CarController : MonoBehaviour
         rb = GetComponent<Rigidbody>();
         SetupRigidbody();
         ConfigureBodyCollidersForStability();
+        CacheRearSidewaysFriction();
         SetupInput();
     }
 
@@ -124,8 +150,8 @@ public class CarController : MonoBehaviour
         rb.centerOfMass = centerOfMassOffset;
         rb.mass = 1500f; // Standart bir araba ağırlığı
         baseRigidbodyMass = rb.mass;
-        rb.linearDamping = 0.05f; // Hava direnci (çok yüksek olursa araç gitmez)
-        rb.angularDamping = 0.5f; 
+        rb.linearDamping = 0.02f; // Hava direnci (çok yüksek olursa araç gitmez)
+        rb.angularDamping = 0.4f; 
         // BUG FIX: Uyuyan fizik motoru sorunu için
         rb.sleepThreshold = 0.0f; 
         if (useContinuousCollisionDetection)
@@ -178,11 +204,13 @@ public class CarController : MonoBehaviour
     private void FixedUpdate()
     {
         UpdateSmoothedInputs(Time.fixedDeltaTime);
+        UpdateHandbrakeDriftState();
         HandleMotor();
         HandleSteering();
         ApplyAntiRollBars();
         UpdateWheels();
         ApplyDownforce(); // Yuksek hizda yol tutusu icin
+        EvaluateDriftFeedback(Time.fixedDeltaTime);
         EvaluateHardBrakeFeedback(Time.fixedDeltaTime);
     }
 
@@ -201,11 +229,8 @@ public class CarController : MonoBehaviour
 
     private void HandleInput()
     {
-        if (moveAction != null)
-        {
-            moveInput = moveAction.ReadValue<Vector2>();
-            isHandbraking = handbrakeAction.IsPressed();
-        }
+        moveInput = moveAction != null ? moveAction.ReadValue<Vector2>() : Vector2.zero;
+        isHandbraking = handbrakeAction != null && handbrakeAction.IsPressed();
     }
 
     private void HandleMotor()
@@ -235,8 +260,18 @@ public class CarController : MonoBehaviour
         // --- MOTOR GÜCÜ (Sadece Arka Tekerler - RWD) ---
         if (!isBraking && !isHandbraking)
         {
-            rearLeftCollider.motorTorque = accelInput * motorTorque;
-            rearRightCollider.motorTorque = accelInput * motorTorque;
+            float speedKmh = rb.linearVelocity.magnitude * 3.6f;
+            float topSpeedRatio = maxForwardSpeedKmh > 1f ? Mathf.Clamp01(speedKmh / maxForwardSpeedKmh) : 0f;
+            float speedTorqueFactor = Mathf.Lerp(1f, topSpeedMinTorqueFactor, topSpeedRatio);
+            float appliedTorque = accelInput * motorTorque * speedTorqueFactor;
+
+            if (accelInput > 0f && speedKmh >= maxForwardSpeedKmh)
+            {
+                appliedTorque = 0f;
+            }
+
+            rearLeftCollider.motorTorque = appliedTorque;
+            rearRightCollider.motorTorque = appliedTorque;
             currentBrakeTorque = 0f;
         }
         else
@@ -258,7 +293,7 @@ public class CarController : MonoBehaviour
         }
         else if (isBraking || Mathf.Abs(accelInput) < 0.05f) // Gaz verilmiyorsa da hafif fren (drag)
         {
-            currentBrakeTorque = isBraking ? brakeTorque : 100f; // Drag braking
+            currentBrakeTorque = isBraking ? brakeTorque : coastBrakeTorque; // Drag braking
             
             frontLeftCollider.brakeTorque = currentBrakeTorque;
             frontRightCollider.brakeTorque = currentBrakeTorque;
@@ -379,6 +414,90 @@ public class CarController : MonoBehaviour
         }
 
         rb.AddForce(-transform.up * requested, ForceMode.Force);
+    }
+
+    private void CacheRearSidewaysFriction()
+    {
+        if (rearLeftCollider == null || rearRightCollider == null)
+        {
+            return;
+        }
+
+        rearLeftSidewaysFrictionBase = rearLeftCollider.sidewaysFriction;
+        rearRightSidewaysFrictionBase = rearRightCollider.sidewaysFriction;
+        rearFrictionCached = true;
+    }
+
+    private void UpdateHandbrakeDriftState()
+    {
+        if (!rearFrictionCached || rb == null)
+        {
+            return;
+        }
+
+        float speedKmh = rb.linearVelocity.magnitude * 3.6f;
+        bool driftActive = isHandbraking && speedKmh >= handbrakeDriftMinSpeedKmh;
+
+        float gripFactor = driftActive ? handbrakeRearSidewaysGripFactor : 1f;
+        gripFactor = Mathf.Clamp(gripFactor, 0.2f, 1f);
+        ApplyRearSidewaysGrip(gripFactor);
+
+        if (driftActive && Mathf.Abs(smoothedSteerInput) > 0.05f)
+        {
+            float steerSign = Mathf.Sign(smoothedSteerInput);
+            float assistScale = Mathf.InverseLerp(handbrakeDriftMinSpeedKmh, handbrakeDriftMinSpeedKmh + 40f, speedKmh);
+            float yawTorque = handbrakeDriftAssistTorque * steerSign * assistScale;
+            rb.AddTorque(Vector3.up * yawTorque, ForceMode.Force);
+        }
+    }
+
+    private void ApplyRearSidewaysGrip(float gripFactor)
+    {
+        WheelFrictionCurve left = rearLeftSidewaysFrictionBase;
+        WheelFrictionCurve right = rearRightSidewaysFrictionBase;
+
+        left.stiffness = rearLeftSidewaysFrictionBase.stiffness * gripFactor;
+        right.stiffness = rearRightSidewaysFrictionBase.stiffness * gripFactor;
+
+        rearLeftCollider.sidewaysFriction = left;
+        rearRightCollider.sidewaysFriction = right;
+    }
+
+    private void EvaluateDriftFeedback(float deltaTime)
+    {
+        if (rb == null || deltaTime <= 0f)
+        {
+            return;
+        }
+
+        Vector3 localVelocity = transform.InverseTransformDirection(rb.linearVelocity);
+        float lateralSpeed = Mathf.Abs(localVelocity.x);
+        float speedKmh = rb.linearVelocity.magnitude * 3.6f;
+        float steerMagnitude = Mathf.Abs(smoothedSteerInput);
+
+        bool driftScoringActive = isHandbraking
+            && speedKmh >= handbrakeDriftMinSpeedKmh
+            && lateralSpeed >= driftScoreMinLateralSpeed
+            && steerMagnitude >= driftScoreMinSteerInput;
+
+        if (!driftScoringActive)
+        {
+            return;
+        }
+
+        float lateralFactor = Mathf.InverseLerp(driftScoreMinLateralSpeed, driftScoreMinLateralSpeed + 7f, lateralSpeed);
+        float speedFactor = Mathf.InverseLerp(handbrakeDriftMinSpeedKmh, handbrakeDriftMinSpeedKmh + 70f, speedKmh);
+        float gain = Mathf.Max(0f, driftScorePerSecond) * (0.35f + (lateralFactor * 0.65f)) * (0.5f + (speedFactor * 0.5f));
+
+        accumulatedDriftScore += gain * deltaTime;
+        int driftDelta = Mathf.FloorToInt(accumulatedDriftScore) - committedDriftScore;
+        if (driftDelta <= 0)
+        {
+            return;
+        }
+
+        committedDriftScore += driftDelta;
+        DeliveryDriver.Quest.QuestManager.Instance?.OnDriftDetected(driftDelta);
     }
 
     private void EvaluateHardBrakeFeedback(float deltaTime)
