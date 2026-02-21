@@ -107,6 +107,9 @@ public class CarController : MonoBehaviour
     [Tooltip("Sert fren bildirimleri arasindaki min sure (s).")]
     [SerializeField] private float hardBrakeNotifyCooldown = 1.2f;
     
+    // Public geri vites input durumu - CameraFollow tarafindan okunur
+    public bool IsReverseInputActive => moveInput.y < -0.1f;
+
     // Private Runtime Variables
     private Rigidbody rb;
     private float currentSteerAngle;
