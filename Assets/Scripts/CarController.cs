@@ -79,6 +79,15 @@ public class CarController : MonoBehaviour
     [Tooltip("Direksiyon girdisinin ne kadar hizli degisecegi (birim/s).")]
     [SerializeField] private float steeringInputRate = 5f;
 
+    [Header("--- HANDBRAKE DRIFT ---")]
+    [Tooltip("El freni aktifken arka teker yan tutusunun korunacak orani.")]
+    [Range(0.2f, 1f)]
+    [SerializeField] private float handbrakeRearSidewaysGripFactor = 0.55f;
+    [Tooltip("El freni aktifken direksiyon yonune verilen hafif donus destegi.")]
+    [SerializeField] private float handbrakeDriftAssistTorque = 1100f;
+    [Tooltip("Drift desteginin devreye girmesi icin minimum hiz (km/s).")]
+    [SerializeField] private float handbrakeDriftMinSpeedKmh = 15f;
+
     [Header("--- FEEDBACK ---")]
     [Tooltip("Sert fren bildirimi icin minimum hiz (km/s).")]
     [SerializeField] private float hardBrakeMinSpeedKmh = 35f;
@@ -100,6 +109,9 @@ public class CarController : MonoBehaviour
     private float smoothedSteerInput;
     private float previousSpeedMetersPerSec;
     private float lastHardBrakeNotifyTime = -999f;
+    private WheelFrictionCurve rearLeftSidewaysFrictionBase;
+    private WheelFrictionCurve rearRightSidewaysFrictionBase;
+    private bool rearFrictionCached;
     
     // Input Action References
     private InputAction moveAction;
@@ -115,6 +127,7 @@ public class CarController : MonoBehaviour
         rb = GetComponent<Rigidbody>();
         SetupRigidbody();
         ConfigureBodyCollidersForStability();
+        CacheRearSidewaysFriction();
         SetupInput();
     }
 
@@ -178,6 +191,7 @@ public class CarController : MonoBehaviour
     private void FixedUpdate()
     {
         UpdateSmoothedInputs(Time.fixedDeltaTime);
+        UpdateHandbrakeDriftState();
         HandleMotor();
         HandleSteering();
         ApplyAntiRollBars();
@@ -201,11 +215,8 @@ public class CarController : MonoBehaviour
 
     private void HandleInput()
     {
-        if (moveAction != null)
-        {
-            moveInput = moveAction.ReadValue<Vector2>();
-            isHandbraking = handbrakeAction.IsPressed();
-        }
+        moveInput = moveAction != null ? moveAction.ReadValue<Vector2>() : Vector2.zero;
+        isHandbraking = handbrakeAction != null && handbrakeAction.IsPressed();
     }
 
     private void HandleMotor()
@@ -379,6 +390,53 @@ public class CarController : MonoBehaviour
         }
 
         rb.AddForce(-transform.up * requested, ForceMode.Force);
+    }
+
+    private void CacheRearSidewaysFriction()
+    {
+        if (rearLeftCollider == null || rearRightCollider == null)
+        {
+            return;
+        }
+
+        rearLeftSidewaysFrictionBase = rearLeftCollider.sidewaysFriction;
+        rearRightSidewaysFrictionBase = rearRightCollider.sidewaysFriction;
+        rearFrictionCached = true;
+    }
+
+    private void UpdateHandbrakeDriftState()
+    {
+        if (!rearFrictionCached || rb == null)
+        {
+            return;
+        }
+
+        float speedKmh = rb.linearVelocity.magnitude * 3.6f;
+        bool driftActive = isHandbraking && speedKmh >= handbrakeDriftMinSpeedKmh;
+
+        float gripFactor = driftActive ? handbrakeRearSidewaysGripFactor : 1f;
+        gripFactor = Mathf.Clamp(gripFactor, 0.2f, 1f);
+        ApplyRearSidewaysGrip(gripFactor);
+
+        if (driftActive && Mathf.Abs(smoothedSteerInput) > 0.05f)
+        {
+            float steerSign = Mathf.Sign(smoothedSteerInput);
+            float assistScale = Mathf.InverseLerp(handbrakeDriftMinSpeedKmh, handbrakeDriftMinSpeedKmh + 40f, speedKmh);
+            float yawTorque = handbrakeDriftAssistTorque * steerSign * assistScale;
+            rb.AddTorque(Vector3.up * yawTorque, ForceMode.Force);
+        }
+    }
+
+    private void ApplyRearSidewaysGrip(float gripFactor)
+    {
+        WheelFrictionCurve left = rearLeftSidewaysFrictionBase;
+        WheelFrictionCurve right = rearRightSidewaysFrictionBase;
+
+        left.stiffness = rearLeftSidewaysFrictionBase.stiffness * gripFactor;
+        right.stiffness = rearRightSidewaysFrictionBase.stiffness * gripFactor;
+
+        rearLeftCollider.sidewaysFriction = left;
+        rearRightCollider.sidewaysFriction = right;
     }
 
     private void EvaluateHardBrakeFeedback(float deltaTime)
