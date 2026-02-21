@@ -14,16 +14,19 @@ public class CameraFollow : MonoBehaviour
     [Header("Smooth Settings")]
     [Tooltip("Kamera takip yumusakligi (Dusuk = daha siki, Yuksek = daha gevek)")]
     [SerializeField] private float translateSmoothTime = 0.2f;
+    [Tooltip("Yuksek hizda takip gecikmesini azaltmak icin minimum smooth time")]
+    [SerializeField] private float minTranslateSmoothTime = 0.08f;
+    [Tooltip("Bu hizdan sonra kamera takipte sikilasir (km/h)")]
+    [SerializeField] private float tightenFollowStartSpeedKmh = 70f;
+    [Tooltip("Bu hizda minimum smooth time degerine ulasir (km/h)")]
+    [SerializeField] private float tightenFollowFullSpeedKmh = 170f;
+    [Tooltip("Kamera arac merkezinden bu mesafeden fazla uzaklasamaz")]
+    [SerializeField] private float maxDistanceFromTarget = 12f;
     [Tooltip("Donus yumusakligi (Dusuk = daha gecikmeli, Yuksek = daha hizli)")]
     [SerializeField] private float rotationSmoothSpeed = 1.5f;
     [Tooltip("Kamera rotasyonu tamamen arabayi takip etsin mi?")]
     [SerializeField] private bool followRotation = false;
 
-    [Header("Reverse Settings")]
-    [Tooltip("Geri gidildiginde kameranin one gecme ozelligi")]
-    [SerializeField] private bool enableReverseView = true;
-    [Tooltip("Hangi hizdan sonra geri goruse gecsin (Negatif deger)")]
-    [SerializeField] private float reverseSpeedThreshold = -1f;
 
     [Header("Speed Feel")]
     [Tooltip("Arac hizina gore kamera FOV degissin mi")]
@@ -77,9 +80,8 @@ public class CameraFollow : MonoBehaviour
     // Runtime variables
     private Vector3 currentVelocity;
     private Rigidbody targetRb;
+    private CarController carController;
     private Camera mainCamera;
-    private bool isReversing = false;
-    private float currentLocalZVelocity = 0f;
     private Camera miniMapCamera;
     private Vector3 miniMapVelocity;
     private bool hasMiniMapRuntimeBounds;
@@ -113,6 +115,16 @@ public class CameraFollow : MonoBehaviour
         {
             mainCamera = GetComponent<Camera>();
             targetRb = target.GetComponent<Rigidbody>();
+            // Rigidbody target'in tam uzerinde yoksa ust/alt hiyerarside ara
+            if (targetRb == null) targetRb = target.GetComponentInParent<Rigidbody>();
+            if (targetRb == null) targetRb = target.GetComponentInChildren<Rigidbody>();
+            // CarController referansini al (geri tus inputunu okumak icin)
+            carController = target.GetComponent<CarController>();
+            if (carController == null) carController = target.GetComponentInParent<CarController>();
+            if (carController == null) carController = target.GetComponentInChildren<CarController>();
+
+            Debug.Log($"[CameraFollow] Start: target={target.name}, targetRb={targetRb != null}, carController={carController != null}");
+
             limitMiniMapToBounds = true;
             ResolveMiniMapBounds();
             ConfigureMiniMapLayerFilter();
@@ -151,54 +163,31 @@ public class CameraFollow : MonoBehaviour
 
     void HandleCameraMovement(float deltaTime)
     {
-        // 1. Aracin yerel hizina bak (Ileri mi gidiyor geri mi?)
-        float localZVelocity = 0f;
-        if (targetRb != null)
-        {
-            // Dunya koordinatindaki hizi, aracin yerel koordinatina cevir
-            // Not: Yeni Unity versiyonlarinda linearVelocity, eski versiyonlarda velocity
-            Vector3 rbVelocity = targetRb.linearVelocity;
-            localZVelocity = target.InverseTransformDirection(rbVelocity).z;
-            currentLocalZVelocity = localZVelocity; // Debug icin sakla
-        }
-
-        // 2. Geri gitme durumunu kontrol et
-        if (enableReverseView)
-        {
-            // Eger belirli bir hizin uzerinde geri gidiyorsa mod degistir
-            if (localZVelocity < reverseSpeedThreshold)
-            {
-                isReversing = true;
-            }
-            // Ileri gidiyorsa veya duruyorsa normal moda don
-            else if (localZVelocity > -0.5f)
-            {
-                isReversing = false;
-            }
-        }
-
-        // 3. Hedef pozisyonu belirle
+        // Kamera her zaman arabanin arkasinda normal takip modunda kalir
+        // HUD (ReverseCameraHUD) geri gorusu kendi saglar
         Vector3 targetOffset = offset;
-
-        if (isReversing)
-        {
-            // Geri giderken Z offsetini tersine cevir (Arabanin onune gec)
-            targetOffset = new Vector3(offset.x, offset.y, -offset.z);
-        }
 
         // 4. Pozisyon hesaplama
         Vector3 desiredPosition;
 
         if (followRotation)
         {
-            // Kamera arabayi donerek takip eder (eski davranis)
+            // Kamera arabayi tum rotasyonlarla takip eder (pitch/roll dahil)
             desiredPosition = target.TransformPoint(targetOffset);
         }
         else
         {
-            // Kamera duz kalir, sadece araba hareket edince hareket eder
-            // Dunya koordinatlarinda sabit yon kullan
-            desiredPosition = target.position + new Vector3(targetOffset.x, targetOffset.y, targetOffset.z);
+            // Aracin sadece yatay yonunu (yaw) baz al, boylece geri viteste ters kamera dogru tarafta olur.
+            Quaternion yawRotation = Quaternion.Euler(0f, target.eulerAngles.y, 0f);
+            desiredPosition = target.position + (yawRotation * targetOffset);
+        }
+
+        float smoothTime = translateSmoothTime;
+        if (targetRb != null)
+        {
+            float speedKmh = targetRb.linearVelocity.magnitude * 3.6f;
+            float tightenT = Mathf.InverseLerp(tightenFollowStartSpeedKmh, tightenFollowFullSpeedKmh, speedKmh);
+            smoothTime = Mathf.Lerp(translateSmoothTime, minTranslateSmoothTime, tightenT);
         }
 
         // 5. Pozisyonu yumusatarak uygula
@@ -206,18 +195,30 @@ public class CameraFollow : MonoBehaviour
             transform.position,
             desiredPosition,
             ref currentVelocity,
-            translateSmoothTime,
+            Mathf.Max(0.01f, smoothTime),
             Mathf.Infinity,
             Mathf.Max(0.0001f, deltaTime));
 
-        // 6. Rotasyon ayari
+        if (maxDistanceFromTarget > 0.1f)
+        {
+            Vector3 fromTarget = transform.position - target.position;
+            if (fromTarget.sqrMagnitude > maxDistanceFromTarget * maxDistanceFromTarget)
+            {
+                transform.position = target.position + (fromTarget.normalized * maxDistanceFromTarget);
+            }
+        }
+
+        // 6. Rotasyon ayari — her zaman arabanin biraz ustune bak
         Vector3 lookAtTarget = target.position + Vector3.up * 1.5f;
         Vector3 direction = lookAtTarget - transform.position;
 
         if (direction != Vector3.zero)
         {
             Quaternion targetRotation = Quaternion.LookRotation(direction);
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSmoothSpeed * deltaTime);
+
+            float currentRotSpeed = rotationSmoothSpeed;
+
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, currentRotSpeed * deltaTime);
         }
     }
 
