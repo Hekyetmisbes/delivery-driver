@@ -89,6 +89,8 @@ namespace DeliveryDriver.Quest
         [SerializeField] private float collisionDamageThreshold = 10000f;
         [SerializeField] private float collisionDamageDivider = 1000f;
         [SerializeField] private float collisionDamageCooldown = 0.25f;
+        [Tooltip("Teslimat iptali için gereken minimum toplam çarpışma sayısı.")]
+        [SerializeField] private int maxCollisionsBeforeCancel = 10;
         private float lastCollisionTime;
 
         [Header("Quest Lists")]
@@ -413,9 +415,9 @@ namespace DeliveryDriver.Quest
             }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (!debugInvincibleCargo && currentQuest.Cargo != null && currentQuest.Cargo.IsFragile && currentQuest.Cargo.IsDestroyed())
+            if (!debugInvincibleCargo && currentQuest.HasPickedUpCargo && currentQuest.Cargo != null && currentQuest.Cargo.IsFragile && currentQuest.Cargo.IsDestroyed())
 #else
-            if (currentQuest.Cargo != null && currentQuest.Cargo.IsFragile && currentQuest.Cargo.IsDestroyed())
+            if (currentQuest.HasPickedUpCargo && currentQuest.Cargo != null && currentQuest.Cargo.IsFragile && currentQuest.Cargo.IsDestroyed())
 #endif
             {
                 FailQuest(currentQuest, "Cargo destroyed");
@@ -1303,6 +1305,12 @@ namespace DeliveryDriver.Quest
             {
                 string collisionLabel = isNpcCollision ? "NPC Carpisma!" : "Carpisma!";
                 OnDrivingFeedback.Invoke(collisionLabel, -deltaPenalty);
+            }
+
+            if (currentQuest.CollisionCount >= maxCollisionsBeforeCancel)
+            {
+                FailQuest(currentQuest, $"Çok fazla çarpışma ({currentQuest.CollisionCount})");
+                return;
             }
 
             // Apply damage to fragile cargo
