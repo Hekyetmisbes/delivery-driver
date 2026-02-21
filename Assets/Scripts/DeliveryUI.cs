@@ -13,6 +13,9 @@ public class DeliveryUI : MonoBehaviour
     [SerializeField] private TextMeshProUGUI distanceText;
     [SerializeField] private TextMeshProUGUI neighborhoodText;
 
+    [Header("Distance Display")]
+    [SerializeField] private float distanceDisplayMultiplier = 10f;
+
     private DeliveryManager deliveryManager;
     private Transform playerTransform;
     private float nextPlayerResolveTime;
@@ -110,7 +113,10 @@ public class DeliveryUI : MonoBehaviour
 
         if (distanceText != null)
         {
-            distanceText.text = $"Mesafe: {distance:F0}m";
+            float d = distance * distanceDisplayMultiplier;
+            distanceText.text = d >= 1000f
+                ? $"Mesafe: {d / 1000f:F1}km"
+                : $"Mesafe: {d:F0}m";
         }
 
         if (neighborhoodText != null)
@@ -147,7 +153,10 @@ public class DeliveryUI : MonoBehaviour
     {
         if (distanceText != null)
         {
-            distanceText.text = $"Mesafe: {distance:F0}m";
+            float d = distance * distanceDisplayMultiplier;
+            distanceText.text = d >= 1000f
+                ? $"Mesafe: {d / 1000f:F1}km"
+                : $"Mesafe: {d:F0}m";
         }
     }
 
