@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro;
 using DeliveryDriver.Quest;
 using DeliveryDriver.City;
 using TrafficSystem;
@@ -86,6 +87,30 @@ public class DeliveryManager : MonoBehaviour
     [SerializeField] private float miniMapEdgeIndicatorPulseSpeed = 4f;
     [SerializeField, Range(0f, 0.6f)] private float miniMapEdgeIndicatorPulseAmount = 0.2f;
 
+    [Header("Speedometer UI")]
+    [SerializeField] private bool showSpeedometer = true;
+    [SerializeField] private string speedometerLabel = "Hiz";
+    [SerializeField] private Vector2 speedometerAnchoredPosition = new Vector2(-28f, 24f);
+    [SerializeField] private int speedometerFontSize = 34;
+    [SerializeField] private Color speedometerColor = Color.white;
+    [SerializeField] private Vector2 speedometerPanelSize = new Vector2(280f, 78f);
+    [SerializeField] private Color speedometerPanelBaseColor = new Color(0.07f, 0.08f, 0.1f, 0.72f);
+    [SerializeField] private Color speedometerPanelEcoColor = new Color(0.08f, 0.2f, 0.12f, 0.78f);
+    [SerializeField] private Color speedometerPanelCruiseColor = new Color(0.08f, 0.13f, 0.2f, 0.78f);
+    [SerializeField] private Color speedometerPanelFastColor = new Color(0.24f, 0.18f, 0.06f, 0.8f);
+    [SerializeField] private Color speedometerPanelMaxColor = new Color(0.3f, 0.08f, 0.08f, 0.84f);
+    [SerializeField] private Color speedometerIconEcoColor = new Color(0.35f, 0.9f, 0.45f, 1f);
+    [SerializeField] private Color speedometerIconCruiseColor = new Color(0.35f, 0.7f, 1f, 1f);
+    [SerializeField] private Color speedometerIconFastColor = new Color(1f, 0.78f, 0.3f, 1f);
+    [SerializeField] private Color speedometerIconMaxColor = new Color(1f, 0.32f, 0.32f, 1f);
+    [SerializeField] private float cruiseThresholdKmh = 20f;
+    [SerializeField] private float fastThresholdKmh = 60f;
+    [SerializeField] private float maxThresholdKmh = 100f;
+    [SerializeField] private Sprite speedIconEcoSprite;
+    [SerializeField] private Sprite speedIconCruiseSprite;
+    [SerializeField] private Sprite speedIconFastSprite;
+    [SerializeField] private Sprite speedIconMaxSprite;
+
     private DeliveryBox currentBox;
     private GameObject currentPickupIndicator;
     private GameObject currentDeliveryIndicator;
@@ -109,6 +134,7 @@ public class DeliveryManager : MonoBehaviour
     private DeliveryUI deliveryUI;
     private QuestData currentDeliveryQuest;
     private Transform cachedPlayerTransform;
+    private Rigidbody cachedPlayerRigidbody;
     private static Collider[] sharedOverlapBuffer = new Collider[32];
     private Bounds[] cachedTerrainBounds;
     private bool hasTerrainBounds;
@@ -120,6 +146,10 @@ public class DeliveryManager : MonoBehaviour
     private Canvas miniMapEdgeCanvas;
     private RectTransform miniMapEdgeIndicatorRect;
     private Image miniMapEdgeIndicatorImage;
+    private RectTransform speedometerPanelRect;
+    private Image speedometerPanelImage;
+    private Image speedometerIconImage;
+    private TextMeshProUGUI speedometerText;
 
     public bool IsDeliveryActive => isDeliveryActive;
     public bool HasBox => currentBox != null;
@@ -159,6 +189,7 @@ public class DeliveryManager : MonoBehaviour
 
         // Cache player and UI references after scene is ready
         ResolvePlayerTransform();
+        EnsureSpeedometerUI();
         CacheTerrainBounds();
         SubscribeToQuestEvents();
     }
@@ -198,6 +229,7 @@ public class DeliveryManager : MonoBehaviour
         if (car != null)
         {
             cachedPlayerTransform = car.transform;
+            cachedPlayerRigidbody = car.GetComponent<Rigidbody>();
             return;
         }
 
@@ -205,6 +237,7 @@ public class DeliveryManager : MonoBehaviour
         if (playerObj != null)
         {
             cachedPlayerTransform = playerObj.transform;
+            cachedPlayerRigidbody = playerObj.GetComponent<Rigidbody>();
         }
     }
 
@@ -233,6 +266,7 @@ public class DeliveryManager : MonoBehaviour
     private void Update()
     {
         UpdateMiniMapObjectiveMarker();
+        UpdateSpeedometerUI();
 
         if (!isDeliveryActive || currentBox == null || !currentBox.IsPickedUp)
         {
@@ -1320,6 +1354,212 @@ public class DeliveryManager : MonoBehaviour
             miniMapObjectiveMarkerMaterial = new Material(shader);
             miniMapObjectiveMarker.GetComponent<MeshRenderer>().material = miniMapObjectiveMarkerMaterial;
         }
+    }
+
+    private enum SpeedometerTier
+    {
+        Eco,
+        Cruise,
+        Fast,
+        Max
+    }
+
+    private void EnsureSpeedometerUI()
+    {
+        if (!showSpeedometer || speedometerText != null)
+        {
+            return;
+        }
+
+        Canvas targetCanvas = FindBestHudCanvas();
+        if (targetCanvas == null)
+        {
+            GameObject canvasObject = new GameObject("GameplayHUDCanvas");
+            targetCanvas = canvasObject.AddComponent<Canvas>();
+            targetCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvasObject.AddComponent<CanvasScaler>();
+            canvasObject.AddComponent<GraphicRaycaster>();
+        }
+
+        GameObject panelObject = new GameObject("SpeedometerPanel");
+        panelObject.transform.SetParent(targetCanvas.transform, false);
+        speedometerPanelRect = panelObject.AddComponent<RectTransform>();
+        speedometerPanelRect.anchorMin = new Vector2(1f, 0f);
+        speedometerPanelRect.anchorMax = new Vector2(1f, 0f);
+        speedometerPanelRect.pivot = new Vector2(1f, 0f);
+        speedometerPanelRect.anchoredPosition = speedometerAnchoredPosition;
+        speedometerPanelRect.sizeDelta = speedometerPanelSize;
+
+        speedometerPanelImage = panelObject.AddComponent<Image>();
+        speedometerPanelImage.color = speedometerPanelBaseColor;
+        speedometerPanelImage.raycastTarget = false;
+        speedometerPanelImage.sprite = GetFallbackSprite();
+        speedometerPanelImage.type = Image.Type.Sliced;
+
+        GameObject iconObject = new GameObject("SpeedometerIcon");
+        iconObject.transform.SetParent(panelObject.transform, false);
+        RectTransform iconRect = iconObject.AddComponent<RectTransform>();
+        iconRect.anchorMin = new Vector2(0f, 0.5f);
+        iconRect.anchorMax = new Vector2(0f, 0.5f);
+        iconRect.pivot = new Vector2(0f, 0.5f);
+        iconRect.anchoredPosition = new Vector2(12f, 0f);
+        iconRect.sizeDelta = new Vector2(42f, 42f);
+
+        speedometerIconImage = iconObject.AddComponent<Image>();
+        speedometerIconImage.raycastTarget = false;
+        speedometerIconImage.sprite = speedIconEcoSprite != null ? speedIconEcoSprite : GetFallbackSprite();
+        speedometerIconImage.color = speedometerIconEcoColor;
+        speedometerIconImage.preserveAspect = true;
+
+        GameObject speedTextObject = new GameObject("SpeedometerText");
+        speedTextObject.transform.SetParent(panelObject.transform, false);
+        RectTransform textRect = speedTextObject.AddComponent<RectTransform>();
+        textRect.anchorMin = new Vector2(0f, 0f);
+        textRect.anchorMax = new Vector2(1f, 1f);
+        textRect.pivot = new Vector2(0.5f, 0.5f);
+        textRect.offsetMin = new Vector2(62f, 6f);
+        textRect.offsetMax = new Vector2(-14f, -6f);
+
+        speedometerText = speedTextObject.AddComponent<TextMeshProUGUI>();
+        speedometerText.fontSize = Mathf.Max(12, speedometerFontSize);
+        speedometerText.color = speedometerColor;
+        speedometerText.alignment = TextAlignmentOptions.MidlineRight;
+        speedometerText.text = $"{speedometerLabel}: 0 km/h";
+    }
+
+    private void UpdateSpeedometerUI()
+    {
+        if (!showSpeedometer)
+        {
+            if (speedometerPanelRect != null)
+            {
+                speedometerPanelRect.gameObject.SetActive(false);
+            }
+            return;
+        }
+
+        if (speedometerText == null || speedometerPanelRect == null)
+        {
+            EnsureSpeedometerUI();
+        }
+
+        if (speedometerText == null || speedometerPanelRect == null)
+        {
+            return;
+        }
+
+        if (cachedPlayerTransform == null)
+        {
+            ResolvePlayerTransform();
+        }
+
+        if (cachedPlayerRigidbody == null && cachedPlayerTransform != null)
+        {
+            cachedPlayerRigidbody = cachedPlayerTransform.GetComponent<Rigidbody>();
+        }
+
+        float speedKmh = cachedPlayerRigidbody != null
+            ? cachedPlayerRigidbody.linearVelocity.magnitude * 3.6f
+            : 0f;
+
+        SpeedometerTier tier = EvaluateSpeedometerTier(speedKmh);
+        ApplySpeedometerTierVisual(tier);
+
+        speedometerPanelRect.gameObject.SetActive(true);
+        speedometerText.text = $"{speedometerLabel}: {speedKmh:0} km/h";
+    }
+
+    private SpeedometerTier EvaluateSpeedometerTier(float speedKmh)
+    {
+        if (speedKmh >= maxThresholdKmh)
+        {
+            return SpeedometerTier.Max;
+        }
+
+        if (speedKmh >= fastThresholdKmh)
+        {
+            return SpeedometerTier.Fast;
+        }
+
+        if (speedKmh >= cruiseThresholdKmh)
+        {
+            return SpeedometerTier.Cruise;
+        }
+
+        return SpeedometerTier.Eco;
+    }
+
+    private void ApplySpeedometerTierVisual(SpeedometerTier tier)
+    {
+        if (speedometerPanelImage == null || speedometerIconImage == null)
+        {
+            return;
+        }
+
+        Sprite fallback = GetFallbackSprite();
+        Sprite selectedSprite = fallback;
+        float fallbackFillAmount = 0.35f;
+        switch (tier)
+        {
+            case SpeedometerTier.Max:
+                speedometerPanelImage.color = speedometerPanelMaxColor;
+                speedometerIconImage.color = speedometerIconMaxColor;
+                selectedSprite = speedIconMaxSprite != null ? speedIconMaxSprite : fallback;
+                fallbackFillAmount = 1f;
+                break;
+            case SpeedometerTier.Fast:
+                speedometerPanelImage.color = speedometerPanelFastColor;
+                speedometerIconImage.color = speedometerIconFastColor;
+                selectedSprite = speedIconFastSprite != null ? speedIconFastSprite : fallback;
+                fallbackFillAmount = 0.78f;
+                break;
+            case SpeedometerTier.Cruise:
+                speedometerPanelImage.color = speedometerPanelCruiseColor;
+                speedometerIconImage.color = speedometerIconCruiseColor;
+                selectedSprite = speedIconCruiseSprite != null ? speedIconCruiseSprite : fallback;
+                fallbackFillAmount = 0.58f;
+                break;
+            default:
+                speedometerPanelImage.color = speedometerPanelEcoColor;
+                speedometerIconImage.color = speedometerIconEcoColor;
+                selectedSprite = speedIconEcoSprite != null ? speedIconEcoSprite : fallback;
+                fallbackFillAmount = 0.35f;
+                break;
+        }
+
+        speedometerIconImage.sprite = selectedSprite;
+        bool isFallbackIcon = selectedSprite == fallback;
+        if (isFallbackIcon)
+        {
+            speedometerIconImage.type = Image.Type.Filled;
+            speedometerIconImage.fillMethod = Image.FillMethod.Radial360;
+            speedometerIconImage.fillOrigin = 2;
+            speedometerIconImage.fillAmount = fallbackFillAmount;
+        }
+        else
+        {
+            speedometerIconImage.type = Image.Type.Simple;
+            speedometerIconImage.fillAmount = 1f;
+        }
+    }
+
+    private Canvas FindBestHudCanvas()
+    {
+        Canvas[] canvases = FindObjectsByType<Canvas>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        for (int i = 0; i < canvases.Length; i++)
+        {
+            if (canvases[i] != null && canvases[i].isActiveAndEnabled && canvases[i].renderMode == RenderMode.ScreenSpaceOverlay)
+            {
+                return canvases[i];
+            }
+        }
+
+        return FindFirstObjectByType<Canvas>();
+    }
+
+    private Sprite GetFallbackSprite()
+    {
+        return Resources.GetBuiltinResource<Sprite>("UI/Skin/UISprite.psd");
     }
 
     private int ResolveMiniMapMarkerLayer()
