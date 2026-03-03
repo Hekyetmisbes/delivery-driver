@@ -17,6 +17,7 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private Key toggleSkillTreeKey = Key.K;
 
         private GameObject rootCanvasObject;
+        private GameObject progressHudPanel;
         private GameObject skillTreeWindow;
         private TextMeshProUGUI levelText;
         private TextMeshProUGUI xpText;
@@ -121,18 +122,20 @@ namespace DeliveryDriver.Quest.UI
 
         private void BuildProgressHud(Transform parent)
         {
-            GameObject panel = CreatePanel("DriverProgressHUD", parent, new Vector2(20f, -20f), new Vector2(370f, 145f), TextAnchor.UpperLeft);
-            levelText = CreateText("LevelText", panel.transform, "Seviye 1", 24, FontStyles.Bold);
+            progressHudPanel = CreatePanel("DriverProgressHUD", parent, new Vector2(20f, -20f), new Vector2(370f, 145f), TextAnchor.UpperLeft);
+            progressHudPanel.SetActive(false);
+
+            levelText = CreateText("LevelText", progressHudPanel.transform, "Seviye 1", 24, FontStyles.Bold);
             levelText.rectTransform.anchoredPosition = new Vector2(14f, -10f);
 
-            moneyText = CreateText("MoneyText", panel.transform, "$0", 20, FontStyles.Normal);
+            moneyText = CreateText("MoneyText", progressHudPanel.transform, "$0", 20, FontStyles.Normal);
             moneyText.rectTransform.anchoredPosition = new Vector2(14f, -42f);
 
-            xpText = CreateText("XPText", panel.transform, "0 / 100 XP", 18, FontStyles.Normal);
+            xpText = CreateText("XPText", progressHudPanel.transform, "0 / 100 XP", 18, FontStyles.Normal);
             xpText.rectTransform.anchoredPosition = new Vector2(14f, -70f);
 
             GameObject xpBackground = new GameObject("XPBarBG");
-            xpBackground.transform.SetParent(panel.transform, false);
+            xpBackground.transform.SetParent(progressHudPanel.transform, false);
             RectTransform bgRect = xpBackground.AddComponent<RectTransform>();
             bgRect.anchorMin = new Vector2(0f, 1f);
             bgRect.anchorMax = new Vector2(0f, 1f);
@@ -156,13 +159,13 @@ namespace DeliveryDriver.Quest.UI
             xpFillImage.fillAmount = 0f;
             xpFillImage.color = new Color(0.21f, 0.73f, 0.39f, 0.95f);
 
-            CreateText("HintText", panel.transform, $"Skill Tree: [{toggleSkillTreeKey}]", 16, FontStyles.Italic).rectTransform.anchoredPosition = new Vector2(14f, -124f);
+            CreateText("HintText", progressHudPanel.transform, $"Skill Tree: [{toggleSkillTreeKey}]", 16, FontStyles.Italic).rectTransform.anchoredPosition = new Vector2(14f, -124f);
         }
 
         private void BuildSkillTreeWindow(Transform parent)
         {
             skillTreeWindow = CreatePanel("SkillTreeWindow", parent, new Vector2(-20f, -20f), new Vector2(460f, 520f), TextAnchor.UpperRight);
-            skillTreeWindow.SetActive(true);
+            skillTreeWindow.SetActive(false);
 
             TextMeshProUGUI title = CreateText("Title", skillTreeWindow.transform, "Yetenek Agaci", 28, FontStyles.Bold);
             title.alignment = TextAlignmentOptions.Center;
