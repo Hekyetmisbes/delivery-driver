@@ -40,6 +40,20 @@ namespace TrafficSystem
         [SerializeField] private Vector3 modelUpLocal = Vector3.up;
         [Tooltip("Auto-detect model forward axis from wheel collider layout")]
         [SerializeField] private bool autoDetectModelForward = true;
+        [Tooltip("Minimum distance threshold for considering a waypoint passed")]
+        [SerializeField] private float waypointPassDistance = 3.0f;
+        [Tooltip("Dot threshold for considering a waypoint passed when it falls behind the vehicle")]
+        [SerializeField] private float waypointPassedDotThreshold = -0.15f;
+        [Tooltip("Enable periodic path reacquire to recover from path drift")]
+        [SerializeField] private bool enablePathReacquire = true;
+        [Tooltip("Seconds between waypoint reacquire checks")]
+        [SerializeField] private float reacquireInterval = 0.25f;
+        [Tooltip("Maximum distance allowed for waypoint reacquire")]
+        [SerializeField] private float reacquireMaxDistance = 12f;
+        [Tooltip("How many waypoints ahead to include in reacquire window")]
+        [SerializeField] private int reacquireSearchAhead = 25;
+        [Tooltip("How many waypoints behind to include in reacquire window")]
+        [SerializeField] private int reacquireSearchBehind = 6;
 
         [Header("Speed Settings")]
         [Tooltip("Cruise speed range (km/h)")]
@@ -254,6 +268,8 @@ namespace TrafficSystem
 
         // Priority 1: Turn Signal System
         private TurnSignalController turnSignalController;
+
+        private float nextReacquireTime = 0f;
 
         // Priority 2: Personality System
         private DrivingPersonality personality;
@@ -572,6 +588,8 @@ namespace TrafficSystem
             predictiveSpeedLimiter = 1f;
             imminentCollisionRisk = false;
 
+            // FIX: Periodically reacquire a valid nearby forward waypoint before progressing path.
+            ReacquireWaypointIfNeeded();
             UpdatePath();
             UpdateOffRoadStatus();
 
@@ -788,22 +806,127 @@ namespace TrafficSystem
         /// </summary>
         private void UpdatePath()
         {
-            if (currentSegment.waypoints.Count == 0) return;
+            // FIX: Guard path state to avoid invalid waypoint access.
+            if (currentSegment == null || currentSegment.waypoints == null || currentSegment.waypoints.Count == 0)
+                return;
 
-            // Check if we've reached current waypoint
-            Waypoint currentWp = currentSegment.waypoints[currentWaypointIndex];
-            float distanceToWaypoint = Vector3.Distance(transform.position, currentWp.position);
+            int waypointCount = currentSegment.waypoints.Count;
+            currentWaypointIndex = Mathf.Clamp(currentWaypointIndex, 0, waypointCount - 1);
 
-            // Move to next waypoint if close enough - use personalized lookahead for variation
-            if (distanceToWaypoint < personalityLookAhead * 0.5f)
+            Vector3 flatForward = GetWorldForward();
+            flatForward.y = 0f;
+            if (flatForward.sqrMagnitude > 0.0001f)
             {
+                flatForward.Normalize();
+            }
+            else
+            {
+                flatForward = Vector3.forward;
+            }
+
+            float dynamicPassDist = Mathf.Max(waypointPassDistance, personalityLookAhead * 0.25f);
+
+            // FIX: Advance waypoint both when close enough and when the waypoint is already behind us.
+            while (currentWaypointIndex < waypointCount)
+            {
+                Waypoint currentWp = currentSegment.waypoints[currentWaypointIndex];
+                Vector3 toWp = currentWp.position - transform.position;
+                toWp.y = 0f;
+
+                float distanceToWaypoint = toWp.magnitude;
+                bool isCloseEnough = distanceToWaypoint <= dynamicPassDist;
+
+                bool isBehind = false;
+                if (toWp.sqrMagnitude > 0.0001f)
+                {
+                    float dot = Vector3.Dot(flatForward, toWp.normalized);
+                    isBehind = dot < waypointPassedDotThreshold;
+                }
+
+                if (!isCloseEnough && !isBehind)
+                {
+                    break;
+                }
+
                 currentWaypointIndex++;
 
-                // Check if we've reached end of segment
-                if (currentWaypointIndex >= currentSegment.waypoints.Count)
+                if (currentWaypointIndex >= waypointCount)
                 {
                     HandleEndOfSegment();
+                    break;
                 }
+            }
+        }
+
+        // FIX: Reacquire nearby forward waypoint to recover from temporary path drift.
+        private void ReacquireWaypointIfNeeded()
+        {
+            if (!enablePathReacquire)
+                return;
+
+            if (Time.time < nextReacquireTime)
+                return;
+
+            nextReacquireTime = Time.time + reacquireInterval;
+
+            if (currentSegment == null || currentSegment.waypoints == null || currentSegment.waypoints.Count == 0)
+                return;
+
+            int waypointCount = currentSegment.waypoints.Count;
+            currentWaypointIndex = Mathf.Clamp(currentWaypointIndex, 0, waypointCount - 1);
+
+            Vector3 pos = GetReferencePosition();
+            Vector3 flatForward = GetWorldForward();
+            flatForward.y = 0f;
+            if (flatForward.sqrMagnitude > 0.0001f)
+            {
+                flatForward.Normalize();
+            }
+            else
+            {
+                flatForward = Vector3.forward;
+            }
+
+            int start = Mathf.Clamp(currentWaypointIndex - reacquireSearchBehind, 0, waypointCount - 1);
+            int end = Mathf.Clamp(currentWaypointIndex + reacquireSearchAhead, 0, waypointCount - 1);
+            if (end < start)
+            {
+                end = start;
+            }
+
+            float bestScore = float.NegativeInfinity;
+            float bestDist = float.MaxValue;
+            int bestIdx = currentWaypointIndex;
+
+            for (int i = start; i <= end; i++)
+            {
+                Vector3 to = currentSegment.waypoints[i].position - pos;
+                to.y = 0f;
+
+                float dist = to.magnitude;
+                float dot = 1f;
+                if (dist > 0.0001f)
+                {
+                    dot = Vector3.Dot(flatForward, to / dist);
+                }
+
+                float score = dot * 2f - dist * 0.08f;
+                if (dot < -0.2f)
+                {
+                    score -= 100f;
+                }
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestDist = dist;
+                    bestIdx = i;
+                }
+            }
+
+            if (bestDist <= reacquireMaxDistance)
+            {
+                currentWaypointIndex = Mathf.Max(bestIdx, currentWaypointIndex);
             }
         }
 
@@ -1054,67 +1177,102 @@ namespace TrafficSystem
         /// </summary>
         private Vector3 GetLookAheadPoint()
         {
-            if (currentSegment == null || currentWaypointIndex >= currentSegment.waypoints.Count)
-                return transform.position + transform.forward * personalityLookAhead;
+            if (currentSegment == null || currentSegment.waypoints == null ||
+                currentWaypointIndex < 0 || currentWaypointIndex >= currentSegment.waypoints.Count)
+            {
+                return transform.position + GetWorldForward() * personalityLookAhead;
+            }
 
-            // Start from current waypoint
+            int waypointCount = currentSegment.waypoints.Count;
+            int startIndex = Mathf.Clamp(currentWaypointIndex, 0, waypointCount - 1);
             Vector3 carPos = transform.position;
-            float remainingDistance = personalityLookAhead; // Use personalized lookahead
-            int searchIndex = currentWaypointIndex;
 
-            // Skip waypoints that are behind us
-            while (searchIndex < currentSegment.waypoints.Count)
+            // FIX: Skip clearly behind waypoints so lookahead starts from a forward anchor.
+            Vector3 flatForward = GetWorldForward();
+            flatForward.y = 0f;
+            if (flatForward.sqrMagnitude > 0.0001f)
             {
-                Vector3 wpPos = currentSegment.waypoints[searchIndex].position;
-                Vector3 toWaypoint = wpPos - carPos;
+                flatForward.Normalize();
+            }
+            else
+            {
+                flatForward = Vector3.forward;
+            }
 
-                // Check if waypoint is ahead of us
-                float dotProduct = Vector3.Dot(toWaypoint.normalized, GetWorldForward());
-                if (dotProduct > 0.3f) // At least somewhat in front
+            for (int i = startIndex; i < waypointCount; i++)
+            {
+                Vector3 toWaypoint = currentSegment.waypoints[i].position - carPos;
+                toWaypoint.y = 0f;
+
+                if (toWaypoint.sqrMagnitude < 0.0001f)
                 {
+                    startIndex = i;
                     break;
                 }
 
-                searchIndex++;
-            }
-
-            // Find lookahead point
-            Vector3 targetPoint = Vector3.zero;
-            while (searchIndex < currentSegment.waypoints.Count)
-            {
-                Waypoint wp = currentSegment.waypoints[searchIndex];
-                float distToWaypoint = Vector3.Distance(carPos, wp.position);
-
-                if (distToWaypoint >= remainingDistance)
+                float dotProduct = Vector3.Dot(flatForward, toWaypoint.normalized);
+                if (dotProduct > 0.3f)
                 {
-                    targetPoint = wp.position;
+                    startIndex = i;
                     break;
                 }
-
-                remainingDistance -= distToWaypoint;
-                searchIndex++;
             }
 
-            // Return last waypoint if we've run out
-            if (targetPoint == Vector3.zero)
+            // FIX: Traverse path polyline distance instead of car-to-waypoint distances.
+            float remaining = Mathf.Max(1f, personalityLookAhead);
+            Vector3 prev = currentSegment.waypoints[startIndex].position;
+            Vector3 targetPoint = prev;
+            Vector3 targetTangent = flatForward;
+            bool targetFound = false;
+
+            for (int i = startIndex; i < waypointCount - 1; i++)
             {
-                if (currentSegment.waypoints.Count > 0)
+                Vector3 next = currentSegment.waypoints[i + 1].position;
+                Vector3 segment = next - prev;
+                float segmentLength = segment.magnitude;
+
+                if (segmentLength > 0.0001f)
                 {
-                    targetPoint = currentSegment.waypoints[currentSegment.waypoints.Count - 1].position;
+                    Vector3 tangent = segment / segmentLength;
+                    if (remaining <= segmentLength)
+                    {
+                        float t = remaining / segmentLength;
+                        targetPoint = Vector3.Lerp(prev, next, t);
+                        targetTangent = tangent;
+                        targetFound = true;
+                        break;
+                    }
+
+                    remaining -= segmentLength;
+                    targetTangent = tangent;
                 }
-                else
+
+                prev = next;
+            }
+
+            if (!targetFound)
+            {
+                targetPoint = currentSegment.waypoints[waypointCount - 1].position;
+
+                if (waypointCount >= 2)
                 {
-                    // Ultimate fallback
-                    return transform.position + transform.forward * personalityLookAhead;
+                    Vector3 lastSegment = currentSegment.waypoints[waypointCount - 1].position - currentSegment.waypoints[waypointCount - 2].position;
+                    if (lastSegment.sqrMagnitude > 0.0001f)
+                    {
+                        targetTangent = lastSegment.normalized;
+                    }
                 }
             }
 
-            // Apply lateral offset for lane variation
-            if (Mathf.Abs(lateralOffset) > 0.1f && searchIndex < currentSegment.waypoints.Count)
+            if (Mathf.Abs(lateralOffset) > 0.1f)
             {
-                Waypoint wp = currentSegment.waypoints[searchIndex];
-                Vector3 right = Vector3.Cross(wp.forward, Vector3.up).normalized;
-                targetPoint += right * lateralOffset;
+                // FIX: Preserve existing lane offset sign semantics (Cross(tangent, up)).
+                Vector3 side = Vector3.Cross(targetTangent, Vector3.up);
+                if (side.sqrMagnitude > 0.0001f)
+                {
+                    side.Normalize();
+                    targetPoint += side * lateralOffset;
+                }
             }
 
             return targetPoint;

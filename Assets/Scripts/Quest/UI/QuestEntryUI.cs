@@ -26,6 +26,9 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private GameObject dailyChallengeIndicator;
         [SerializeField] private Image dailyChallengeIcon;
 
+        [Header("Distance Display")]
+        [SerializeField] private float distanceDisplayMultiplier = 10f;
+
         [Header("Actions")]
         [SerializeField] private Button acceptButton;
 
@@ -70,7 +73,7 @@ namespace DeliveryDriver.Quest.UI
 
             if (distanceText != null)
             {
-                distanceText.text = FormatDistance(GetQuestDistance(questData));
+                distanceText.text = FormatDistance(GetQuestDistance(questData) * distanceDisplayMultiplier);
             }
 
             if (timeText != null)

@@ -13,10 +13,20 @@ public class DeliveryUI : MonoBehaviour
     [SerializeField] private TextMeshProUGUI distanceText;
     [SerializeField] private TextMeshProUGUI neighborhoodText;
 
+    [Header("Distance Display")]
+    [SerializeField] private float distanceDisplayMultiplier = 10f;
+
     private DeliveryManager deliveryManager;
     private Transform playerTransform;
     private float nextPlayerResolveTime;
-    private bool isShowingCompletionMessage;
+
+    private void Awake()
+    {
+        if (deliveryPanel != null)
+        {
+            deliveryPanel.SetActive(false);
+        }
+    }
 
     private void Start()
     {
@@ -69,17 +79,7 @@ public class DeliveryUI : MonoBehaviour
 
     private void UpdateUI()
     {
-        if (isShowingCompletionMessage)
-        {
-            if (deliveryPanel != null)
-            {
-                deliveryPanel.SetActive(true);
-            }
-
-            return;
-        }
-
-        bool hasObjective = deliveryManager.HasObjectivePoint;
+        bool hasObjective = deliveryManager.ShouldShowObjectiveUI;
 
         if (deliveryPanel != null)
         {
@@ -110,7 +110,10 @@ public class DeliveryUI : MonoBehaviour
 
         if (distanceText != null)
         {
-            distanceText.text = $"Mesafe: {distance:F0}m";
+            float d = distance * distanceDisplayMultiplier;
+            distanceText.text = d >= 1000f
+                ? $"Mesafe: {d / 1000f:F1}km"
+                : $"Mesafe: {d:F0}m";
         }
 
         if (neighborhoodText != null)
@@ -147,7 +150,10 @@ public class DeliveryUI : MonoBehaviour
     {
         if (distanceText != null)
         {
-            distanceText.text = $"Mesafe: {distance:F0}m";
+            float d = distance * distanceDisplayMultiplier;
+            distanceText.text = d >= 1000f
+                ? $"Mesafe: {d / 1000f:F1}km"
+                : $"Mesafe: {d:F0}m";
         }
     }
 
@@ -156,28 +162,9 @@ public class DeliveryUI : MonoBehaviour
     /// </summary>
     public void OnDeliveryComplete()
     {
-        isShowingCompletionMessage = true;
-
-        if (statusText != null)
+        if (deliveryPanel != null)
         {
-            statusText.text = "Teslimat tamamlandi!";
-        }
-
-        if (neighborhoodText != null)
-        {
-            neighborhoodText.text = "";
-        }
-
-        Invoke(nameof(ResetUI), 2f);
-    }
-
-    private void ResetUI()
-    {
-        isShowingCompletionMessage = false;
-
-        if (statusText != null)
-        {
-            statusText.text = "Paketi bul!";
+            deliveryPanel.SetActive(false);
         }
 
         if (distanceText != null)
