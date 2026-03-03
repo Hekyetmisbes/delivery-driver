@@ -16,6 +16,7 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private Transform playerTransform;
 
         private QuestManager questManager;
+        private DeliveryManager deliveryManager;
         private bool isSubscribed;
         private QuestLocation lastObjective;
 
@@ -45,6 +46,7 @@ namespace DeliveryDriver.Quest.UI
             }
 
             ResolvePlayerTransform();
+            ResolveDeliveryManager();
 
             if (questCompleteUI != null)
             {
@@ -61,8 +63,7 @@ namespace DeliveryDriver.Quest.UI
 
             if (questManager != null && questManager.CurrentQuest != null)
             {
-                HandleQuestStarted(questManager.CurrentQuest);
-                HandleQuestUpdated(questManager.CurrentQuest);
+                SyncActiveQuestVisibility(questManager.CurrentQuest);
             }
         }
 
@@ -84,9 +85,15 @@ namespace DeliveryDriver.Quest.UI
             }
 
             QuestData currentQuest = questManager.CurrentQuest;
+            SyncActiveQuestVisibility(currentQuest);
 
             if (activeQuestUI != null)
             {
+                if (!activeQuestUI.gameObject.activeSelf)
+                {
+                    return;
+                }
+
                 activeQuestUI.UpdateTimer(currentQuest.TimeRemaining, currentQuest.TimeLimit);
             }
 
@@ -146,14 +153,7 @@ namespace DeliveryDriver.Quest.UI
                 questListUI.SetOpen(false);
             }
 
-            if (activeQuestUI != null)
-            {
-                activeQuestUI.Show();
-                activeQuestUI.UpdateQuestDisplay(quest);
-                lastObjective = null;
-                UpdateActiveQuestDistance(quest);
-                UpdateCargoHealth(quest);
-            }
+            SyncActiveQuestVisibility(quest);
         }
 
         private void HandleQuestCompleted(QuestData quest)
@@ -202,7 +202,7 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            activeQuestUI.UpdateQuestDisplay(quest);
+            SyncActiveQuestVisibility(quest);
         }
 
         private void HandleDrivingFeedback(string message, int scoreDelta)
@@ -251,6 +251,53 @@ namespace DeliveryDriver.Quest.UI
             {
                 playerTransform = Camera.main.transform.root;
             }
+        }
+
+        private void ResolveDeliveryManager()
+        {
+            if (deliveryManager != null)
+            {
+                return;
+            }
+
+            deliveryManager = FindAnyObjectByType<DeliveryManager>();
+        }
+
+        private bool ShouldShowActiveQuestUI(QuestData quest)
+        {
+            if (quest == null)
+            {
+                return false;
+            }
+
+            ResolveDeliveryManager();
+            if (deliveryManager == null)
+            {
+                return true;
+            }
+
+            return deliveryManager.ShouldShowObjectiveUI;
+        }
+
+        private void SyncActiveQuestVisibility(QuestData quest)
+        {
+            if (activeQuestUI == null)
+            {
+                return;
+            }
+
+            bool shouldShow = ShouldShowActiveQuestUI(quest);
+            if (!shouldShow)
+            {
+                activeQuestUI.Hide();
+                return;
+            }
+
+            activeQuestUI.Show();
+            activeQuestUI.UpdateQuestDisplay(quest);
+            lastObjective = null;
+            UpdateActiveQuestDistance(quest);
+            UpdateCargoHealth(quest);
         }
 
         private void UpdateActiveQuestDistance(QuestData quest)
