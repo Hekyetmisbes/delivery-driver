@@ -34,6 +34,17 @@ public class DeliveryManager : MonoBehaviour
     [SerializeField] private LayerMask roadSurfaceMask;
     [SerializeField] private RoadGraphBuilder roadGraphBuilder;
     [SerializeField] private bool useRoadGraphSpawnPoints = true;
+    [SerializeField] private bool spawnOnBuildingFrontSidewalk = true;
+    [SerializeField] private float buildingSearchRadius = 30f;
+    [SerializeField] private float buildingFrontOffset = 2.2f;
+    [SerializeField] private float sidewalkToRoadMaxDistance = 14f;
+    [SerializeField] private float sidewalkValidationBuildingRadius = 6f;
+    [SerializeField] private float minPickupSpawnDistanceFromPlayer = 18f;
+    [SerializeField] private string[] buildingNameKeywords =
+    {
+        "building", "house", "shop", "market", "restaurant", "factory",
+        "stadium", "residential", "apartment", "office", "hospital", "school"
+    };
 
     [Header("Delivery Settings")]
     [SerializeField] private float deliveryRadius = 5f;
@@ -158,6 +169,9 @@ public class DeliveryManager : MonoBehaviour
     private Image speedometerIconImage;
     private TextMeshProUGUI speedometerText;
     private Sprite _cachedFallbackSprite;
+    private int cachedBuildingLayer = int.MinValue;
+    private readonly Dictionary<int, bool> roadColliderGuessCache = new Dictionary<int, bool>(256);
+    private bool usingRoadGraphSpawnCache;
 
     public bool IsDeliveryActive => isDeliveryActive;
     public bool HasBox => currentBox != null;
@@ -192,13 +206,22 @@ public class DeliveryManager : MonoBehaviour
             yield return null;
         }
 
+        // Cache terrain bounds BEFORE generating spawn points so terrain validation
+        // and auto-calculated spawn area work correctly.
+        ResolvePlayerTransform();
+        CacheTerrainBounds();
+        AutoCalculateSpawnAreaFromTerrain();
+
+        Debug.Log($"[DeliveryManager] Init: hasTerrainBounds={hasTerrainBounds}, " +
+                  $"hasRoadGraph={HasRoadGraphData()}, " +
+                  $"roadMask={roadSurfaceMask.value}, " +
+                  $"player={(cachedPlayerTransform != null ? cachedPlayerTransform.position.ToString() : "NULL")}, " +
+                  $"spawnArea=({spawnAreaMin} -> {spawnAreaMax})");
+
         GenerateSpawnPoints();
         SpawnNewBox();
 
-        // Cache player and UI references after scene is ready
-        ResolvePlayerTransform();
         EnsureSpeedometerUI();
-        CacheTerrainBounds();
         SubscribeToQuestEvents();
     }
 
@@ -229,6 +252,36 @@ public class DeliveryManager : MonoBehaviour
         }
         cachedTerrainBounds = boundsList.ToArray();
         hasTerrainBounds = cachedTerrainBounds.Length > 0;
+    }
+
+    /// <summary>
+    /// Auto-calculate spawnAreaMin/Max from terrain bounds so packages spawn
+    /// across the actual playable area instead of the default (-50, 50) range.
+    /// </summary>
+    private void AutoCalculateSpawnAreaFromTerrain()
+    {
+        if (!hasTerrainBounds || cachedTerrainBounds.Length == 0) return;
+
+        float minX = float.MaxValue, minZ = float.MaxValue;
+        float maxX = float.MinValue, maxZ = float.MinValue;
+
+        foreach (Bounds b in cachedTerrainBounds)
+        {
+            if (b.min.x < minX) minX = b.min.x;
+            if (b.min.z < minZ) minZ = b.min.z;
+            if (b.max.x > maxX) maxX = b.max.x;
+            if (b.max.z > maxZ) maxZ = b.max.z;
+        }
+
+        // Shrink slightly so we don't spawn right at terrain edges
+        float margin = 10f;
+        spawnAreaMin = new Vector2(minX + margin, minZ + margin);
+        spawnAreaMax = new Vector2(maxX - margin, maxZ - margin);
+
+        if (showDebugInfo)
+        {
+            Debug.Log($"[DeliveryManager] Auto-calculated spawn area from terrain: min={spawnAreaMin}, max={spawnAreaMax}");
+        }
     }
 
     private void ResolvePlayerTransform()
@@ -320,6 +373,12 @@ public class DeliveryManager : MonoBehaviour
     private void GenerateSpawnPoints()
     {
         availableSpawnPoints.Clear();
+        usingRoadGraphSpawnCache = false;
+
+        if (showDebugInfo)
+        {
+            Debug.Log($"[DeliveryManager] Generating spawn points. SpawnArea: min={spawnAreaMin}, max={spawnAreaMax}");
+        }
 
         // Use manual spawn points if available
         if (spawnPoints != null && spawnPoints.Length > 0 && !autoGenerateSpawnPoints)
@@ -343,6 +402,7 @@ public class DeliveryManager : MonoBehaviour
         {
             if (useRoadGraphSpawnPoints && TryGenerateSpawnPointsFromRoadGraph())
             {
+                usingRoadGraphSpawnCache = true;
                 if (showDebugInfo)
                 {
                     Debug.Log($"[DeliveryManager] Generated {availableSpawnPoints.Count} road-graph spawn points");
@@ -353,7 +413,7 @@ public class DeliveryManager : MonoBehaviour
             // Auto-generate spawn points
             for (int i = 0; i < numberOfAutoSpawnPoints; i++)
             {
-                Vector3 randomPoint = GetRandomGroundPosition();
+                Vector3 randomPoint = GetRandomGroundPosition(false);
                 if (IsValidSpawnPosition(randomPoint))
                 {
                     availableSpawnPoints.Add(randomPoint);
@@ -368,76 +428,248 @@ public class DeliveryManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Get random position on ground with proper ground detection
+    /// Get random position on road surface around a center point.
     /// </summary>
-    private Vector3 GetRandomGroundPosition()
+    private Vector3 GetRandomGroundPosition(bool logOnFailure = true)
     {
-        int maxAttempts = 30;
-        for (int i = 0; i < maxAttempts; i++)
-        {
-            float x = UnityEngine.Random.Range(spawnAreaMin.x, spawnAreaMax.x);
-            float z = UnityEngine.Random.Range(spawnAreaMin.y, spawnAreaMax.y);
-            Vector3 position = new Vector3(x, raycastStartHeight, z);
-
-            // Raycast down to find ground
-            if (Physics.Raycast(position, Vector3.down, out RaycastHit hit, raycastMaxDistance, groundMask, QueryTriggerInteraction.Ignore))
-            {
-                // Spawn only on road colliders, never on buildings/other meshes.
-                if (!IsRoadCollider(hit.collider))
-                {
-                    continue;
-                }
-
-                // Keep points inside terrain bounds.
-                if (!IsWithinAnyTerrainBounds(hit.point))
-                {
-                    continue;
-                }
-
-                // Make sure it's not too steep and not a trigger
-                if (Vector3.Dot(hit.normal, Vector3.up) > 0.7f && !hit.collider.isTrigger)
-                {
-                    Vector3 spawnPos = hit.point + Vector3.up * spawnHeight;
-
-                    // Validate spawn position (ensure there's space and no blocking geometry)
-                    if (!IsSpawnSpaceBlocked(spawnPos) && IsValidSpawnPosition(spawnPos))
-                    {
-                        if (showDebugInfo && i > 0)
-                        {
-                            Debug.Log($"[DeliveryManager] Found valid spawn point at {spawnPos} (attempt {i + 1})");
-                        }
-                        return spawnPos;
-                    }
-                }
-            }
-        }
-
-        // Fallback - use player position if available
         if (cachedPlayerTransform == null)
             ResolvePlayerTransform();
 
-        if (cachedPlayerTransform != null)
-        {
-            Vector3 playerPos = cachedPlayerTransform.position;
-            Vector3 offset = UnityEngine.Random.insideUnitCircle * 20f;
-            Vector3 fallbackPos = new Vector3(playerPos.x + offset.x, raycastStartHeight, playerPos.z + offset.y);
+        Vector3 searchCenter = cachedPlayerTransform != null
+            ? cachedPlayerTransform.position
+            : Vector3.zero;
 
-            if (Physics.Raycast(fallbackPos, Vector3.down, out RaycastHit hit, raycastMaxDistance, groundMask, QueryTriggerInteraction.Ignore))
+        // Search around the center with increasing radius
+        float[] radii = { 40f, 70f, 110f, 160f, 250f };
+        foreach (float radius in radii)
+        {
+            for (int i = 0; i < 15; i++)
             {
-                Vector3 fallbackSpawn = hit.point + Vector3.up * spawnHeight;
-                if (IsRoadCollider(hit.collider) && IsValidSpawnPosition(fallbackSpawn))
+                Vector2 rndCircle = UnityEngine.Random.insideUnitCircle.normalized
+                                    * UnityEngine.Random.Range(radius * 0.4f, radius);
+                Vector3 probePos = new Vector3(
+                    searchCenter.x + rndCircle.x,
+                    raycastStartHeight,
+                    searchCenter.z + rndCircle.y);
+
+                if (TryFindRoadsidePoint(probePos, out Vector3 result))
                 {
                     if (showDebugInfo)
                     {
-                        Debug.Log($"[DeliveryManager] Using fallback spawn near player at {hit.point}");
+                        Debug.Log($"[DeliveryManager] Found roadside spawn at {result} (radius={radius})");
                     }
-                    return fallbackSpawn;
+                    return result;
                 }
             }
         }
 
-        Debug.LogError("[DeliveryManager] Failed to find valid spawn position! Using fallback.");
-        return new Vector3(0, 10f, 0);
+        // Also sample across the configured spawn area, not only around player.
+        for (int i = 0; i < 120; i++)
+        {
+            Vector3 probePos = new Vector3(
+                UnityEngine.Random.Range(spawnAreaMin.x, spawnAreaMax.x),
+                raycastStartHeight,
+                UnityEngine.Random.Range(spawnAreaMin.y, spawnAreaMax.y));
+
+            if (TryFindRoadsidePoint(probePos, out Vector3 result))
+            {
+                if (showDebugInfo)
+                {
+                    Debug.Log($"[DeliveryManager] Found road spawn in area sample at {result}");
+                }
+                return result;
+            }
+        }
+
+        // Last resort: any flat ground near search center
+        for (int i = 0; i < 30; i++)
+        {
+            Vector2 off = UnityEngine.Random.insideUnitCircle * UnityEngine.Random.Range(20f, 120f);
+            Vector3 probe = new Vector3(
+                searchCenter.x + off.x, raycastStartHeight, searchCenter.z + off.y);
+
+            if (Physics.Raycast(probe, Vector3.down, out RaycastHit hit, raycastMaxDistance, ~0, QueryTriggerInteraction.Ignore)
+                && !hit.collider.isTrigger
+                && (!HasRoadMask || IsRoadCollider(hit.collider))
+                && Vector3.Dot(hit.normal, Vector3.up) > 0.7f
+                && !IsSpawnSpaceBlocked(hit.point + Vector3.up * spawnHeight))
+            {
+                Vector3 fallback = hit.point + Vector3.up * spawnHeight;
+                Debug.LogWarning($"[DeliveryManager] Using last-resort ground spawn at {fallback}");
+                return fallback;
+            }
+        }
+
+        if (logOnFailure)
+        {
+            Debug.LogError("[DeliveryManager] Failed to find a valid spawn position.");
+        }
+        return Vector3.positiveInfinity;
+    }
+
+    /// <summary>
+    /// From a raycast origin, find a valid road spawn point below.
+    /// </summary>
+    private bool TryFindRoadsidePoint(Vector3 rayOrigin, out Vector3 roadsidePoint)
+    {
+        roadsidePoint = Vector3.positiveInfinity;
+
+        // Cast down to find whatever surface is below
+        if (!Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, raycastMaxDistance, ~0, QueryTriggerInteraction.Ignore))
+        {
+            return false;
+        }
+
+        if (hit.collider.isTrigger || Vector3.Dot(hit.normal, Vector3.up) < 0.7f)
+        {
+            return false;
+        }
+
+        Vector3 groundPoint = hit.point;
+
+        // If we hit a road collider, spawn directly on road surface.
+        if (IsRoadCollider(hit.collider))
+        {
+            roadsidePoint = groundPoint + Vector3.up * spawnHeight;
+            return !IsSpawnSpaceBlocked(roadsidePoint);
+        }
+
+        // No road mask configured: accept generic ground.
+        if (!HasRoadMask)
+        {
+            roadsidePoint = groundPoint + Vector3.up * spawnHeight;
+            return !IsSpawnSpaceBlocked(roadsidePoint);
+        }
+
+        // We hit non-road ground: search nearby road colliders and try to place on road.
+        if (TryFindRoadSurfaceNearPoint(groundPoint, out roadsidePoint))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryFindRoadSurfaceNearPoint(Vector3 center, out Vector3 roadPoint)
+    {
+        roadPoint = Vector3.positiveInfinity;
+        if (!HasRoadMask)
+        {
+            return false;
+        }
+
+        float[] searchRadii = { 6f, 10f, 16f, 24f, 36f };
+        foreach (float radius in searchRadii)
+        {
+            int hitCount = Physics.OverlapSphereNonAlloc(center, radius, sharedOverlapBuffer, roadSurfaceMask, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < hitCount; i++)
+            {
+                Collider roadCol = sharedOverlapBuffer[i];
+                if (roadCol == null || roadCol.isTrigger || !IsRoadCollider(roadCol))
+                {
+                    continue;
+                }
+
+                if (!TryGetClosestPointSafe(roadCol, center, out Vector3 closePoint))
+                {
+                    continue;
+                }
+
+                Vector3 rayStart = closePoint + Vector3.up * 20f;
+                if (!Physics.Raycast(rayStart, Vector3.down, out RaycastHit hit, 80f, ~0, QueryTriggerInteraction.Ignore))
+                {
+                    continue;
+                }
+
+                if (hit.collider == null || hit.collider.isTrigger || !IsRoadCollider(hit.collider))
+                {
+                    continue;
+                }
+
+                Vector3 candidate = hit.point + Vector3.up * spawnHeight;
+                if (hasTerrainBounds && !IsWithinAnyTerrainBounds(candidate))
+                {
+                    continue;
+                }
+
+                if (IsSpawnSpaceBlocked(candidate))
+                {
+                    continue;
+                }
+
+                roadPoint = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Given a point on a road, probe sideways to find the road edge / curb area.
+    /// </summary>
+    private bool TryOffsetToRoadside(Vector3 roadPoint, Collider roadCollider, out Vector3 roadsidePoint)
+    {
+        roadsidePoint = Vector3.positiveInfinity;
+
+        // Try 4 cardinal + 4 diagonal directions to find the road edge
+        Vector3[] directions =
+        {
+            Vector3.right, Vector3.left, Vector3.forward, Vector3.back,
+            (Vector3.right + Vector3.forward).normalized,
+            (Vector3.right + Vector3.back).normalized,
+            (Vector3.left + Vector3.forward).normalized,
+            (Vector3.left + Vector3.back).normalized,
+        };
+
+        // Shuffle so we don't always pick the same direction
+        for (int i = directions.Length - 1; i > 0; i--)
+        {
+            int j = UnityEngine.Random.Range(0, i + 1);
+            (directions[i], directions[j]) = (directions[j], directions[i]);
+        }
+
+        foreach (Vector3 dir in directions)
+        {
+            // Step outward from road center to find where road ends
+            for (float dist = buildingFrontOffset; dist <= buildingFrontOffset + 6f; dist += 1f)
+            {
+                Vector3 candidate = roadPoint + dir * dist;
+                Vector3 probeRayStart = candidate + Vector3.up * 10f;
+
+                if (!Physics.Raycast(probeRayStart, Vector3.down, out RaycastHit sideHit, 30f, groundMask, QueryTriggerInteraction.Ignore))
+                {
+                    continue;
+                }
+
+                if (sideHit.collider.isTrigger)
+                {
+                    continue;
+                }
+
+                // We want to be OFF the road (curb/sidewalk) but still close to it
+                if (!IsRoadCollider(sideHit.collider))
+                {
+                    Vector3 spawnCandidate = sideHit.point + Vector3.up * spawnHeight;
+                    if (!IsSpawnSpaceBlocked(spawnCandidate))
+                    {
+                        roadsidePoint = spawnCandidate;
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // Could not find road edge - place right next to road with offset
+        Vector3 randomDir = new Vector3(UnityEngine.Random.Range(-1f, 1f), 0, UnityEngine.Random.Range(-1f, 1f)).normalized;
+        Vector3 offsetPoint = roadPoint + randomDir * buildingFrontOffset + Vector3.up * spawnHeight;
+        if (!IsSpawnSpaceBlocked(offsetPoint))
+        {
+            roadsidePoint = offsetPoint;
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -482,10 +714,10 @@ public class DeliveryManager : MonoBehaviour
             return;
         }
 
-        // Get a valid random spawn point
-        if (!TryGetValidSpawnPoint(Vector3.zero, false, out Vector3 spawnPos))
+        // Get a valid random spawn point (keep it away from player so it does not auto-pickup instantly)
+        if (!TryGetPickupSpawnPoint(out Vector3 spawnPos) || spawnPos == Vector3.zero)
         {
-            Debug.LogError("[DeliveryManager] Could not find a valid road spawn position.");
+            Debug.LogError("[DeliveryManager] Could not find a valid spawn position for delivery box.");
             return;
         }
 
@@ -569,6 +801,37 @@ public class DeliveryManager : MonoBehaviour
         }
 
         UpdateMiniMapObjectiveMarker();
+    }
+
+    private bool TryGetPickupSpawnPoint(out Vector3 spawnPoint)
+    {
+        ResolvePlayerTransform();
+
+        int attempts = Mathf.Max(40, numberOfAutoSpawnPoints * 8);
+        float minDistanceSqr = Mathf.Max(0f, minPickupSpawnDistanceFromPlayer) * Mathf.Max(0f, minPickupSpawnDistanceFromPlayer);
+
+        for (int i = 0; i < attempts; i++)
+        {
+            if (!TryGetValidSpawnPoint(Vector3.zero, false, out Vector3 candidate))
+            {
+                continue;
+            }
+
+            if (cachedPlayerTransform != null && minDistanceSqr > 0f)
+            {
+                Vector3 delta = candidate - cachedPlayerTransform.position;
+                delta.y = 0f;
+                if (delta.sqrMagnitude < minDistanceSqr)
+                {
+                    continue;
+                }
+            }
+
+            spawnPoint = candidate;
+            return true;
+        }
+
+        return TryGetValidSpawnPoint(Vector3.zero, false, out spawnPoint);
     }
 
     /// <summary>
@@ -792,14 +1055,18 @@ public class DeliveryManager : MonoBehaviour
     private bool TryGetValidSpawnPoint(Vector3 referencePoint, bool enforceMinDistance, out Vector3 spawnPoint)
     {
         const int maxAttempts = 40;
+        bool validateAsRoadGraph = usingRoadGraphSpawnCache && availableSpawnPoints.Count > 0;
 
         for (int i = 0; i < maxAttempts; i++)
         {
             Vector3 candidate = availableSpawnPoints.Count > 0
                 ? availableSpawnPoints[UnityEngine.Random.Range(0, availableSpawnPoints.Count)]
-                : GetRandomGroundPosition();
+                : GetRandomGroundPosition(false);
 
-            if (!IsValidSpawnPosition(candidate))
+            bool isValid = validateAsRoadGraph
+                ? IsValidRoadGraphSpawnPosition(candidate)
+                : IsValidSpawnPosition(candidate);
+            if (!isValid)
             {
                 continue;
             }
@@ -813,7 +1080,247 @@ public class DeliveryManager : MonoBehaviour
             return true;
         }
 
+        // Last resort: try a random ground position directly instead of returning origin
+        Vector3 fallback = GetRandomGroundPosition(false);
+        if (IsValidSpawnPosition(fallback))
+        {
+            spawnPoint = fallback;
+            return true;
+        }
+
+        // Emergency fallback: if strict roadside constraints fail repeatedly,
+        // allow any safe ground point so gameplay can continue.
+        if (TryGetEmergencyGroundSpawn(out fallback))
+        {
+            spawnPoint = fallback;
+            return true;
+        }
+
+        if (TryFindRoadPointFromRoadGraphWaypoints(out fallback))
+        {
+            spawnPoint = fallback;
+            return true;
+        }
+
         spawnPoint = Vector3.zero;
+        return false;
+    }
+
+    private bool TryGetEmergencyGroundSpawn(out Vector3 spawnPoint)
+    {
+        spawnPoint = Vector3.zero;
+
+        if (cachedPlayerTransform == null)
+        {
+            ResolvePlayerTransform();
+        }
+
+        Vector3 center = cachedPlayerTransform != null ? cachedPlayerTransform.position : Vector3.zero;
+        const int attempts = 80;
+        for (int i = 0; i < attempts; i++)
+        {
+            Vector2 off = UnityEngine.Random.insideUnitCircle * UnityEngine.Random.Range(14f, 140f);
+            Vector3 probe = new Vector3(center.x + off.x, raycastStartHeight, center.z + off.y);
+            if (!Physics.Raycast(probe, Vector3.down, out RaycastHit hit, raycastMaxDistance, ~0, QueryTriggerInteraction.Ignore))
+            {
+                continue;
+            }
+
+            if (hit.collider == null || hit.collider.isTrigger || Vector3.Dot(hit.normal, Vector3.up) < 0.65f)
+            {
+                continue;
+            }
+
+            if (HasRoadMask && !IsRoadCollider(hit.collider))
+            {
+                continue;
+            }
+
+            Vector3 candidate = hit.point + Vector3.up * spawnHeight;
+            if (!IsValidSpawnPosition(candidate))
+            {
+                continue;
+            }
+
+            spawnPoint = candidate;
+            Debug.LogWarning($"[DeliveryManager] Emergency fallback spawn used at {spawnPoint}");
+            return true;
+        }
+
+        if (TryFindRoadPointFromSceneColliders(out spawnPoint))
+        {
+            Debug.LogWarning($"[DeliveryManager] Road-collider fallback spawn used at {spawnPoint}");
+            return true;
+        }
+
+        if (TryFindRoadPointFromRoadGraphWaypoints(out spawnPoint))
+        {
+            Debug.LogWarning($"[DeliveryManager] RoadGraph fallback spawn used at {spawnPoint}");
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryFindRoadPointFromSceneColliders(out Vector3 spawnPoint)
+    {
+        spawnPoint = Vector3.zero;
+        if (!HasRoadMask)
+        {
+            return false;
+        }
+
+        Collider[] sceneColliders = FindObjectsByType<Collider>(FindObjectsSortMode.None);
+        if (sceneColliders == null || sceneColliders.Length == 0)
+        {
+            return false;
+        }
+
+        const int samplesPerCollider = 4;
+        foreach (Collider col in sceneColliders)
+        {
+            if (col == null || col.isTrigger || !IsRoadCollider(col))
+            {
+                continue;
+            }
+
+            Bounds b = col.bounds;
+            for (int i = 0; i < samplesPerCollider; i++)
+            {
+                float x = UnityEngine.Random.Range(b.min.x, b.max.x);
+                float z = UnityEngine.Random.Range(b.min.z, b.max.z);
+                Vector3 rayStart = new Vector3(x, b.max.y + 30f, z);
+                if (!Physics.Raycast(rayStart, Vector3.down, out RaycastHit hit, 120f, ~0, QueryTriggerInteraction.Ignore))
+                {
+                    continue;
+                }
+
+                if (hit.collider == null || hit.collider.isTrigger || !IsRoadCollider(hit.collider))
+                {
+                    continue;
+                }
+
+                Vector3 candidate = hit.point + Vector3.up * spawnHeight;
+                if (!IsValidSpawnPosition(candidate))
+                {
+                    continue;
+                }
+
+                spawnPoint = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryFindRoadPointFromRoadGraphWaypoints(out Vector3 spawnPoint)
+    {
+        spawnPoint = Vector3.zero;
+        if (!HasRoadGraphData())
+        {
+            return false;
+        }
+
+        const int attempts = 220;
+        for (int i = 0; i < attempts; i++)
+        {
+            var randomWp = roadGraphBuilder.RoadGraph.GetRandomWaypoint();
+            if (randomWp.segment == null)
+            {
+                continue;
+            }
+
+            Waypoint wp = randomWp.segment.GetWaypoint(randomWp.waypointIndex);
+            if (wp == null)
+            {
+                continue;
+            }
+
+            Vector3 rayStart = wp.position + Vector3.up * 60f;
+            if (!Physics.Raycast(rayStart, Vector3.down, out RaycastHit hit, 140f, ~0, QueryTriggerInteraction.Ignore))
+            {
+                continue;
+            }
+
+            if (hit.collider == null || hit.collider.isTrigger || Vector3.Dot(hit.normal, Vector3.up) < 0.65f)
+            {
+                continue;
+            }
+
+            bool acceptedRoad = HasRoadMask ? (IsRoadCollider(hit.collider) || IsLikelyRoadCollider(hit.collider)) : true;
+            if (!acceptedRoad)
+            {
+                // Some scenes provide road graph waypoints but the raycast hits non-road ground.
+                // Accept only when the hit remains close to the source waypoint.
+                Vector3 wpDelta = hit.point - wp.position;
+                wpDelta.y = 0f;
+                if (wpDelta.sqrMagnitude > 12.25f)
+                {
+                    continue;
+                }
+            }
+
+            Vector3 candidate = hit.point + Vector3.up * spawnHeight;
+            if (hasTerrainBounds && !IsWithinAnyTerrainBounds(candidate))
+            {
+                continue;
+            }
+
+            if (IsSpawnSpaceBlocked(candidate))
+            {
+                continue;
+            }
+
+            spawnPoint = candidate;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool IsLikelyRoadCollider(Collider collider)
+    {
+        if (collider == null)
+        {
+            return false;
+        }
+
+        string n = collider.name;
+        if (!string.IsNullOrEmpty(n))
+        {
+            string lower = n.ToLowerInvariant();
+            if (lower.Contains("road") || lower.Contains("street") || lower.Contains("asphalt") || lower.Contains("highway"))
+            {
+                return true;
+            }
+        }
+
+        string tag = collider.tag;
+        if (!string.IsNullOrEmpty(tag))
+        {
+            string lowerTag = tag.ToLowerInvariant();
+            if (lowerTag.Contains("road") || lowerTag.Contains("street"))
+            {
+                return true;
+            }
+        }
+
+        Transform t = collider.transform;
+        for (int i = 0; t != null && i < 6; i++)
+        {
+            string tn = t.name;
+            if (!string.IsNullOrEmpty(tn))
+            {
+                string lower = tn.ToLowerInvariant();
+                if (lower.Contains("road") || lower.Contains("street") || lower.Contains("asphalt") || lower.Contains("highway"))
+                {
+                    return true;
+                }
+            }
+            t = t.parent;
+        }
+
         return false;
     }
 
@@ -835,26 +1342,45 @@ public class DeliveryManager : MonoBehaviour
         int targetCount = Mathf.Max(1, numberOfAutoSpawnPoints);
         int maxAttempts = targetCount * 20;
         int attempts = 0;
+        int failNoRoadGraphPoint = 0;
+        int failOutOfTerrain = 0;
+        int failBlocked = 0;
+        int failValidation = 0;
 
         while (availableSpawnPoints.Count < targetCount && attempts < maxAttempts)
         {
             attempts++;
             if (!TryGetRandomRoadGraphPoint(out Vector3 point))
             {
+                failNoRoadGraphPoint++;
                 continue;
             }
 
             if (!IsWithinAnyTerrainBounds(point))
             {
+                failOutOfTerrain++;
                 continue;
             }
 
             if (IsSpawnSpaceBlocked(point))
             {
+                failBlocked++;
+                continue;
+            }
+
+            if (!IsValidRoadGraphSpawnPosition(point))
+            {
+                failValidation++;
                 continue;
             }
 
             availableSpawnPoints.Add(point);
+        }
+
+        if (showDebugInfo)
+        {
+            Debug.Log($"[DeliveryManager] Road graph spawn generation: {availableSpawnPoints.Count}/{targetCount} valid points found in {attempts} attempts " +
+                      $"(noPoint={failNoRoadGraphPoint}, outOfTerrain={failOutOfTerrain}, blocked={failBlocked}, invalid={failValidation})");
         }
 
         return availableSpawnPoints.Count > 0;
@@ -881,7 +1407,30 @@ public class DeliveryManager : MonoBehaviour
             return false;
         }
 
-        point = wp.position + Vector3.up * spawnHeight;
+        bool wantsSidewalkPoint = spawnOnBuildingFrontSidewalk && !HasRoadMask;
+        if (wantsSidewalkPoint)
+        {
+            if (!TryGetBuildingFrontSidewalkPoint(wp.position, out point))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            Vector3 rayStart = wp.position + Vector3.up * 30f;
+            if (Physics.Raycast(rayStart, Vector3.down, out RaycastHit hit, 80f, ~0, QueryTriggerInteraction.Ignore)
+                && hit.collider != null
+                && !hit.collider.isTrigger
+                && Vector3.Dot(hit.normal, Vector3.up) > 0.6f)
+            {
+                point = hit.point + Vector3.up * spawnHeight;
+            }
+            else
+            {
+                point = wp.position + Vector3.up * spawnHeight;
+            }
+        }
+
         return true;
     }
 
@@ -897,7 +1446,14 @@ public class DeliveryManager : MonoBehaviour
         {
             roadSurfaceMask = 1 << roadLayer;
         }
+        else
+        {
+            Debug.LogWarning("[DeliveryManager] No 'Road' layer found and roadSurfaceMask is not set. " +
+                             "Road-based spawn constraints will be skipped.");
+        }
     }
+
+    private bool HasRoadMask => roadSurfaceMask.value != 0;
 
     private bool IsRoadCollider(Collider collider)
     {
@@ -906,7 +1462,20 @@ public class DeliveryManager : MonoBehaviour
             return false;
         }
 
-        return (roadSurfaceMask.value & (1 << collider.gameObject.layer)) != 0;
+        if (HasRoadMask && (roadSurfaceMask.value & (1 << collider.gameObject.layer)) != 0)
+        {
+            return true;
+        }
+
+        int colliderId = collider.GetInstanceID();
+        if (roadColliderGuessCache.TryGetValue(colliderId, out bool cachedIsRoad))
+        {
+            return cachedIsRoad;
+        }
+
+        bool inferredIsRoad = IsLikelyRoadCollider(collider);
+        roadColliderGuessCache[colliderId] = inferredIsRoad;
+        return inferredIsRoad;
     }
 
     private bool IsWithinAnyTerrainBounds(Vector3 worldPos)
@@ -934,12 +1503,24 @@ public class DeliveryManager : MonoBehaviour
     private bool IsSpawnSpaceBlocked(Vector3 position)
     {
         const float checkRadius = 0.6f;
+        Collider supportCollider = null;
+        Vector3 supportRayOrigin = position + Vector3.up * 2f;
+        if (Physics.Raycast(supportRayOrigin, Vector3.down, out RaycastHit supportHit, 6f, ~0, QueryTriggerInteraction.Ignore))
+        {
+            supportCollider = supportHit.collider;
+        }
+
         int hitCount = Physics.OverlapSphereNonAlloc(position, checkRadius, sharedOverlapBuffer, ~0, QueryTriggerInteraction.Ignore);
 
         for (int i = 0; i < hitCount; i++)
         {
             Collider col = sharedOverlapBuffer[i];
             if (col == null || col.isTrigger)
+            {
+                continue;
+            }
+
+            if (supportCollider != null && col == supportCollider)
             {
                 continue;
             }
@@ -955,9 +1536,18 @@ public class DeliveryManager : MonoBehaviour
         return false;
     }
 
-    private bool IsValidSpawnPosition(Vector3 position)
+    /// <summary>
+    /// Validation path for points sourced from the RoadGraph.
+    /// These points are already road-biased, so avoid strict road-collider gating.
+    /// </summary>
+    private bool IsValidRoadGraphSpawnPosition(Vector3 position)
     {
-        if (!IsWithinAnyTerrainBounds(position))
+        if (!float.IsFinite(position.x) || !float.IsFinite(position.y) || !float.IsFinite(position.z))
+        {
+            return false;
+        }
+
+        if (hasTerrainBounds && !IsWithinAnyTerrainBounds(position))
         {
             return false;
         }
@@ -968,18 +1558,260 @@ public class DeliveryManager : MonoBehaviour
             return false;
         }
 
-        bool requireRoadCollider = !(useRoadGraphSpawnPoints && HasRoadGraphData());
-        if (requireRoadCollider && !IsRoadCollider(hit.collider))
-        {
-            return false;
-        }
-
-        if (spawnOnlyInNeighborhoods && !IsInsideNeighborhood(position))
+        if (hit.collider == null || hit.collider.isTrigger || Vector3.Dot(hit.normal, Vector3.up) < 0.6f)
         {
             return false;
         }
 
         return !IsSpawnSpaceBlocked(position);
+    }
+
+    private bool IsValidSpawnPosition(Vector3 position)
+    {
+        if (!float.IsFinite(position.x) || !float.IsFinite(position.y) || !float.IsFinite(position.z))
+        {
+            return false;
+        }
+
+        if (hasTerrainBounds && !IsWithinAnyTerrainBounds(position))
+        {
+            return false;
+        }
+
+        // When road-only spawning is active, don't additionally gate by neighborhood;
+        // this combination can make valid road spawns impossible in some scenes.
+        if (spawnOnlyInNeighborhoods && !HasRoadMask && !IsInsideNeighborhood(position))
+        {
+            return false;
+        }
+
+        // Must have ground below
+        Vector3 rayOrigin = position + Vector3.up * 5f;
+        if (!Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, 20f, ~0, QueryTriggerInteraction.Ignore))
+        {
+            return false;
+        }
+
+        // Road-based checks only when road mask is configured
+        if (HasRoadMask)
+        {
+            // Must be directly on road surface.
+            if (!IsRoadCollider(hit.collider))
+            {
+                return false;
+            }
+        }
+
+        return !IsSpawnSpaceBlocked(position);
+    }
+
+    private bool TryGetBuildingFrontSidewalkPoint(Vector3 roadAnchorPoint, out Vector3 sidewalkPoint)
+    {
+        sidewalkPoint = Vector3.zero;
+
+        if (!TryFindNearestBuildingCollider(roadAnchorPoint, buildingSearchRadius, out Collider buildingCollider, out Vector3 buildingFrontPoint))
+        {
+            return false;
+        }
+
+        Vector3 directionToRoad = roadAnchorPoint - buildingFrontPoint;
+        directionToRoad.y = 0f;
+        if (directionToRoad.sqrMagnitude < 0.01f)
+        {
+            directionToRoad = roadAnchorPoint - buildingCollider.bounds.center;
+            directionToRoad.y = 0f;
+        }
+
+        if (directionToRoad.sqrMagnitude < 0.01f)
+        {
+            return false;
+        }
+
+        directionToRoad.Normalize();
+        Vector3 probePoint = buildingFrontPoint + directionToRoad * Mathf.Max(0.5f, buildingFrontOffset);
+
+        Vector3 rayStart = probePoint + Vector3.up * 12f;
+        if (!Physics.Raycast(rayStart, Vector3.down, out RaycastHit hit, 40f, groundMask, QueryTriggerInteraction.Ignore))
+        {
+            return false;
+        }
+
+        if (hit.collider == null || hit.collider.isTrigger || (HasRoadMask && IsRoadCollider(hit.collider)))
+        {
+            return false;
+        }
+
+        Vector3 candidate = hit.point + Vector3.up * spawnHeight;
+        if (!IsNearBuilding(candidate, sidewalkValidationBuildingRadius))
+        {
+            return false;
+        }
+
+        if (HasRoadMask && !IsNearRoad(candidate, sidewalkToRoadMaxDistance))
+        {
+            return false;
+        }
+
+        sidewalkPoint = candidate;
+        return true;
+    }
+
+    private bool TryFindNearestBuildingCollider(Vector3 origin, float radius, out Collider nearestBuilding, out Vector3 nearestPoint)
+    {
+        nearestBuilding = null;
+        nearestPoint = Vector3.zero;
+
+        int hitCount = Physics.OverlapSphereNonAlloc(origin, radius, sharedOverlapBuffer, ~0, QueryTriggerInteraction.Ignore);
+        float bestSqrDistance = float.MaxValue;
+
+        for (int i = 0; i < hitCount; i++)
+        {
+            Collider col = sharedOverlapBuffer[i];
+            if (!IsBuildingCollider(col))
+            {
+                continue;
+            }
+
+            if (!TryGetClosestPointSafe(col, origin, out Vector3 point))
+            {
+                continue;
+            }
+
+            Vector3 delta = point - origin;
+            delta.y = 0f;
+            float sqrDistance = delta.sqrMagnitude;
+
+            if (sqrDistance < bestSqrDistance)
+            {
+                bestSqrDistance = sqrDistance;
+                nearestBuilding = col;
+                nearestPoint = point;
+            }
+        }
+
+        return nearestBuilding != null;
+    }
+
+    private bool TryGetClosestPointSafe(Collider collider, Vector3 origin, out Vector3 point)
+    {
+        point = Vector3.zero;
+        if (collider == null)
+        {
+            return false;
+        }
+
+        // Non-convex MeshCollider can throw in Collider.ClosestPoint.
+        if (collider is MeshCollider meshCollider && !meshCollider.convex)
+        {
+            point = collider.bounds.ClosestPoint(origin);
+            return float.IsFinite(point.x) && float.IsFinite(point.y) && float.IsFinite(point.z);
+        }
+
+        try
+        {
+            point = collider.ClosestPoint(origin);
+            return float.IsFinite(point.x) && float.IsFinite(point.y) && float.IsFinite(point.z);
+        }
+        catch (Exception)
+        {
+            point = collider.bounds.ClosestPoint(origin);
+            return float.IsFinite(point.x) && float.IsFinite(point.y) && float.IsFinite(point.z);
+        }
+    }
+
+    private bool IsNearBuilding(Vector3 position, float radius)
+    {
+        int hitCount = Physics.OverlapSphereNonAlloc(position, Mathf.Max(0.2f, radius), sharedOverlapBuffer, ~0, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < hitCount; i++)
+        {
+            if (IsBuildingCollider(sharedOverlapBuffer[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsNearRoad(Vector3 position, float radius)
+    {
+        int hitCount = Physics.OverlapSphereNonAlloc(position, Mathf.Max(0.2f, radius), sharedOverlapBuffer, ~0, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < hitCount; i++)
+        {
+            Collider col = sharedOverlapBuffer[i];
+            if (col == null || col.isTrigger)
+            {
+                continue;
+            }
+
+            if (IsRoadCollider(col))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsBuildingCollider(Collider collider)
+    {
+        if (collider == null)
+        {
+            return false;
+        }
+
+        Transform current = collider.transform;
+        for (int depth = 0; current != null && depth < 6; depth++)
+        {
+            if (IsBuildingObject(current.gameObject))
+            {
+                return true;
+            }
+
+            current = current.parent;
+        }
+
+        return false;
+    }
+
+    private bool IsBuildingObject(GameObject obj)
+    {
+        if (obj == null)
+        {
+            return false;
+        }
+
+        if (cachedBuildingLayer == int.MinValue)
+        {
+            cachedBuildingLayer = LayerMask.NameToLayer("MiniMapBuilding");
+        }
+
+        if (cachedBuildingLayer >= 0 && obj.layer == cachedBuildingLayer)
+        {
+            return true;
+        }
+
+        if (buildingNameKeywords == null || buildingNameKeywords.Length == 0)
+        {
+            return false;
+        }
+
+        string lowerName = obj.name.ToLowerInvariant();
+        for (int i = 0; i < buildingNameKeywords.Length; i++)
+        {
+            string keyword = buildingNameKeywords[i];
+            if (string.IsNullOrWhiteSpace(keyword))
+            {
+                continue;
+            }
+
+            if (lowerName.Contains(keyword.ToLowerInvariant()))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private string ResolveNeighborhoodName(Vector3 position)
