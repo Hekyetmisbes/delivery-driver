@@ -153,6 +153,7 @@ public class DeliveryManager : MonoBehaviour
     private bool hasNightBonus;
     private bool hasRainRiskBonus;
     private bool hasPendingPhoneOffer;
+    private bool hasAcceptedMission;
     private bool missionSettingsPreparedForSpawn;
     private DeliveryMissionType pendingMissionType = DeliveryMissionType.Standard;
     private float pendingMissionRewardMultiplier = 1f;
@@ -192,6 +193,7 @@ public class DeliveryManager : MonoBehaviour
     public bool HasBox => currentBox != null;
     public bool IsCarryingBox => currentBox != null && currentBox.IsPickedUp;
     public bool HasObjectivePoint => HasBox || isDeliveryActive;
+    public bool ShouldShowObjectiveUI => hasAcceptedMission && HasObjectivePoint;
     public Vector3 CurrentObjectivePoint => isDeliveryActive ? currentDeliveryPoint : currentPickupPoint;
     public Vector3 CurrentDeliveryPoint => currentDeliveryPoint;
     public Vector3 CurrentPickupPoint => currentPickupPoint;
@@ -207,6 +209,10 @@ public class DeliveryManager : MonoBehaviour
     {
         EnsureRoadSurfaceMask();
         deliveryUI = FindFirstObjectByType<DeliveryUI>();
+
+        // This project flow requires phone acceptance before showing delivery objective UI.
+        // Force this at runtime so scene/prefab inspector mismatches cannot bypass it.
+        requirePhoneMissionAccept = true;
 
         if (roadGraphBuilder == null)
         {
@@ -235,6 +241,7 @@ public class DeliveryManager : MonoBehaviour
 
         GenerateSpawnPoints();
         EnsurePhoneMissionUI();
+        hasAcceptedMission = false;
         if (requirePhoneMissionAccept)
         {
             ScheduleMissionOffer(initialPhoneOfferDelay);
@@ -2137,6 +2144,7 @@ public class DeliveryManager : MonoBehaviour
         currentDeliveryQuest = null;
 
         hasPendingPhoneOffer = false;
+        hasAcceptedMission = false;
         if (phoneMissionUI != null)
         {
             phoneMissionUI.HideOffer();
@@ -2798,8 +2806,8 @@ public class DeliveryManager : MonoBehaviour
         EnsurePhoneMissionUI();
         if (phoneMissionUI == null)
         {
-            Debug.LogWarning("[DeliveryManager] PhoneMissionUI not found. Falling back to auto spawn flow.");
-            SpawnNewBox();
+            Debug.LogError("[DeliveryManager] PhoneMissionUI not found. Mission offer cannot be shown.");
+            hasAcceptedMission = false;
             return;
         }
 
@@ -2821,6 +2829,7 @@ public class DeliveryManager : MonoBehaviour
         }
 
         hasPendingPhoneOffer = false;
+        hasAcceptedMission = true;
         CancelInvoke(nameof(OfferMissionToPhone));
         if (phoneMissionUI != null)
         {
@@ -2844,6 +2853,7 @@ public class DeliveryManager : MonoBehaviour
         }
 
         hasPendingPhoneOffer = false;
+        hasAcceptedMission = false;
         if (phoneMissionUI != null)
         {
             phoneMissionUI.HideOffer();
