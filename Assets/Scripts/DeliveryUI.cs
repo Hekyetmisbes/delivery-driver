@@ -16,6 +16,13 @@ public class DeliveryUI : MonoBehaviour
     [Header("Distance Display")]
     [SerializeField] private float distanceDisplayMultiplier = 10f;
 
+    [Header("Kenney Skin")]
+    [SerializeField] private bool useKenneySkin = true;
+    [SerializeField] private Sprite panelBackgroundSprite;
+    [SerializeField] private Sprite statusBackgroundSprite;
+    [SerializeField] private Sprite distanceBackgroundSprite;
+    [SerializeField] private Sprite neighborhoodBackgroundSprite;
+
     private DeliveryManager deliveryManager;
     private Transform playerTransform;
     private float nextPlayerResolveTime;
@@ -32,6 +39,8 @@ public class DeliveryUI : MonoBehaviour
     {
         deliveryManager = FindFirstObjectByType<DeliveryManager>();
         ResolvePlayerTransform();
+        ResolveSkinSprites();
+        ApplyKenneySkin();
 
         // Hide panel initially
         if (deliveryPanel != null)
@@ -181,5 +190,85 @@ public class DeliveryUI : MonoBehaviour
     private string GetNeighborhoodLabel(string neighborhoodName)
     {
         return string.IsNullOrWhiteSpace(neighborhoodName) ? "Bilinmiyor" : neighborhoodName;
+    }
+
+    private void ApplyKenneySkin()
+    {
+        if (!useKenneySkin || deliveryPanel == null)
+        {
+            return;
+        }
+
+        Image panelImage = deliveryPanel.GetComponent<Image>();
+        if (panelImage != null && panelBackgroundSprite != null)
+        {
+            panelImage.sprite = panelBackgroundSprite;
+            panelImage.type = Image.Type.Sliced;
+            panelImage.color = new Color(1f, 1f, 1f, 0.97f);
+        }
+
+        ApplyTextBlockStyle(statusText, statusBackgroundSprite, new Color(0.94f, 0.96f, 1f, 1f));
+        ApplyTextBlockStyle(distanceText, distanceBackgroundSprite, new Color(0.86f, 0.96f, 1f, 1f));
+        ApplyTextBlockStyle(neighborhoodText, neighborhoodBackgroundSprite, new Color(0.9f, 0.95f, 1f, 1f));
+    }
+
+    private void ApplyTextBlockStyle(TextMeshProUGUI text, Sprite backgroundSprite, Color textColor)
+    {
+        if (text == null)
+        {
+            return;
+        }
+
+        text.color = textColor;
+        text.outlineWidth = 0.18f;
+        text.outlineColor = new Color(0.07f, 0.11f, 0.16f, 1f);
+        text.fontStyle = FontStyles.Bold;
+        if (TMP_Settings.defaultFontAsset != null)
+        {
+            text.font = TMP_Settings.defaultFontAsset;
+        }
+
+        RectTransform parentRect = text.transform.parent as RectTransform;
+        if (parentRect == null)
+        {
+            return;
+        }
+
+        Image blockImage = parentRect.GetComponent<Image>();
+        if (blockImage == null)
+        {
+            blockImage = parentRect.gameObject.AddComponent<Image>();
+        }
+
+        if (backgroundSprite != null)
+        {
+            blockImage.sprite = backgroundSprite;
+            blockImage.type = Image.Type.Sliced;
+            blockImage.color = new Color(1f, 1f, 1f, 0.85f);
+        }
+    }
+
+    private void ResolveSkinSprites()
+    {
+        if (!useKenneySkin)
+        {
+            return;
+        }
+
+        panelBackgroundSprite ??= RuntimeUiSkinLoader.LoadSprite(
+            "UI/Kenney/panel_bg",
+            "Assets/kenney_ui-pack/PNG/Grey/Double/button_rectangle_depth_flat.png");
+
+        statusBackgroundSprite ??= RuntimeUiSkinLoader.LoadSprite(
+            "UI/Kenney/button_bg",
+            "Assets/kenney_ui-pack/PNG/Grey/Default/button_rectangle_depth_flat.png");
+
+        distanceBackgroundSprite ??= RuntimeUiSkinLoader.LoadSprite(
+            "UI/Kenney/button_upgrade",
+            "Assets/kenney_ui-pack/PNG/Blue/Default/button_rectangle_depth_flat.png");
+
+        neighborhoodBackgroundSprite ??= RuntimeUiSkinLoader.LoadSprite(
+            "UI/Kenney/button_bg",
+            "Assets/kenney_ui-pack/PNG/Grey/Default/button_rectangle_depth_flat.png");
     }
 }
