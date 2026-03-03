@@ -24,6 +24,11 @@ public class PhoneMissionUI : MonoBehaviour
     [SerializeField] private Vector2 panelOffset = new Vector2(-24f, -24f);
     [SerializeField] private string acceptButtonLabel = "Kabul Et";
     [SerializeField] private string rejectButtonLabel = "Reddet";
+    [SerializeField] private bool useKenneySkin = true;
+    [SerializeField] private Sprite panelBackgroundSprite;
+    [SerializeField] private Sprite buttonBackgroundSprite;
+    [SerializeField] private Sprite acceptIconSprite;
+    [SerializeField] private Sprite rejectIconSprite;
 
     private Action onAccept;
     private Action onReject;
@@ -129,6 +134,7 @@ public class PhoneMissionUI : MonoBehaviour
             return;
         }
 
+        ResolveSkinSprites();
         EnsureEventSystem();
 
         if (rootCanvas == null)
@@ -174,6 +180,12 @@ public class PhoneMissionUI : MonoBehaviour
         Image panelImage = panel.GetComponent<Image>();
         panelImage.color = new Color(0.06f, 0.08f, 0.12f, 0.95f);
         panelImage.raycastTarget = true;
+        if (panelBackgroundSprite != null)
+        {
+            panelImage.sprite = panelBackgroundSprite;
+            panelImage.type = Image.Type.Sliced;
+            panelImage.pixelsPerUnitMultiplier = 1f;
+        }
 
         VerticalLayoutGroup vertical = panel.GetComponent<VerticalLayoutGroup>();
         vertical.padding = new RectOffset(18, 18, 18, 18);
@@ -205,8 +217,8 @@ public class PhoneMissionUI : MonoBehaviour
         rowLayout.minHeight = 58f;
         rowLayout.flexibleHeight = 0f;
 
-        acceptButton = CreateButton(buttonRow.transform, "AcceptButton", new Color(0.16f, 0.62f, 0.3f, 1f), acceptButtonLabel);
-        rejectButton = CreateButton(buttonRow.transform, "RejectButton", new Color(0.68f, 0.22f, 0.2f, 1f), rejectButtonLabel);
+        acceptButton = CreateButton(buttonRow.transform, "AcceptButton", new Color(0.16f, 0.62f, 0.3f, 1f), acceptButtonLabel, acceptIconSprite);
+        rejectButton = CreateButton(buttonRow.transform, "RejectButton", new Color(0.68f, 0.22f, 0.2f, 1f), rejectButtonLabel, rejectIconSprite);
 
         return panel;
     }
@@ -243,13 +255,18 @@ public class PhoneMissionUI : MonoBehaviour
         return text;
     }
 
-    private Button CreateButton(Transform parent, string objectName, Color color, string label)
+    private Button CreateButton(Transform parent, string objectName, Color color, string label, Sprite iconSprite)
     {
         GameObject buttonObject = new GameObject(objectName, typeof(RectTransform), typeof(Image), typeof(Button), typeof(LayoutElement));
         buttonObject.transform.SetParent(parent, false);
 
         Image buttonImage = buttonObject.GetComponent<Image>();
         buttonImage.color = color;
+        if (buttonBackgroundSprite != null)
+        {
+            buttonImage.sprite = buttonBackgroundSprite;
+            buttonImage.type = Image.Type.Sliced;
+        }
 
         Button button = buttonObject.GetComponent<Button>();
         ColorBlock colors = button.colors;
@@ -285,7 +302,48 @@ public class PhoneMissionUI : MonoBehaviour
             text.font = TMP_Settings.defaultFontAsset;
         }
 
+        if (iconSprite != null)
+        {
+            GameObject iconObject = new GameObject("Icon", typeof(RectTransform), typeof(Image));
+            iconObject.transform.SetParent(buttonObject.transform, false);
+            RectTransform iconRect = iconObject.GetComponent<RectTransform>();
+            iconRect.anchorMin = new Vector2(0f, 0.5f);
+            iconRect.anchorMax = new Vector2(0f, 0.5f);
+            iconRect.pivot = new Vector2(0f, 0.5f);
+            iconRect.anchoredPosition = new Vector2(10f, 0f);
+            iconRect.sizeDelta = new Vector2(22f, 22f);
+
+            Image iconImage = iconObject.GetComponent<Image>();
+            iconImage.sprite = iconSprite;
+            iconImage.color = Color.white;
+            iconImage.preserveAspect = true;
+        }
+
         return button;
+    }
+
+    private void ResolveSkinSprites()
+    {
+        if (!useKenneySkin)
+        {
+            return;
+        }
+
+        panelBackgroundSprite ??= RuntimeUiSkinLoader.LoadSprite(
+            "UI/Kenney/panel_bg",
+            "Assets/kenney_ui-pack/PNG/Grey/Double/button_rectangle_depth_flat.png");
+
+        buttonBackgroundSprite ??= RuntimeUiSkinLoader.LoadSprite(
+            "UI/Kenney/button_bg",
+            "Assets/kenney_ui-pack/PNG/Grey/Default/button_rectangle_depth_flat.png");
+
+        acceptIconSprite ??= RuntimeUiSkinLoader.LoadSprite(
+            "UI/Kenney/icon_accept",
+            "Assets/kenney_ui-pack/PNG/Green/Default/icon_checkmark.png");
+
+        rejectIconSprite ??= RuntimeUiSkinLoader.LoadSprite(
+            "UI/Kenney/icon_reject",
+            "Assets/kenney_ui-pack/PNG/Red/Default/icon_cross.png");
     }
 
     private void EnsureEventSystem()

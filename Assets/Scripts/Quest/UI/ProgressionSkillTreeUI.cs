@@ -15,6 +15,10 @@ namespace DeliveryDriver.Quest.UI
     public class ProgressionSkillTreeUI : MonoBehaviour
     {
         [SerializeField] private Key toggleSkillTreeKey = Key.K;
+        [SerializeField] private bool useKenneySkin = true;
+        [SerializeField] private Sprite hudPanelSprite;
+        [SerializeField] private Sprite skillRowSprite;
+        [SerializeField] private Sprite upgradeButtonSprite;
 
         private GameObject rootCanvasObject;
         private GameObject progressHudPanel;
@@ -105,6 +109,8 @@ namespace DeliveryDriver.Quest.UI
 
         private void BuildUI()
         {
+            ResolveSkinSprites();
+
             rootCanvasObject = new GameObject("ProgressionSkillTreeCanvas");
             Canvas canvas = rootCanvasObject.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -122,7 +128,7 @@ namespace DeliveryDriver.Quest.UI
 
         private void BuildProgressHud(Transform parent)
         {
-            progressHudPanel = CreatePanel("DriverProgressHUD", parent, new Vector2(20f, -20f), new Vector2(370f, 145f), TextAnchor.UpperLeft);
+            progressHudPanel = CreatePanel("DriverProgressHUD", parent, new Vector2(20f, -20f), new Vector2(370f, 145f), TextAnchor.UpperLeft, null, hudPanelSprite);
             progressHudPanel.SetActive(false);
 
             levelText = CreateText("LevelText", progressHudPanel.transform, "Seviye 1", 24, FontStyles.Bold);
@@ -181,7 +187,14 @@ namespace DeliveryDriver.Quest.UI
             float y = -96f;
             foreach (DriverSkillType skill in new[] { DriverSkillType.FuelEfficiency, DriverSkillType.CargoDurability, DriverSkillType.RouteAssist })
             {
-                GameObject row = CreatePanel($"Skill_{skill}", skillTreeWindow.transform, new Vector2(12f, y), new Vector2(436f, 92f), TextAnchor.UpperLeft, new Color(0f, 0f, 0f, 0.32f));
+                GameObject row = CreatePanel(
+                    $"Skill_{skill}",
+                    skillTreeWindow.transform,
+                    new Vector2(12f, y),
+                    new Vector2(436f, 92f),
+                    TextAnchor.UpperLeft,
+                    new Color(0f, 0f, 0f, 0.32f),
+                    skillRowSprite);
 
                 TextMeshProUGUI nameLabel = CreateText("Name", row.transform, skill.ToString(), 19, FontStyles.Bold);
                 nameLabel.rectTransform.anchoredPosition = new Vector2(10f, -8f);
@@ -190,7 +203,7 @@ namespace DeliveryDriver.Quest.UI
                 rankLabel.rectTransform.anchoredPosition = new Vector2(10f, -35f);
                 skillRankLabels[skill] = rankLabel;
 
-                Button button = CreateButton("UpgradeButton", row.transform, "+", new Vector2(340f, -23f), new Vector2(78f, 42f));
+                Button button = CreateButton("UpgradeButton", row.transform, "+", new Vector2(340f, -23f), new Vector2(78f, 42f), upgradeButtonSprite);
                 DriverSkillType captured = skill;
                 button.onClick.AddListener(() => TryUpgradeSkill(captured));
                 skillButtons[skill] = button;
@@ -311,7 +324,8 @@ namespace DeliveryDriver.Quest.UI
             Vector2 anchoredPosition,
             Vector2 size,
             TextAnchor anchor,
-            Color? color = null)
+            Color? color = null,
+            Sprite backgroundSprite = null)
         {
             GameObject panel = new GameObject(name);
             panel.transform.SetParent(parent, false);
@@ -337,6 +351,11 @@ namespace DeliveryDriver.Quest.UI
 
             Image image = panel.AddComponent<Image>();
             image.color = color ?? new Color(0.06f, 0.08f, 0.12f, 0.78f);
+            if (backgroundSprite != null)
+            {
+                image.sprite = backgroundSprite;
+                image.type = Image.Type.Sliced;
+            }
             return panel;
         }
 
@@ -359,7 +378,7 @@ namespace DeliveryDriver.Quest.UI
             return textUi;
         }
 
-        private static Button CreateButton(string name, Transform parent, string label, Vector2 anchoredPosition, Vector2 size)
+        private static Button CreateButton(string name, Transform parent, string label, Vector2 anchoredPosition, Vector2 size, Sprite backgroundSprite = null)
         {
             GameObject buttonObject = new GameObject(name);
             buttonObject.transform.SetParent(parent, false);
@@ -372,6 +391,11 @@ namespace DeliveryDriver.Quest.UI
 
             Image image = buttonObject.AddComponent<Image>();
             image.color = new Color(0.13f, 0.49f, 0.25f, 0.95f);
+            if (backgroundSprite != null)
+            {
+                image.sprite = backgroundSprite;
+                image.type = Image.Type.Sliced;
+            }
 
             Button button = buttonObject.AddComponent<Button>();
             ColorBlock colors = button.colors;
@@ -391,6 +415,26 @@ namespace DeliveryDriver.Quest.UI
             buttonLabel.rectTransform.sizeDelta = Vector2.zero;
 
             return button;
+        }
+
+        private void ResolveSkinSprites()
+        {
+            if (!useKenneySkin)
+            {
+                return;
+            }
+
+            hudPanelSprite ??= RuntimeUiSkinLoader.LoadSprite(
+                "UI/Kenney/panel_bg",
+                "Assets/kenney_ui-pack/PNG/Grey/Double/button_rectangle_depth_flat.png");
+
+            skillRowSprite ??= RuntimeUiSkinLoader.LoadSprite(
+                "UI/Kenney/button_bg",
+                "Assets/kenney_ui-pack/PNG/Grey/Default/button_rectangle_depth_flat.png");
+
+            upgradeButtonSprite ??= RuntimeUiSkinLoader.LoadSprite(
+                "UI/Kenney/button_upgrade",
+                "Assets/kenney_ui-pack/PNG/Blue/Default/button_rectangle_depth_flat.png");
         }
     }
 }
