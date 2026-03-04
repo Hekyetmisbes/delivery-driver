@@ -38,10 +38,14 @@ namespace DeliveryDriver.Quest.UI
 
         private GameObject currentPickupMarker;
         private List<GameObject> currentDeliveryMarkers = new List<GameObject>();
+        private Vector3 currentPickupWorldPosition;
+        private bool hasPickupMarkerWorldPosition;
+        private readonly List<Vector3> currentDeliveryWorldPositions = new List<Vector3>();
         private GameObject playerMarker;
         private Transform playerTransform;
         private QuestData currentQuest;
         private float routeRefreshTimer;
+        private bool subscribedToQuestEvents;
 
         private void Awake()
         {
@@ -67,10 +71,17 @@ namespace DeliveryDriver.Quest.UI
 
         private void Update()
         {
+            if (!subscribedToQuestEvents)
+            {
+                SubscribeToQuestEvents();
+            }
+
             if (playerMarker != null && playerTransform != null)
             {
                 UpdatePlayerMarkerRotation();
             }
+
+            UpdateObjectiveMarkerPositions();
 
             if (showRoutePreview && includePlayerInRoute && currentQuest != null)
             {
@@ -136,7 +147,7 @@ namespace DeliveryDriver.Quest.UI
 
         private void SubscribeToQuestEvents()
         {
-            if (QuestManager.Instance == null)
+            if (subscribedToQuestEvents || QuestManager.Instance == null)
             {
                 return;
             }
@@ -145,6 +156,7 @@ namespace DeliveryDriver.Quest.UI
             QuestManager.Instance.OnQuestUpdated.AddListener(HandleQuestUpdated);
             QuestManager.Instance.OnQuestCompleted.AddListener(HandleQuestCompleted);
             QuestManager.Instance.OnQuestFailed.AddListener(HandleQuestFailed);
+            subscribedToQuestEvents = true;
         }
 
         private void UnsubscribeFromQuestEvents()
@@ -190,6 +202,7 @@ namespace DeliveryDriver.Quest.UI
             if (quest == null)
             {
                 currentQuest = null;
+                ClearAllMarkers();
                 ClearRoutePreview();
                 return;
             }
@@ -202,6 +215,17 @@ namespace DeliveryDriver.Quest.UI
                 // Cargo picked up, remove pickup marker and show delivery markers
                 Destroy(currentPickupMarker);
                 currentPickupMarker = null;
+                ShowDeliveryMarkers(quest);
+            }
+            else if (!quest.HasPickedUpCargo)
+            {
+                if (quest.PickupLocation != null && currentPickupMarker == null)
+                {
+                    ShowPickupMarker(quest.PickupLocation.Position);
+                }
+            }
+            else if (quest.HasPickedUpCargo && currentDeliveryMarkers.Count == 0)
+            {
                 ShowDeliveryMarkers(quest);
             }
 
@@ -224,19 +248,34 @@ namespace DeliveryDriver.Quest.UI
 
         private void ShowPickupMarker(Vector3 worldPosition)
         {
-            if (pickupMarkerPrefab == null || markerContainer == null)
+            if (markerContainer == null)
             {
                 return;
             }
 
-            currentPickupMarker = Instantiate(pickupMarkerPrefab, markerContainer);
+            if (currentPickupMarker != null)
+            {
+                Destroy(currentPickupMarker);
+            }
+
+            if (pickupMarkerPrefab != null)
+            {
+                currentPickupMarker = Instantiate(pickupMarkerPrefab, markerContainer);
+            }
+            else
+            {
+                currentPickupMarker = CreateDefaultMarkerUI(new Color(0.1f, 1f, 1f, 1f));
+                currentPickupMarker.transform.SetParent(markerContainer, false);
+            }
             currentPickupMarker.name = "PickupMarker";
-            // Position will be handled by the marker script or manually
+            currentPickupWorldPosition = worldPosition;
+            hasPickupMarkerWorldPosition = true;
+            UpdateMarkerPosition(currentPickupMarker, worldPosition);
         }
 
         private void ShowDeliveryMarkers(QuestData quest)
         {
-            if (deliveryMarkerPrefab == null || markerContainer == null || quest.DeliveryLocations == null)
+            if (markerContainer == null || quest.DeliveryLocations == null)
             {
                 return;
             }
@@ -250,14 +289,27 @@ namespace DeliveryDriver.Quest.UI
                 }
             }
             currentDeliveryMarkers.Clear();
+            currentDeliveryWorldPositions.Clear();
 
             // Show only the current delivery location
             if (quest.CurrentDeliveryIndex < quest.DeliveryLocations.Count)
             {
                 QuestLocation currentDelivery = quest.DeliveryLocations[quest.CurrentDeliveryIndex];
-                GameObject marker = Instantiate(deliveryMarkerPrefab, markerContainer);
+                GameObject marker;
+                if (deliveryMarkerPrefab != null)
+                {
+                    marker = Instantiate(deliveryMarkerPrefab, markerContainer);
+                }
+                else
+                {
+                    marker = CreateDefaultMarkerUI(new Color(1f, 0.9f, 0.05f, 1f));
+                    marker.transform.SetParent(markerContainer, false);
+                }
                 marker.name = $"DeliveryMarker_{quest.CurrentDeliveryIndex}";
                 currentDeliveryMarkers.Add(marker);
+                Vector3 worldPosition = currentDelivery != null ? currentDelivery.Position : Vector3.zero;
+                currentDeliveryWorldPositions.Add(worldPosition);
+                UpdateMarkerPosition(marker, worldPosition);
             }
         }
 
@@ -268,6 +320,7 @@ namespace DeliveryDriver.Quest.UI
                 Destroy(currentPickupMarker);
                 currentPickupMarker = null;
             }
+            hasPickupMarkerWorldPosition = false;
 
             foreach (var marker in currentDeliveryMarkers)
             {
@@ -277,6 +330,7 @@ namespace DeliveryDriver.Quest.UI
                 }
             }
             currentDeliveryMarkers.Clear();
+            currentDeliveryWorldPositions.Clear();
         }
 
         private void UpdatePlayerMarkerRotation()
@@ -331,6 +385,83 @@ namespace DeliveryDriver.Quest.UI
             routeLine.color = routeLineColor;
             routeLine.SetLineWidth(routeLineWidth);
             routeLine.SetPoints(localPoints);
+        }
+
+        private void UpdateObjectiveMarkerPositions()
+        {
+            if (cameraComponent == null || minimapContainer == null)
+            {
+                return;
+            }
+
+            if (currentPickupMarker != null && hasPickupMarkerWorldPosition)
+            {
+                UpdateMarkerPosition(currentPickupMarker, currentPickupWorldPosition);
+            }
+
+            int count = Mathf.Min(currentDeliveryMarkers.Count, currentDeliveryWorldPositions.Count);
+            for (int i = 0; i < count; i++)
+            {
+                GameObject marker = currentDeliveryMarkers[i];
+                if (marker == null)
+                {
+                    continue;
+                }
+
+                UpdateMarkerPosition(marker, currentDeliveryWorldPositions[i]);
+            }
+        }
+
+        private void UpdateMarkerPosition(GameObject markerObject, Vector3 worldPosition)
+        {
+            if (markerObject == null || cameraComponent == null || minimapContainer == null)
+            {
+                return;
+            }
+
+            Vector3 viewport = cameraComponent.WorldToViewportPoint(worldPosition);
+            if (viewport.z <= 0f)
+            {
+                markerObject.SetActive(false);
+                return;
+            }
+
+            markerObject.SetActive(true);
+
+            // Clamp to minimap edge with padding so off-screen markers stay visible at the border
+            const float edgePadding = 0.05f;
+            float clampedX = Mathf.Clamp(viewport.x, edgePadding, 1f - edgePadding);
+            float clampedY = Mathf.Clamp(viewport.y, edgePadding, 1f - edgePadding);
+
+            Rect rect = minimapContainer.rect;
+            Vector2 local = new Vector2(
+                (clampedX - 0.5f) * rect.width,
+                (clampedY - 0.5f) * rect.height
+            );
+
+            RectTransform markerRect = markerObject.GetComponent<RectTransform>();
+            if (markerRect != null)
+            {
+                markerRect.anchoredPosition = local;
+                return;
+            }
+
+            markerObject.transform.localPosition = new Vector3(local.x, local.y, 0f);
+        }
+
+        private GameObject CreateDefaultMarkerUI(Color color)
+        {
+            GameObject markerObj = new GameObject("DefaultMinimapMarker");
+            RectTransform rect = markerObj.AddComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(16f, 16f);
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+
+            Image img = markerObj.AddComponent<Image>();
+            img.color = color;
+            img.raycastTarget = false;
+            return markerObj;
         }
 
         private List<Vector3> BuildRoutePoints(QuestData quest)
