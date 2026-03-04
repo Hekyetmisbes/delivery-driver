@@ -23,6 +23,12 @@ namespace DeliveryDriver.Quest
         private const string SfxVolumeKey = "SfxVolume";
         private const string UiScaleKey = "UIScale";
         private const string QuestDifficultyKey = "QuestDifficultyPreference";
+        private const string QualityLevelKey = "QualityLevel";
+        private const string ResolutionIndexKey = "ResolutionIndex";
+        private const string ResolutionWidthKey = "ResolutionWidth";
+        private const string ResolutionHeightKey = "ResolutionHeight";
+        private const string FullScreenKey = "FullScreen";
+        private const string TargetFpsKey = "TargetFPS";
 
         [Header("Audio")]
         [Range(0f, 1f)] [SerializeField] private float masterVolume = 1f;
@@ -31,6 +37,14 @@ namespace DeliveryDriver.Quest
 
         [Header("Gameplay")]
         [SerializeField] private QuestDifficultyPreference questDifficultyPreference = QuestDifficultyPreference.MatchPlayerLevel;
+
+        [Header("Graphics")]
+        [SerializeField] private int qualityLevel = -1;
+        [SerializeField] private int resolutionIndex = -1;
+        [SerializeField] private int resolutionWidth;
+        [SerializeField] private int resolutionHeight;
+        [SerializeField] private bool fullScreen = true;
+        [SerializeField] private int targetFps = -1;
 
         [Header("UI")]
         [Range(0.75f, 1.5f)] [SerializeField] private float uiScale = 1f;
@@ -46,6 +60,10 @@ namespace DeliveryDriver.Quest
         public float SfxVolume => sfxVolume;
         public float UiScale => uiScale;
         public QuestDifficultyPreference DifficultyPreference => questDifficultyPreference;
+        public int QualityLevel => qualityLevel;
+        public int ResolutionIndex => resolutionIndex;
+        public bool FullScreen => fullScreen;
+        public int TargetFps => targetFps;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void EnsureInstance()
@@ -98,6 +116,32 @@ namespace DeliveryDriver.Quest
             questDifficultyPreference = preference;
         }
 
+        public void SetQualityLevel(int level)
+        {
+            qualityLevel = level;
+        }
+
+        public void SetResolutionIndex(int index)
+        {
+            resolutionIndex = index;
+        }
+
+        public void SetResolutionSize(int width, int height)
+        {
+            resolutionWidth = width;
+            resolutionHeight = height;
+        }
+
+        public void SetFullScreen(bool value)
+        {
+            fullScreen = value;
+        }
+
+        public void SetTargetFps(int fps)
+        {
+            targetFps = fps;
+        }
+
         public QuestDifficulty ResolveQuestDifficulty(int playerLevel)
         {
             if (questDifficultyPreference != QuestDifficultyPreference.MatchPlayerLevel)
@@ -123,6 +167,30 @@ namespace DeliveryDriver.Quest
                 QuestManager.Instance.SetSFXVolume(sfxVolume);
             }
 
+            // Graphics settings
+            if (qualityLevel >= 0)
+            {
+                if (QualityLevelManager.Instance != null)
+                {
+                    QualityLevelManager.Instance.SetQualityLevel(qualityLevel);
+                }
+                else
+                {
+                    QualitySettings.SetQualityLevel(qualityLevel, true);
+                }
+            }
+
+            if (resolutionWidth > 0 && resolutionHeight > 0)
+            {
+                Screen.SetResolution(resolutionWidth, resolutionHeight, fullScreen);
+            }
+            else
+            {
+                Screen.fullScreen = fullScreen;
+            }
+
+            Application.targetFrameRate = targetFps;
+
             if (uiScaleRoots != null)
             {
                 Vector3 scale = new Vector3(uiScale, uiScale, uiScale);
@@ -143,6 +211,12 @@ namespace DeliveryDriver.Quest
             PlayerPrefs.SetFloat(SfxVolumeKey, sfxVolume);
             PlayerPrefs.SetFloat(UiScaleKey, uiScale);
             PlayerPrefs.SetInt(QuestDifficultyKey, (int)questDifficultyPreference);
+            PlayerPrefs.SetInt(QualityLevelKey, qualityLevel);
+            PlayerPrefs.SetInt(ResolutionIndexKey, resolutionIndex);
+            PlayerPrefs.SetInt(ResolutionWidthKey, resolutionWidth);
+            PlayerPrefs.SetInt(ResolutionHeightKey, resolutionHeight);
+            PlayerPrefs.SetInt(FullScreenKey, fullScreen ? 1 : 0);
+            PlayerPrefs.SetInt(TargetFpsKey, targetFps);
             PlayerPrefs.Save();
         }
 
@@ -171,6 +245,36 @@ namespace DeliveryDriver.Quest
             if (PlayerPrefs.HasKey(QuestDifficultyKey))
             {
                 questDifficultyPreference = (QuestDifficultyPreference)PlayerPrefs.GetInt(QuestDifficultyKey);
+            }
+
+            if (PlayerPrefs.HasKey(QualityLevelKey))
+            {
+                qualityLevel = PlayerPrefs.GetInt(QualityLevelKey, qualityLevel);
+            }
+
+            if (PlayerPrefs.HasKey(ResolutionIndexKey))
+            {
+                resolutionIndex = PlayerPrefs.GetInt(ResolutionIndexKey, resolutionIndex);
+            }
+
+            if (PlayerPrefs.HasKey(ResolutionWidthKey))
+            {
+                resolutionWidth = PlayerPrefs.GetInt(ResolutionWidthKey, 0);
+            }
+
+            if (PlayerPrefs.HasKey(ResolutionHeightKey))
+            {
+                resolutionHeight = PlayerPrefs.GetInt(ResolutionHeightKey, 0);
+            }
+
+            if (PlayerPrefs.HasKey(FullScreenKey))
+            {
+                fullScreen = PlayerPrefs.GetInt(FullScreenKey, 1) == 1;
+            }
+
+            if (PlayerPrefs.HasKey(TargetFpsKey))
+            {
+                targetFps = PlayerPrefs.GetInt(TargetFpsKey, targetFps);
             }
         }
     }
