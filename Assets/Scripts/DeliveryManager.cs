@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
-using TMPro;
 using DeliveryDriver.Quest;
 using DeliveryDriver.City;
 using TrafficSystem;
@@ -86,52 +84,11 @@ public class DeliveryManager : MonoBehaviour
     [SerializeField] private float neighborhoodCheckRadius = 2f;
 
     [Header("Debug")]
-    [SerializeField] private bool showDebugInfo = true;
+    [SerializeField] private bool showDebugInfo = false;
 
-    [Header("MiniMap Objective Marker")]
-    [SerializeField] private bool enableMiniMapObjectiveMarker = true;
-    [SerializeField] private float miniMapMarkerHeight = 24f;
-    [SerializeField] private Vector3 miniMapMarkerScale = new Vector3(4f, 10f, 4f);
-    [SerializeField] private float miniMapMarkerSpinSpeed = 120f;
-    [SerializeField] private float miniMapMarkerPulseSpeed = 3f;
-    [SerializeField] private float miniMapMarkerPulseAmount = 0.2f;
-    [SerializeField] private Color miniMapPickupMarkerColor = new Color(0.1f, 1f, 1f, 1f);
-    [SerializeField] private Color miniMapDeliveryMarkerColor = new Color(1f, 0.9f, 0.05f, 1f);
-    [SerializeField] private string miniMapMarkerLayerName = "MiniMapMarker";
-    [SerializeField] private bool clampMiniMapMarkerToEdgeWhenOffscreen = true;
-    [SerializeField, Range(0f, 0.45f)] private float miniMapMarkerEdgePadding = 0.08f;
-    [SerializeField] private bool showMiniMapEdgeIndicator = true;
-    [SerializeField] private float miniMapEdgeIndicatorSize = 22f;
-    [SerializeField] private float miniMapEdgeIndicatorOffset = 0f;
-    [SerializeField] private float miniMapEdgeIndicatorPulseSpeed = 4f;
-    [SerializeField, Range(0f, 0.6f)] private float miniMapEdgeIndicatorPulseAmount = 0.2f;
-    [SerializeField] private float miniMapMarkerFollowSmoothTime = 0.08f;
-    [SerializeField] private float miniMapEdgeFollowSmoothTime = 0.12f;
-    [SerializeField] private Sprite miniMapEdgeIndicatorSprite;
-
-    [Header("Speedometer UI")]
-    [SerializeField] private bool showSpeedometer = true;
-    [SerializeField] private string speedometerLabel = "Hiz";
-    [SerializeField] private Vector2 speedometerAnchoredPosition = new Vector2(-28f, 24f);
-    [SerializeField] private int speedometerFontSize = 34;
-    [SerializeField] private Color speedometerColor = Color.white;
-    [SerializeField] private Vector2 speedometerPanelSize = new Vector2(280f, 78f);
-    [SerializeField] private Color speedometerPanelBaseColor = new Color(0.07f, 0.08f, 0.1f, 0.72f);
-    [SerializeField] private Color speedometerPanelEcoColor = new Color(0.08f, 0.2f, 0.12f, 0.78f);
-    [SerializeField] private Color speedometerPanelCruiseColor = new Color(0.08f, 0.13f, 0.2f, 0.78f);
-    [SerializeField] private Color speedometerPanelFastColor = new Color(0.24f, 0.18f, 0.06f, 0.8f);
-    [SerializeField] private Color speedometerPanelMaxColor = new Color(0.3f, 0.08f, 0.08f, 0.84f);
-    [SerializeField] private Color speedometerIconEcoColor = new Color(0.35f, 0.9f, 0.45f, 1f);
-    [SerializeField] private Color speedometerIconCruiseColor = new Color(0.35f, 0.7f, 1f, 1f);
-    [SerializeField] private Color speedometerIconFastColor = new Color(1f, 0.78f, 0.3f, 1f);
-    [SerializeField] private Color speedometerIconMaxColor = new Color(1f, 0.32f, 0.32f, 1f);
-    [SerializeField] private float cruiseThresholdKmh = 20f;
-    [SerializeField] private float fastThresholdKmh = 60f;
-    [SerializeField] private float maxThresholdKmh = 100f;
-    [SerializeField] private Sprite speedIconEcoSprite;
-    [SerializeField] private Sprite speedIconCruiseSprite;
-    [SerializeField] private Sprite speedIconFastSprite;
-    [SerializeField] private Sprite speedIconMaxSprite;
+    [Header("Extracted Components")]
+    [SerializeField] private MiniMapObjectiveMarker miniMapMarker;
+    [SerializeField] private SpeedometerUI speedometerUI;
 
     private DeliveryBox currentBox;
     private GameObject currentPickupIndicator;
@@ -169,22 +126,6 @@ public class DeliveryManager : MonoBehaviour
     private Bounds[] cachedTerrainBounds;
     private bool hasTerrainBounds;
     private bool isFinishingDeliveryLifecycle;
-    private GameObject miniMapObjectiveMarker;
-    private Material miniMapObjectiveMarkerMaterial;
-    private int cachedMiniMapMarkerLayer = int.MinValue;
-    private Camera cachedMiniMapCamera;
-    private Canvas miniMapEdgeCanvas;
-    private RectTransform miniMapEdgeIndicatorRect;
-    private Image miniMapEdgeIndicatorImage;
-    private Vector3 miniMapMarkerVelocity;
-    private Vector2 miniMapEdgeIndicatorVelocity;
-    private bool hasMiniMapMarkerPosition;
-    private bool hasMiniMapEdgeIndicatorPosition;
-    private RectTransform speedometerPanelRect;
-    private Image speedometerPanelImage;
-    private Image speedometerIconImage;
-    private TextMeshProUGUI speedometerText;
-    private Sprite _cachedFallbackSprite;
     private int cachedBuildingLayer = int.MinValue;
     private readonly Dictionary<int, bool> roadColliderGuessCache = new Dictionary<int, bool>(256);
     private bool usingRoadGraphSpawnCache;
@@ -203,6 +144,11 @@ public class DeliveryManager : MonoBehaviour
     private void Awake()
     {
         EnsureRoadSurfaceMask();
+
+        if (miniMapMarker == null)
+            miniMapMarker = GetComponent<MiniMapObjectiveMarker>();
+        if (speedometerUI == null)
+            speedometerUI = GetComponent<SpeedometerUI>();
     }
 
     private System.Collections.IEnumerator Start()
@@ -251,15 +197,13 @@ public class DeliveryManager : MonoBehaviour
             SpawnNewBox();
         }
 
-        EnsureSpeedometerUI();
+        speedometerUI?.Initialize(cachedPlayerRigidbody);
         SubscribeToQuestEvents();
     }
 
     private void OnDestroy()
     {
         UnsubscribeFromQuestEvents();
-        RemoveMiniMapObjectiveMarker();
-        RemoveMiniMapEdgeIndicator();
 
         if (phoneMissionUI != null)
         {
@@ -321,6 +265,8 @@ public class DeliveryManager : MonoBehaviour
 
     private void ResolvePlayerTransform()
     {
+        if (cachedPlayerTransform != null) return;
+
         CarController car = FindFirstObjectByType<CarController>();
         if (car != null)
         {
@@ -361,9 +307,6 @@ public class DeliveryManager : MonoBehaviour
 
     private void Update()
     {
-        UpdateMiniMapObjectiveMarker();
-        UpdateSpeedometerUI();
-
         if (!isDeliveryActive || currentBox == null || !currentBox.IsPickedUp)
         {
             return;
@@ -848,7 +791,7 @@ public class DeliveryManager : MonoBehaviour
             Debug.Log($"[DeliveryManager] Spawned box at {spawnPos}. MissionType={currentMissionType}, Conditions x{currentMissionRewardMultiplier:F2}");
         }
 
-        UpdateMiniMapObjectiveMarker();
+        miniMapMarker?.SetPickupTarget(currentPickupPoint);
     }
 
     private bool TryGetPickupSpawnPoint(out Vector3 spawnPoint)
@@ -933,7 +876,7 @@ public class DeliveryManager : MonoBehaviour
             Debug.Log($"[DeliveryManager] Delivery route prepared. Stops={currentDeliveryStops.Count}, FirstTarget={currentDeliveryPoint}, Distance={distance:F1}m");
         }
 
-        UpdateMiniMapObjectiveMarker();
+        miniMapMarker?.SetDeliveryTarget(currentDeliveryPoint);
     }
 
     /// <summary>
@@ -1210,6 +1153,8 @@ public class DeliveryManager : MonoBehaviour
         return false;
     }
 
+    private static readonly Collider[] roadSearchBuffer = new Collider[64];
+
     private bool TryFindRoadPointFromSceneColliders(out Vector3 spawnPoint)
     {
         spawnPoint = Vector3.zero;
@@ -1218,15 +1163,18 @@ public class DeliveryManager : MonoBehaviour
             return false;
         }
 
-        Collider[] sceneColliders = FindObjectsByType<Collider>(FindObjectsSortMode.None);
-        if (sceneColliders == null || sceneColliders.Length == 0)
+        Vector3 center = cachedPlayerTransform != null ? cachedPlayerTransform.position : Vector3.zero;
+        Vector3 halfExtents = new Vector3(150f, 100f, 150f);
+        int hitCount = Physics.OverlapBoxNonAlloc(center, halfExtents, roadSearchBuffer, Quaternion.identity, roadSurfaceMask, QueryTriggerInteraction.Ignore);
+        if (hitCount == 0)
         {
             return false;
         }
 
         const int samplesPerCollider = 4;
-        foreach (Collider col in sceneColliders)
+        for (int c = 0; c < hitCount; c++)
         {
+            Collider col = roadSearchBuffer[c];
             if (col == null || col.isTrigger || !IsRoadCollider(col))
             {
                 continue;
@@ -1522,6 +1470,10 @@ public class DeliveryManager : MonoBehaviour
         }
 
         bool inferredIsRoad = IsLikelyRoadCollider(collider);
+        if (roadColliderGuessCache.Count >= 512)
+        {
+            roadColliderGuessCache.Clear();
+        }
         roadColliderGuessCache[colliderId] = inferredIsRoad;
         return inferredIsRoad;
     }
@@ -1822,6 +1774,9 @@ public class DeliveryManager : MonoBehaviour
         return false;
     }
 
+    private HashSet<string> buildingKeywordSet;
+    private readonly Dictionary<int, bool> buildingObjectCache = new Dictionary<int, bool>(256);
+
     private bool IsBuildingObject(GameObject obj)
     {
         if (obj == null)
@@ -1839,32 +1794,59 @@ public class DeliveryManager : MonoBehaviour
             return true;
         }
 
-        if (buildingNameKeywords == null || buildingNameKeywords.Length == 0)
+        int instanceId = obj.GetInstanceID();
+        if (buildingObjectCache.TryGetValue(instanceId, out bool cached))
         {
-            return false;
+            return cached;
         }
 
-        string lowerName = obj.name.ToLowerInvariant();
-        for (int i = 0; i < buildingNameKeywords.Length; i++)
+        if (buildingKeywordSet == null)
         {
-            string keyword = buildingNameKeywords[i];
-            if (string.IsNullOrWhiteSpace(keyword))
+            buildingKeywordSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (buildingNameKeywords != null)
             {
-                continue;
-            }
-
-            if (lowerName.Contains(keyword.ToLowerInvariant()))
-            {
-                return true;
+                foreach (string kw in buildingNameKeywords)
+                {
+                    if (!string.IsNullOrWhiteSpace(kw))
+                        buildingKeywordSet.Add(kw.ToLowerInvariant());
+                }
             }
         }
 
-        return false;
+        bool result = false;
+        if (buildingKeywordSet.Count > 0)
+        {
+            string lowerName = obj.name.ToLowerInvariant();
+            foreach (string keyword in buildingKeywordSet)
+            {
+                if (lowerName.Contains(keyword))
+                {
+                    result = true;
+                    break;
+                }
+            }
+        }
+
+        if (buildingObjectCache.Count >= 256)
+        {
+            buildingObjectCache.Clear();
+        }
+        buildingObjectCache[instanceId] = result;
+        return result;
     }
+
+    private int cachedNeighborhoodLayer = int.MinValue;
+    private LayerMask neighborhoodLayerMask;
 
     private string ResolveNeighborhoodName(Vector3 position)
     {
-        int hitCount = Physics.OverlapSphereNonAlloc(position, neighborhoodCheckRadius, sharedOverlapBuffer, ~0, QueryTriggerInteraction.Collide);
+        if (cachedNeighborhoodLayer == int.MinValue)
+        {
+            cachedNeighborhoodLayer = LayerMask.NameToLayer("Neighborhood");
+            neighborhoodLayerMask = cachedNeighborhoodLayer >= 0 ? (1 << cachedNeighborhoodLayer) : ~0;
+        }
+
+        int hitCount = Physics.OverlapSphereNonAlloc(position, neighborhoodCheckRadius, sharedOverlapBuffer, neighborhoodLayerMask, QueryTriggerInteraction.Collide);
         for (int i = 0; i < hitCount; i++)
         {
             Collider col = sharedOverlapBuffer[i];
@@ -2133,7 +2115,7 @@ public class DeliveryManager : MonoBehaviour
             currentBox = null;
         }
 
-        RemoveMiniMapObjectiveMarker();
+        miniMapMarker?.ClearTarget();
 
         currentDeliveryStops.Clear();
         currentDeliveryStopNeighborhoods.Clear();
@@ -2198,549 +2180,9 @@ public class DeliveryManager : MonoBehaviour
             QuestManager.Instance?.OnQuestUpdated?.Invoke(currentDeliveryQuest);
         }
 
-        UpdateMiniMapObjectiveMarker();
+        miniMapMarker?.SetDeliveryTarget(currentDeliveryPoint);
     }
 
-    private void EnsureMiniMapObjectiveMarker()
-    {
-        if (miniMapObjectiveMarker != null)
-        {
-            return;
-        }
-
-        miniMapObjectiveMarker = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        miniMapObjectiveMarker.name = "MiniMapObjectiveMarker";
-        miniMapObjectiveMarker.transform.localScale = miniMapMarkerScale;
-        int markerLayer = ResolveMiniMapMarkerLayer();
-        if (markerLayer >= 0)
-        {
-            miniMapObjectiveMarker.layer = markerLayer;
-        }
-
-        Collider markerCollider = miniMapObjectiveMarker.GetComponent<Collider>();
-        if (markerCollider != null)
-        {
-            Destroy(markerCollider);
-        }
-
-        Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
-        if (shader == null)
-        {
-            shader = Shader.Find("Unlit/Color");
-        }
-
-        if (shader != null)
-        {
-            miniMapObjectiveMarkerMaterial = new Material(shader);
-            miniMapObjectiveMarker.GetComponent<MeshRenderer>().material = miniMapObjectiveMarkerMaterial;
-        }
-    }
-
-    private enum SpeedometerTier
-    {
-        Eco,
-        Cruise,
-        Fast,
-        Max
-    }
-
-    private void EnsureSpeedometerUI()
-    {
-        if (!showSpeedometer || speedometerText != null)
-        {
-            return;
-        }
-
-        Canvas targetCanvas = FindBestHudCanvas();
-        if (targetCanvas == null)
-        {
-            GameObject canvasObject = new GameObject("GameplayHUDCanvas");
-            targetCanvas = canvasObject.AddComponent<Canvas>();
-            targetCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvasObject.AddComponent<CanvasScaler>();
-            canvasObject.AddComponent<GraphicRaycaster>();
-        }
-
-        GameObject panelObject = new GameObject("SpeedometerPanel");
-        panelObject.transform.SetParent(targetCanvas.transform, false);
-        speedometerPanelRect = panelObject.AddComponent<RectTransform>();
-        speedometerPanelRect.anchorMin = new Vector2(1f, 0f);
-        speedometerPanelRect.anchorMax = new Vector2(1f, 0f);
-        speedometerPanelRect.pivot = new Vector2(1f, 0f);
-        speedometerPanelRect.anchoredPosition = speedometerAnchoredPosition;
-        speedometerPanelRect.sizeDelta = speedometerPanelSize;
-
-        speedometerPanelImage = panelObject.AddComponent<Image>();
-        speedometerPanelImage.color = speedometerPanelBaseColor;
-        speedometerPanelImage.raycastTarget = false;
-        speedometerPanelImage.sprite = GetFallbackSprite();
-        speedometerPanelImage.type = Image.Type.Simple;
-
-        GameObject iconObject = new GameObject("SpeedometerIcon");
-        iconObject.transform.SetParent(panelObject.transform, false);
-        RectTransform iconRect = iconObject.AddComponent<RectTransform>();
-        iconRect.anchorMin = new Vector2(0f, 0.5f);
-        iconRect.anchorMax = new Vector2(0f, 0.5f);
-        iconRect.pivot = new Vector2(0f, 0.5f);
-        iconRect.anchoredPosition = new Vector2(12f, 0f);
-        iconRect.sizeDelta = new Vector2(42f, 42f);
-
-        speedometerIconImage = iconObject.AddComponent<Image>();
-        speedometerIconImage.raycastTarget = false;
-        speedometerIconImage.sprite = speedIconEcoSprite != null ? speedIconEcoSprite : GetFallbackSprite();
-        speedometerIconImage.color = speedometerIconEcoColor;
-        speedometerIconImage.preserveAspect = true;
-
-        GameObject speedTextObject = new GameObject("SpeedometerText");
-        speedTextObject.transform.SetParent(panelObject.transform, false);
-        RectTransform textRect = speedTextObject.AddComponent<RectTransform>();
-        textRect.anchorMin = new Vector2(0f, 0f);
-        textRect.anchorMax = new Vector2(1f, 1f);
-        textRect.pivot = new Vector2(0.5f, 0.5f);
-        textRect.offsetMin = new Vector2(62f, 6f);
-        textRect.offsetMax = new Vector2(-14f, -6f);
-
-        speedometerText = speedTextObject.AddComponent<TextMeshProUGUI>();
-        speedometerText.fontSize = Mathf.Max(12, speedometerFontSize);
-        speedometerText.color = speedometerColor;
-        speedometerText.alignment = TextAlignmentOptions.MidlineRight;
-        speedometerText.text = $"{speedometerLabel}: 0 km/h";
-    }
-
-    private void UpdateSpeedometerUI()
-    {
-        if (!showSpeedometer)
-        {
-            if (speedometerPanelRect != null)
-            {
-                speedometerPanelRect.gameObject.SetActive(false);
-            }
-            return;
-        }
-
-        if (speedometerText == null || speedometerPanelRect == null)
-        {
-            EnsureSpeedometerUI();
-        }
-
-        if (speedometerText == null || speedometerPanelRect == null)
-        {
-            return;
-        }
-
-        if (cachedPlayerTransform == null)
-        {
-            ResolvePlayerTransform();
-        }
-
-        if (cachedPlayerRigidbody == null && cachedPlayerTransform != null)
-        {
-            cachedPlayerRigidbody = cachedPlayerTransform.GetComponent<Rigidbody>();
-        }
-
-        float speedKmh = cachedPlayerRigidbody != null
-            ? cachedPlayerRigidbody.linearVelocity.magnitude * 3.6f
-            : 0f;
-
-        SpeedometerTier tier = EvaluateSpeedometerTier(speedKmh);
-        ApplySpeedometerTierVisual(tier);
-
-        speedometerPanelRect.gameObject.SetActive(true);
-        speedometerText.text = $"{speedometerLabel}: {speedKmh:0} km/h";
-    }
-
-    private SpeedometerTier EvaluateSpeedometerTier(float speedKmh)
-    {
-        if (speedKmh >= maxThresholdKmh)
-        {
-            return SpeedometerTier.Max;
-        }
-
-        if (speedKmh >= fastThresholdKmh)
-        {
-            return SpeedometerTier.Fast;
-        }
-
-        if (speedKmh >= cruiseThresholdKmh)
-        {
-            return SpeedometerTier.Cruise;
-        }
-
-        return SpeedometerTier.Eco;
-    }
-
-    private void ApplySpeedometerTierVisual(SpeedometerTier tier)
-    {
-        if (speedometerPanelImage == null || speedometerIconImage == null)
-        {
-            return;
-        }
-
-        Sprite fallback = GetFallbackSprite();
-        Sprite selectedSprite = fallback;
-        float fallbackFillAmount = 0.35f;
-        switch (tier)
-        {
-            case SpeedometerTier.Max:
-                speedometerPanelImage.color = speedometerPanelMaxColor;
-                speedometerIconImage.color = speedometerIconMaxColor;
-                selectedSprite = speedIconMaxSprite != null ? speedIconMaxSprite : fallback;
-                fallbackFillAmount = 1f;
-                break;
-            case SpeedometerTier.Fast:
-                speedometerPanelImage.color = speedometerPanelFastColor;
-                speedometerIconImage.color = speedometerIconFastColor;
-                selectedSprite = speedIconFastSprite != null ? speedIconFastSprite : fallback;
-                fallbackFillAmount = 0.78f;
-                break;
-            case SpeedometerTier.Cruise:
-                speedometerPanelImage.color = speedometerPanelCruiseColor;
-                speedometerIconImage.color = speedometerIconCruiseColor;
-                selectedSprite = speedIconCruiseSprite != null ? speedIconCruiseSprite : fallback;
-                fallbackFillAmount = 0.58f;
-                break;
-            default:
-                speedometerPanelImage.color = speedometerPanelEcoColor;
-                speedometerIconImage.color = speedometerIconEcoColor;
-                selectedSprite = speedIconEcoSprite != null ? speedIconEcoSprite : fallback;
-                fallbackFillAmount = 0.35f;
-                break;
-        }
-
-        speedometerIconImage.sprite = selectedSprite;
-        bool isFallbackIcon = selectedSprite == fallback;
-        if (isFallbackIcon)
-        {
-            speedometerIconImage.type = Image.Type.Filled;
-            speedometerIconImage.fillMethod = Image.FillMethod.Radial360;
-            speedometerIconImage.fillOrigin = 2;
-            speedometerIconImage.fillAmount = fallbackFillAmount;
-        }
-        else
-        {
-            speedometerIconImage.type = Image.Type.Simple;
-            speedometerIconImage.fillAmount = 1f;
-        }
-    }
-
-    private Canvas FindBestHudCanvas()
-    {
-        Canvas[] canvases = FindObjectsByType<Canvas>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-        for (int i = 0; i < canvases.Length; i++)
-        {
-            if (canvases[i] != null && canvases[i].isActiveAndEnabled && canvases[i].renderMode == RenderMode.ScreenSpaceOverlay)
-            {
-                return canvases[i];
-            }
-        }
-
-        return FindFirstObjectByType<Canvas>();
-    }
-
-    private Sprite GetFallbackSprite()
-    {
-        if (_cachedFallbackSprite != null) return _cachedFallbackSprite;
-
-        Texture2D tex = new Texture2D(4, 4);
-        Color[] pixels = new Color[16];
-        for (int i = 0; i < pixels.Length; i++) pixels[i] = Color.white;
-        tex.SetPixels(pixels);
-        tex.Apply();
-        _cachedFallbackSprite = Sprite.Create(tex, new Rect(0, 0, 4, 4), new Vector2(0.5f, 0.5f));
-        return _cachedFallbackSprite;
-    }
-
-    private int ResolveMiniMapMarkerLayer()
-    {
-        if (cachedMiniMapMarkerLayer == int.MinValue)
-        {
-            cachedMiniMapMarkerLayer = LayerMask.NameToLayer(miniMapMarkerLayerName);
-        }
-
-        return cachedMiniMapMarkerLayer;
-    }
-
-    private void UpdateMiniMapObjectiveMarker()
-    {
-        if (!enableMiniMapObjectiveMarker)
-        {
-            RemoveMiniMapObjectiveMarker();
-            return;
-        }
-
-        bool hasPickupTarget = currentBox != null && !currentBox.IsPickedUp;
-        bool hasDeliveryTarget = isDeliveryActive;
-        bool hasTarget = hasPickupTarget || hasDeliveryTarget;
-
-        if (!hasTarget)
-        {
-            HideMiniMapEdgeIndicator();
-            if (miniMapObjectiveMarker != null)
-            {
-                miniMapObjectiveMarker.SetActive(false);
-            }
-            hasMiniMapMarkerPosition = false;
-            return;
-        }
-
-        EnsureMiniMapObjectiveMarker();
-        if (miniMapObjectiveMarker == null)
-        {
-            return;
-        }
-
-        Vector3 targetPoint = hasDeliveryTarget
-            ? currentDeliveryPoint
-            : (currentBox != null ? currentBox.transform.position : currentPickupPoint);
-        bool targetIsOffscreen = false;
-        Vector3 markerPoint = GetMiniMapMarkerTargetPoint(targetPoint, out targetIsOffscreen);
-        Color markerColor = hasDeliveryTarget ? miniMapDeliveryMarkerColor : miniMapPickupMarkerColor;
-        if (targetIsOffscreen)
-        {
-            miniMapObjectiveMarker.SetActive(false);
-            hasMiniMapMarkerPosition = false;
-            if (showMiniMapEdgeIndicator)
-            {
-                UpdateMiniMapEdgeIndicator(targetPoint, markerColor);
-            }
-            else
-            {
-                HideMiniMapEdgeIndicator();
-            }
-        }
-        else
-        {
-            miniMapObjectiveMarker.SetActive(true);
-            Vector3 desiredMarkerPosition = markerPoint + Vector3.up * miniMapMarkerHeight;
-            if (!hasMiniMapMarkerPosition)
-            {
-                miniMapObjectiveMarker.transform.position = desiredMarkerPosition;
-                miniMapMarkerVelocity = Vector3.zero;
-                hasMiniMapMarkerPosition = true;
-            }
-            else
-            {
-                float smoothTime = Mathf.Max(0.01f, miniMapMarkerFollowSmoothTime);
-                miniMapObjectiveMarker.transform.position = Vector3.SmoothDamp(
-                    miniMapObjectiveMarker.transform.position,
-                    desiredMarkerPosition,
-                    ref miniMapMarkerVelocity,
-                    smoothTime);
-            }
-            float pulse = 1f + Mathf.Sin(Time.time * miniMapMarkerPulseSpeed) * miniMapMarkerPulseAmount;
-            miniMapObjectiveMarker.transform.localScale = miniMapMarkerScale * pulse;
-            miniMapObjectiveMarker.transform.Rotate(Vector3.up, miniMapMarkerSpinSpeed * Time.deltaTime, Space.World);
-            HideMiniMapEdgeIndicator();
-        }
-
-        if (miniMapObjectiveMarkerMaterial != null)
-        {
-            miniMapObjectiveMarkerMaterial.color = markerColor;
-        }
-    }
-
-    private Vector3 GetMiniMapMarkerTargetPoint(Vector3 worldTargetPoint, out bool targetIsOffscreen)
-    {
-        targetIsOffscreen = false;
-
-        if (!clampMiniMapMarkerToEdgeWhenOffscreen)
-        {
-            return worldTargetPoint;
-        }
-
-        if (!TryGetMiniMapCamera(out Camera miniMapCamera))
-        {
-            return worldTargetPoint;
-        }
-
-        Vector3 viewportPoint = miniMapCamera.WorldToViewportPoint(worldTargetPoint);
-        if (viewportPoint.z <= 0f)
-        {
-            return worldTargetPoint;
-        }
-
-        bool isOutsideViewport =
-            viewportPoint.x < 0f || viewportPoint.x > 1f ||
-            viewportPoint.y < 0f || viewportPoint.y > 1f;
-        targetIsOffscreen = isOutsideViewport;
-
-        if (!isOutsideViewport)
-        {
-            return worldTargetPoint;
-        }
-
-        float padding = Mathf.Clamp(miniMapMarkerEdgePadding, 0f, 0.45f);
-        viewportPoint.x = Mathf.Clamp(viewportPoint.x, padding, 1f - padding);
-        viewportPoint.y = Mathf.Clamp(viewportPoint.y, padding, 1f - padding);
-
-        Vector3 edgePoint = miniMapCamera.ViewportToWorldPoint(viewportPoint);
-        edgePoint.y = worldTargetPoint.y;
-        return edgePoint;
-    }
-
-    private bool TryGetMiniMapCamera(out Camera miniMapCamera)
-    {
-        if (cachedMiniMapCamera == null)
-        {
-            GameObject miniMapCameraObject = GameObject.Find("MiniMapCamera");
-            if (miniMapCameraObject != null)
-            {
-                cachedMiniMapCamera = miniMapCameraObject.GetComponent<Camera>();
-            }
-        }
-
-        miniMapCamera = cachedMiniMapCamera;
-        return miniMapCamera != null && miniMapCamera.gameObject.activeInHierarchy && miniMapCamera.enabled;
-    }
-
-    private void UpdateMiniMapEdgeIndicator(Vector3 worldTargetPoint, Color indicatorColor)
-    {
-        if (!TryGetMiniMapCamera(out Camera miniMapCamera))
-        {
-            HideMiniMapEdgeIndicator();
-            return;
-        }
-
-        EnsureMiniMapEdgeIndicator();
-        if (miniMapEdgeIndicatorRect == null || miniMapEdgeCanvas == null)
-        {
-            return;
-        }
-
-        Vector3 viewportPoint = miniMapCamera.WorldToViewportPoint(worldTargetPoint);
-        if (viewportPoint.z < 0f)
-        {
-            viewportPoint.x = 1f - viewportPoint.x;
-            viewportPoint.y = 1f - viewportPoint.y;
-            viewportPoint.z = -viewportPoint.z;
-        }
-
-        Vector2 direction = new Vector2(viewportPoint.x - 0.5f, viewportPoint.y - 0.5f);
-        if (direction.sqrMagnitude < 0.0001f)
-        {
-            direction = Vector2.up;
-        }
-        direction.Normalize();
-
-        Rect miniMapRect = miniMapCamera.rect;
-        float rectCenterX = (miniMapRect.x + (miniMapRect.width * 0.5f)) * Screen.width;
-        float rectCenterY = (miniMapRect.y + (miniMapRect.height * 0.5f)) * Screen.height;
-        float rectHalfWidth = miniMapRect.width * Screen.width * 0.5f;
-        float rectHalfHeight = miniMapRect.height * Screen.height * 0.5f;
-
-        float inset = Mathf.Max(0f, miniMapEdgeIndicatorOffset);
-        float usableHalfWidth = Mathf.Max(1f, rectHalfWidth - inset);
-        float usableHalfHeight = Mathf.Max(1f, rectHalfHeight - inset);
-        float tx = Mathf.Approximately(direction.x, 0f) ? float.PositiveInfinity : usableHalfWidth / Mathf.Abs(direction.x);
-        float ty = Mathf.Approximately(direction.y, 0f) ? float.PositiveInfinity : usableHalfHeight / Mathf.Abs(direction.y);
-        float t = Mathf.Min(tx, ty);
-        Vector2 screenPoint = new Vector2(rectCenterX, rectCenterY) + direction * t;
-
-        RectTransform canvasRect = miniMapEdgeCanvas.transform as RectTransform;
-        if (canvasRect != null &&
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, screenPoint, null, out Vector2 localPoint))
-        {
-            if (!hasMiniMapEdgeIndicatorPosition)
-            {
-                miniMapEdgeIndicatorRect.anchoredPosition = localPoint;
-                miniMapEdgeIndicatorVelocity = Vector2.zero;
-                hasMiniMapEdgeIndicatorPosition = true;
-            }
-            else
-            {
-                float smoothTime = Mathf.Max(0.01f, miniMapEdgeFollowSmoothTime);
-                miniMapEdgeIndicatorRect.anchoredPosition = Vector2.SmoothDamp(
-                    miniMapEdgeIndicatorRect.anchoredPosition,
-                    localPoint,
-                    ref miniMapEdgeIndicatorVelocity,
-                    smoothTime);
-            }
-        }
-
-        float edgePulse = 1f + Mathf.Sin(Time.time * miniMapEdgeIndicatorPulseSpeed) * Mathf.Clamp(miniMapEdgeIndicatorPulseAmount, 0f, 0.6f);
-        float size = Mathf.Max(8f, miniMapEdgeIndicatorSize) * edgePulse;
-        miniMapEdgeIndicatorRect.sizeDelta = new Vector2(size, size);
-        miniMapEdgeIndicatorRect.localRotation = Quaternion.identity;
-
-        if (miniMapEdgeIndicatorImage != null)
-        {
-            miniMapEdgeIndicatorImage.color = indicatorColor;
-            miniMapEdgeIndicatorImage.enabled = true;
-        }
-    }
-
-    private void EnsureMiniMapEdgeIndicator()
-    {
-        if (miniMapEdgeCanvas == null)
-        {
-            GameObject canvasObject = new GameObject("MiniMapEdgeIndicatorCanvas");
-            miniMapEdgeCanvas = canvasObject.AddComponent<Canvas>();
-            miniMapEdgeCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            miniMapEdgeCanvas.sortingOrder = 1000;
-            canvasObject.AddComponent<CanvasScaler>();
-            canvasObject.AddComponent<GraphicRaycaster>();
-        }
-
-        if (miniMapEdgeIndicatorRect == null)
-        {
-            GameObject indicatorObject = new GameObject("MiniMapEdgeIndicator");
-            indicatorObject.transform.SetParent(miniMapEdgeCanvas.transform, false);
-            miniMapEdgeIndicatorRect = indicatorObject.AddComponent<RectTransform>();
-            miniMapEdgeIndicatorRect.anchorMin = new Vector2(0.5f, 0.5f);
-            miniMapEdgeIndicatorRect.anchorMax = new Vector2(0.5f, 0.5f);
-            miniMapEdgeIndicatorRect.pivot = new Vector2(0.5f, 0.5f);
-
-            miniMapEdgeIndicatorImage = indicatorObject.AddComponent<Image>();
-            miniMapEdgeIndicatorImage.raycastTarget = false;
-            miniMapEdgeIndicatorImage.sprite = miniMapEdgeIndicatorSprite != null
-                ? miniMapEdgeIndicatorSprite
-                : GetFallbackSprite();
-            miniMapEdgeIndicatorImage.preserveAspect = true;
-        }
-    }
-
-    private void HideMiniMapEdgeIndicator()
-    {
-        if (miniMapEdgeIndicatorImage != null)
-        {
-            miniMapEdgeIndicatorImage.enabled = false;
-        }
-        hasMiniMapEdgeIndicatorPosition = false;
-    }
-
-    private void RemoveMiniMapEdgeIndicator()
-    {
-        if (miniMapEdgeIndicatorRect != null)
-        {
-            Destroy(miniMapEdgeIndicatorRect.gameObject);
-            miniMapEdgeIndicatorRect = null;
-            miniMapEdgeIndicatorImage = null;
-        }
-
-        if (miniMapEdgeCanvas != null)
-        {
-            Destroy(miniMapEdgeCanvas.gameObject);
-            miniMapEdgeCanvas = null;
-        }
-    }
-
-    private void RemoveMiniMapObjectiveMarker()
-    {
-        HideMiniMapEdgeIndicator();
-
-        if (miniMapObjectiveMarker != null)
-        {
-            Destroy(miniMapObjectiveMarker);
-            miniMapObjectiveMarker = null;
-            hasMiniMapMarkerPosition = false;
-        }
-
-        if (miniMapObjectiveMarkerMaterial != null)
-        {
-            Destroy(miniMapObjectiveMarkerMaterial);
-            miniMapObjectiveMarkerMaterial = null;
-        }
-    }
 
     private bool IsPlayerInExpectedNeighborhood(Vector3 playerPosition)
     {
