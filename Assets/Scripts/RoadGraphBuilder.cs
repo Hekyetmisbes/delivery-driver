@@ -55,6 +55,8 @@ namespace TrafficSystem
         // Built road graph
         private RoadGraph roadGraph;
         public RoadGraph RoadGraph => roadGraph;
+        public bool HasBuiltRoadGraph => roadGraph != null && roadGraph.roadSegments != null && roadGraph.roadSegments.Count > 0;
+        public bool HasPendingBuild => deferredBuildCoroutine != null;
         private Coroutine deferredBuildCoroutine;
 
         private void Start()

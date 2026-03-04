@@ -56,6 +56,7 @@ namespace TrafficSystem
         private HashSet<GameObject> pooledNpcSet = new HashSet<GameObject>();
         private Transform npcContainer;
         private Coroutine spawnCoroutine;
+        public bool HasPendingOrActiveSpawn => spawnCoroutine != null || activeNpcs.Count > 0;
 
         // Cached allocations to avoid GC pressure
         private static readonly Collider[] spawnOverlapBuffer = new Collider[32];
