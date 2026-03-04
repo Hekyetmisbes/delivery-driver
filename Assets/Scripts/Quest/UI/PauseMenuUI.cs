@@ -18,7 +18,7 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private bool showStatsOnPause = true;
         [SerializeField] private bool buildKenneyPauseMenuAtRuntime = true;
         [SerializeField] private bool useKenneySkin = true;
-        [SerializeField] private Vector2 pauseMenuSize = new Vector2(560f, 440f);
+        [SerializeField] private Vector2 pauseMenuSize = new Vector2(560f, 720f);
         [SerializeField] private string resumeButtonLabel = "Devam Et";
         [SerializeField] private string quitButtonLabel = "Oyundan Cik";
 
@@ -28,11 +28,23 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private Sprite sliderBackgroundSprite;
         [SerializeField] private Sprite sliderFillSprite;
         [SerializeField] private Sprite sliderHandleSprite;
+        [SerializeField] private Sprite dropdownBackgroundSprite;
+        [SerializeField] private Sprite toggleBackgroundSprite;
+        [SerializeField] private Sprite toggleCheckmarkSprite;
 
         private Slider masterVolumeSlider;
         private Slider musicVolumeSlider;
         private Slider sfxVolumeSlider;
+        private TMP_Dropdown qualityDropdown;
+        private TMP_Dropdown resolutionDropdown;
+        private Toggle fullScreenToggle;
+        private TMP_Dropdown fpsDropdown;
+        private Resolution[] availableResolutions;
+        private readonly System.Collections.Generic.List<string> qualityTierOptions =
+            new System.Collections.Generic.List<string> { "Dusuk", "Orta", "Yuksek" };
+        private int[] qualityTierToProjectQuality = { 0, 1, 2 };
         private bool suppressSliderCallbacks;
+        private bool suppressGraphicsCallbacks;
         private bool runtimePausePanelBuilt;
 
         private bool isPaused;
@@ -76,6 +88,7 @@ namespace DeliveryDriver.Quest.UI
         {
             isPaused = paused;
             RefreshAudioSliders();
+            RefreshGraphicsControls();
 
             if (pausePanel != null)
             {
@@ -151,8 +164,8 @@ namespace DeliveryDriver.Quest.UI
             panelRect.anchorMin = new Vector2(0.5f, 0.5f);
             panelRect.anchorMax = new Vector2(0.5f, 0.5f);
             panelRect.pivot = new Vector2(0.5f, 0.5f);
-            panelRect.anchoredPosition = Vector2.zero;
-            panelRect.sizeDelta = pauseMenuSize;
+            panelRect.anchoredPosition = new Vector2(0f, 18f);
+            panelRect.sizeDelta = new Vector2(Mathf.Max(pauseMenuSize.x, 660f), Mathf.Max(pauseMenuSize.y, 760f));
 
             Image panelImage = panelObject.GetComponent<Image>();
             panelImage.color = new Color(0.05f, 0.08f, 0.12f, 0.98f);
@@ -163,17 +176,19 @@ namespace DeliveryDriver.Quest.UI
             }
 
             VerticalLayoutGroup layout = panelObject.AddComponent<VerticalLayoutGroup>();
-            layout.padding = new RectOffset(24, 24, 24, 24);
-            layout.spacing = 12f;
+            layout.padding = new RectOffset(26, 26, 24, 24);
+            layout.spacing = 14f;
             layout.childControlHeight = true;
             layout.childControlWidth = true;
             layout.childForceExpandHeight = false;
             layout.childForceExpandWidth = true;
 
             CreateHeader(panelObject.transform, "OYUN DURAKLATILDI");
-            masterVolumeSlider = CreateLabeledSlider(panelObject.transform, "Ana Ses");
-            musicVolumeSlider = CreateLabeledSlider(panelObject.transform, "Muzik");
-            sfxVolumeSlider = CreateLabeledSlider(panelObject.transform, "Efekt");
+            Transform audioSection = CreateSectionContainer(panelObject.transform, "SesBolumu");
+            CreateSectionLabel(audioSection, "SES");
+            masterVolumeSlider = CreateLabeledSlider(audioSection, "Ana Ses");
+            musicVolumeSlider = CreateLabeledSlider(audioSection, "Muzik");
+            sfxVolumeSlider = CreateLabeledSlider(audioSection, "Efekt");
 
             if (masterVolumeSlider != null)
             {
@@ -189,6 +204,30 @@ namespace DeliveryDriver.Quest.UI
             {
                 sfxVolumeSlider.onValueChanged.AddListener(OnSfxVolumeChanged);
             }
+
+            Transform graphicsSection = CreateSectionContainer(panelObject.transform, "GrafikBolumu");
+            CreateSectionLabel(graphicsSection, "GRAFIK");
+            ConfigureQualityTierMapping();
+
+            qualityDropdown = CreateLabeledDropdown(graphicsSection, "Kalite Seviyesi", qualityTierOptions);
+            qualityDropdown.value = ConvertProjectQualityToTierIndex(QualitySettings.GetQualityLevel());
+            qualityDropdown.onValueChanged.AddListener(OnQualityChanged);
+
+            BuildResolutionDropdown(graphicsSection);
+
+            fullScreenToggle = CreateLabeledToggle(graphicsSection, "Tam Ekran");
+            fullScreenToggle.isOn = Screen.fullScreen;
+            fullScreenToggle.onValueChanged.AddListener(OnFullScreenChanged);
+
+            fpsDropdown = CreateLabeledDropdown(graphicsSection, "FPS Siniri",
+                new System.Collections.Generic.List<string> { "30", "60", "120", "Sinirsiz" });
+            SetFpsDropdownValue();
+            fpsDropdown.onValueChanged.AddListener(OnFpsChanged);
+
+            GameObject footerSpacer = new GameObject("FooterSpacer", typeof(RectTransform), typeof(LayoutElement));
+            footerSpacer.transform.SetParent(panelObject.transform, false);
+            LayoutElement footerSpacerLayout = footerSpacer.GetComponent<LayoutElement>();
+            footerSpacerLayout.minHeight = 10f;
 
             GameObject buttonRow = new GameObject("ButtonRow", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
             buttonRow.transform.SetParent(panelObject.transform, false);
@@ -215,6 +254,53 @@ namespace DeliveryDriver.Quest.UI
             }
 
             return panelObject;
+        }
+
+        private Transform CreateSectionContainer(Transform parent, string objectName)
+        {
+            GameObject sectionObject = new GameObject(objectName, typeof(RectTransform), typeof(Image), typeof(VerticalLayoutGroup), typeof(LayoutElement));
+            sectionObject.transform.SetParent(parent, false);
+
+            Image sectionImage = sectionObject.GetComponent<Image>();
+            sectionImage.color = new Color(0.09f, 0.13f, 0.19f, 0.92f);
+            if (panelBackgroundSprite != null)
+            {
+                sectionImage.sprite = panelBackgroundSprite;
+                sectionImage.type = Image.Type.Sliced;
+            }
+
+            VerticalLayoutGroup sectionLayout = sectionObject.GetComponent<VerticalLayoutGroup>();
+            sectionLayout.padding = new RectOffset(16, 16, 14, 14);
+            sectionLayout.spacing = 8f;
+            sectionLayout.childControlWidth = true;
+            sectionLayout.childControlHeight = true;
+            sectionLayout.childForceExpandWidth = true;
+            sectionLayout.childForceExpandHeight = false;
+
+            LayoutElement sectionSize = sectionObject.GetComponent<LayoutElement>();
+            sectionSize.minHeight = 120f;
+
+            return sectionObject.transform;
+        }
+
+        private void CreateSectionLabel(Transform parent, string label)
+        {
+            GameObject headerObject = new GameObject($"{label}Header", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
+            headerObject.transform.SetParent(parent, false);
+
+            LayoutElement layout = headerObject.GetComponent<LayoutElement>();
+            layout.minHeight = 34f;
+
+            TextMeshProUGUI text = headerObject.GetComponent<TextMeshProUGUI>();
+            text.text = label;
+            text.fontSize = 24f;
+            text.fontStyle = FontStyles.Bold;
+            text.alignment = TextAlignmentOptions.Left;
+            text.color = new Color(0.88f, 0.94f, 1f, 1f);
+            if (TMP_Settings.defaultFontAsset != null)
+            {
+                text.font = TMP_Settings.defaultFontAsset;
+            }
         }
 
         private void CreateHeader(Transform parent, string label)
@@ -456,6 +542,461 @@ namespace DeliveryDriver.Quest.UI
             GameSettings.Instance.SaveSettings();
         }
 
+        private void RefreshGraphicsControls()
+        {
+            GameSettings settings = GameSettings.Instance;
+            if (settings == null)
+            {
+                return;
+            }
+
+            suppressGraphicsCallbacks = true;
+
+            if (qualityDropdown != null)
+            {
+                int qualityLevel = settings.QualityLevel >= 0
+                    ? settings.QualityLevel
+                    : QualitySettings.GetQualityLevel();
+                qualityDropdown.value = ConvertProjectQualityToTierIndex(qualityLevel);
+            }
+
+            if (resolutionDropdown != null && settings.ResolutionIndex >= 0)
+            {
+                resolutionDropdown.value = settings.ResolutionIndex;
+            }
+
+            if (fullScreenToggle != null)
+            {
+                fullScreenToggle.isOn = settings.FullScreen;
+            }
+
+            if (fpsDropdown != null)
+            {
+                SetFpsDropdownValue();
+            }
+
+            suppressGraphicsCallbacks = false;
+        }
+
+        private void SetFpsDropdownValue()
+        {
+            if (fpsDropdown == null) return;
+            int fps = GameSettings.Instance != null
+                ? GameSettings.Instance.TargetFps
+                : Application.targetFrameRate;
+            switch (fps)
+            {
+                case 30: fpsDropdown.value = 0; break;
+                case 60: fpsDropdown.value = 1; break;
+                case 120: fpsDropdown.value = 2; break;
+                default: fpsDropdown.value = 3; break;
+            }
+        }
+
+        private void BuildResolutionDropdown(Transform parent)
+        {
+            Resolution[] allResolutions = Screen.resolutions;
+            var uniqueResolutions = new System.Collections.Generic.List<Resolution>();
+            var options = new System.Collections.Generic.List<string>();
+            int currentIndex = 0;
+            int currentWidth = Screen.currentResolution.width;
+            int currentHeight = Screen.currentResolution.height;
+
+            for (int i = 0; i < allResolutions.Length; i++)
+            {
+                Resolution res = allResolutions[i];
+                bool duplicate = false;
+                for (int j = 0; j < uniqueResolutions.Count; j++)
+                {
+                    if (uniqueResolutions[j].width == res.width && uniqueResolutions[j].height == res.height)
+                    {
+                        duplicate = true;
+                        break;
+                    }
+                }
+
+                if (duplicate) continue;
+
+                if (res.width == currentWidth && res.height == currentHeight)
+                {
+                    currentIndex = uniqueResolutions.Count;
+                }
+
+                uniqueResolutions.Add(res);
+                options.Add($"{res.width} x {res.height}");
+            }
+
+            availableResolutions = uniqueResolutions.ToArray();
+            resolutionDropdown = CreateLabeledDropdown(parent, "Cozunurluk", options);
+            resolutionDropdown.value = currentIndex;
+            resolutionDropdown.onValueChanged.AddListener(OnResolutionChanged);
+        }
+
+        private void OnQualityChanged(int index)
+        {
+            if (suppressGraphicsCallbacks || GameSettings.Instance == null) return;
+            int projectQualityIndex = ConvertTierIndexToProjectQuality(index);
+            GameSettings.Instance.SetQualityLevel(projectQualityIndex);
+            GameSettings.Instance.ApplySettings();
+            GameSettings.Instance.SaveSettings();
+        }
+
+        private void OnResolutionChanged(int index)
+        {
+            if (suppressGraphicsCallbacks || GameSettings.Instance == null) return;
+            if (index >= 0 && index < availableResolutions.Length)
+            {
+                Resolution res = availableResolutions[index];
+                bool isFullScreen = fullScreenToggle != null && fullScreenToggle.isOn;
+                Screen.SetResolution(res.width, res.height, isFullScreen);
+                GameSettings.Instance.SetResolutionIndex(index);
+                GameSettings.Instance.SetResolutionSize(res.width, res.height);
+                GameSettings.Instance.SetFullScreen(isFullScreen);
+                GameSettings.Instance.SaveSettings();
+            }
+        }
+
+        private void OnFullScreenChanged(bool value)
+        {
+            if (suppressGraphicsCallbacks || GameSettings.Instance == null) return;
+            GameSettings.Instance.SetFullScreen(value);
+            GameSettings.Instance.ApplySettings();
+            GameSettings.Instance.SaveSettings();
+        }
+
+        private void OnFpsChanged(int index)
+        {
+            if (suppressGraphicsCallbacks || GameSettings.Instance == null) return;
+            int[] fpsValues = { 30, 60, 120, -1 };
+            GameSettings.Instance.SetTargetFps(fpsValues[index]);
+            GameSettings.Instance.ApplySettings();
+            GameSettings.Instance.SaveSettings();
+        }
+
+        private TMP_Dropdown CreateLabeledDropdown(Transform parent, string label, System.Collections.Generic.List<string> options)
+        {
+            GameObject rowObject = new GameObject($"{label}Row", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(LayoutElement));
+            rowObject.transform.SetParent(parent, false);
+
+            VerticalLayoutGroup rowLayout = rowObject.GetComponent<VerticalLayoutGroup>();
+            rowLayout.spacing = 4f;
+            rowLayout.childControlHeight = true;
+            rowLayout.childControlWidth = true;
+            rowLayout.childForceExpandHeight = false;
+            rowLayout.childForceExpandWidth = true;
+
+            LayoutElement rowElement = rowObject.GetComponent<LayoutElement>();
+            rowElement.minHeight = 64f;
+
+            GameObject labelObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+            labelObject.transform.SetParent(rowObject.transform, false);
+            TextMeshProUGUI labelText = labelObject.GetComponent<TextMeshProUGUI>();
+            labelText.text = label;
+            labelText.fontSize = 22f;
+            labelText.fontStyle = FontStyles.Bold;
+            labelText.color = new Color(0.9f, 0.95f, 1f, 1f);
+            labelText.alignment = TextAlignmentOptions.Left;
+            if (TMP_Settings.defaultFontAsset != null)
+            {
+                labelText.font = TMP_Settings.defaultFontAsset;
+            }
+
+            GameObject dropdownObject = new GameObject($"{label}Dropdown", typeof(RectTransform), typeof(TMP_Dropdown), typeof(Image), typeof(LayoutElement));
+            dropdownObject.transform.SetParent(rowObject.transform, false);
+
+            LayoutElement dropdownLayout = dropdownObject.GetComponent<LayoutElement>();
+            dropdownLayout.minHeight = 36f;
+
+            Image dropdownImage = dropdownObject.GetComponent<Image>();
+            dropdownImage.color = new Color(0.22f, 0.26f, 0.32f, 1f);
+            if (dropdownBackgroundSprite != null)
+            {
+                dropdownImage.sprite = dropdownBackgroundSprite;
+                dropdownImage.type = Image.Type.Sliced;
+            }
+            else if (buttonBackgroundSprite != null)
+            {
+                dropdownImage.sprite = buttonBackgroundSprite;
+                dropdownImage.type = Image.Type.Sliced;
+            }
+
+            // Caption text
+            GameObject captionObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+            captionObject.transform.SetParent(dropdownObject.transform, false);
+            RectTransform captionRect = captionObject.GetComponent<RectTransform>();
+            captionRect.anchorMin = Vector2.zero;
+            captionRect.anchorMax = Vector2.one;
+            captionRect.offsetMin = new Vector2(10f, 2f);
+            captionRect.offsetMax = new Vector2(-30f, -2f);
+            TextMeshProUGUI captionText = captionObject.GetComponent<TextMeshProUGUI>();
+            captionText.fontSize = 18f;
+            captionText.color = Color.white;
+            captionText.alignment = TextAlignmentOptions.Left;
+            if (TMP_Settings.defaultFontAsset != null)
+            {
+                captionText.font = TMP_Settings.defaultFontAsset;
+            }
+
+            // Arrow indicator
+            GameObject arrowObject = new GameObject("Arrow", typeof(RectTransform), typeof(TextMeshProUGUI));
+            arrowObject.transform.SetParent(dropdownObject.transform, false);
+            RectTransform arrowRect = arrowObject.GetComponent<RectTransform>();
+            arrowRect.anchorMin = new Vector2(1f, 0f);
+            arrowRect.anchorMax = new Vector2(1f, 1f);
+            arrowRect.pivot = new Vector2(1f, 0.5f);
+            arrowRect.sizeDelta = new Vector2(30f, 0f);
+            arrowRect.anchoredPosition = new Vector2(-5f, 0f);
+            TextMeshProUGUI arrowText = arrowObject.GetComponent<TextMeshProUGUI>();
+            arrowText.text = "\u25BC";
+            arrowText.fontSize = 14f;
+            arrowText.color = Color.white;
+            arrowText.alignment = TextAlignmentOptions.Center;
+            if (TMP_Settings.defaultFontAsset != null)
+            {
+                arrowText.font = TMP_Settings.defaultFontAsset;
+            }
+
+            // Template
+            GameObject templateObject = new GameObject("Template", typeof(RectTransform), typeof(Image), typeof(ScrollRect));
+            templateObject.transform.SetParent(dropdownObject.transform, false);
+            RectTransform templateRect = templateObject.GetComponent<RectTransform>();
+            templateRect.anchorMin = new Vector2(0f, 1f);
+            templateRect.anchorMax = new Vector2(1f, 1f);
+            templateRect.pivot = new Vector2(0.5f, 0f);
+            templateRect.anchoredPosition = new Vector2(0f, 2f);
+            templateRect.sizeDelta = new Vector2(0f, 150f);
+            Image templateImage = templateObject.GetComponent<Image>();
+            templateImage.color = new Color(0.15f, 0.18f, 0.22f, 0.98f);
+            if (dropdownBackgroundSprite != null)
+            {
+                templateImage.sprite = dropdownBackgroundSprite;
+                templateImage.type = Image.Type.Sliced;
+            }
+            else if (panelBackgroundSprite != null)
+            {
+                templateImage.sprite = panelBackgroundSprite;
+                templateImage.type = Image.Type.Sliced;
+            }
+
+            // Viewport
+            GameObject viewportObject = new GameObject("Viewport", typeof(RectTransform), typeof(Mask), typeof(Image));
+            viewportObject.transform.SetParent(templateObject.transform, false);
+            RectTransform viewportRect = viewportObject.GetComponent<RectTransform>();
+            viewportRect.anchorMin = Vector2.zero;
+            viewportRect.anchorMax = Vector2.one;
+            viewportRect.offsetMin = Vector2.zero;
+            viewportRect.offsetMax = Vector2.zero;
+            Image viewportImage = viewportObject.GetComponent<Image>();
+            viewportImage.color = Color.white;
+            Mask viewportMask = viewportObject.GetComponent<Mask>();
+            viewportMask.showMaskGraphic = false;
+
+            // Content
+            GameObject contentObject = new GameObject("Content", typeof(RectTransform));
+            contentObject.transform.SetParent(viewportObject.transform, false);
+            RectTransform contentRect = contentObject.GetComponent<RectTransform>();
+            contentRect.anchorMin = new Vector2(0f, 1f);
+            contentRect.anchorMax = new Vector2(1f, 1f);
+            contentRect.pivot = new Vector2(0.5f, 1f);
+            contentRect.sizeDelta = new Vector2(0f, 28f);
+
+            // Item
+            GameObject itemObject = new GameObject("Item", typeof(RectTransform), typeof(Toggle));
+            itemObject.transform.SetParent(contentObject.transform, false);
+            RectTransform itemRect = itemObject.GetComponent<RectTransform>();
+            itemRect.anchorMin = new Vector2(0f, 0.5f);
+            itemRect.anchorMax = new Vector2(1f, 0.5f);
+            itemRect.sizeDelta = new Vector2(0f, 28f);
+
+            // Item background
+            GameObject itemBgObject = new GameObject("Item Background", typeof(RectTransform), typeof(Image));
+            itemBgObject.transform.SetParent(itemObject.transform, false);
+            RectTransform itemBgRect = itemBgObject.GetComponent<RectTransform>();
+            itemBgRect.anchorMin = Vector2.zero;
+            itemBgRect.anchorMax = Vector2.one;
+            itemBgRect.offsetMin = Vector2.zero;
+            itemBgRect.offsetMax = Vector2.zero;
+            Image itemBgImage = itemBgObject.GetComponent<Image>();
+            itemBgImage.color = new Color(0.25f, 0.35f, 0.5f, 0.5f);
+
+            // Item label
+            GameObject itemLabelObject = new GameObject("Item Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+            itemLabelObject.transform.SetParent(itemObject.transform, false);
+            RectTransform itemLabelRect = itemLabelObject.GetComponent<RectTransform>();
+            itemLabelRect.anchorMin = Vector2.zero;
+            itemLabelRect.anchorMax = Vector2.one;
+            itemLabelRect.offsetMin = new Vector2(10f, 1f);
+            itemLabelRect.offsetMax = new Vector2(-10f, -1f);
+            TextMeshProUGUI itemLabelText = itemLabelObject.GetComponent<TextMeshProUGUI>();
+            itemLabelText.fontSize = 16f;
+            itemLabelText.color = Color.white;
+            itemLabelText.alignment = TextAlignmentOptions.Left;
+            if (TMP_Settings.defaultFontAsset != null)
+            {
+                itemLabelText.font = TMP_Settings.defaultFontAsset;
+            }
+
+            // Wire up toggle
+            Toggle itemToggle = itemObject.GetComponent<Toggle>();
+            itemToggle.targetGraphic = itemBgImage;
+            itemToggle.isOn = true;
+
+            // Wire up scroll rect
+            ScrollRect scrollRect = templateObject.GetComponent<ScrollRect>();
+            scrollRect.content = contentRect;
+            scrollRect.viewport = viewportRect;
+            scrollRect.horizontal = false;
+            scrollRect.vertical = true;
+            scrollRect.movementType = ScrollRect.MovementType.Clamped;
+
+            templateObject.SetActive(false);
+
+            // Wire up dropdown
+            TMP_Dropdown dropdown = dropdownObject.GetComponent<TMP_Dropdown>();
+            dropdown.targetGraphic = dropdownImage;
+            dropdown.template = templateRect;
+            dropdown.captionText = captionText;
+            dropdown.itemText = itemLabelText;
+            dropdown.ClearOptions();
+            dropdown.AddOptions(options);
+
+            return dropdown;
+        }
+
+        private void ConfigureQualityTierMapping()
+        {
+            int qualityCount = QualitySettings.names.Length;
+            if (qualityCount <= 0)
+            {
+                qualityTierToProjectQuality = new[] { 0, 0, 0 };
+                return;
+            }
+
+            int lowIndex = 0;
+            int mediumIndex = Mathf.Clamp(qualityCount / 2, 0, qualityCount - 1);
+            int highIndex = qualityCount - 1;
+
+            qualityTierToProjectQuality = new[] { lowIndex, mediumIndex, highIndex };
+        }
+
+        private int ConvertProjectQualityToTierIndex(int qualityIndex)
+        {
+            if (qualityTierToProjectQuality == null || qualityTierToProjectQuality.Length < 3)
+            {
+                ConfigureQualityTierMapping();
+            }
+
+            int bestTier = 0;
+            int bestDistance = int.MaxValue;
+            for (int i = 0; i < qualityTierToProjectQuality.Length; i++)
+            {
+                int distance = Mathf.Abs(qualityTierToProjectQuality[i] - qualityIndex);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    bestTier = i;
+                }
+            }
+
+            return bestTier;
+        }
+
+        private int ConvertTierIndexToProjectQuality(int tierIndex)
+        {
+            if (qualityTierToProjectQuality == null || qualityTierToProjectQuality.Length < 3)
+            {
+                ConfigureQualityTierMapping();
+            }
+
+            int safeTier = Mathf.Clamp(tierIndex, 0, qualityTierToProjectQuality.Length - 1);
+            return qualityTierToProjectQuality[safeTier];
+        }
+
+        private Toggle CreateLabeledToggle(Transform parent, string label)
+        {
+            GameObject rowObject = new GameObject($"{label}Row", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
+            rowObject.transform.SetParent(parent, false);
+
+            HorizontalLayoutGroup rowLayout = rowObject.GetComponent<HorizontalLayoutGroup>();
+            rowLayout.spacing = 10f;
+            rowLayout.childControlHeight = true;
+            rowLayout.childControlWidth = true;
+            rowLayout.childForceExpandHeight = false;
+            rowLayout.childForceExpandWidth = true;
+            rowLayout.childAlignment = TextAnchor.MiddleLeft;
+
+            LayoutElement rowElement = rowObject.GetComponent<LayoutElement>();
+            rowElement.minHeight = 36f;
+
+            GameObject labelObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
+            labelObject.transform.SetParent(rowObject.transform, false);
+            LayoutElement labelLayout = labelObject.GetComponent<LayoutElement>();
+            labelLayout.flexibleWidth = 1f;
+            TextMeshProUGUI labelText = labelObject.GetComponent<TextMeshProUGUI>();
+            labelText.text = label;
+            labelText.fontSize = 22f;
+            labelText.fontStyle = FontStyles.Bold;
+            labelText.color = new Color(0.9f, 0.95f, 1f, 1f);
+            labelText.alignment = TextAlignmentOptions.Left;
+            if (TMP_Settings.defaultFontAsset != null)
+            {
+                labelText.font = TMP_Settings.defaultFontAsset;
+            }
+
+            GameObject toggleObject = new GameObject($"{label}Toggle", typeof(RectTransform), typeof(Toggle), typeof(LayoutElement));
+            toggleObject.transform.SetParent(rowObject.transform, false);
+            LayoutElement toggleLayout = toggleObject.GetComponent<LayoutElement>();
+            toggleLayout.minWidth = 36f;
+            toggleLayout.minHeight = 36f;
+            toggleLayout.preferredWidth = 36f;
+            toggleLayout.flexibleWidth = 0f;
+
+            // Background
+            GameObject bgObject = new GameObject("Background", typeof(RectTransform), typeof(Image));
+            bgObject.transform.SetParent(toggleObject.transform, false);
+            RectTransform bgRect = bgObject.GetComponent<RectTransform>();
+            bgRect.anchorMin = new Vector2(0.5f, 0.5f);
+            bgRect.anchorMax = new Vector2(0.5f, 0.5f);
+            bgRect.sizeDelta = new Vector2(30f, 30f);
+            Image bgImage = bgObject.GetComponent<Image>();
+            bgImage.color = new Color(0.22f, 0.26f, 0.32f, 1f);
+            if (toggleBackgroundSprite != null)
+            {
+                bgImage.sprite = toggleBackgroundSprite;
+                bgImage.type = Image.Type.Sliced;
+            }
+            else if (buttonBackgroundSprite != null)
+            {
+                bgImage.sprite = buttonBackgroundSprite;
+                bgImage.type = Image.Type.Sliced;
+            }
+
+            // Checkmark
+            GameObject checkObject = new GameObject("Checkmark", typeof(RectTransform), typeof(TextMeshProUGUI));
+            checkObject.transform.SetParent(bgObject.transform, false);
+            RectTransform checkRect = checkObject.GetComponent<RectTransform>();
+            checkRect.anchorMin = Vector2.zero;
+            checkRect.anchorMax = Vector2.one;
+            checkRect.offsetMin = Vector2.zero;
+            checkRect.offsetMax = Vector2.zero;
+            TextMeshProUGUI checkText = checkObject.GetComponent<TextMeshProUGUI>();
+            checkText.text = "\u2713";
+            checkText.fontSize = 22f;
+            checkText.color = new Color(0.16f, 0.52f, 0.88f, 1f);
+            checkText.alignment = TextAlignmentOptions.Center;
+            if (TMP_Settings.defaultFontAsset != null)
+            {
+                checkText.font = TMP_Settings.defaultFontAsset;
+            }
+
+            Toggle toggle = toggleObject.GetComponent<Toggle>();
+            toggle.targetGraphic = bgImage;
+            toggle.graphic = checkText;
+            toggle.isOn = false;
+
+            return toggle;
+        }
+
         private void QuitGame()
         {
 #if UNITY_EDITOR
@@ -502,6 +1043,9 @@ namespace DeliveryDriver.Quest.UI
             sliderHandleSprite ??= RuntimeUiSkinLoader.LoadSprite(
                 "UI/Kenney/slider_handle",
                 "Assets/kenney_ui-pack/PNG/Grey/Default/slide_hangle.png");
+
+            dropdownBackgroundSprite ??= buttonBackgroundSprite;
+            toggleBackgroundSprite ??= buttonBackgroundSprite;
         }
     }
 }
