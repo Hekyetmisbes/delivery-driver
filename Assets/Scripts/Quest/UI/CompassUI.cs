@@ -31,9 +31,16 @@ namespace DeliveryDriver.Quest.UI
         private Vector3 currentObjectivePosition;
         private bool hasObjective = false;
         private float targetRotation = 0f;
+        private Image cachedNeedleImage;
+        private int frameCounter;
 
         private void Start()
         {
+            if (compassNeedle != null)
+            {
+                compassNeedle.TryGetComponent(out cachedNeedleImage);
+            }
+
             ResolvePlayerTransform();
             SubscribeToQuestEvents();
             SetCompassVisible(showCompass);
@@ -52,6 +59,9 @@ namespace DeliveryDriver.Quest.UI
             }
 
             UpdateCompassDirection();
+
+            frameCounter++;
+            if (frameCounter % 3 != 0) return;
 
             if (showDistance)
             {
@@ -137,13 +147,9 @@ namespace DeliveryDriver.Quest.UI
             hasObjective = true;
 
             // Update compass color based on objective type
-            if (compassNeedle != null)
+            if (cachedNeedleImage != null)
             {
-                Image needleImage = compassNeedle.GetComponent<Image>();
-                if (needleImage != null)
-                {
-                    needleImage.color = quest.HasPickedUpCargo ? deliveryColor : pickupColor;
-                }
+                cachedNeedleImage.color = quest.HasPickedUpCargo ? deliveryColor : pickupColor;
             }
         }
 

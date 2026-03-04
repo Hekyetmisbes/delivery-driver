@@ -190,6 +190,17 @@ namespace DeliveryDriver.Optimization
             // Create combined mesh
             Mesh combinedMesh = new Mesh();
             combinedMesh.name = "HLOD_Proxy_" + gameObject.name;
+
+            // Count total vertices to decide index format
+            int totalVertices = 0;
+            foreach (var ci in combineInstances)
+            {
+                if (ci.mesh != null)
+                    totalVertices += ci.mesh.vertexCount;
+            }
+            if (totalVertices > 65535)
+                combinedMesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+
             combinedMesh.CombineMeshes(combineInstances.ToArray(), combineSubmeshes, true);
 
             // Optimize mesh
