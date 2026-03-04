@@ -57,6 +57,10 @@ namespace TrafficSystem
         private Transform npcContainer;
         private Coroutine spawnCoroutine;
 
+        // Cached allocations to avoid GC pressure
+        private static readonly Collider[] spawnOverlapBuffer = new Collider[32];
+        private WaitForSeconds cachedSpawnDelay;
+
         private void Start()
         {
             // Create container for organization
@@ -140,6 +144,9 @@ namespace TrafficSystem
                 spawnCoroutine = null;
                 yield break;
             }
+
+            // Cache WaitForSeconds to avoid per-iteration allocation
+            cachedSpawnDelay = new WaitForSeconds(spawnDelay);
 
             // Clear existing NPCs without stopping this active spawn routine.
             ClearAllNpcs(stopSpawnRoutine: false);
@@ -301,6 +308,7 @@ namespace TrafficSystem
                 NpcRecovery recovery = npcVehicle.GetComponent<NpcRecovery>();
                 if (recovery != null)
                 {
+                    recovery.ConfigureForRuntime(false);
                     recovery.Initialize(roadGraphBuilder);
                 }
 
@@ -322,8 +330,8 @@ namespace TrafficSystem
                     Debug.Log($"[NpcSpawner] Spawned {spawnedCount}/{spawnCount} NPCs");
                 }
 
-                // Wait before spawning next NPC
-                yield return new WaitForSeconds(spawnDelay);
+                // Wait before spawning next NPC (cached to avoid GC alloc)
+                yield return cachedSpawnDelay;
             }
 
             // Log distribution summary
@@ -534,6 +542,7 @@ namespace TrafficSystem
                 NpcRecovery recovery = npc.GetComponent<NpcRecovery>();
                 if (recovery != null)
                 {
+                    recovery.ConfigureForRuntime(false);
                     recovery.Initialize(roadGraphBuilder);
                 }
 
@@ -590,22 +599,20 @@ namespace TrafficSystem
         /// </summary>
         private bool IsSpawnPositionClear(Vector3 position)
         {
-            // Check for colliders in the spawn radius
-            Collider[] colliders = Physics.OverlapSphere(position, spawnCheckRadius, spawnObstacleCheckMask, QueryTriggerInteraction.Ignore);
+            // NonAlloc: reuse static buffer to avoid GC allocation
+            int count = Physics.OverlapSphereNonAlloc(position, spawnCheckRadius, spawnOverlapBuffer, spawnObstacleCheckMask, QueryTriggerInteraction.Ignore);
 
-            if (colliders == null || colliders.Length == 0)
+            if (count == 0)
                 return true;
 
             // Filter out ground/road colliders - only care about vehicles and obstacles
-            foreach (Collider col in colliders)
+            for (int i = 0; i < count; i++)
             {
+                Collider col = spawnOverlapBuffer[i];
                 if (col == null) continue;
 
                 // Check if it's a vehicle (NPC or player)
-                if (col.GetComponent<NpcCarAgent>() != null ||
-                    col.GetComponentInParent<NpcCarAgent>() != null ||
-                    col.GetComponent<CarController>() != null ||
-                    col.GetComponentInParent<CarController>() != null)
+                if (HasVehicleController(col))
                 {
                     return false;
                 }
@@ -634,23 +641,49 @@ namespace TrafficSystem
             }
 
             float checkRadius = Mathf.Max(spawnCheckRadius, spacingRadius);
-            Collider[] colliders = Physics.OverlapSphere(position, checkRadius, spawnObstacleCheckMask, QueryTriggerInteraction.Ignore);
-            for (int i = 0; i < colliders.Length; i++)
+            int count = Physics.OverlapSphereNonAlloc(position, checkRadius, spawnOverlapBuffer, spawnObstacleCheckMask, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < count; i++)
             {
-                Collider col = colliders[i];
+                Collider col = spawnOverlapBuffer[i];
                 if (col == null) continue;
                 if (col.transform.IsChildOf(transform)) continue;
 
-                if (col.GetComponent<NpcCarAgent>() != null ||
-                    col.GetComponentInParent<NpcCarAgent>() != null ||
-                    col.GetComponent<CarController>() != null ||
-                    col.GetComponentInParent<CarController>() != null)
+                if (HasVehicleController(col))
                 {
                     return false;
                 }
             }
 
             return true;
+        }
+
+        private static bool HasVehicleController(Collider collider)
+        {
+            if (collider == null)
+            {
+                return false;
+            }
+
+            if (collider.TryGetComponent<NpcCarAgent>(out _) || collider.TryGetComponent<CarController>(out _))
+            {
+                return true;
+            }
+
+            Rigidbody attachedRigidbody = collider.attachedRigidbody;
+            if (attachedRigidbody != null &&
+                (attachedRigidbody.TryGetComponent<NpcCarAgent>(out _) || attachedRigidbody.TryGetComponent<CarController>(out _)))
+            {
+                return true;
+            }
+
+            Transform root = collider.transform.root;
+            if (root != null && root != collider.transform &&
+                (root.TryGetComponent<NpcCarAgent>(out _) || root.TryGetComponent<CarController>(out _)))
+            {
+                return true;
+            }
+
+            return false;
         }
 
         private float GetSpawnClearanceRadius()
