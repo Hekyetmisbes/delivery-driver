@@ -68,8 +68,9 @@ public class MiniMapObjectiveMarker : MonoBehaviour
 
     private void Update()
     {
+        int safeFrameInterval = Mathf.Max(1, updateEveryNFrames);
         frameCounter++;
-        if (frameCounter % updateEveryNFrames == 0)
+        if (frameCounter % safeFrameInterval == 0)
         {
             UpdateMarker();
         }
