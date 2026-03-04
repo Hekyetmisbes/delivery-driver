@@ -43,7 +43,7 @@ public class RuntimeOptimizationBootstrap : MonoBehaviour
 
     private void EnsureOptimizationManagers()
     {
-        EnsureManager<PerformanceOptimizationManager>("PerformanceOptimizationManager");
+        // PerformanceOptimizationManager removed - TrafficSimulationOptimizer handles all NPC throttling
 
         WorldChunkManager chunkManager = FindAnyObjectByType<WorldChunkManager>();
         if (chunkManager != null)
@@ -53,7 +53,7 @@ public class RuntimeOptimizationBootstrap : MonoBehaviour
             chunkManager.updateInterval = 0.35f;
             chunkManager.maxChunkUpdatesPerFrame = 12;
             chunkManager.enableHardRadiusCulling = true;
-            chunkManager.cullStaticRenderersOnly = true;
+            chunkManager.cullStaticRenderersOnly = false;
         }
 
         TrafficSimulationOptimizer trafficOptimizer = FindAnyObjectByType<TrafficSimulationOptimizer>();
@@ -61,6 +61,13 @@ public class RuntimeOptimizationBootstrap : MonoBehaviour
         {
             trafficOptimizer.showPerformanceStats = false;
             trafficOptimizer.autoFindPlayer = true;
+        }
+
+        // Create unified optimization controller (persists across scenes)
+        if (UnifiedOptimizationController.Instance == null)
+        {
+            GameObject controllerObj = new GameObject("UnifiedOptimizationController");
+            controllerObj.AddComponent<UnifiedOptimizationController>();
         }
     }
 
