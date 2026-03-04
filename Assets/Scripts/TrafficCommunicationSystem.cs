@@ -29,6 +29,10 @@ namespace TrafficSystem
 
         // Vehicle state cache
         private Dictionary<NpcCarAgent, VehicleState> vehicleStates;
+        private Dictionary<NpcCarAgent, Rigidbody> vehicleRigidbodies;
+
+        // Incremental grid tracking: vehicle -> last cell key
+        private Dictionary<NpcCarAgent, Vector2Int> vehicleCellKeys;
 
         private void Awake()
         {
@@ -45,6 +49,8 @@ namespace TrafficSystem
             spatialGrid = new Dictionary<Vector2Int, List<NpcCarAgent>>();
             allVehicles = new List<NpcCarAgent>();
             vehicleStates = new Dictionary<NpcCarAgent, VehicleState>();
+            vehicleRigidbodies = new Dictionary<NpcCarAgent, Rigidbody>();
+            vehicleCellKeys = new Dictionary<NpcCarAgent, Vector2Int>();
         }
 
         private void Update()
@@ -67,6 +73,7 @@ namespace TrafficSystem
             {
                 allVehicles.Add(vehicle);
                 vehicleStates[vehicle] = new VehicleState();
+                vehicleRigidbodies[vehicle] = vehicle.GetComponent<Rigidbody>();
             }
         }
 
@@ -77,32 +84,79 @@ namespace TrafficSystem
         {
             if (vehicle == null) return;
 
+            // Remove from spatial grid using cached cell key
+            if (vehicleCellKeys.TryGetValue(vehicle, out Vector2Int oldKey))
+            {
+                if (spatialGrid.TryGetValue(oldKey, out List<NpcCarAgent> oldCell))
+                {
+                    oldCell.Remove(vehicle);
+                }
+                vehicleCellKeys.Remove(vehicle);
+            }
+
             allVehicles.Remove(vehicle);
             vehicleStates.Remove(vehicle);
+            vehicleRigidbodies.Remove(vehicle);
         }
 
         /// <summary>
-        /// Update the spatial grid with current vehicle positions
+        /// Copy all registered vehicles into caller-provided list (avoids FindObjectsByType)
+        /// </summary>
+        public void GetAllVehicles(List<NpcCarAgent> results)
+        {
+            if (results == null) return;
+            results.Clear();
+            for (int i = 0; i < allVehicles.Count; i++)
+            {
+                if (allVehicles[i] != null)
+                    results.Add(allVehicles[i]);
+            }
+        }
+
+        /// <summary>
+        /// Number of registered vehicles
+        /// </summary>
+        public int VehicleCount => allVehicles.Count;
+
+        /// <summary>
+        /// Incremental spatial grid update - only moves vehicles that changed cells
         /// </summary>
         private void UpdateSpatialGrid()
         {
-            // Clear grid
-            spatialGrid.Clear();
-
-            // Insert all vehicles into grid
-            foreach (var vehicle in allVehicles)
+            for (int i = allVehicles.Count - 1; i >= 0; i--)
             {
-                if (vehicle == null || !vehicle.gameObject.activeInHierarchy)
-                    continue;
-
-                Vector2Int cellKey = GetCellKey(vehicle.transform.position);
-
-                if (!spatialGrid.ContainsKey(cellKey))
+                NpcCarAgent vehicle = allVehicles[i];
+                if (vehicle == null)
                 {
-                    spatialGrid[cellKey] = new List<NpcCarAgent>();
+                    allVehicles.RemoveAt(i);
+                    continue;
                 }
 
-                spatialGrid[cellKey].Add(vehicle);
+                if (!vehicle.gameObject.activeInHierarchy)
+                    continue;
+
+                Vector2Int newKey = GetCellKey(vehicle.transform.position);
+                bool hadOldKey = vehicleCellKeys.TryGetValue(vehicle, out Vector2Int oldKey);
+
+                // Only update grid if cell changed
+                if (!hadOldKey || oldKey != newKey)
+                {
+                    // Remove from old cell
+                    if (hadOldKey && spatialGrid.TryGetValue(oldKey, out List<NpcCarAgent> oldCell))
+                    {
+                        oldCell.Remove(vehicle);
+                    }
+
+                    // Add to new cell
+                    if (!spatialGrid.TryGetValue(newKey, out List<NpcCarAgent> newCell))
+                    {
+                        newCell = new List<NpcCarAgent>(8);
+                        spatialGrid[newKey] = newCell;
+                    }
+                    newCell.Add(vehicle);
+
+                    vehicleCellKeys[vehicle] = newKey;
+                }
 
                 // Update vehicle state
                 UpdateVehicleState(vehicle);
@@ -121,7 +175,13 @@ namespace TrafficSystem
 
             VehicleState state = vehicleStates[vehicle];
             state.position = vehicle.transform.position;
-            state.velocity = vehicle.GetComponent<Rigidbody>()?.linearVelocity ?? Vector3.zero;
+            if (!vehicleRigidbodies.TryGetValue(vehicle, out Rigidbody rb) || rb == null)
+            {
+                rb = vehicle.GetComponent<Rigidbody>();
+                vehicleRigidbodies[vehicle] = rb;
+            }
+
+            state.velocity = rb != null ? rb.linearVelocity : Vector3.zero;
             state.speed = vehicle.CurrentSpeed;
             state.forward = vehicle.transform.forward;
         }
@@ -132,9 +192,25 @@ namespace TrafficSystem
         public List<NpcCarAgent> GetNearbyVehicles(Vector3 position, float radius)
         {
             List<NpcCarAgent> results = new List<NpcCarAgent>();
+            GetNearbyVehicles(position, radius, results);
+            return results;
+        }
+
+        /// <summary>
+        /// Non-alloc nearby vehicle query into caller-provided list
+        /// </summary>
+        public void GetNearbyVehicles(Vector3 position, float radius, List<NpcCarAgent> results)
+        {
+            if (results == null)
+            {
+                return;
+            }
+
+            results.Clear();
 
             int cellRadius = Mathf.CeilToInt(radius / cellSize);
             Vector2Int centerCell = GetCellKey(position);
+            float radiusSqr = radius * radius;
 
             for (int x = -cellRadius; x <= cellRadius; x++)
             {
@@ -142,15 +218,16 @@ namespace TrafficSystem
                 {
                     Vector2Int cellKey = new Vector2Int(centerCell.x + x, centerCell.y + z);
 
-                    if (spatialGrid.ContainsKey(cellKey))
+                    if (spatialGrid.TryGetValue(cellKey, out List<NpcCarAgent> cellVehicles))
                     {
-                        foreach (var vehicle in spatialGrid[cellKey])
+                        for (int i = 0; i < cellVehicles.Count; i++)
                         {
+                            NpcCarAgent vehicle = cellVehicles[i];
                             if (vehicle == null || !vehicle.gameObject.activeInHierarchy)
                                 continue;
 
-                            float distance = Vector3.Distance(position, vehicle.transform.position);
-                            if (distance <= radius)
+                            Vector3 delta = vehicle.transform.position - position;
+                            if (delta.sqrMagnitude <= radiusSqr)
                             {
                                 results.Add(vehicle);
                             }
@@ -158,8 +235,6 @@ namespace TrafficSystem
                     }
                 }
             }
-
-            return results;
         }
 
         /// <summary>
