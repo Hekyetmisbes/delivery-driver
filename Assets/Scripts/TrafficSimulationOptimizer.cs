@@ -45,8 +45,12 @@ namespace DeliveryDriver.Optimization
         public Transform playerTransform;
         public bool autoFindPlayer = true;
 
+        [Header("Update Budget")]
+        [Tooltip("How often to refresh NPC distance/state data (seconds)")]
+        public float stateUpdateInterval = 0.12f;
+
         [Header("Performance Monitoring")]
-        public bool showPerformanceStats = true;
+        public bool showPerformanceStats = false;
         public int totalNPCs = 0;
         public int activeNPCs = 0;
         public int throttledNPCs = 0;
@@ -60,13 +64,22 @@ namespace DeliveryDriver.Optimization
         // Cached component lookups per NPC
         private Dictionary<NpcCarAgent, TurnSignalController> npcTurnSignals = new Dictionary<NpcCarAgent, TurnSignalController>();
         private Dictionary<NpcCarAgent, Rigidbody> npcRigidbodies = new Dictionary<NpcCarAgent, Rigidbody>();
+        private Dictionary<NpcCarAgent, NpcOptimizationState> npcOptimizationStates = new Dictionary<NpcCarAgent, NpcOptimizationState>();
 
-        // Spatial partitioning
-        private Dictionary<Vector2Int, List<NpcCarAgent>> spatialGrid = new Dictionary<Vector2Int, List<NpcCarAgent>>();
+        // Spatial partitioning - delegated to TrafficCommunicationSystem (single grid)
 
         // Statistics
         private int frameCounter = 0;
         private float lastStatsUpdate = 0f;
+        private float lastStateUpdate = 0f;
+        private GUIStyle perfHeaderStyle;
+
+        private enum NpcOptimizationState
+        {
+            Full,
+            Simplified,
+            Disabled
+        }
 
         private static TrafficSimulationOptimizer instance;
 
@@ -125,8 +138,9 @@ namespace DeliveryDriver.Optimization
             npcDistances[npc] = float.MaxValue;
             npcTurnSignals[npc] = npc.GetComponent<TurnSignalController>();
             npcRigidbodies[npc] = npc.GetComponent<Rigidbody>();
+            npcOptimizationStates[npc] = NpcOptimizationState.Full;
 
-            totalNPCs++;
+            totalNPCs = registeredNPCs.Count;
         }
 
         /// <summary>
@@ -141,8 +155,9 @@ namespace DeliveryDriver.Optimization
             npcDistances.Remove(npc);
             npcTurnSignals.Remove(npc);
             npcRigidbodies.Remove(npc);
+            npcOptimizationStates.Remove(npc);
 
-            totalNPCs--;
+            totalNPCs = registeredNPCs.Count;
         }
 
         private void Update()
@@ -151,13 +166,10 @@ namespace DeliveryDriver.Optimization
 
             frameCounter++;
 
-            // Update NPC distances and intervals
-            UpdateNPCStates();
-
-            // Update spatial partitioning
-            if (useSpatialPartitioning)
+            if (Time.time - lastStateUpdate >= stateUpdateInterval)
             {
-                UpdateSpatialPartitioning();
+                lastStateUpdate = Time.time;
+                UpdateNPCStates();
             }
 
             // Update statistics periodically
@@ -174,80 +186,120 @@ namespace DeliveryDriver.Optimization
             activeNPCs = 0;
             throttledNPCs = 0;
             disabledNPCs = 0;
+            float nearSqr = nearDistance * nearDistance;
+            float midSqr = midDistance * midDistance;
+            float farSqr = farDistance * farDistance;
+            float veryFarSqr = veryFarDistance * veryFarDistance;
 
-            foreach (var npc in registeredNPCs)
+            for (int i = registeredNPCs.Count - 1; i >= 0; i--)
             {
+                NpcCarAgent npc = registeredNPCs[i];
                 if (npc == null) continue;
 
                 // Calculate distance
-                float distance = Vector3.Distance(playerPos, npc.transform.position);
-                npcDistances[npc] = distance;
+                Vector3 npcPos = npc.transform.position;
+                float dx = npcPos.x - playerPos.x;
+                float dz = npcPos.z - playerPos.z;
+                float sqrDistance = dx * dx + dz * dz;
 
                 // Determine update interval and state
-                int updateInterval = DetermineUpdateInterval(distance);
+                int updateInterval = DetermineUpdateIntervalSqr(sqrDistance, nearSqr, midSqr, farSqr, veryFarSqr);
                 npcUpdateIntervals[npc] = updateInterval;
 
                 // Apply optimizations based on distance
-                ApplyNPCOptimizations(npc, distance, updateInterval);
+                ApplyNPCOptimizations(npc, sqrDistance, farSqr, veryFarSqr);
 
                 // Count statistics
-                if (distance > veryFarDistance && disableVeryFarAI)
+                if (sqrDistance > veryFarSqr && disableVeryFarAI)
                     disabledNPCs++;
                 else if (updateInterval > 1)
                     throttledNPCs++;
                 else
                     activeNPCs++;
             }
+
+            totalNPCs = registeredNPCs.Count;
         }
 
-        private int DetermineUpdateInterval(float distance)
+        private int DetermineUpdateIntervalSqr(float sqrDistance, float nearSqr, float midSqr, float farSqr, float veryFarSqr)
         {
-            if (distance < nearDistance)
+            if (sqrDistance < nearSqr)
                 return 1; // Every frame
-            else if (distance < midDistance)
+            else if (sqrDistance < midSqr)
                 return 2; // Every 2 frames
-            else if (distance < farDistance)
+            else if (sqrDistance < farSqr)
                 return 4; // Every 4 frames
-            else if (distance < veryFarDistance)
+            else if (sqrDistance < veryFarSqr)
                 return 8; // Every 8 frames
             else
                 return 16; // Every 16 frames (event-driven)
         }
 
-        private void ApplyNPCOptimizations(NpcCarAgent npc, float distance, int updateInterval)
+        private void ApplyNPCOptimizations(NpcCarAgent npc, float sqrDistance, float farSqr, float veryFarSqr)
         {
+            NpcOptimizationState targetState;
+
             // Very far: disable most behaviors
-            if (distance > veryFarDistance && disableVeryFarAI)
+            if (sqrDistance > veryFarSqr && disableVeryFarAI)
             {
-                DisableNPCBehaviors(npc);
+                targetState = NpcOptimizationState.Disabled;
+            }
+            else if (sqrDistance > farSqr)
+            {
+                targetState = NpcOptimizationState.Simplified;
+            }
+            else
+            {
+                targetState = NpcOptimizationState.Full;
+            }
+
+            if (npcOptimizationStates.TryGetValue(npc, out NpcOptimizationState currentState) && currentState == targetState)
+            {
                 return;
             }
 
-            // Far: simplify behaviors
-            if (distance > farDistance)
-            {
-                if (disableFarTurnSignals)
-                {
-                    npcTurnSignals.TryGetValue(npc, out TurnSignalController turnSignal);
-                    if (turnSignal != null)
-                    {
-                        turnSignal.enabled = false;
-                    }
-                }
+            npcOptimizationStates[npc] = targetState;
 
-                if (simplifyDistantPhysics)
+            if (targetState == NpcOptimizationState.Disabled)
+            {
+                DisableNPCBehaviors(npc);
+            }
+            else if (targetState == NpcOptimizationState.Simplified)
+            {
+                SimplifyNpcBehaviors(npc);
+            }
+            else
+            {
+                EnableNPCBehaviors(npc);
+            }
+        }
+
+        private void SimplifyNpcBehaviors(NpcCarAgent npc)
+        {
+            if (disableFarTurnSignals)
+            {
+                npcTurnSignals.TryGetValue(npc, out TurnSignalController turnSignal);
+                if (turnSignal != null && turnSignal.enabled)
                 {
-                    npcRigidbodies.TryGetValue(npc, out Rigidbody rb);
-                    if (rb != null)
+                    turnSignal.enabled = false;
+                }
+            }
+
+            if (simplifyDistantPhysics)
+            {
+                npcRigidbodies.TryGetValue(npc, out Rigidbody rb);
+                if (rb != null)
+                {
+                    if (rb.isKinematic)
+                    {
+                        rb.isKinematic = false;
+                    }
+
+                    if (rb.interpolation != RigidbodyInterpolation.None)
                     {
                         rb.interpolation = RigidbodyInterpolation.None;
                     }
                 }
-            }
-            else
-            {
-                // Near/Mid: enable full behaviors
-                EnableNPCBehaviors(npc);
             }
         }
 
@@ -255,7 +307,7 @@ namespace DeliveryDriver.Optimization
         {
             // Disable turn signals
             npcTurnSignals.TryGetValue(npc, out TurnSignalController turnSignal);
-            if (turnSignal != null)
+            if (turnSignal != null && turnSignal.enabled)
             {
                 turnSignal.enabled = false;
             }
@@ -264,8 +316,15 @@ namespace DeliveryDriver.Optimization
             npcRigidbodies.TryGetValue(npc, out Rigidbody rb);
             if (rb != null)
             {
-                rb.interpolation = RigidbodyInterpolation.None;
-                rb.isKinematic = true; // Make kinematic at very far distance
+                if (rb.interpolation != RigidbodyInterpolation.None)
+                {
+                    rb.interpolation = RigidbodyInterpolation.None;
+                }
+
+                if (!rb.isKinematic)
+                {
+                    rb.isKinematic = true; // Make kinematic at very far distance
+                }
             }
         }
 
@@ -273,7 +332,7 @@ namespace DeliveryDriver.Optimization
         {
             // Enable turn signals
             npcTurnSignals.TryGetValue(npc, out TurnSignalController turnSignal);
-            if (turnSignal != null)
+            if (turnSignal != null && !turnSignal.enabled)
             {
                 turnSignal.enabled = true;
             }
@@ -282,8 +341,15 @@ namespace DeliveryDriver.Optimization
             npcRigidbodies.TryGetValue(npc, out Rigidbody rb);
             if (rb != null)
             {
-                rb.isKinematic = false;
-                rb.interpolation = RigidbodyInterpolation.Interpolate;
+                if (rb.isKinematic)
+                {
+                    rb.isKinematic = false;
+                }
+
+                if (rb.interpolation != RigidbodyInterpolation.Interpolate)
+                {
+                    rb.interpolation = RigidbodyInterpolation.Interpolate;
+                }
             }
         }
 
@@ -307,74 +373,32 @@ namespace DeliveryDriver.Optimization
             return npcDistances.ContainsKey(npc) ? npcDistances[npc] : float.MaxValue;
         }
 
-        private void UpdateSpatialPartitioning()
-        {
-            // Clear existing lists instead of discarding them to avoid allocations
-            foreach (var kvp in spatialGrid)
-            {
-                kvp.Value.Clear();
-            }
-
-            foreach (var npc in registeredNPCs)
-            {
-                if (npc == null) continue;
-
-                Vector2Int gridCell = WorldToGridCell(npc.transform.position);
-
-                if (!spatialGrid.TryGetValue(gridCell, out List<NpcCarAgent> list))
-                {
-                    list = new List<NpcCarAgent>();
-                    spatialGrid[gridCell] = list;
-                }
-
-                list.Add(npc);
-            }
-        }
-
-        private Vector2Int WorldToGridCell(Vector3 worldPos)
-        {
-            return new Vector2Int(
-                Mathf.FloorToInt(worldPos.x / gridCellSize),
-                Mathf.FloorToInt(worldPos.z / gridCellSize)
-            );
-        }
-
         /// <summary>
-        /// Get NPCs in nearby grid cells (for collision avoidance, etc.)
+        /// Get NPCs in nearby grid cells - delegates to TrafficCommunicationSystem's single spatial grid
         /// </summary>
         public List<NpcCarAgent> GetNearbyNPCs(Vector3 position, int cellRadius = 1)
         {
-            List<NpcCarAgent> nearby = new List<NpcCarAgent>();
-            GetNearbyNPCs(position, nearby, cellRadius);
-            return nearby;
+            float radius = cellRadius * gridCellSize;
+            if (TrafficCommunicationSystem.Instance != null)
+            {
+                return TrafficCommunicationSystem.Instance.GetNearbyVehicles(position, radius);
+            }
+            return new List<NpcCarAgent>(registeredNPCs);
         }
 
         /// <summary>
-        /// Get NPCs in nearby grid cells into a reusable list (zero-alloc overload)
+        /// Get NPCs in nearby grid cells into a reusable list - delegates to TrafficCommunicationSystem
         /// </summary>
         public void GetNearbyNPCs(Vector3 position, List<NpcCarAgent> results, int cellRadius = 1)
         {
-            results.Clear();
-
-            if (!useSpatialPartitioning)
+            float radius = cellRadius * gridCellSize;
+            if (TrafficCommunicationSystem.Instance != null)
             {
-                results.AddRange(registeredNPCs);
+                TrafficCommunicationSystem.Instance.GetNearbyVehicles(position, radius, results);
                 return;
             }
-
-            Vector2Int centerCell = WorldToGridCell(position);
-
-            for (int x = -cellRadius; x <= cellRadius; x++)
-            {
-                for (int z = -cellRadius; z <= cellRadius; z++)
-                {
-                    Vector2Int cell = centerCell + new Vector2Int(x, z);
-                    if (spatialGrid.TryGetValue(cell, out List<NpcCarAgent> list))
-                    {
-                        results.AddRange(list);
-                    }
-                }
-            }
+            results.Clear();
+            results.AddRange(registeredNPCs);
         }
 
         private void UpdateStatistics()
@@ -390,7 +414,12 @@ namespace DeliveryDriver.Optimization
             GUILayout.BeginArea(new Rect(10, 670, 300, 150));
             GUILayout.BeginVertical("box");
 
-            GUILayout.Label($"<b>Traffic Simulation Optimizer</b>", new GUIStyle(GUI.skin.label) { richText = true });
+            if (perfHeaderStyle == null)
+            {
+                perfHeaderStyle = new GUIStyle(GUI.skin.label) { richText = true };
+            }
+
+            GUILayout.Label($"<b>Traffic Simulation Optimizer</b>", perfHeaderStyle);
             GUILayout.Label($"Total NPCs: {totalNPCs}");
             GUILayout.Label($"Active (Every Frame): {activeNPCs}");
             GUILayout.Label($"Throttled: {throttledNPCs}");
