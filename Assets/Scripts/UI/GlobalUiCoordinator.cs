@@ -2,29 +2,57 @@ using DeliveryDriver.Quest.UI;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
+[ExecuteAlways]
 public class GlobalUiCoordinator : MonoBehaviour
 {
     [SerializeField] private bool adoptExistingCanvases = true;
     [SerializeField] private bool includeWorldSpaceCanvases = false;
     [SerializeField] private int rootCanvasSortingOrder = 500;
     [SerializeField] private string rootCanvasName = "GlobalUICanvas";
+    [SerializeField] private string canvasGroupRootName = "GlobalUICanvasGroups";
+    [SerializeField] private float runtimeAdoptionInterval = 0.5f;
+    [SerializeField] private bool continuousRuntimeAdoption = false;
 
     private static GlobalUiCoordinator instance;
     private Canvas rootCanvas;
+    private RectTransform canvasGroupRoot;
+    private float lastRuntimeAdoptionTime;
+
+    public static Canvas PrimaryCanvas
+    {
+        get
+        {
+            EnsureInstance();
+            return instance != null ? instance.rootCanvas : null;
+        }
+    }
+
+    public static Transform CanvasGroupRoot
+    {
+        get
+        {
+            EnsureInstance();
+            return instance != null ? instance.canvasGroupRoot : null;
+        }
+    }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void EnsureInstance()
     {
+        if (!ResolveExistingInstance() && instance == null)
+        {
+            GameObject rootObject = new GameObject("GlobalUIRoot");
+            instance = rootObject.AddComponent<GlobalUiCoordinator>();
+        }
+
         if (instance != null)
         {
             instance.RefreshSceneBindings();
-            return;
         }
-
-        GameObject rootObject = new GameObject("GlobalUIRoot");
-        instance = rootObject.AddComponent<GlobalUiCoordinator>();
-        DontDestroyOnLoad(rootObject);
     }
 
     private void Awake()
@@ -36,15 +64,22 @@ public class GlobalUiCoordinator : MonoBehaviour
         }
 
         instance = this;
-        SceneManager.sceneLoaded += OnSceneLoaded;
+
+        if (Application.isPlaying)
+        {
+            DontDestroyOnLoad(gameObject);
+            SceneManager.sceneLoaded += OnSceneLoaded;
+        }
+
         BuildOrFindRootCanvas();
+        BuildOrFindCanvasGroupRoot();
         EnsurePauseMenuComponent();
         RefreshSceneBindings();
     }
 
     private void OnDestroy()
     {
-        if (instance == this)
+        if (instance == this && Application.isPlaying)
         {
             SceneManager.sceneLoaded -= OnSceneLoaded;
         }
@@ -55,9 +90,42 @@ public class GlobalUiCoordinator : MonoBehaviour
         RefreshSceneBindings();
     }
 
+    private void LateUpdate()
+    {
+        if (!adoptExistingCanvases)
+        {
+            return;
+        }
+
+        if (!Application.isPlaying || !continuousRuntimeAdoption)
+        {
+            return;
+        }
+
+        if (Time.unscaledTime - lastRuntimeAdoptionTime < Mathf.Max(0.1f, runtimeAdoptionInterval))
+        {
+            return;
+        }
+
+        lastRuntimeAdoptionTime = Time.unscaledTime;
+        ReparentSceneCanvases();
+    }
+
+    private static bool ResolveExistingInstance()
+    {
+        if (instance != null)
+        {
+            return true;
+        }
+
+        instance = FindFirstObjectByType<GlobalUiCoordinator>();
+        return instance != null;
+    }
+
     private void RefreshSceneBindings()
     {
         BuildOrFindRootCanvas();
+        BuildOrFindCanvasGroupRoot();
         EnsurePauseMenuComponent();
         if (adoptExistingCanvases)
         {
@@ -97,6 +165,39 @@ public class GlobalUiCoordinator : MonoBehaviour
         scaler.matchWidthOrHeight = 0.5f;
     }
 
+    private void BuildOrFindCanvasGroupRoot()
+    {
+        if (rootCanvas == null)
+        {
+            return;
+        }
+
+        if (canvasGroupRoot != null)
+        {
+            return;
+        }
+
+        Transform existing = rootCanvas.transform.Find(canvasGroupRootName);
+        if (existing != null)
+        {
+            canvasGroupRoot = existing as RectTransform;
+            if (canvasGroupRoot != null)
+            {
+                EnsureCanvasGroup(canvasGroupRoot.gameObject);
+                return;
+            }
+        }
+
+        GameObject groupRootObject = new GameObject(canvasGroupRootName, typeof(RectTransform), typeof(CanvasGroup));
+        groupRootObject.transform.SetParent(rootCanvas.transform, false);
+        canvasGroupRoot = groupRootObject.GetComponent<RectTransform>();
+        canvasGroupRoot.anchorMin = Vector2.zero;
+        canvasGroupRoot.anchorMax = Vector2.one;
+        canvasGroupRoot.pivot = new Vector2(0.5f, 0.5f);
+        canvasGroupRoot.offsetMin = Vector2.zero;
+        canvasGroupRoot.offsetMax = Vector2.zero;
+    }
+
     private void EnsurePauseMenuComponent()
     {
         if (FindFirstObjectByType<PauseMenuUI>() != null)
@@ -113,7 +214,7 @@ public class GlobalUiCoordinator : MonoBehaviour
 
     private void ReparentSceneCanvases()
     {
-        if (rootCanvas == null)
+        if (rootCanvas == null || canvasGroupRoot == null)
         {
             return;
         }
@@ -135,12 +236,63 @@ public class GlobalUiCoordinator : MonoBehaviour
 
             if (canvas.transform.IsChildOf(rootCanvas.transform))
             {
-                continue;
+                if (!canvas.transform.IsChildOf(canvasGroupRoot))
+                {
+                    canvas.transform.SetParent(canvasGroupRoot, true);
+                }
+            }
+            else
+            {
+                canvas.transform.SetParent(canvasGroupRoot, true);
             }
 
-            canvas.transform.SetParent(rootCanvas.transform, true);
             canvas.overrideSorting = true;
             canvas.sortingOrder = localSortingOrder++;
+            EnsureCanvasGroup(canvas.gameObject);
         }
     }
+
+    private static void EnsureCanvasGroup(GameObject target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        CanvasGroup group = target.GetComponent<CanvasGroup>();
+        if (group == null)
+        {
+            group = target.AddComponent<CanvasGroup>();
+        }
+
+        group.alpha = 1f;
+        group.interactable = true;
+        group.blocksRaycasts = true;
+    }
+
+#if UNITY_EDITOR
+    [InitializeOnLoadMethod]
+    private static void EnsureEditorSceneInstance()
+    {
+        EditorApplication.delayCall += TryEnsureEditorSceneInstance;
+    }
+
+    private static void TryEnsureEditorSceneInstance()
+    {
+        if (Application.isPlaying || EditorApplication.isPlayingOrWillChangePlaymode)
+        {
+            return;
+        }
+
+        if (ResolveExistingInstance())
+        {
+            instance.RefreshSceneBindings();
+            return;
+        }
+
+        GameObject rootObject = new GameObject("GlobalUIRoot");
+        instance = rootObject.AddComponent<GlobalUiCoordinator>();
+        instance.RefreshSceneBindings();
+    }
+#endif
 }
