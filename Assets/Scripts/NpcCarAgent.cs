@@ -666,6 +666,8 @@ namespace TrafficSystem
             float dynamicCheckRadius = Mathf.Lerp(3f, 6f, Mathf.Clamp01(CurrentSpeed / 80f));
             int hitCount = Physics.OverlapSphereNonAlloc(transform.position, dynamicCheckRadius, sharedOverlapBuffer, obstacleLayerMask, QueryTriggerInteraction.Ignore);
             Vector3 selfReference = GetReferencePosition();
+            float immediateCollisionDistanceSqr = 1.2f * 1.2f;
+            float minimumSeparationDistanceSqr = minimumSeparationDistance * minimumSeparationDistance;
 
             for (int i = 0; i < hitCount; i++)
             {
@@ -678,18 +680,19 @@ namespace TrafficSystem
                     nearbyVehicles.Add(col);
 
                     Vector3 closestPoint = col.ClosestPoint(selfReference);
-                    float distance = Vector3.Distance(selfReference, closestPoint);
+                    Vector3 toOther = closestPoint - selfReference;
+                    float distanceSqr = toOther.sqrMagnitude;
 
                     Rigidbody otherRb = col.attachedRigidbody;
                     Vector3 otherVel = (otherRb != null && !otherRb.isKinematic) ? otherRb.linearVelocity : Vector3.zero;
-                    Vector3 toOther = closestPoint - selfReference;
                     float closingSpeed = 0f;
-                    if (toOther.sqrMagnitude > 0.001f)
+                    if (distanceSqr > 0.001f)
                     {
-                        closingSpeed = Vector3.Dot(rb.linearVelocity - otherVel, toOther.normalized);
+                        float invDistance = 1f / Mathf.Sqrt(distanceSqr);
+                        closingSpeed = Vector3.Dot(rb.linearVelocity - otherVel, toOther * invDistance);
                     }
 
-                    if (distance < 1.2f || (distance < minimumSeparationDistance && closingSpeed > 1.5f))
+                    if (distanceSqr < immediateCollisionDistanceSqr || (distanceSqr < minimumSeparationDistanceSqr && closingSpeed > 1.5f))
                     {
                         isColliding = true;
                     }
@@ -717,6 +720,7 @@ namespace TrafficSystem
             Vector3 separationForce = Vector3.zero;
             int separationCount = 0;
             Vector3 selfReference = GetReferencePosition();
+            float minimumSeparationDistanceSqr = minimumSeparationDistance * minimumSeparationDistance;
 
             foreach (Collider nearbyVehicle in nearbyVehicles)
             {
@@ -724,22 +728,25 @@ namespace TrafficSystem
 
                 Vector3 closestPoint = nearbyVehicle.ClosestPoint(selfReference);
                 Vector3 toOther = closestPoint - selfReference;
-                float distance = toOther.magnitude;
+                float distanceSqr = toOther.sqrMagnitude;
 
                 // Skip if too far
-                if (distance > minimumSeparationDistance) continue;
+                if (distanceSqr > minimumSeparationDistanceSqr) continue;
 
                 // Apply gentle separation force when close
-                if (distance < minimumSeparationDistance && distance > 0.05f)
+                if (distanceSqr > 0.0025f)
                 {
+                    float distance = Mathf.Sqrt(distanceSqr);
+                    float invDistance = 1f / distance;
+
                     Rigidbody otherRb = nearbyVehicle.attachedRigidbody;
                     Vector3 otherVel = (otherRb != null && !otherRb.isKinematic) ? otherRb.linearVelocity : Vector3.zero;
-                    float closingSpeed = Vector3.Dot(rb.linearVelocity - otherVel, toOther.normalized);
+                    float closingSpeed = Vector3.Dot(rb.linearVelocity - otherVel, toOther * invDistance);
 
                     float proximityFactor = 1f - (distance / minimumSeparationDistance);
                     float closingFactor = Mathf.Clamp01(closingSpeed / 8f);
                     float strength = proximityFactor * (1f + closingFactor);
-                    Vector3 repulsion = -toOther.normalized * strength;
+                    Vector3 repulsion = -(toOther * invDistance) * strength;
                     separationForce += repulsion;
                     separationCount++;
                 }
