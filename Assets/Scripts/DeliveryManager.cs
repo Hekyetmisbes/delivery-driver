@@ -147,6 +147,10 @@ public class DeliveryManager : MonoBehaviour
 
         if (miniMapMarker == null)
             miniMapMarker = GetComponent<MiniMapObjectiveMarker>();
+        if (miniMapMarker == null)
+            miniMapMarker = FindFirstObjectByType<MiniMapObjectiveMarker>();
+        if (miniMapMarker == null)
+            miniMapMarker = gameObject.AddComponent<MiniMapObjectiveMarker>();
         if (speedometerUI == null)
             speedometerUI = GetComponent<SpeedometerUI>();
     }
