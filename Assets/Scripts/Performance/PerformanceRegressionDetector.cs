@@ -54,12 +54,17 @@ public class PerformanceRegressionDetector : MonoBehaviour
     public int warningCount = 0;
     public int criticalCount = 0;
 
-    private List<RegressionAlert> activeAlerts = new List<RegressionAlert>();
-    private List<float> frameTimeHistory = new List<float>();
-    private List<float> memoryHistory = new List<float>();
+    private readonly List<RegressionAlert> activeAlerts = new List<RegressionAlert>();
+    private readonly List<float> frameTimeHistory = new List<float>();
+    private readonly List<float> memoryHistory = new List<float>();
     private float nextDetectionTime = 0f;
     private float initialMemory = 0f;
     private float sessionStartTime = 0f;
+
+    private GUIStyle warningStyle;
+    private GUIStyle criticalStyle;
+    private Texture2D warningBackgroundTexture;
+    private Texture2D criticalBackgroundTexture;
 
     private void Start()
     {
@@ -165,16 +170,16 @@ public class PerformanceRegressionDetector : MonoBehaviour
         }
     }
 
-    private void CheckMetric(string metricName, float baseline, float current, bool higherIsBetter)
+    private void CheckMetric(string metricName, float baselineValue, float current, bool higherIsBetter)
     {
         float variance;
         if (higherIsBetter)
         {
-            variance = (baseline - current) / baseline;
+            variance = (baselineValue - current) / baselineValue;
         }
         else
         {
-            variance = (current - baseline) / baseline;
+            variance = (current - baselineValue) / baselineValue;
         }
 
         if (variance > criticalThreshold)
@@ -182,7 +187,7 @@ public class PerformanceRegressionDetector : MonoBehaviour
             RegressionAlert alert = new RegressionAlert
             {
                 metric = metricName,
-                baseline = baseline,
+                baseline = baselineValue,
                 current = current,
                 variance = variance,
                 severity = "Critical",
@@ -190,14 +195,14 @@ public class PerformanceRegressionDetector : MonoBehaviour
             };
             activeAlerts.Add(alert);
             criticalCount++;
-            Debug.LogError($"[RegressionDetector] CRITICAL: {metricName} regression! Baseline: {baseline:F2}, Current: {current:F2}, Variance: {variance * 100:F1}%");
+            Debug.LogError($"[RegressionDetector] CRITICAL: {metricName} regression! Baseline: {baselineValue:F2}, Current: {current:F2}, Variance: {variance * 100:F1}%");
         }
         else if (variance > warningThreshold)
         {
             RegressionAlert alert = new RegressionAlert
             {
                 metric = metricName,
-                baseline = baseline,
+                baseline = baselineValue,
                 current = current,
                 variance = variance,
                 severity = "Warning",
@@ -205,7 +210,7 @@ public class PerformanceRegressionDetector : MonoBehaviour
             };
             activeAlerts.Add(alert);
             warningCount++;
-            Debug.LogWarning($"[RegressionDetector] WARNING: {metricName} degradation. Baseline: {baseline:F2}, Current: {current:F2}, Variance: {variance * 100:F1}%");
+            Debug.LogWarning($"[RegressionDetector] WARNING: {metricName} degradation. Baseline: {baselineValue:F2}, Current: {current:F2}, Variance: {variance * 100:F1}%");
         }
     }
 
@@ -214,10 +219,11 @@ public class PerformanceRegressionDetector : MonoBehaviour
         if (frameTimeHistory.Count == 0) return 60f;
 
         float totalTime = 0f;
-        foreach (float time in frameTimeHistory)
+        for (int i = 0; i < frameTimeHistory.Count; i++)
         {
-            totalTime += time;
+            totalTime += frameTimeHistory[i];
         }
+
         float avgTimeMS = totalTime / frameTimeHistory.Count;
         return 1000f / avgTimeMS;
     }
@@ -240,23 +246,25 @@ public class PerformanceRegressionDetector : MonoBehaviour
         if (frameTimeHistory.Count == 0) return 0f;
 
         float totalTime = 0f;
-        foreach (float time in frameTimeHistory)
+        for (int i = 0; i < frameTimeHistory.Count; i++)
         {
-            totalTime += time;
+            totalTime += frameTimeHistory[i];
         }
+
         return totalTime / frameTimeHistory.Count;
     }
 
     private int CountFrameSpikes()
     {
         int count = 0;
-        foreach (float time in frameTimeHistory)
+        for (int i = 0; i < frameTimeHistory.Count; i++)
         {
-            if (time > spikeThresholdMS)
+            if (frameTimeHistory[i] > spikeThresholdMS)
             {
                 count++;
             }
         }
+
         return count;
     }
 
@@ -264,7 +272,6 @@ public class PerformanceRegressionDetector : MonoBehaviour
     {
         if (memoryHistory.Count < 2) return 0f;
 
-        // Linear regression to find growth rate
         float firstMemory = memoryHistory[0];
         float lastMemory = memoryHistory[memoryHistory.Count - 1];
         float timeDelta = (memoryHistory.Count / 60f) / 60f; // Convert to minutes
@@ -350,23 +357,16 @@ public class PerformanceRegressionDetector : MonoBehaviour
     {
         if (!hasActiveAlerts) return;
 
-        // Display regression alerts on screen
-        GUIStyle warningStyle = new GUIStyle(GUI.skin.box);
-        warningStyle.normal.background = MakeTexture(2, 2, new Color(1f, 0.5f, 0f, 0.8f));
-        warningStyle.normal.textColor = Color.white;
-        warningStyle.fontSize = 14;
-        warningStyle.padding = new RectOffset(10, 10, 5, 5);
-
-        GUIStyle criticalStyle = new GUIStyle(warningStyle);
-        criticalStyle.normal.background = MakeTexture(2, 2, new Color(1f, 0f, 0f, 0.8f));
+        EnsureGuiStyles();
 
         float yPos = 10f;
 
-        GUI.Label(new Rect(10, yPos, 400, 25), $"⚠️ Performance Issues: {activeAlerts.Count}", criticalStyle);
+        GUI.Label(new Rect(10, yPos, 400, 25), $"Performance Issues: {activeAlerts.Count}", criticalStyle);
         yPos += 30f;
 
-        foreach (RegressionAlert alert in activeAlerts)
+        for (int i = 0; i < activeAlerts.Count; i++)
         {
+            RegressionAlert alert = activeAlerts[i];
             GUIStyle style = alert.severity == "Critical" ? criticalStyle : warningStyle;
             string text = $"{alert.metric}: {alert.current:F1} (target: {alert.baseline:F1})";
             GUI.Label(new Rect(10, yPos, 400, 20), text, style);
@@ -374,16 +374,51 @@ public class PerformanceRegressionDetector : MonoBehaviour
         }
     }
 
-    private Texture2D MakeTexture(int width, int height, Color color)
+    private void EnsureGuiStyles()
+    {
+        if (warningStyle != null && criticalStyle != null)
+        {
+            return;
+        }
+
+        warningStyle = new GUIStyle(GUI.skin.box);
+        warningBackgroundTexture = CreateTexture(2, 2, new Color(1f, 0.5f, 0f, 0.8f));
+        warningStyle.normal.background = warningBackgroundTexture;
+        warningStyle.normal.textColor = Color.white;
+        warningStyle.fontSize = 14;
+        warningStyle.padding = new RectOffset(10, 10, 5, 5);
+
+        criticalStyle = new GUIStyle(warningStyle);
+        criticalBackgroundTexture = CreateTexture(2, 2, new Color(1f, 0f, 0f, 0.8f));
+        criticalStyle.normal.background = criticalBackgroundTexture;
+    }
+
+    private static Texture2D CreateTexture(int width, int height, Color color)
     {
         Color[] pixels = new Color[width * height];
         for (int i = 0; i < pixels.Length; i++)
         {
             pixels[i] = color;
         }
-        Texture2D texture = new Texture2D(width, height);
+
+        Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
         texture.SetPixels(pixels);
         texture.Apply();
         return texture;
+    }
+
+    private void OnDestroy()
+    {
+        if (warningBackgroundTexture != null)
+        {
+            Destroy(warningBackgroundTexture);
+            warningBackgroundTexture = null;
+        }
+
+        if (criticalBackgroundTexture != null)
+        {
+            Destroy(criticalBackgroundTexture);
+            criticalBackgroundTexture = null;
+        }
     }
 }
