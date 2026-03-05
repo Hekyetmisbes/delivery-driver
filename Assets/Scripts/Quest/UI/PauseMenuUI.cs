@@ -3,6 +3,7 @@ using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using TMPro;
 using DeliveryDriver.Quest;
+using UnityEngine.SceneManagement;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -21,6 +22,10 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private Vector2 pauseMenuSize = new Vector2(560f, 720f);
         [SerializeField] private string resumeButtonLabel = "Devam Et";
         [SerializeField] private string quitButtonLabel = "Oyundan Cik";
+        [SerializeField] private string resumeSceneName = "";
+        [SerializeField] private string quitSceneName = "";
+        [SerializeField] private bool enablePauseToggleInput = true;
+        [SerializeField] private bool startPaused;
 
         [Header("Kenney Skin")]
         [SerializeField] private Sprite panelBackgroundSprite;
@@ -52,7 +57,7 @@ namespace DeliveryDriver.Quest.UI
         private void Start()
         {
             EnsurePauseMenu();
-            SetPaused(false);
+            SetPaused(startPaused);
         }
 
         private void Update()
@@ -62,6 +67,11 @@ namespace DeliveryDriver.Quest.UI
 
         private void HandlePauseInput()
         {
+            if (!enablePauseToggleInput)
+            {
+                return;
+            }
+
 #if ENABLE_INPUT_SYSTEM
             bool escPressed = Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame;
 #if ENABLE_LEGACY_INPUT_MANAGER
@@ -245,12 +255,12 @@ namespace DeliveryDriver.Quest.UI
             Button quitButton = CreateButton(buttonRow.transform, "QuitButton", quitButtonLabel, new Color(0.67f, 0.22f, 0.2f, 1f));
             if (resumeButton != null)
             {
-                resumeButton.onClick.AddListener(() => SetPaused(false));
+                resumeButton.onClick.AddListener(OnResumeButtonClicked);
             }
 
             if (quitButton != null)
             {
-                quitButton.onClick.AddListener(QuitGame);
+                quitButton.onClick.AddListener(OnQuitButtonClicked);
             }
 
             return panelObject;
@@ -995,6 +1005,42 @@ namespace DeliveryDriver.Quest.UI
             toggle.isOn = false;
 
             return toggle;
+        }
+
+        public void ConfigureForSettingsScene(string mainMenuSceneName = "MainMenu")
+        {
+            pauseTimeScale = false;
+            showStatsOnPause = false;
+            enablePauseToggleInput = false;
+            startPaused = true;
+            resumeButtonLabel = "Ana Menu";
+            resumeSceneName = mainMenuSceneName;
+            quitButtonLabel = "Oyundan Cik";
+            quitSceneName = string.Empty;
+        }
+
+        private void OnResumeButtonClicked()
+        {
+            if (!string.IsNullOrWhiteSpace(resumeSceneName))
+            {
+                Time.timeScale = 1f;
+                SceneManager.LoadScene(resumeSceneName);
+                return;
+            }
+
+            SetPaused(false);
+        }
+
+        private void OnQuitButtonClicked()
+        {
+            if (!string.IsNullOrWhiteSpace(quitSceneName))
+            {
+                Time.timeScale = 1f;
+                SceneManager.LoadScene(quitSceneName);
+                return;
+            }
+
+            QuitGame();
         }
 
         private void QuitGame()
