@@ -1,4 +1,5 @@
 using DeliveryDriver.Quest;
+using DeliveryDriver.UI;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -18,8 +19,8 @@ public class MainMenuRuntimeUI : MonoBehaviour
     [SerializeField] private string developerName = "hekye";
 
     [Header("Main Panel Layout")]
-    [SerializeField] private Vector2 mainPanelSize = new Vector2(560f, 380f);
-    [SerializeField] private Vector2 mainPanelOffset = new Vector2(0f, -110f);
+    [SerializeField] private Vector2 mainPanelSize = new Vector2(640f, 430f);
+    [SerializeField] private Vector2 mainPanelOffset = new Vector2(0f, -150f);
 
     [Header("Kenney Skin")]
     [SerializeField] private Sprite panelBackgroundSprite;
@@ -37,15 +38,25 @@ public class MainMenuRuntimeUI : MonoBehaviour
     private GameObject backgroundObject;
     private GameObject overlayObject;
 
+    private CanvasGroup mainPanelCanvasGroup;
+    private CanvasGroup settingsPanelCanvasGroup;
+    private CanvasGroup creditsPanelCanvasGroup;
+
     private Slider masterVolumeSlider;
     private Slider musicVolumeSlider;
     private Slider sfxVolumeSlider;
     private TMP_Dropdown qualityDropdown;
+    private TMP_Dropdown resolutionDropdown;
     private Toggle fullScreenToggle;
     private TMP_Dropdown fpsDropdown;
+    private TMP_Dropdown speedUnitDropdown;
+    private TMP_Dropdown colorBlindDropdown;
+    private Slider textScaleSlider;
+    private Toggle highContrastToggle;
 
     private bool suppressCallbacks;
     private int[] qualityTierToProjectQuality = { 0, 1, 2 };
+    private Resolution[] availableResolutions;
 
     private void Awake()
     {
@@ -99,8 +110,12 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
         mainPanel = CreatePanel(overlay.transform, "MainPanel", mainPanelSize);
         mainPanel.GetComponent<RectTransform>().anchoredPosition = mainPanelOffset;
-        settingsPanel = CreatePanel(overlay.transform, "SettingsPanel", new Vector2(760f, 720f));
+        settingsPanel = CreatePanel(overlay.transform, "SettingsPanel", new Vector2(980f, 980f));
         creditsPanel = CreatePanel(overlay.transform, "CreditsPanel", new Vector2(900f, 720f));
+
+        mainPanelCanvasGroup = mainPanel.AddComponent<CanvasGroup>();
+        settingsPanelCanvasGroup = settingsPanel.AddComponent<CanvasGroup>();
+        creditsPanelCanvasGroup = creditsPanel.AddComponent<CanvasGroup>();
 
         BuildMainPanel(mainPanel.transform);
         BuildSettingsPanel(settingsPanel.transform);
@@ -117,10 +132,15 @@ public class MainMenuRuntimeUI : MonoBehaviour
         layout.childForceExpandHeight = false;
         layout.childForceExpandWidth = true;
 
-        Button playButton = CreateMenuButton(parent, "Play", new Color(0.12f, 0.58f, 0.24f, 0.95f));
-        Button settingsButton = CreateMenuButton(parent, "Settings", new Color(0.13f, 0.43f, 0.72f, 0.95f));
-        Button creditsButton = CreateMenuButton(parent, "Credits", new Color(0.64f, 0.45f, 0.1f, 0.95f));
-        Button quitButton = CreateMenuButton(parent, "Quit", new Color(0.66f, 0.2f, 0.2f, 0.95f));
+        Button playButton = CreateMenuButton(parent, LocalizationTable.Get("play"), new Color(0.12f, 0.58f, 0.24f, 0.95f));
+        Button settingsButton = CreateMenuButton(parent, LocalizationTable.Get("settings"), new Color(0.13f, 0.43f, 0.72f, 0.95f));
+        Button creditsButton = CreateMenuButton(parent, LocalizationTable.Get("credits"), new Color(0.64f, 0.45f, 0.1f, 0.95f));
+        Button quitButton = CreateMenuButton(parent, LocalizationTable.Get("quit"), new Color(0.66f, 0.2f, 0.2f, 0.95f));
+
+        UIButtonEnhancer.EnhanceButton(playButton);
+        UIButtonEnhancer.EnhanceButton(settingsButton);
+        UIButtonEnhancer.EnhanceButton(creditsButton);
+        UIButtonEnhancer.EnhanceButton(quitButton);
 
         playButton.onClick.AddListener(LoadGameScene);
         settingsButton.onClick.AddListener(() =>
@@ -129,47 +149,83 @@ public class MainMenuRuntimeUI : MonoBehaviour
             ShowSettingsPanel();
         });
         creditsButton.onClick.AddListener(ShowCreditsPanel);
-        quitButton.onClick.AddListener(QuitGame);
+        quitButton.onClick.AddListener(() =>
+        {
+            ConfirmationDialog.Show(
+                LocalizationTable.Get("confirm_quit_title"),
+                LocalizationTable.Get("confirm_quit"),
+                QuitGame);
+        });
     }
 
     private void BuildSettingsPanel(Transform parent)
     {
         VerticalLayoutGroup layout = parent.gameObject.AddComponent<VerticalLayoutGroup>();
-        layout.padding = new RectOffset(24, 24, 24, 24);
-        layout.spacing = 12f;
+        layout.padding = new RectOffset(30, 30, 28, 28);
+        layout.spacing = 14f;
         layout.childControlHeight = true;
         layout.childControlWidth = true;
         layout.childForceExpandHeight = false;
         layout.childForceExpandWidth = true;
 
-        CreateTitle(parent, "SETTINGS");
+        CreateTitle(parent, LocalizationTable.Get("settings_title"));
 
         Transform audioSection = CreateSectionContainer(parent, "AudioSection");
-        CreateSectionLabel(audioSection, "SES");
+        CreateSectionLabel(audioSection, LocalizationTable.Get("audio"));
 
-        masterVolumeSlider = CreateLabeledSlider(audioSection, "Master Volume");
+        masterVolumeSlider = CreateLabeledSlider(audioSection, LocalizationTable.Get("master_volume"));
         masterVolumeSlider.onValueChanged.AddListener(OnMasterVolumeChanged);
 
-        musicVolumeSlider = CreateLabeledSlider(audioSection, "Music Volume");
+        musicVolumeSlider = CreateLabeledSlider(audioSection, LocalizationTable.Get("music_volume"));
         musicVolumeSlider.onValueChanged.AddListener(OnMusicVolumeChanged);
 
-        sfxVolumeSlider = CreateLabeledSlider(audioSection, "SFX Volume");
+        sfxVolumeSlider = CreateLabeledSlider(audioSection, LocalizationTable.Get("sfx_volume"));
         sfxVolumeSlider.onValueChanged.AddListener(OnSfxVolumeChanged);
 
         Transform graphicsSection = CreateSectionContainer(parent, "GraphicsSection");
-        CreateSectionLabel(graphicsSection, "GRAFIK");
+        CreateSectionLabel(graphicsSection, LocalizationTable.Get("graphics"));
 
         ConfigureQualityTierMapping();
-        qualityDropdown = CreateLabeledDropdown(graphicsSection, "Quality", new[] { "Dusuk", "Orta", "Yuksek" });
+        qualityDropdown = CreateLabeledDropdown(graphicsSection, LocalizationTable.Get("quality"),
+            new[] { LocalizationTable.Get("quality_low"), LocalizationTable.Get("quality_medium"), LocalizationTable.Get("quality_high") });
         qualityDropdown.onValueChanged.AddListener(OnQualityChanged);
 
-        fullScreenToggle = CreateLabeledToggle(graphicsSection, "Fullscreen");
+        BuildResolutionDropdown(graphicsSection);
+
+        fullScreenToggle = CreateLabeledToggle(graphicsSection, LocalizationTable.Get("fullscreen"));
         fullScreenToggle.onValueChanged.AddListener(OnFullscreenChanged);
 
-        fpsDropdown = CreateLabeledDropdown(graphicsSection, "FPS", new[] { "30", "60", "120", "Sinirsiz" });
+        fpsDropdown = CreateLabeledDropdown(graphicsSection, LocalizationTable.Get("fps_limit"),
+            new[] { "30", "60", "120", LocalizationTable.Get("fps_unlimited") });
         fpsDropdown.onValueChanged.AddListener(OnFpsChanged);
 
-        Button backButton = CreateMenuButton(parent, "Back", new Color(0.15f, 0.45f, 0.75f, 0.95f));
+        speedUnitDropdown = CreateLabeledDropdown(graphicsSection, LocalizationTable.Get("speed_unit"),
+            new[] { "KMH", "MPH" });
+        speedUnitDropdown.onValueChanged.AddListener(OnSpeedUnitChanged);
+
+        Transform accessibilitySection = CreateSectionContainer(parent, "AccessibilitySection");
+        CreateSectionLabel(accessibilitySection, LocalizationTable.Get("accessibility"));
+
+        colorBlindDropdown = CreateLabeledDropdown(accessibilitySection, LocalizationTable.Get("color_blind_mode"),
+            new[]
+            {
+                LocalizationTable.Get("color_blind_none"),
+                LocalizationTable.Get("color_blind_protanopia"),
+                LocalizationTable.Get("color_blind_deuteranopia"),
+                LocalizationTable.Get("color_blind_tritanopia")
+            });
+        colorBlindDropdown.onValueChanged.AddListener(OnColorBlindModeChanged);
+
+        textScaleSlider = CreateLabeledSlider(accessibilitySection, LocalizationTable.Get("text_scale"));
+        textScaleSlider.minValue = 0.8f;
+        textScaleSlider.maxValue = 1.5f;
+        textScaleSlider.onValueChanged.AddListener(OnTextScaleChanged);
+
+        highContrastToggle = CreateLabeledToggle(accessibilitySection, LocalizationTable.Get("high_contrast"));
+        highContrastToggle.onValueChanged.AddListener(OnHighContrastChanged);
+
+        Button backButton = CreateMenuButton(parent, LocalizationTable.Get("back"), UIThemeConstants.ButtonBlue);
+        UIButtonEnhancer.EnhanceButton(backButton);
         backButton.onClick.AddListener(ShowMainPanel);
     }
 
@@ -183,7 +239,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
         layout.childForceExpandHeight = false;
         layout.childForceExpandWidth = true;
 
-        CreateTitle(parent, "CREDITS");
+        CreateTitle(parent, LocalizationTable.Get("credits"));
 
         GameObject textObject = new GameObject("CreditsText", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
         textObject.transform.SetParent(parent, false);
@@ -201,7 +257,8 @@ public class MainMenuRuntimeUI : MonoBehaviour
             text.font = TMP_Settings.defaultFontAsset;
         }
 
-        Button backButton = CreateMenuButton(parent, "Back", new Color(0.15f, 0.45f, 0.75f, 0.95f));
+        Button backButton = CreateMenuButton(parent, LocalizationTable.Get("back"), UIThemeConstants.ButtonBlue);
+        UIButtonEnhancer.EnhanceButton(backButton);
         backButton.onClick.AddListener(ShowMainPanel);
     }
 
@@ -255,6 +312,51 @@ public class MainMenuRuntimeUI : MonoBehaviour
         GameSettings.Instance.SaveSettings();
     }
 
+    private void OnResolutionChanged(int index)
+    {
+        if (suppressCallbacks || GameSettings.Instance == null) return;
+        if (availableResolutions == null || index < 0 || index >= availableResolutions.Length) return;
+
+        Resolution resolution = availableResolutions[index];
+        bool isFullScreen = fullScreenToggle != null && fullScreenToggle.isOn;
+        Screen.SetResolution(resolution.width, resolution.height, isFullScreen);
+        GameSettings.Instance.SetResolutionIndex(index);
+        GameSettings.Instance.SetResolutionSize(resolution.width, resolution.height);
+        GameSettings.Instance.SetFullScreen(isFullScreen);
+        GameSettings.Instance.SaveSettings();
+    }
+
+    private void OnSpeedUnitChanged(int index)
+    {
+        if (suppressCallbacks || GameSettings.Instance == null) return;
+        GameSettings.Instance.SetSpeedUnitPreference(index == 1
+            ? SpeedUnitPreference.Mph
+            : SpeedUnitPreference.Kmh);
+        GameSettings.Instance.ApplySettings();
+        GameSettings.Instance.SaveSettings();
+    }
+
+    private void OnColorBlindModeChanged(int mode)
+    {
+        if (suppressCallbacks || GameSettings.Instance == null) return;
+        GameSettings.Instance.SetColorBlindMode(mode);
+        GameSettings.Instance.SaveSettings();
+    }
+
+    private void OnTextScaleChanged(float value)
+    {
+        if (suppressCallbacks || GameSettings.Instance == null) return;
+        GameSettings.Instance.SetTextScaleMultiplier(value);
+        GameSettings.Instance.SaveSettings();
+    }
+
+    private void OnHighContrastChanged(bool value)
+    {
+        if (suppressCallbacks || GameSettings.Instance == null) return;
+        GameSettings.Instance.SetHighContrastMode(value);
+        GameSettings.Instance.SaveSettings();
+    }
+
     private void RefreshSettingsControls()
     {
         if (GameSettings.Instance == null)
@@ -276,6 +378,12 @@ public class MainMenuRuntimeUI : MonoBehaviour
             qualityDropdown.value = ConvertProjectQualityToTierIndex(currentQuality);
         }
 
+        if (resolutionDropdown != null && availableResolutions != null && availableResolutions.Length > 0)
+        {
+            int safeIndex = Mathf.Clamp(GameSettings.Instance.ResolutionIndex, 0, availableResolutions.Length - 1);
+            resolutionDropdown.value = safeIndex;
+        }
+
         if (fullScreenToggle != null)
         {
             fullScreenToggle.isOn = GameSettings.Instance.FullScreen;
@@ -283,17 +391,89 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
         if (fpsDropdown != null)
         {
-            int fps = GameSettings.Instance.TargetFps;
-            fpsDropdown.value = fps switch
-            {
-                30 => 0,
-                60 => 1,
-                120 => 2,
-                _ => 3
-            };
+            SetFpsDropdownValue();
+        }
+
+        if (speedUnitDropdown != null)
+        {
+            speedUnitDropdown.value = GameSettings.Instance.SpeedUnitPreference == SpeedUnitPreference.Mph ? 1 : 0;
+        }
+
+        if (colorBlindDropdown != null)
+        {
+            colorBlindDropdown.value = Mathf.Clamp(GameSettings.Instance.ColorBlindMode, 0, 3);
+        }
+
+        if (textScaleSlider != null)
+        {
+            textScaleSlider.value = Mathf.Clamp(GameSettings.Instance.TextScaleMultiplier, 0.8f, 1.5f);
+        }
+
+        if (highContrastToggle != null)
+        {
+            highContrastToggle.isOn = GameSettings.Instance.HighContrastMode;
         }
 
         suppressCallbacks = false;
+    }
+
+    private void SetFpsDropdownValue()
+    {
+        if (fpsDropdown == null || GameSettings.Instance == null)
+        {
+            return;
+        }
+
+        int fps = GameSettings.Instance.TargetFps;
+        fpsDropdown.value = fps switch
+        {
+            30 => 0,
+            60 => 1,
+            120 => 2,
+            _ => 3
+        };
+    }
+
+    private void BuildResolutionDropdown(Transform parent)
+    {
+        Resolution[] allResolutions = Screen.resolutions;
+        var uniqueResolutions = new System.Collections.Generic.List<Resolution>();
+        var options = new System.Collections.Generic.List<string>();
+        int currentIndex = 0;
+        int currentWidth = Screen.currentResolution.width;
+        int currentHeight = Screen.currentResolution.height;
+
+        for (int i = 0; i < allResolutions.Length; i++)
+        {
+            Resolution res = allResolutions[i];
+            bool duplicate = false;
+            for (int j = 0; j < uniqueResolutions.Count; j++)
+            {
+                if (uniqueResolutions[j].width == res.width && uniqueResolutions[j].height == res.height)
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+
+            if (duplicate) continue;
+
+            if (res.width == currentWidth && res.height == currentHeight)
+            {
+                currentIndex = uniqueResolutions.Count;
+            }
+
+            uniqueResolutions.Add(res);
+            options.Add($"{res.width} x {res.height}");
+        }
+
+        availableResolutions = uniqueResolutions.ToArray();
+        resolutionDropdown = CreateLabeledDropdown(parent, LocalizationTable.Get("resolution"), options.ToArray());
+        if (resolutionDropdown != null)
+        {
+            resolutionDropdown.value = currentIndex;
+            resolutionDropdown.onValueChanged.AddListener(OnResolutionChanged);
+        }
     }
 
     private void ConfigureQualityTierMapping()
@@ -330,23 +510,51 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
     private void ShowMainPanel()
     {
-        mainPanel.SetActive(true);
-        settingsPanel.SetActive(false);
-        creditsPanel.SetActive(false);
+        AnimateHidePanel(settingsPanel, settingsPanelCanvasGroup);
+        AnimateHidePanel(creditsPanel, creditsPanelCanvasGroup);
+        AnimateShowPanel(mainPanel, mainPanelCanvasGroup);
     }
 
     private void ShowSettingsPanel()
     {
-        mainPanel.SetActive(false);
-        settingsPanel.SetActive(true);
-        creditsPanel.SetActive(false);
+        AnimateHidePanel(mainPanel, mainPanelCanvasGroup);
+        AnimateHidePanel(creditsPanel, creditsPanelCanvasGroup);
+        AnimateShowPanel(settingsPanel, settingsPanelCanvasGroup);
     }
 
     private void ShowCreditsPanel()
     {
-        mainPanel.SetActive(false);
-        settingsPanel.SetActive(false);
-        creditsPanel.SetActive(true);
+        AnimateHidePanel(mainPanel, mainPanelCanvasGroup);
+        AnimateHidePanel(settingsPanel, settingsPanelCanvasGroup);
+        AnimateShowPanel(creditsPanel, creditsPanelCanvasGroup);
+    }
+
+    private void AnimateShowPanel(GameObject panel, CanvasGroup group)
+    {
+        if (panel == null) return;
+        panel.SetActive(true);
+        if (group != null)
+        {
+            group.alpha = 0f;
+            UIAnimationHelper.FadeIn(this, group, UIThemeConstants.PanelFadeDuration);
+            UIAnimationHelper.ScaleIn(this, panel.GetComponent<RectTransform>(), UIThemeConstants.PanelScaleDuration);
+        }
+    }
+
+    private void AnimateHidePanel(GameObject panel, CanvasGroup group)
+    {
+        if (panel == null || !panel.activeSelf) return;
+        if (group != null)
+        {
+            UIAnimationHelper.FadeOut(this, group, UIThemeConstants.PanelFadeDuration * 0.5f, () =>
+            {
+                panel.SetActive(false);
+            });
+        }
+        else
+        {
+            panel.SetActive(false);
+        }
     }
 
     private GameObject CreatePanel(Transform parent, string name, Vector2 size)
@@ -777,12 +985,39 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
     private static void EnsureEventSystem()
     {
-        if (EventSystem.current != null)
+        EventSystem eventSystem = EventSystem.current;
+        if (eventSystem == null)
         {
-            return;
+            eventSystem = FindFirstObjectByType<EventSystem>();
         }
 
-        new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+        if (eventSystem == null)
+        {
+            eventSystem = new GameObject("EventSystem", typeof(EventSystem)).GetComponent<EventSystem>();
+        }
+
+#if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
+        if (eventSystem.GetComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>() == null)
+        {
+            eventSystem.gameObject.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
+        }
+
+        StandaloneInputModule standalone = eventSystem.GetComponent<StandaloneInputModule>();
+        if (standalone != null)
+        {
+            Object.Destroy(standalone);
+        }
+#else
+        if (eventSystem.GetComponent<StandaloneInputModule>() == null)
+        {
+            eventSystem.gameObject.AddComponent<StandaloneInputModule>();
+        }
+#endif
+
+        if (!eventSystem.gameObject.activeSelf)
+        {
+            eventSystem.gameObject.SetActive(true);
+        }
     }
 
     private static void QuitGame()
@@ -800,7 +1035,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
         if (!string.IsNullOrEmpty(sceneToLoad))
         {
             Debug.Log($"[MainMenuRuntimeUI] Loading scene: {sceneToLoad}");
-            SceneManager.LoadScene(sceneToLoad, LoadSceneMode.Single);
+            SceneTransitionManager.TransitionToScene(sceneToLoad);
         }
         else
         {

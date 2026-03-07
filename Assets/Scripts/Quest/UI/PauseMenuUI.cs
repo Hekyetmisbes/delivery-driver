@@ -3,6 +3,7 @@ using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using TMPro;
 using DeliveryDriver.Quest;
+using DeliveryDriver.UI;
 using UnityEngine.SceneManagement;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
@@ -45,6 +46,9 @@ namespace DeliveryDriver.Quest.UI
         private Toggle fullScreenToggle;
         private TMP_Dropdown fpsDropdown;
         private TMP_Dropdown speedUnitDropdown;
+        private TMP_Dropdown colorBlindDropdown;
+        private Slider textScaleSlider;
+        private Toggle highContrastToggle;
         private Resolution[] availableResolutions;
         private readonly System.Collections.Generic.List<string> qualityTierOptions =
             new System.Collections.Generic.List<string> { "Dusuk", "Orta", "Yuksek" };
@@ -52,6 +56,7 @@ namespace DeliveryDriver.Quest.UI
         private bool suppressSliderCallbacks;
         private bool suppressGraphicsCallbacks;
         private bool runtimePausePanelBuilt;
+        private CanvasGroup pausePanelCanvasGroup;
 
         private bool isPaused;
 
@@ -103,7 +108,30 @@ namespace DeliveryDriver.Quest.UI
 
             if (pausePanel != null)
             {
-                pausePanel.SetActive(paused);
+                if (paused)
+                {
+                    pausePanel.SetActive(true);
+                    if (pausePanelCanvasGroup != null)
+                    {
+                        pausePanelCanvasGroup.alpha = 0f;
+                        UIAnimationHelper.FadeIn(this, pausePanelCanvasGroup, UIThemeConstants.PanelFadeDuration);
+                        UIAnimationHelper.ScaleIn(this, pausePanel.GetComponent<RectTransform>(), UIThemeConstants.PanelScaleDuration);
+                    }
+                }
+                else
+                {
+                    if (pausePanelCanvasGroup != null)
+                    {
+                        UIAnimationHelper.FadeOut(this, pausePanelCanvasGroup, UIThemeConstants.PanelFadeDuration * 0.5f, () =>
+                        {
+                            pausePanel.SetActive(false);
+                        });
+                    }
+                    else
+                    {
+                        pausePanel.SetActive(false);
+                    }
+                }
             }
 
             if (settingsMenu != null && !runtimePausePanelBuilt)
@@ -186,6 +214,8 @@ namespace DeliveryDriver.Quest.UI
                 panelImage.type = Image.Type.Sliced;
             }
 
+            pausePanelCanvasGroup = panelObject.AddComponent<CanvasGroup>();
+
             VerticalLayoutGroup layout = panelObject.AddComponent<VerticalLayoutGroup>();
             layout.padding = new RectOffset(30, 30, 28, 24);
             layout.spacing = 16f;
@@ -194,12 +224,12 @@ namespace DeliveryDriver.Quest.UI
             layout.childForceExpandHeight = false;
             layout.childForceExpandWidth = true;
 
-            CreateHeader(panelObject.transform, "OYUN DURAKLATILDI");
+            CreateHeader(panelObject.transform, LocalizationTable.Get("paused_title"));
             Transform audioSection = CreateSectionContainer(panelObject.transform, "SesBolumu");
-            CreateSectionLabel(audioSection, "SES");
-            masterVolumeSlider = CreateLabeledSlider(audioSection, "Ana Ses");
-            musicVolumeSlider = CreateLabeledSlider(audioSection, "Muzik");
-            sfxVolumeSlider = CreateLabeledSlider(audioSection, "Efekt");
+            CreateSectionLabel(audioSection, LocalizationTable.Get("audio"));
+            masterVolumeSlider = CreateLabeledSlider(audioSection, LocalizationTable.Get("master_volume"));
+            musicVolumeSlider = CreateLabeledSlider(audioSection, LocalizationTable.Get("music_volume"));
+            sfxVolumeSlider = CreateLabeledSlider(audioSection, LocalizationTable.Get("sfx_volume"));
 
             if (masterVolumeSlider != null)
             {
@@ -217,27 +247,55 @@ namespace DeliveryDriver.Quest.UI
             }
 
             Transform graphicsSection = CreateSectionContainer(panelObject.transform, "GrafikBolumu");
-            CreateSectionLabel(graphicsSection, "GRAFIK");
+            CreateSectionLabel(graphicsSection, LocalizationTable.Get("graphics"));
             ConfigureQualityTierMapping();
 
-            qualityDropdown = CreateLabeledDropdown(graphicsSection, "Kalite Seviyesi", qualityTierOptions);
+            qualityTierOptions[0] = LocalizationTable.Get("quality_low");
+            qualityTierOptions[1] = LocalizationTable.Get("quality_medium");
+            qualityTierOptions[2] = LocalizationTable.Get("quality_high");
+            qualityDropdown = CreateLabeledDropdown(graphicsSection, LocalizationTable.Get("quality"), qualityTierOptions);
             qualityDropdown.value = ConvertProjectQualityToTierIndex(QualitySettings.GetQualityLevel());
             qualityDropdown.onValueChanged.AddListener(OnQualityChanged);
 
             BuildResolutionDropdown(graphicsSection);
 
-            fullScreenToggle = CreateLabeledToggle(graphicsSection, "Tam Ekran");
+            fullScreenToggle = CreateLabeledToggle(graphicsSection, LocalizationTable.Get("fullscreen"));
             fullScreenToggle.isOn = Screen.fullScreen;
             fullScreenToggle.onValueChanged.AddListener(OnFullScreenChanged);
 
-            fpsDropdown = CreateLabeledDropdown(graphicsSection, "FPS Siniri",
-                new System.Collections.Generic.List<string> { "30", "60", "120", "Sinirsiz" });
+            fpsDropdown = CreateLabeledDropdown(graphicsSection, LocalizationTable.Get("fps_limit"),
+                new System.Collections.Generic.List<string> { "30", "60", "120", LocalizationTable.Get("fps_unlimited") });
             SetFpsDropdownValue();
             fpsDropdown.onValueChanged.AddListener(OnFpsChanged);
 
-            speedUnitDropdown = CreateLabeledDropdown(graphicsSection, "Hiz Birimi",
+            speedUnitDropdown = CreateLabeledDropdown(graphicsSection, LocalizationTable.Get("speed_unit"),
                 new System.Collections.Generic.List<string> { "KMH", "MPH" });
             speedUnitDropdown.onValueChanged.AddListener(OnSpeedUnitChanged);
+
+            // Accessibility section
+            Transform accessibilitySection = CreateSectionContainer(panelObject.transform, "ErisilebilirlikBolumu");
+            CreateSectionLabel(accessibilitySection, LocalizationTable.Get("accessibility"));
+
+            colorBlindDropdown = CreateLabeledDropdown(accessibilitySection, LocalizationTable.Get("color_blind_mode"),
+                new System.Collections.Generic.List<string>
+                {
+                    LocalizationTable.Get("color_blind_none"),
+                    LocalizationTable.Get("color_blind_protanopia"),
+                    LocalizationTable.Get("color_blind_deuteranopia"),
+                    LocalizationTable.Get("color_blind_tritanopia")
+                });
+            if (GameSettings.Instance != null) colorBlindDropdown.value = GameSettings.Instance.ColorBlindMode;
+            colorBlindDropdown.onValueChanged.AddListener(OnColorBlindModeChanged);
+
+            textScaleSlider = CreateLabeledSlider(accessibilitySection, LocalizationTable.Get("text_scale"));
+            textScaleSlider.minValue = 0.8f;
+            textScaleSlider.maxValue = 1.5f;
+            if (GameSettings.Instance != null) textScaleSlider.value = GameSettings.Instance.TextScaleMultiplier;
+            textScaleSlider.onValueChanged.AddListener(OnTextScaleChanged);
+
+            highContrastToggle = CreateLabeledToggle(accessibilitySection, LocalizationTable.Get("high_contrast"));
+            if (GameSettings.Instance != null) highContrastToggle.isOn = GameSettings.Instance.HighContrastMode;
+            highContrastToggle.onValueChanged.AddListener(OnHighContrastChanged);
 
             GameObject footerSpacer = new GameObject("FooterSpacer", typeof(RectTransform), typeof(LayoutElement));
             footerSpacer.transform.SetParent(panelObject.transform, false);
@@ -256,8 +314,12 @@ namespace DeliveryDriver.Quest.UI
             LayoutElement buttonRowLayout = buttonRow.GetComponent<LayoutElement>();
             buttonRowLayout.minHeight = 58f;
 
-            Button resumeButton = CreateButton(buttonRow.transform, "ResumeButton", resumeButtonLabel, new Color(0.16f, 0.62f, 0.3f, 1f));
-            Button quitButton = CreateButton(buttonRow.transform, "QuitButton", quitButtonLabel, new Color(0.67f, 0.22f, 0.2f, 1f));
+            Button resumeButton = CreateButton(buttonRow.transform, "ResumeButton", GetResumeButtonLabel(), UIThemeConstants.ButtonGreen);
+            Button quitButton = CreateButton(buttonRow.transform, "QuitButton", GetQuitButtonLabel(), UIThemeConstants.ButtonRed);
+
+            UIButtonEnhancer.EnhanceButton(resumeButton);
+            UIButtonEnhancer.EnhanceButton(quitButton);
+
             if (resumeButton != null)
             {
                 resumeButton.onClick.AddListener(OnResumeButtonClicked);
@@ -265,7 +327,13 @@ namespace DeliveryDriver.Quest.UI
 
             if (quitButton != null)
             {
-                quitButton.onClick.AddListener(OnQuitButtonClicked);
+                quitButton.onClick.AddListener(() =>
+                {
+                    ConfirmationDialog.Show(
+                        LocalizationTable.Get("confirm_quit_title"),
+                        LocalizationTable.Get("confirm_quit"),
+                        OnQuitButtonClicked);
+                });
             }
 
             return panelObject;
@@ -703,6 +771,27 @@ namespace DeliveryDriver.Quest.UI
             GameSettings.Instance.SaveSettings();
         }
 
+        private void OnColorBlindModeChanged(int mode)
+        {
+            if (GameSettings.Instance == null) return;
+            GameSettings.Instance.SetColorBlindMode(mode);
+            GameSettings.Instance.SaveSettings();
+        }
+
+        private void OnTextScaleChanged(float value)
+        {
+            if (GameSettings.Instance == null) return;
+            GameSettings.Instance.SetTextScaleMultiplier(value);
+            GameSettings.Instance.SaveSettings();
+        }
+
+        private void OnHighContrastChanged(bool value)
+        {
+            if (GameSettings.Instance == null) return;
+            GameSettings.Instance.SetHighContrastMode(value);
+            GameSettings.Instance.SaveSettings();
+        }
+
         private TMP_Dropdown CreateLabeledDropdown(Transform parent, string label, System.Collections.Generic.List<string> options)
         {
             GameObject rowObject = new GameObject($"{label}Row", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
@@ -1009,27 +1098,30 @@ namespace DeliveryDriver.Quest.UI
                 bgImage.type = Image.Type.Sliced;
             }
 
-            // Checkmark
-            GameObject checkObject = new GameObject("Checkmark", typeof(RectTransform), typeof(TextMeshProUGUI));
+            // Checkmark (Image-based to avoid TMP glyph fallback warnings)
+            GameObject checkObject = new GameObject("Checkmark", typeof(RectTransform), typeof(Image));
             checkObject.transform.SetParent(bgObject.transform, false);
             RectTransform checkRect = checkObject.GetComponent<RectTransform>();
-            checkRect.anchorMin = Vector2.zero;
-            checkRect.anchorMax = Vector2.one;
-            checkRect.offsetMin = Vector2.zero;
-            checkRect.offsetMax = Vector2.zero;
-            TextMeshProUGUI checkText = checkObject.GetComponent<TextMeshProUGUI>();
-            checkText.text = "\u2713";
-            checkText.fontSize = 24f;
-            checkText.color = new Color(0.16f, 0.52f, 0.88f, 1f);
-            checkText.alignment = TextAlignmentOptions.Center;
-            if (TMP_Settings.defaultFontAsset != null)
+            checkRect.anchorMin = new Vector2(0.5f, 0.5f);
+            checkRect.anchorMax = new Vector2(0.5f, 0.5f);
+            checkRect.pivot = new Vector2(0.5f, 0.5f);
+            checkRect.sizeDelta = new Vector2(20f, 20f);
+
+            Image checkImage = checkObject.GetComponent<Image>();
+            checkImage.color = new Color(0.16f, 0.52f, 0.88f, 1f);
+            if (toggleCheckmarkSprite != null)
             {
-                checkText.font = TMP_Settings.defaultFontAsset;
+                checkImage.sprite = toggleCheckmarkSprite;
+                checkImage.preserveAspect = true;
+            }
+            else
+            {
+                checkRect.sizeDelta = new Vector2(14f, 14f);
             }
 
             Toggle toggle = toggleObject.GetComponent<Toggle>();
             toggle.targetGraphic = bgImage;
-            toggle.graphic = checkText;
+            toggle.graphic = checkImage;
             toggle.isOn = false;
 
             return toggle;
@@ -1047,12 +1139,26 @@ namespace DeliveryDriver.Quest.UI
             quitSceneName = string.Empty;
         }
 
+        private string GetResumeButtonLabel()
+        {
+            return string.IsNullOrWhiteSpace(resumeButtonLabel)
+                ? LocalizationTable.Get("resume")
+                : resumeButtonLabel;
+        }
+
+        private string GetQuitButtonLabel()
+        {
+            return string.IsNullOrWhiteSpace(quitButtonLabel)
+                ? LocalizationTable.Get("quit_game")
+                : quitButtonLabel;
+        }
+
         private void OnResumeButtonClicked()
         {
             if (!string.IsNullOrWhiteSpace(resumeSceneName))
             {
                 Time.timeScale = 1f;
-                SceneManager.LoadScene(resumeSceneName);
+                SceneTransitionManager.TransitionToScene(resumeSceneName);
                 return;
             }
 
@@ -1064,7 +1170,7 @@ namespace DeliveryDriver.Quest.UI
             if (!string.IsNullOrWhiteSpace(quitSceneName))
             {
                 Time.timeScale = 1f;
-                SceneManager.LoadScene(quitSceneName);
+                SceneTransitionManager.TransitionToScene(quitSceneName);
                 return;
             }
 
@@ -1082,13 +1188,36 @@ namespace DeliveryDriver.Quest.UI
 
         private void EnsureEventSystem()
         {
-            if (EventSystem.current != null)
+            EventSystem eventSystem = EventSystem.current;
+            if (eventSystem == null)
             {
-                return;
+                eventSystem = FindFirstObjectByType<EventSystem>();
             }
 
-            GameObject eventSystemObject = new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
-            eventSystemObject.hideFlags = HideFlags.DontSave;
+            if (eventSystem == null)
+            {
+                GameObject eventSystemObject = new GameObject("EventSystem", typeof(EventSystem));
+                eventSystemObject.hideFlags = HideFlags.DontSave;
+                eventSystem = eventSystemObject.GetComponent<EventSystem>();
+            }
+
+#if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
+            if (eventSystem.GetComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>() == null)
+            {
+                eventSystem.gameObject.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
+            }
+
+            StandaloneInputModule standalone = eventSystem.GetComponent<StandaloneInputModule>();
+            if (standalone != null)
+            {
+                Destroy(standalone);
+            }
+#else
+            if (eventSystem.GetComponent<StandaloneInputModule>() == null)
+            {
+                eventSystem.gameObject.AddComponent<StandaloneInputModule>();
+            }
+#endif
         }
 
         private void ResolveSkinSprites()
@@ -1120,6 +1249,9 @@ namespace DeliveryDriver.Quest.UI
 
             dropdownBackgroundSprite ??= buttonBackgroundSprite;
             toggleBackgroundSprite ??= buttonBackgroundSprite;
+            toggleCheckmarkSprite ??= RuntimeUiSkinLoader.LoadSprite(
+                "UI/Kenney/icon_accept",
+                "Assets/Resources/UI/FreeButtonSet/checkmark_64.png");
         }
     }
 }

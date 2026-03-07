@@ -36,6 +36,11 @@ namespace DeliveryDriver.Quest
         private const string FullScreenKey = "FullScreen";
         private const string TargetFpsKey = "TargetFPS";
         private const string SpeedUnitKey = "SpeedUnitPreference";
+        private const string LanguageKey = "Language";
+        private const string ColorBlindModeKey = "ColorBlindMode";
+        private const string TextScaleMultiplierKey = "TextScaleMultiplier";
+        private const string HighContrastModeKey = "HighContrastMode";
+        private const string MinimapZoomKey = "MinimapZoom";
 
         [Header("Audio")]
         [Range(0f, 1f)] [SerializeField] private float masterVolume = 1f;
@@ -58,6 +63,17 @@ namespace DeliveryDriver.Quest
         [Range(0.75f, 1.5f)] [SerializeField] private float uiScale = 1f;
         [SerializeField] private Transform[] uiScaleRoots;
 
+        [Header("Localization")]
+        [SerializeField] private string language = "tr";
+
+        [Header("Accessibility")]
+        [SerializeField] private int colorBlindMode = 0;
+        [Range(0.8f, 1.5f)] [SerializeField] private float textScaleMultiplier = 1f;
+        [SerializeField] private bool highContrastMode = false;
+
+        [Header("Minimap")]
+        [SerializeField] private float minimapZoom = 250f;
+
 #if ENABLE_INPUT_SYSTEM
         [Header("Input")]
         [SerializeField] private InputActionAsset inputActions;
@@ -73,8 +89,15 @@ namespace DeliveryDriver.Quest
         public bool FullScreen => fullScreen;
         public int TargetFps => targetFps;
         public SpeedUnitPreference SpeedUnitPreference => speedUnitPreference;
+        public string Language => language;
+        public int ColorBlindMode => colorBlindMode;
+        public float TextScaleMultiplier => textScaleMultiplier;
+        public bool HighContrastMode => highContrastMode;
+        public float MinimapZoom => minimapZoom;
 
         public static event System.Action<SpeedUnitPreference> OnSpeedUnitChanged;
+        public static event System.Action OnLanguageChanged;
+        public static event System.Action OnAccessibilityChanged;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void EnsureInstance()
@@ -167,6 +190,36 @@ namespace DeliveryDriver.Quest
             targetFps = fps;
         }
 
+        public void SetLanguage(string lang)
+        {
+            if (string.Equals(language, lang, System.StringComparison.OrdinalIgnoreCase)) return;
+            language = lang;
+            OnLanguageChanged?.Invoke();
+        }
+
+        public void SetColorBlindMode(int mode)
+        {
+            colorBlindMode = Mathf.Clamp(mode, 0, 3);
+            OnAccessibilityChanged?.Invoke();
+        }
+
+        public void SetTextScaleMultiplier(float scale)
+        {
+            textScaleMultiplier = Mathf.Clamp(scale, 0.8f, 1.5f);
+            OnAccessibilityChanged?.Invoke();
+        }
+
+        public void SetHighContrastMode(bool value)
+        {
+            highContrastMode = value;
+            OnAccessibilityChanged?.Invoke();
+        }
+
+        public void SetMinimapZoom(float zoom)
+        {
+            minimapZoom = Mathf.Clamp(zoom, 100f, 500f);
+        }
+
         public QuestDifficulty ResolveQuestDifficulty(int playerLevel)
         {
             if (questDifficultyPreference != QuestDifficultyPreference.MatchPlayerLevel)
@@ -245,6 +298,11 @@ namespace DeliveryDriver.Quest
             PlayerPrefs.SetInt(FullScreenKey, fullScreen ? 1 : 0);
             PlayerPrefs.SetInt(TargetFpsKey, targetFps);
             PlayerPrefs.SetInt(SpeedUnitKey, (int)speedUnitPreference);
+            PlayerPrefs.SetString(LanguageKey, language);
+            PlayerPrefs.SetInt(ColorBlindModeKey, colorBlindMode);
+            PlayerPrefs.SetFloat(TextScaleMultiplierKey, textScaleMultiplier);
+            PlayerPrefs.SetInt(HighContrastModeKey, highContrastMode ? 1 : 0);
+            PlayerPrefs.SetFloat(MinimapZoomKey, minimapZoom);
             PlayerPrefs.Save();
         }
 
@@ -311,6 +369,31 @@ namespace DeliveryDriver.Quest
                 speedUnitPreference = savedUnit == (int)SpeedUnitPreference.Mph
                     ? SpeedUnitPreference.Mph
                     : SpeedUnitPreference.Kmh;
+            }
+
+            if (PlayerPrefs.HasKey(LanguageKey))
+            {
+                language = PlayerPrefs.GetString(LanguageKey, language);
+            }
+
+            if (PlayerPrefs.HasKey(ColorBlindModeKey))
+            {
+                colorBlindMode = PlayerPrefs.GetInt(ColorBlindModeKey, colorBlindMode);
+            }
+
+            if (PlayerPrefs.HasKey(TextScaleMultiplierKey))
+            {
+                textScaleMultiplier = PlayerPrefs.GetFloat(TextScaleMultiplierKey, textScaleMultiplier);
+            }
+
+            if (PlayerPrefs.HasKey(HighContrastModeKey))
+            {
+                highContrastMode = PlayerPrefs.GetInt(HighContrastModeKey, 0) == 1;
+            }
+
+            if (PlayerPrefs.HasKey(MinimapZoomKey))
+            {
+                minimapZoom = PlayerPrefs.GetFloat(MinimapZoomKey, minimapZoom);
             }
         }
     }
