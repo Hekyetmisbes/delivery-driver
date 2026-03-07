@@ -85,13 +85,16 @@ public class SpeedometerUI : MonoBehaviour
         }
 
         ResolveSpeedometerSkinSprites();
-        Canvas targetCanvas = FindBestHudCanvas();
+        Canvas targetCanvas = GetOrCreateHudCanvas();
         if (targetCanvas == null)
         {
             GameObject canvasObject = new GameObject("GameplayHUDCanvas");
             targetCanvas = canvasObject.AddComponent<Canvas>();
             targetCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvasObject.AddComponent<CanvasScaler>();
+            CanvasScaler scaler = canvasObject.AddComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+            scaler.matchWidthOrHeight = 0.5f;
             canvasObject.AddComponent<GraphicRaycaster>();
         }
 
@@ -312,6 +315,52 @@ public class SpeedometerUI : MonoBehaviour
         speedometerDefaultIconSprite ??= RuntimeUiSkinLoader.LoadSprite(
             "UI/Kenney/speed_icon",
             "Assets/kenney_ui-pack/PNG/Blue/Default/icon_circle.png");
+    }
+
+    private Canvas GetOrCreateHudCanvas()
+    {
+        GameObject existing = GameObject.Find("GameplayHUDCanvas");
+        if (existing != null)
+        {
+            Canvas existingCanvas = existing.GetComponent<Canvas>();
+            if (existingCanvas != null)
+            {
+                EnsureHudCanvasSettings(existingCanvas.gameObject, existingCanvas);
+                return existingCanvas;
+            }
+        }
+
+        GameObject canvasObject = new GameObject("GameplayHUDCanvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+        Canvas canvas = canvasObject.GetComponent<Canvas>();
+        EnsureHudCanvasSettings(canvasObject, canvas);
+        return canvas;
+    }
+
+    private static void EnsureHudCanvasSettings(GameObject canvasObject, Canvas canvas)
+    {
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.overrideSorting = true;
+        canvas.sortingOrder = 220;
+
+        CanvasScaler scaler = canvasObject.GetComponent<CanvasScaler>();
+        if (scaler == null)
+        {
+            scaler = canvasObject.AddComponent<CanvasScaler>();
+        }
+
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
+        scaler.matchWidthOrHeight = 0.5f;
+
+        RectTransform rect = canvasObject.GetComponent<RectTransform>();
+        if (rect != null)
+        {
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+            rect.localScale = Vector3.one;
+        }
     }
 
     private Canvas FindBestHudCanvas()
