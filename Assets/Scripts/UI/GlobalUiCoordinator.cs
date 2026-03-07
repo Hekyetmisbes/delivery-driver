@@ -248,12 +248,12 @@ public class GlobalUiCoordinator : MonoBehaviour
             {
                 if (!canvas.transform.IsChildOf(canvasGroupRoot))
                 {
-                    canvas.transform.SetParent(canvasGroupRoot, true);
+                    canvas.transform.SetParent(canvasGroupRoot, false);
                 }
             }
             else
             {
-                canvas.transform.SetParent(canvasGroupRoot, true);
+                canvas.transform.SetParent(canvasGroupRoot, false);
             }
 
             canvas.overrideSorting = true;

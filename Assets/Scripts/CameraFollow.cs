@@ -92,6 +92,18 @@ public class CameraFollow : MonoBehaviour
     [Tooltip("Bu hızın (m/s) altında araç durağan sayılır; geri tuşu kamerayı açar.")]
     [SerializeField] private float reverseCamStationaryThreshold = 1.0f;
 
+    [Header("Geri Görüş Kamerası Stili")]
+    [Tooltip("Çerçeve rengi")]
+    [SerializeField] private Color reverseCamBorderColor = new Color(0.1f, 0.9f, 1f, 0.85f);
+    [Tooltip("Çerçeve kalınlığı (piksel)")]
+    [SerializeField] private float reverseCamBorderWidth = 2.5f;
+    [Tooltip("Arka plan karartma çerçevesi kalınlığı (piksel)")]
+    [SerializeField] private float reverseCamFramePadding = 6f;
+    [Tooltip("Fade animasyon hızı")]
+    [SerializeField] private float reverseCamFadeSpeed = 6f;
+    [Tooltip("Üst gradient yüksekliği (piksel)")]
+    [SerializeField] private float reverseCamGradientHeight = 28f;
+
     [Header("MiniMap Marker")]
     [SerializeField] private bool showMiniMapPlayerMarker = true;
     [SerializeField] private float miniMapPlayerMarkerHeight = 20f;
@@ -113,6 +125,9 @@ public class CameraFollow : MonoBehaviour
     private int cachedMiniMapMarkerLayer = int.MinValue;
     private Camera reverseCamHUD;
     private bool reverseCamShowing;
+    private float reverseCamFadeAlpha;
+    private Texture2D reverseCamWhiteTex;
+    private GUIStyle reverseCamLabelStyle;
     private float currentZoomOffset;
 
     void Start()
@@ -190,16 +205,17 @@ public class CameraFollow : MonoBehaviour
 
     void HandleCameraMovement(float deltaTime)
     {
-        // --- Geri/İleri tespiti ve dinamik Z offset ---
+        // --- Geri/fren tespiti ve dinamik Z offset ---
+        bool reverseInput = carController != null && carController.IsReverseInputActive;
         bool isReversing = false;
         if (targetRb != null)
         {
             float localVelZ = target.InverseTransformDirection(targetRb.linearVelocity).z;
-            isReversing = localVelZ < -0.3f;
+            // Geri tuşuna basılıyorsa VEYA araç gerçekten geri gidiyorsa → kamera sabit
+            isReversing = reverseInput || localVelZ < -0.3f;
 
             if (isReversing)
             {
-                // Geri viteste: SmoothDamp ataletini sıfırla → kamera arabaya yaklaşmaz
                 currentVelocity = Vector3.zero;
                 currentZoomOffset = Mathf.Lerp(currentZoomOffset, 0f, 10f * deltaTime);
             }
@@ -230,7 +246,7 @@ public class CameraFollow : MonoBehaviour
         // --- Pozisyonu uygula ---
         if (isReversing)
         {
-            // Geri viteste lag sıfır: kamera arabaya hiç yaklaşmaz
+            // Geri/fren: SmoothDamp ataleti sıfırla, pozisyona anında snap yap
             currentVelocity = Vector3.zero;
             transform.position = desiredPosition;
         }
@@ -642,10 +658,110 @@ public class CameraFollow : MonoBehaviour
         return new Rect(x, y, size, size);
     }
 
+    void OnGUI()
+    {
+        if (!enableReverseCamera || reverseCamFadeAlpha < 0.01f) return;
+
+        EnsureReverseCamGUIResources();
+
+        // Viewport → ekran pikseli
+        float sw = Screen.width;
+        float sh = Screen.height;
+        float rx = reverseCamVpX * sw;
+        float ry = (1f - reverseCamVpY - reverseCamVpH) * sh; // GUI: sol üst orijin
+        float rw = reverseCamVpW * sw;
+        float rh = reverseCamVpH * sh;
+
+        Color prevColor = GUI.color;
+        float a = reverseCamFadeAlpha;
+
+        // 1) Dış karartma çerçevesi (padding)
+        float pad = reverseCamFramePadding;
+        GUI.color = new Color(0f, 0f, 0f, 0.7f * a);
+        // Üst
+        GUI.DrawTexture(new Rect(rx - pad, ry - pad, rw + pad * 2f, pad), reverseCamWhiteTex);
+        // Alt
+        GUI.DrawTexture(new Rect(rx - pad, ry + rh, rw + pad * 2f, pad), reverseCamWhiteTex);
+        // Sol
+        GUI.DrawTexture(new Rect(rx - pad, ry, pad, rh), reverseCamWhiteTex);
+        // Sağ
+        GUI.DrawTexture(new Rect(rx + rw, ry, pad, rh), reverseCamWhiteTex);
+
+        // 2) Parlak kenarlık çizgileri
+        float bw = reverseCamBorderWidth;
+        Color borderCol = reverseCamBorderColor;
+        borderCol.a *= a;
+        GUI.color = borderCol;
+        // Üst
+        GUI.DrawTexture(new Rect(rx - bw, ry - bw, rw + bw * 2f, bw), reverseCamWhiteTex);
+        // Alt
+        GUI.DrawTexture(new Rect(rx - bw, ry + rh, rw + bw * 2f, bw), reverseCamWhiteTex);
+        // Sol
+        GUI.DrawTexture(new Rect(rx - bw, ry, bw, rh), reverseCamWhiteTex);
+        // Sağ
+        GUI.DrawTexture(new Rect(rx + rw, ry, bw, rh), reverseCamWhiteTex);
+
+        // 3) Üst gradient overlay (karartma)
+        float gradH = Mathf.Min(reverseCamGradientHeight, rh * 0.4f);
+        for (int i = 0; i < 8; i++)
+        {
+            float t = i / 8f;
+            float lineH = gradH / 8f;
+            GUI.color = new Color(0f, 0f, 0f, (1f - t) * 0.45f * a);
+            GUI.DrawTexture(new Rect(rx, ry + t * gradH, rw, lineH), reverseCamWhiteTex);
+        }
+
+        // 4) "REAR VIEW" etiketi
+        GUI.color = new Color(1f, 1f, 1f, 0.9f * a);
+        reverseCamLabelStyle.fontSize = Mathf.Max(10, (int)(sh * 0.014f));
+        Rect labelRect = new Rect(rx, ry + 2f, rw, reverseCamLabelStyle.fontSize + 6f);
+        GUI.Label(labelRect, "REAR VIEW", reverseCamLabelStyle);
+
+        // 5) Köşe aksan çizgileri (küçük L şekilleri)
+        float cornerLen = Mathf.Min(rw, rh) * 0.08f;
+        float cornerW = bw * 1.5f;
+        Color cornerCol = reverseCamBorderColor;
+        cornerCol.a = Mathf.Min(1f, cornerCol.a * 1.4f) * a;
+        GUI.color = cornerCol;
+        // Sol üst
+        GUI.DrawTexture(new Rect(rx - bw, ry - bw, cornerLen, cornerW), reverseCamWhiteTex);
+        GUI.DrawTexture(new Rect(rx - bw, ry - bw, cornerW, cornerLen), reverseCamWhiteTex);
+        // Sağ üst
+        GUI.DrawTexture(new Rect(rx + rw - cornerLen + bw, ry - bw, cornerLen, cornerW), reverseCamWhiteTex);
+        GUI.DrawTexture(new Rect(rx + rw, ry - bw, cornerW, cornerLen), reverseCamWhiteTex);
+        // Sol alt
+        GUI.DrawTexture(new Rect(rx - bw, ry + rh, cornerLen, cornerW), reverseCamWhiteTex);
+        GUI.DrawTexture(new Rect(rx - bw, ry + rh - cornerLen + bw, cornerW, cornerLen), reverseCamWhiteTex);
+        // Sağ alt
+        GUI.DrawTexture(new Rect(rx + rw - cornerLen + bw, ry + rh, cornerLen, cornerW), reverseCamWhiteTex);
+        GUI.DrawTexture(new Rect(rx + rw, ry + rh - cornerLen + bw, cornerW, cornerLen), reverseCamWhiteTex);
+
+        GUI.color = prevColor;
+    }
+
+    void EnsureReverseCamGUIResources()
+    {
+        if (reverseCamWhiteTex == null)
+        {
+            reverseCamWhiteTex = new Texture2D(1, 1);
+            reverseCamWhiteTex.SetPixel(0, 0, Color.white);
+            reverseCamWhiteTex.Apply();
+        }
+
+        if (reverseCamLabelStyle == null)
+        {
+            reverseCamLabelStyle = new GUIStyle(GUI.skin.label);
+            reverseCamLabelStyle.alignment = TextAnchor.UpperCenter;
+            reverseCamLabelStyle.fontStyle = FontStyle.Bold;
+            reverseCamLabelStyle.normal.textColor = new Color(0.85f, 0.95f, 1f, 1f);
+        }
+    }
+
     void OnDestroy()
     {
         RemoveMiniMapPlayerMarker();
         if (reverseCamHUD != null) Destroy(reverseCamHUD.gameObject);
+        if (reverseCamWhiteTex != null) Destroy(reverseCamWhiteTex);
     }
 
     // ── Geri Görüş Kamerası ──────────────────────────────────────────────────
@@ -669,9 +785,16 @@ public class CameraFollow : MonoBehaviour
         if (!enableReverseCamera || reverseCamHUD == null) return;
 
         bool shouldShow = IsCarReversing();
-        if (shouldShow != reverseCamShowing)
+
+        // Smooth fade
+        float targetAlpha = shouldShow ? 1f : 0f;
+        reverseCamFadeAlpha = Mathf.MoveTowards(reverseCamFadeAlpha, targetAlpha,
+            reverseCamFadeSpeed * Time.deltaTime);
+
+        bool camActive = reverseCamFadeAlpha > 0.01f;
+        if (camActive != reverseCamShowing)
         {
-            reverseCamShowing = shouldShow;
+            reverseCamShowing = camActive;
             reverseCamHUD.enabled = reverseCamShowing;
         }
 

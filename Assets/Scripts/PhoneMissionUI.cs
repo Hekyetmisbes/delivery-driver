@@ -1,4 +1,5 @@
 using System;
+using DeliveryDriver.UI;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -32,6 +33,8 @@ public class PhoneMissionUI : MonoBehaviour
 
     private Action onAccept;
     private Action onReject;
+    private CanvasGroup panelCanvasGroup;
+    private RectTransform panelRect;
 
     private void Awake()
     {
@@ -54,6 +57,7 @@ public class PhoneMissionUI : MonoBehaviour
     public void ShowOffer(string title, string body, string reward)
     {
         EnsureRuntimeUI();
+        StopAllCoroutines();
 
         if (titleText != null)
         {
@@ -75,24 +79,76 @@ public class PhoneMissionUI : MonoBehaviour
         if (panelRoot != null)
         {
             panelRoot.SetActive(true);
+            EnsureCanvasGroup();
+            if (panelCanvasGroup != null && panelRect != null)
+            {
+                panelRect.anchoredPosition = panelOffset;
+                panelCanvasGroup.alpha = 0f;
+                Vector2 targetPos = panelRect.anchoredPosition;
+                Vector2 offScreen = new Vector2(targetPos.x + 400f, targetPos.y);
+                UIAnimationHelper.SlideIn(this, panelRect, offScreen, targetPos, UIThemeConstants.SlideInDuration);
+                UIAnimationHelper.FadeIn(this, panelCanvasGroup, UIThemeConstants.PanelFadeDuration);
+            }
         }
     }
 
     public void HideOffer()
     {
+        StopAllCoroutines();
+
         if (panelRoot != null)
         {
-            panelRoot.SetActive(false);
+            EnsureCanvasGroup();
+            if (panelCanvasGroup != null && panelRect != null)
+            {
+                Vector2 currentPos = panelRect.anchoredPosition;
+                Vector2 offScreen = new Vector2(currentPos.x + 400f, currentPos.y);
+                UIAnimationHelper.SlideOut(this, panelRect, currentPos, offScreen, UIThemeConstants.SlideInDuration * 0.7f);
+                UIAnimationHelper.FadeOut(this, panelCanvasGroup, UIThemeConstants.PanelFadeDuration * 0.7f, () =>
+                {
+                    panelRoot.SetActive(false);
+                    panelRect.anchoredPosition = panelOffset;
+                });
+            }
+            else
+            {
+                panelRoot.SetActive(false);
+            }
+        }
+    }
+
+    private void EnsureCanvasGroup()
+    {
+        if (panelRoot == null) return;
+        if (panelCanvasGroup == null)
+        {
+            panelCanvasGroup = panelRoot.GetComponent<CanvasGroup>();
+            if (panelCanvasGroup == null)
+            {
+                panelCanvasGroup = panelRoot.AddComponent<CanvasGroup>();
+            }
+        }
+        if (panelRect == null)
+        {
+            panelRect = panelRoot.GetComponent<RectTransform>();
         }
     }
 
     private void HandleAcceptClicked()
     {
+        if (UIAudioFeedback.Instance != null)
+        {
+            UIAudioFeedback.Instance.PlayClick();
+        }
         onAccept?.Invoke();
     }
 
     private void HandleRejectClicked()
     {
+        if (UIAudioFeedback.Instance != null)
+        {
+            UIAudioFeedback.Instance.PlayError();
+        }
         onReject?.Invoke();
     }
 
@@ -139,15 +195,20 @@ public class PhoneMissionUI : MonoBehaviour
 
         if (rootCanvas == null)
         {
-            rootCanvas = FindFirstObjectByType<Canvas>();
-        }
-
-        if (rootCanvas == null)
-        {
             GameObject canvasObject = new GameObject("PhoneMissionCanvas");
             rootCanvas = canvasObject.AddComponent<Canvas>();
             rootCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
             rootCanvas.sortingOrder = 120;
+
+            RectTransform canvasRect = canvasObject.GetComponent<RectTransform>();
+            if (canvasRect != null)
+            {
+                canvasRect.anchorMin = Vector2.zero;
+                canvasRect.anchorMax = Vector2.one;
+                canvasRect.offsetMin = Vector2.zero;
+                canvasRect.offsetMax = Vector2.zero;
+                canvasRect.localScale = Vector3.one;
+            }
 
             CanvasScaler scaler = canvasObject.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -217,8 +278,11 @@ public class PhoneMissionUI : MonoBehaviour
         rowLayout.minHeight = 58f;
         rowLayout.flexibleHeight = 0f;
 
-        acceptButton = CreateButton(buttonRow.transform, "AcceptButton", new Color(0.16f, 0.62f, 0.3f, 1f), acceptButtonLabel, acceptIconSprite);
-        rejectButton = CreateButton(buttonRow.transform, "RejectButton", new Color(0.68f, 0.22f, 0.2f, 1f), rejectButtonLabel, rejectIconSprite);
+        acceptButton = CreateButton(buttonRow.transform, "AcceptButton", UIThemeConstants.ButtonGreen, acceptButtonLabel, acceptIconSprite);
+        rejectButton = CreateButton(buttonRow.transform, "RejectButton", UIThemeConstants.ButtonRed, rejectButtonLabel, rejectIconSprite);
+
+        UIButtonEnhancer.EnhanceButton(acceptButton);
+        UIButtonEnhancer.EnhanceButton(rejectButton);
 
         return panel;
     }
@@ -348,12 +412,35 @@ public class PhoneMissionUI : MonoBehaviour
 
     private void EnsureEventSystem()
     {
-        if (EventSystem.current != null)
+        EventSystem eventSystem = EventSystem.current;
+        if (eventSystem == null)
         {
-            return;
+            eventSystem = FindFirstObjectByType<EventSystem>();
         }
 
-        GameObject eventSystemObject = new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
-        eventSystemObject.transform.SetParent(null, false);
+        if (eventSystem == null)
+        {
+            GameObject eventSystemObject = new GameObject("EventSystem", typeof(EventSystem));
+            eventSystemObject.transform.SetParent(null, false);
+            eventSystem = eventSystemObject.GetComponent<EventSystem>();
+        }
+
+#if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
+        if (eventSystem.GetComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>() == null)
+        {
+            eventSystem.gameObject.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
+        }
+
+        StandaloneInputModule standalone = eventSystem.GetComponent<StandaloneInputModule>();
+        if (standalone != null)
+        {
+            Destroy(standalone);
+        }
+#else
+        if (eventSystem.GetComponent<StandaloneInputModule>() == null)
+        {
+            eventSystem.gameObject.AddComponent<StandaloneInputModule>();
+        }
+#endif
     }
 }

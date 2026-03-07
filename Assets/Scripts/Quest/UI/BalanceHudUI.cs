@@ -1,3 +1,5 @@
+using System.Collections;
+using DeliveryDriver.UI;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -22,6 +24,8 @@ namespace DeliveryDriver.Quest.UI
 
         private TextMeshProUGUI balanceText;
         private PlayerProgressionManager subscribedManager;
+        private int lastKnownBalance;
+        private RectTransform balancePanelRect;
 
         private void OnEnable()
         {
@@ -129,6 +133,7 @@ namespace DeliveryDriver.Quest.UI
 
             balanceText = textObject.GetComponent<TextMeshProUGUI>();
             ApplyTextStyle(balanceText);
+            balancePanelRect = panelRect;
         }
 
         private void ConfigurePanelRect(RectTransform panelRect)
@@ -187,7 +192,70 @@ namespace DeliveryDriver.Quest.UI
 
         private void OnMoneyChanged(int newAmount)
         {
+            int delta = newAmount - lastKnownBalance;
+            lastKnownBalance = newAmount;
             RefreshBalanceText(newAmount);
+
+            if (delta != 0 && Application.isPlaying)
+            {
+                ShowBalanceDelta(delta);
+                if (balancePanelRect != null)
+                {
+                    UIAnimationHelper.PulseScale(this, balancePanelRect, 1.08f, UIThemeConstants.PulseDuration);
+                }
+            }
+        }
+
+        private void ShowBalanceDelta(int delta)
+        {
+            if (balanceText == null) return;
+
+            Canvas canvas = balanceText.GetComponentInParent<Canvas>();
+            if (canvas == null) return;
+
+            Transform panelTransform = balanceText.transform.parent;
+            if (panelTransform == null) return;
+
+            GameObject deltaObj = new GameObject("BalanceDelta", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(CanvasGroup));
+            deltaObj.transform.SetParent(panelTransform, false);
+            RectTransform deltaRect = deltaObj.GetComponent<RectTransform>();
+            deltaRect.anchorMin = new Vector2(1f, 0.5f);
+            deltaRect.anchorMax = new Vector2(1f, 0.5f);
+            deltaRect.pivot = new Vector2(0f, 0.5f);
+            deltaRect.anchoredPosition = new Vector2(12f, 0f);
+            deltaRect.sizeDelta = new Vector2(120f, 40f);
+
+            TextMeshProUGUI deltaText = deltaObj.GetComponent<TextMeshProUGUI>();
+            deltaText.text = delta > 0 ? $"+${delta}" : $"-${Mathf.Abs(delta)}";
+            deltaText.fontSize = 26f;
+            deltaText.fontStyle = FontStyles.Bold;
+            deltaText.color = delta > 0 ? UIThemeConstants.Positive : UIThemeConstants.Negative;
+            deltaText.alignment = TextAlignmentOptions.Left;
+            if (TMP_Settings.defaultFontAsset != null)
+            {
+                deltaText.font = TMP_Settings.defaultFontAsset;
+            }
+
+            CanvasGroup cg = deltaObj.GetComponent<CanvasGroup>();
+            StartCoroutine(AnimateBalanceDelta(deltaRect, cg, deltaObj));
+        }
+
+        private IEnumerator AnimateBalanceDelta(RectTransform rect, CanvasGroup cg, GameObject obj)
+        {
+            float duration = 1.2f;
+            float elapsed = 0f;
+            Vector2 startPos = rect.anchoredPosition;
+
+            while (elapsed < duration)
+            {
+                elapsed += Time.unscaledDeltaTime;
+                float t = elapsed / duration;
+                rect.anchoredPosition = startPos + new Vector2(0f, t * 30f);
+                cg.alpha = 1f - UIAnimationHelper.EaseOutCubic(t);
+                yield return null;
+            }
+
+            Destroy(obj);
         }
 
         private void RefreshBalanceText()
@@ -203,7 +271,7 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            balanceText.text = $"Bakiye: ${amount:N0}";
+            balanceText.text = $"{LocalizationTable.Get("balance_label")}: ${amount:N0}";
         }
 
         private Canvas GetOrCreateHudCanvas()

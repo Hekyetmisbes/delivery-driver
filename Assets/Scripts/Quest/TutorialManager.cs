@@ -32,6 +32,7 @@ namespace DeliveryDriver.Quest
 
         public bool IsTutorialActive => isTutorialActive;
         public int CurrentStepIndex => currentStepIndex;
+        public int TotalSteps => tutorialSteps != null ? tutorialSteps.Count : 0;
         public bool IsTutorialCompleted => PlayerPrefs.GetInt(tutorialCompletedKey, 0) == 1;
 
         public UnityEvent OnTutorialStarted = new UnityEvent();

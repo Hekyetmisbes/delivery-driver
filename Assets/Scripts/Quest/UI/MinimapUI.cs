@@ -1,13 +1,16 @@
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
 using System.Collections.Generic;
+using DeliveryDriver.UI;
+using TMPro;
 
 namespace DeliveryDriver.Quest.UI
 {
     /// <summary>
     /// Controls the minimap UI display and quest markers on the minimap
     /// </summary>
-    public class MinimapUI : MonoBehaviour
+    public class MinimapUI : MonoBehaviour, IScrollHandler
     {
         [Header("UI References")]
         [SerializeField] private RawImage minimapImage;
@@ -36,6 +39,20 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private bool showMinimap = true;
         [SerializeField] private Vector2 minimapSize = new Vector2(200f, 200f);
 
+        [Header("Zoom")]
+        [SerializeField] private float minZoom = 100f;
+        [SerializeField] private float maxZoom = 500f;
+        [SerializeField] private float zoomStep = 50f;
+        [SerializeField] private float zoomLerpSpeed = 8f;
+        [SerializeField] private float scrollZoomStep = 30f;
+
+        [Header("Marker Style")]
+        [SerializeField] private Color pickupMarkerColor = new Color(0.2f, 0.6f, 1f, 1f);
+        [SerializeField] private Color deliveryMarkerColor = new Color(0.2f, 0.9f, 0.4f, 1f);
+        [SerializeField] private float markerSize = 22f;
+        [SerializeField] private float markerPulseScale = 1.25f;
+        [SerializeField] private float markerPulseSpeed = 2.5f;
+
         private GameObject currentPickupMarker;
         private List<GameObject> currentDeliveryMarkers = new List<GameObject>();
         private Vector3 currentPickupWorldPosition;
@@ -46,10 +63,16 @@ namespace DeliveryDriver.Quest.UI
         private QuestData currentQuest;
         private float routeRefreshTimer;
         private bool subscribedToQuestEvents;
+        private float targetZoom;
+        private float currentZoom;
+        private bool zoomControlsBuilt;
+        private readonly List<RectTransform> markerRects = new List<RectTransform>();
 
         private void Awake()
         {
+            InitializeZoom();
             SetupMinimap();
+            BuildZoomControls();
         }
 
         private void Start()
@@ -82,6 +105,8 @@ namespace DeliveryDriver.Quest.UI
             }
 
             UpdateObjectiveMarkerPositions();
+            UpdateZoomLerp();
+            UpdateMarkerPulse();
 
             if (showRoutePreview && includePlayerInRoute && currentQuest != null)
             {
@@ -264,7 +289,7 @@ namespace DeliveryDriver.Quest.UI
             }
             else
             {
-                currentPickupMarker = CreateDefaultMarkerUI(new Color(0.1f, 1f, 1f, 1f));
+                currentPickupMarker = CreateDefaultMarkerUI(pickupMarkerColor);
                 currentPickupMarker.transform.SetParent(markerContainer, false);
             }
             currentPickupMarker.name = "PickupMarker";
@@ -302,7 +327,7 @@ namespace DeliveryDriver.Quest.UI
                 }
                 else
                 {
-                    marker = CreateDefaultMarkerUI(new Color(1f, 0.9f, 0.05f, 1f));
+                    marker = CreateDefaultMarkerUI(deliveryMarkerColor);
                     marker.transform.SetParent(markerContainer, false);
                 }
                 marker.name = $"DeliveryMarker_{quest.CurrentDeliveryIndex}";
@@ -331,6 +356,7 @@ namespace DeliveryDriver.Quest.UI
             }
             currentDeliveryMarkers.Clear();
             currentDeliveryWorldPositions.Clear();
+            markerRects.Clear();
         }
 
         private void UpdatePlayerMarkerRotation()
@@ -453,7 +479,7 @@ namespace DeliveryDriver.Quest.UI
         {
             GameObject markerObj = new GameObject("DefaultMinimapMarker");
             RectTransform rect = markerObj.AddComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(16f, 16f);
+            rect.sizeDelta = new Vector2(markerSize, markerSize);
             rect.anchorMin = new Vector2(0.5f, 0.5f);
             rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.pivot = new Vector2(0.5f, 0.5f);
@@ -461,6 +487,8 @@ namespace DeliveryDriver.Quest.UI
             Image img = markerObj.AddComponent<Image>();
             img.color = color;
             img.raycastTarget = false;
+
+            markerRects.Add(rect);
             return markerObj;
         }
 
@@ -518,6 +546,152 @@ namespace DeliveryDriver.Quest.UI
             if (controller != null)
             {
                 playerTransform = controller.transform;
+            }
+        }
+
+        public void OnScroll(PointerEventData eventData)
+        {
+            float scroll = eventData.scrollDelta.y;
+            if (Mathf.Abs(scroll) > 0.01f)
+            {
+                targetZoom -= scroll * scrollZoomStep;
+                targetZoom = Mathf.Clamp(targetZoom, minZoom, maxZoom);
+            }
+        }
+
+        private void InitializeZoom()
+        {
+            if (GameSettings.Instance != null)
+            {
+                targetZoom = GameSettings.Instance.MinimapZoom;
+            }
+            else
+            {
+                targetZoom = Mathf.Clamp(250f, minZoom, maxZoom);
+            }
+            currentZoom = targetZoom;
+        }
+
+        private void UpdateZoomLerp()
+        {
+            if (Mathf.Abs(currentZoom - targetZoom) < 0.5f)
+            {
+                if (Mathf.Abs(currentZoom - targetZoom) > 0.01f)
+                {
+                    currentZoom = targetZoom;
+                    ApplyZoom(currentZoom);
+                }
+                return;
+            }
+
+            currentZoom = Mathf.Lerp(currentZoom, targetZoom, zoomLerpSpeed * Time.deltaTime);
+            ApplyZoom(currentZoom);
+        }
+
+        private void ApplyZoom(float zoom)
+        {
+            if (minimapCamera != null)
+            {
+                minimapCamera.SetZoom(zoom);
+            }
+
+            if (GameSettings.Instance != null)
+            {
+                GameSettings.Instance.SetMinimapZoom(zoom);
+            }
+        }
+
+        private void ZoomIn()
+        {
+            targetZoom = Mathf.Clamp(targetZoom - zoomStep, minZoom, maxZoom);
+        }
+
+        private void ZoomOut()
+        {
+            targetZoom = Mathf.Clamp(targetZoom + zoomStep, minZoom, maxZoom);
+        }
+
+        private void BuildZoomControls()
+        {
+            if (zoomControlsBuilt || minimapContainer == null) return;
+            zoomControlsBuilt = true;
+
+            Sprite fallback = DeliveryUiSpriteHelper.GetFallbackSprite();
+
+            // Zoom in button (+)
+            GameObject zoomInObj = new GameObject("ZoomIn", typeof(RectTransform), typeof(Image), typeof(Button));
+            zoomInObj.transform.SetParent(minimapContainer, false);
+            RectTransform zoomInRect = zoomInObj.GetComponent<RectTransform>();
+            zoomInRect.anchorMin = new Vector2(1f, 0f);
+            zoomInRect.anchorMax = new Vector2(1f, 0f);
+            zoomInRect.pivot = new Vector2(1f, 0f);
+            zoomInRect.anchoredPosition = new Vector2(-4f, 30f);
+            zoomInRect.sizeDelta = new Vector2(24f, 24f);
+
+            Image zoomInImage = zoomInObj.GetComponent<Image>();
+            zoomInImage.color = new Color(0.15f, 0.2f, 0.28f, 0.85f);
+            if (fallback != null) zoomInImage.sprite = fallback;
+
+            GameObject zoomInLabel = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+            zoomInLabel.transform.SetParent(zoomInObj.transform, false);
+            RectTransform zoomInLabelRect = zoomInLabel.GetComponent<RectTransform>();
+            zoomInLabelRect.anchorMin = Vector2.zero;
+            zoomInLabelRect.anchorMax = Vector2.one;
+            zoomInLabelRect.offsetMin = Vector2.zero;
+            zoomInLabelRect.offsetMax = Vector2.zero;
+            TextMeshProUGUI zoomInText = zoomInLabel.GetComponent<TextMeshProUGUI>();
+            zoomInText.text = "+";
+            zoomInText.fontSize = 18f;
+            zoomInText.alignment = TextAlignmentOptions.Center;
+            zoomInText.color = Color.white;
+            zoomInText.fontStyle = FontStyles.Bold;
+            if (TMP_Settings.defaultFontAsset != null) zoomInText.font = TMP_Settings.defaultFontAsset;
+
+            zoomInObj.GetComponent<Button>().onClick.AddListener(ZoomIn);
+
+            // Zoom out button (-)
+            GameObject zoomOutObj = new GameObject("ZoomOut", typeof(RectTransform), typeof(Image), typeof(Button));
+            zoomOutObj.transform.SetParent(minimapContainer, false);
+            RectTransform zoomOutRect = zoomOutObj.GetComponent<RectTransform>();
+            zoomOutRect.anchorMin = new Vector2(1f, 0f);
+            zoomOutRect.anchorMax = new Vector2(1f, 0f);
+            zoomOutRect.pivot = new Vector2(1f, 0f);
+            zoomOutRect.anchoredPosition = new Vector2(-4f, 4f);
+            zoomOutRect.sizeDelta = new Vector2(24f, 24f);
+
+            Image zoomOutImage = zoomOutObj.GetComponent<Image>();
+            zoomOutImage.color = new Color(0.15f, 0.2f, 0.28f, 0.85f);
+            if (fallback != null) zoomOutImage.sprite = fallback;
+
+            GameObject zoomOutLabel = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+            zoomOutLabel.transform.SetParent(zoomOutObj.transform, false);
+            RectTransform zoomOutLabelRect = zoomOutLabel.GetComponent<RectTransform>();
+            zoomOutLabelRect.anchorMin = Vector2.zero;
+            zoomOutLabelRect.anchorMax = Vector2.one;
+            zoomOutLabelRect.offsetMin = Vector2.zero;
+            zoomOutLabelRect.offsetMax = Vector2.zero;
+            TextMeshProUGUI zoomOutText = zoomOutLabel.GetComponent<TextMeshProUGUI>();
+            zoomOutText.text = "-";
+            zoomOutText.fontSize = 18f;
+            zoomOutText.alignment = TextAlignmentOptions.Center;
+            zoomOutText.color = Color.white;
+            zoomOutText.fontStyle = FontStyles.Bold;
+            if (TMP_Settings.defaultFontAsset != null) zoomOutText.font = TMP_Settings.defaultFontAsset;
+
+            zoomOutObj.GetComponent<Button>().onClick.AddListener(ZoomOut);
+        }
+
+        private void UpdateMarkerPulse()
+        {
+            float pulse = 1f + (Mathf.Sin(Time.time * markerPulseSpeed * Mathf.PI) * 0.5f + 0.5f) * (markerPulseScale - 1f);
+            Vector3 pulseScale = new Vector3(pulse, pulse, 1f);
+
+            for (int i = 0; i < markerRects.Count; i++)
+            {
+                if (markerRects[i] != null)
+                {
+                    markerRects[i].localScale = pulseScale;
+                }
             }
         }
 

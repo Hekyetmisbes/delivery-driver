@@ -1157,13 +1157,14 @@ namespace TrafficSystem
                 // Check start and end points for connections
                 Vector3 startPos = segment.waypoints[0].position;
                 Vector3 endPos = segment.waypoints[segment.waypoints.Count - 1].position;
+                int lastIdx = segment.waypoints.Count - 1;
 
                 // Self-loop connection for closed roads
                 if (Vector3.Distance(endPos, startPos) < threshold)
                 {
                     segment.connections.Add(new RoadConnection(
                         segment, segment,
-                        segment.waypoints.Count - 1, 0
+                        lastIdx, 0
                     ));
                 }
 
@@ -1173,13 +1174,14 @@ namespace TrafficSystem
 
                     Vector3 otherStart = otherSegment.waypoints[0].position;
                     Vector3 otherEnd = otherSegment.waypoints[otherSegment.waypoints.Count - 1].position;
+                    int otherLastIdx = otherSegment.waypoints.Count - 1;
 
                     // End of current -> Start of other
                     if (Vector3.Distance(endPos, otherStart) < threshold)
                     {
                         segment.connections.Add(new RoadConnection(
                             segment, otherSegment,
-                            segment.waypoints.Count - 1, 0
+                            lastIdx, 0
                         ));
                     }
 
@@ -1188,7 +1190,25 @@ namespace TrafficSystem
                     {
                         segment.connections.Add(new RoadConnection(
                             segment, otherSegment,
-                            segment.waypoints.Count - 1, otherSegment.waypoints.Count - 1
+                            lastIdx, otherLastIdx
+                        ));
+                    }
+
+                    // Start of current -> Start of other (both segments start at same intersection)
+                    if (Vector3.Distance(startPos, otherStart) < threshold)
+                    {
+                        segment.connections.Add(new RoadConnection(
+                            segment, otherSegment,
+                            0, 0
+                        ));
+                    }
+
+                    // Start of current -> End of other
+                    if (Vector3.Distance(startPos, otherEnd) < threshold)
+                    {
+                        segment.connections.Add(new RoadConnection(
+                            segment, otherSegment,
+                            0, otherLastIdx
                         ));
                     }
                 }

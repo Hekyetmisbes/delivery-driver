@@ -1,4 +1,5 @@
 using System.Text;
+using DeliveryDriver.UI;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -28,7 +29,12 @@ namespace DeliveryDriver.Quest.UI
         [Header("Layout")]
         [SerializeField] private Vector2 minimumPanelSize = new Vector2(520f, 250f);
         [SerializeField] private int minimumObjectiveFontSize = 26;
-        [SerializeField] private int minimumDetailFontSize = 20;
+        [SerializeField] private int minimumTimerFontSize = 24;
+        [SerializeField] private int minimumDistanceFontSize = 22;
+
+        [Header("Feedback Animation")]
+        [SerializeField] private float feedbackFadeInDuration = 0.2f;
+        [SerializeField] private float feedbackFadeOutDuration = 0.35f;
 
         private QuestData currentQuest;
         private string objectiveBaseText = string.Empty;
@@ -36,16 +42,27 @@ namespace DeliveryDriver.Quest.UI
         private int lastTimerSeconds = -1;
         private Color lastTimerColor = Color.clear;
         private string lastDistanceText = string.Empty;
+        private string lastCompactLine = string.Empty;
         private float lastCargoHealth = -1f;
         private bool lastCargoPanelActive = false;
         private string currentFeedbackText = string.Empty;
         private Color currentFeedbackColor = Color.white;
         private float feedbackExpireAt;
         private bool feedbackVisible;
+        private bool feedbackFadingOut;
         private readonly StringBuilder objectiveBuilder = new StringBuilder(64);
         private QuestManager questManager;
         private Transform playerTransform;
         private bool hasLoggedRuntimeUpdater;
+        private bool timerPulsing;
+        private RectTransform timerRect;
+        private CanvasGroup feedbackCanvasGroup;
+        private QuestLocation cachedObjective;
+        private int frameCounter;
+        private const int UpdateEveryNFrames = 2;
+        private float lastExternalDistance;
+        private float lastExternalTimeRemaining;
+        private float lastExternalTimeLimit;
 
         private void Awake()
         {
@@ -61,27 +78,28 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            UpdateTimer(currentQuest.TimeRemaining, currentQuest.TimeLimit);
+            frameCounter++;
+            bool fullUpdate = frameCounter % UpdateEveryNFrames == 0;
 
             if (playerTransform == null)
             {
                 ResolvePlayerTransform();
             }
 
-            if (playerTransform == null)
+            float distance = 0f;
+            if (playerTransform != null)
             {
-                return;
+                if (fullUpdate || cachedObjective == null)
+                {
+                    cachedObjective = GetCurrentObjective(currentQuest);
+                }
+                if (cachedObjective != null)
+                {
+                    distance = Vector3.Distance(playerTransform.position, cachedObjective.Position);
+                }
             }
 
-            QuestLocation objective = GetCurrentObjective(currentQuest);
-            if (objective == null)
-            {
-                UpdateDistance(0f);
-                return;
-            }
-
-            float distance = Vector3.Distance(playerTransform.position, objective.Position);
-            UpdateDistance(distance);
+            UpdateCompactTimerLine(currentQuest.TimeRemaining, currentQuest.TimeLimit, distance);
             TryExpireFeedback();
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -110,7 +128,7 @@ namespace DeliveryDriver.Quest.UI
                 RefreshObjectiveText();
             }
 
-            UpdateTimer(currentQuest.TimeRemaining, currentQuest.TimeLimit);
+            UpdateCompactTimerLine(currentQuest.TimeRemaining, currentQuest.TimeLimit, 0f);
 
             if (currentQuest.Cargo != null && currentQuest.Cargo.IsFragile)
             {
@@ -139,16 +157,33 @@ namespace DeliveryDriver.Quest.UI
 
         public void UpdateTimer(float timeRemaining, float timeLimit)
         {
+            lastExternalTimeRemaining = timeRemaining;
+            lastExternalTimeLimit = timeLimit;
+            UpdateCompactTimerLine(timeRemaining, timeLimit, lastExternalDistance);
+        }
+
+        public void UpdateDistance(float distanceMeters)
+        {
+            lastExternalDistance = distanceMeters;
+            UpdateCompactTimerLine(lastExternalTimeRemaining, lastExternalTimeLimit, distanceMeters);
+        }
+
+        public void UpdateCompactTimerLine(float timeRemaining, float timeLimit, float distanceMeters)
+        {
             if (timerText == null)
             {
                 return;
             }
 
             int seconds = Mathf.CeilToInt(timeRemaining);
-            if (seconds != lastTimerSeconds)
+            string distStr = FormatDistanceCompact(distanceMeters, estimatedAverageSpeedMetersPerSec, distanceDisplayMultiplier);
+            string compactLine = $"{FormatTime(seconds)}  |  {distStr}";
+
+            if (!string.Equals(lastCompactLine, compactLine, System.StringComparison.Ordinal))
             {
-                timerText.text = FormatTime(seconds);
+                lastCompactLine = compactLine;
                 lastTimerSeconds = seconds;
+                timerText.text = compactLine;
             }
 
             Color color = GetTimerColor(timeRemaining, timeLimit);
@@ -157,25 +192,30 @@ namespace DeliveryDriver.Quest.UI
                 timerText.color = color;
                 lastTimerColor = color;
             }
-        }
 
-        public void UpdateDistance(float distanceMeters)
-        {
-            if (distanceText == null)
+            // Pulse animation when timer is critical (<20% remaining)
+            bool shouldPulse = timeLimit > 0f && timeRemaining < timeLimit * 0.2f && timeRemaining > 0f;
+            if (shouldPulse && !timerPulsing)
             {
-                AutoBindTextReferences();
+                timerPulsing = true;
+                if (timerRect == null)
+                {
+                    timerRect = timerText.GetComponent<RectTransform>();
+                }
+                if (timerRect != null)
+                {
+                    UIAnimationHelper.PulseScale(this, timerRect, 1.12f, UIThemeConstants.PulseDuration);
+                }
+            }
+            else if (!shouldPulse)
+            {
+                timerPulsing = false;
             }
 
-            if (distanceText == null)
+            // Also update separate distanceText if it exists (backwards compat)
+            if (distanceText != null)
             {
-                return;
-            }
-
-            string formatted = FormatDistanceWithEta(distanceMeters, estimatedAverageSpeedMetersPerSec, distanceDisplayMultiplier);
-            if (!string.Equals(lastDistanceText, formatted, System.StringComparison.Ordinal))
-            {
-                lastDistanceText = formatted;
-                distanceText.text = formatted;
+                distanceText.gameObject.SetActive(false);
             }
         }
 
@@ -191,8 +231,16 @@ namespace DeliveryDriver.Quest.UI
             currentFeedbackColor = scoreDelta < 0 ? new Color(1f, 0.45f, 0.35f) : new Color(0.55f, 1f, 0.55f);
             feedbackExpireAt = Time.time + Mathf.Max(0.25f, feedbackDuration);
             feedbackVisible = true;
+            feedbackFadingOut = false;
             RefreshObjectiveText();
             UpdateFeedbackTextComponent();
+
+            // Fade in feedback text
+            EnsureFeedbackCanvasGroup();
+            if (feedbackCanvasGroup != null)
+            {
+                UIAnimationHelper.FadeIn(this, feedbackCanvasGroup, feedbackFadeInDuration);
+            }
         }
 
         public void UpdateCargoHealth(float health)
@@ -329,19 +377,23 @@ namespace DeliveryDriver.Quest.UI
             return $"{minutes:00}:{seconds:00}";
         }
 
-        private static string FormatDistanceWithEta(float distanceMeters, float estimatedSpeed, float displayMultiplier = 1f)
+        private static string FormatDistanceCompact(float distanceMeters, float estimatedSpeed, float displayMultiplier = 1f)
         {
             if (distanceMeters <= 0f)
             {
-                return "Mesafe: -- m | ETA: --:--";
+                return "-- m";
             }
 
-            int etaSeconds = estimatedSpeed > 0.1f
-                ? Mathf.CeilToInt(distanceMeters / estimatedSpeed)
-                : 0;
             float d = distanceMeters * displayMultiplier;
             string distStr = d >= 1000f ? $"{d / 1000f:F1}km" : $"{Mathf.RoundToInt(d)} m";
-            return $"Mesafe: {distStr} | ETA: {FormatTime(etaSeconds)}";
+
+            if (estimatedSpeed > 0.1f)
+            {
+                int etaSeconds = Mathf.CeilToInt(distanceMeters / estimatedSpeed);
+                return $"{distStr} (~{FormatTime(etaSeconds)})";
+            }
+
+            return distStr;
         }
 
         private static Color GetTimerColor(float timeRemaining, float timeLimit)
@@ -456,10 +508,34 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            feedbackVisible = false;
-            currentFeedbackText = string.Empty;
-            UpdateFeedbackTextComponent();
-            RefreshObjectiveText();
+            if (!feedbackFadingOut)
+            {
+                feedbackFadingOut = true;
+                EnsureFeedbackCanvasGroup();
+                if (feedbackCanvasGroup != null)
+                {
+                    UIAnimationHelper.FadeOut(this, feedbackCanvasGroup, feedbackFadeOutDuration, () =>
+                    {
+                        feedbackVisible = false;
+                        feedbackFadingOut = false;
+                        currentFeedbackText = string.Empty;
+                        UpdateFeedbackTextComponent();
+                        RefreshObjectiveText();
+                        if (feedbackCanvasGroup != null)
+                        {
+                            feedbackCanvasGroup.alpha = 1f;
+                        }
+                    });
+                }
+                else
+                {
+                    feedbackVisible = false;
+                    feedbackFadingOut = false;
+                    currentFeedbackText = string.Empty;
+                    UpdateFeedbackTextComponent();
+                    RefreshObjectiveText();
+                }
+            }
         }
 
         private void UpdateFeedbackTextComponent()
@@ -514,9 +590,23 @@ namespace DeliveryDriver.Quest.UI
             }
 
             ApplyMinimumTextStyle(objectiveText, minimumObjectiveFontSize);
-            ApplyMinimumTextStyle(distanceText, minimumDetailFontSize);
-            ApplyMinimumTextStyle(timerText, minimumDetailFontSize);
-            ApplyMinimumTextStyle(feedbackText, minimumDetailFontSize);
+            ApplyMinimumTextStyle(distanceText, minimumDistanceFontSize);
+            ApplyMinimumTextStyle(timerText, minimumTimerFontSize);
+            ApplyMinimumTextStyle(feedbackText, minimumDistanceFontSize);
+        }
+
+        private void EnsureFeedbackCanvasGroup()
+        {
+            if (feedbackCanvasGroup != null || feedbackText == null)
+            {
+                return;
+            }
+
+            feedbackCanvasGroup = feedbackText.GetComponent<CanvasGroup>();
+            if (feedbackCanvasGroup == null)
+            {
+                feedbackCanvasGroup = feedbackText.gameObject.AddComponent<CanvasGroup>();
+            }
         }
 
         private static void ApplyMinimumTextStyle(TextMeshProUGUI text, int minimumFontSize)

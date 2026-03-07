@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using DeliveryDriver.Quest;
+using DeliveryDriver.UI;
 
 public class SpeedometerUI : MonoBehaviour
 {
@@ -37,10 +38,12 @@ public class SpeedometerUI : MonoBehaviour
     private Image panelImage;
     private TextMeshProUGUI speedValueText;
     private TextMeshProUGUI unitText;
+    private TextMeshProUGUI gearText;
     private Rigidbody playerRigidbody;
     private Image[] tickImages;
     private int frameCounter;
     private int lastDisplayedSpeed = -1;
+    private string lastGearDisplay = "";
 
     public void Initialize(Rigidbody rb)
     {
@@ -140,6 +143,8 @@ public class SpeedometerUI : MonoBehaviour
             lastDisplayedSpeed = roundedSpeed;
             speedValueText.SetText("{0:00}", roundedSpeed);
         }
+
+        UpdateGearDisplay(speedMps, speedKmh);
     }
 
     private void BuildSpeedTexts(Transform parent)
@@ -177,6 +182,79 @@ public class SpeedometerUI : MonoBehaviour
         unitText.outlineWidth = 0.16f;
         unitText.outlineColor = new Color(0f, 0f, 0f, 0.95f);
         unitText.text = displayMph ? "MPH" : "KM/H";
+
+        // Gear text
+        GameObject gearTextObject = new GameObject("GearIndicator", typeof(RectTransform), typeof(TextMeshProUGUI));
+        gearTextObject.transform.SetParent(parent, false);
+        RectTransform gearRect = gearTextObject.GetComponent<RectTransform>();
+        gearRect.anchorMin = new Vector2(0.28f, 0.12f);
+        gearRect.anchorMax = new Vector2(0.28f, 0.12f);
+        gearRect.pivot = new Vector2(0.5f, 0.5f);
+        gearRect.sizeDelta = new Vector2(50f, 36f);
+
+        gearText = gearTextObject.GetComponent<TextMeshProUGUI>();
+        gearText.alignment = TextAlignmentOptions.Center;
+        gearText.fontSize = 28f;
+        gearText.fontStyle = FontStyles.Bold;
+        gearText.textWrappingMode = TextWrappingModes.NoWrap;
+        gearText.outlineWidth = 0.16f;
+        gearText.outlineColor = new Color(0f, 0f, 0f, 0.95f);
+        gearText.text = "N";
+        gearText.color = Color.white;
+    }
+
+    private void UpdateGearDisplay(float speedMps, float speedKmh)
+    {
+        if (gearText == null) return;
+
+        string gear;
+        bool isReverse = false;
+
+        if (playerRigidbody != null)
+        {
+            float forwardDot = Vector3.Dot(playerRigidbody.linearVelocity, playerRigidbody.transform.forward);
+            isReverse = forwardDot < -0.5f && speedMps > 0.5f;
+        }
+
+        if (isReverse)
+        {
+            gear = "R";
+        }
+        else if (speedKmh < 3f)
+        {
+            gear = "N";
+        }
+        else if (speedKmh < 30f)
+        {
+            gear = "1";
+        }
+        else if (speedKmh < 60f)
+        {
+            gear = "2";
+        }
+        else if (speedKmh < 100f)
+        {
+            gear = "3";
+        }
+        else if (speedKmh < 140f)
+        {
+            gear = "4";
+        }
+        else if (speedKmh < 190f)
+        {
+            gear = "5";
+        }
+        else
+        {
+            gear = "6";
+        }
+
+        if (!string.Equals(gear, lastGearDisplay))
+        {
+            lastGearDisplay = gear;
+            gearText.text = gear;
+            gearText.color = isReverse ? UIThemeConstants.Negative : Color.white;
+        }
     }
 
     private void BuildGaugeTicks(Transform parent, Sprite fallbackSprite)

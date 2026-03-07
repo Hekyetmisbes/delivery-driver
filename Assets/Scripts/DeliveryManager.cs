@@ -2229,7 +2229,6 @@ public class DeliveryManager : MonoBehaviour
         }
 
         phoneMissionUI.BindCallbacks(HandlePhoneMissionAccepted, HandlePhoneMissionRejected);
-        phoneMissionUI.HideOffer();
     }
 
     private void ScheduleMissionOffer(float delaySeconds)

@@ -1,4 +1,5 @@
 using System;
+using DeliveryDriver.UI;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -32,6 +33,7 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private int minimumBodyFontSize = 24;
 
         private Action continueAction;
+        private CanvasGroup rootCanvasGroup;
 
         private void Awake()
         {
@@ -72,7 +74,7 @@ namespace DeliveryDriver.Quest.UI
 
             if (resultText != null)
             {
-                resultText.text = "DELIVERY COMPLETE";
+                resultText.text = LocalizationTable.Get("delivery_complete");
             }
 
             if (questNameText != null)
@@ -112,7 +114,7 @@ namespace DeliveryDriver.Quest.UI
 
             if (resultText != null)
             {
-                resultText.text = "DELIVERY FAILED";
+                resultText.text = LocalizationTable.Get("delivery_failed");
             }
 
             if (questNameText != null)
@@ -149,13 +151,47 @@ namespace DeliveryDriver.Quest.UI
 
         private void SetVisible(bool visible)
         {
-            if (rootPanel != null)
+            GameObject target = rootPanel != null ? rootPanel : gameObject;
+            if (visible)
             {
-                rootPanel.SetActive(visible);
-                return;
-            }
+                target.SetActive(true);
+                EnsureCanvasGroup(target);
+                if (rootCanvasGroup != null)
+                {
+                    rootCanvasGroup.alpha = 0f;
+                    UIAnimationHelper.FadeIn(this, rootCanvasGroup, UIThemeConstants.PanelFadeDuration);
 
-            gameObject.SetActive(visible);
+                    RectTransform rect = target.GetComponent<RectTransform>();
+                    if (rect != null)
+                    {
+                        UIAnimationHelper.ScaleIn(this, rect, UIThemeConstants.PanelScaleDuration);
+                    }
+                }
+            }
+            else
+            {
+                if (rootCanvasGroup != null)
+                {
+                    UIAnimationHelper.FadeOut(this, rootCanvasGroup, UIThemeConstants.PanelFadeDuration * 0.5f, () =>
+                    {
+                        target.SetActive(false);
+                    });
+                }
+                else
+                {
+                    target.SetActive(false);
+                }
+            }
+        }
+
+        private void EnsureCanvasGroup(GameObject target)
+        {
+            if (rootCanvasGroup != null) return;
+            rootCanvasGroup = target.GetComponent<CanvasGroup>();
+            if (rootCanvasGroup == null)
+            {
+                rootCanvasGroup = target.AddComponent<CanvasGroup>();
+            }
         }
 
         private static string BuildStatsText(QuestData quest, string failureReason, int penaltyAmount = 0, QuestManager.RewardPenaltyBreakdown? breakdown = null)

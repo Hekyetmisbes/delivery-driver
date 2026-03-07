@@ -984,10 +984,25 @@ namespace TrafficSystem
         /// </summary>
         private void HandleEndOfSegment()
         {
-            // Check for connections (intersections)
+            // Filter connections to those originating from the end of the segment
+            List<RoadConnection> endConnections = null;
             if (currentSegment.connections != null && currentSegment.connections.Count > 0)
             {
-                RoadConnection connection = SelectBestConnection(currentSegment.connections);
+                int lastIdx = currentSegment.waypoints.Count - 1;
+                endConnections = new List<RoadConnection>();
+                for (int i = 0; i < currentSegment.connections.Count; i++)
+                {
+                    if (currentSegment.connections[i].fromWaypointIndex >= lastIdx - 1)
+                    {
+                        endConnections.Add(currentSegment.connections[i]);
+                    }
+                }
+            }
+
+            // Check for connections (intersections)
+            if (endConnections != null && endConnections.Count > 0)
+            {
+                RoadConnection connection = SelectBestConnection(endConnections);
                 if (connection == null || connection.toSegment == null)
                 {
                     if (TryGetSequentialNextSegment(out RoadSegment fallbackSegment))
@@ -1003,7 +1018,7 @@ namespace TrafficSystem
                 }
 
                 currentSegment = connection.toSegment;
-                currentWaypointIndex = 0;
+                currentWaypointIndex = Mathf.Clamp(connection.toWaypointIndex, 0, currentSegment.waypoints.Count - 1);
 
                 if (logPathChanges)
                 {
@@ -1070,6 +1085,7 @@ namespace TrafficSystem
                 return null;
             }
 
+            // Filter to only valid, forward-facing connections (exclude U-turns)
             Vector3 currentForward = GetWorldForward();
             currentForward.y = 0f;
             if (currentForward.sqrMagnitude < 0.0001f)
@@ -1081,13 +1097,19 @@ namespace TrafficSystem
                 currentForward.Normalize();
             }
 
-            RoadConnection best = connections[0];
-            float bestDot = -999f;
+            List<RoadConnection> validConnections = new List<RoadConnection>();
+            List<float> weights = new List<float>();
 
             for (int i = 0; i < connections.Count; i++)
             {
                 RoadConnection connection = connections[i];
                 if (connection == null || connection.toSegment == null || connection.toSegment.waypoints == null || connection.toSegment.waypoints.Count == 0)
+                {
+                    continue;
+                }
+
+                // Skip connections back to current segment (avoid immediate U-turn)
+                if (connection.toSegment == currentSegment)
                 {
                     continue;
                 }
@@ -1109,14 +1131,53 @@ namespace TrafficSystem
 
                 candidateForward.Normalize();
                 float dot = Vector3.Dot(currentForward, candidateForward);
-                if (dot > bestDot)
+
+                // Reject sharp U-turns (> ~135 degrees)
+                if (dot < -0.7f)
                 {
-                    bestDot = dot;
-                    best = connection;
+                    continue;
+                }
+
+                // Weight: forward-ish paths get higher weight, but turns are still viable
+                // Remap dot from [-0.7, 1] to a positive weight, with slight forward bias
+                float weight = Mathf.Max(0.1f, dot + 1f); // range ~[0.3, 2.0]
+                validConnections.Add(connection);
+                weights.Add(weight);
+            }
+
+            if (validConnections.Count == 0)
+            {
+                // Fallback: pick any valid connection if all were filtered out
+                for (int i = 0; i < connections.Count; i++)
+                {
+                    RoadConnection c = connections[i];
+                    if (c != null && c.toSegment != null && c.toSegment.waypoints != null && c.toSegment.waypoints.Count > 0)
+                    {
+                        return c;
+                    }
+                }
+                return null;
+            }
+
+            // Weighted random selection among valid connections
+            float totalWeight = 0f;
+            for (int i = 0; i < weights.Count; i++)
+            {
+                totalWeight += weights[i];
+            }
+
+            float roll = Random.Range(0f, totalWeight);
+            float cumulative = 0f;
+            for (int i = 0; i < validConnections.Count; i++)
+            {
+                cumulative += weights[i];
+                if (roll <= cumulative)
+                {
+                    return validConnections[i];
                 }
             }
 
-            return best;
+            return validConnections[validConnections.Count - 1];
         }
 
         /// <summary>

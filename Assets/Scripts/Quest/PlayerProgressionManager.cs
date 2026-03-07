@@ -109,9 +109,13 @@ namespace DeliveryDriver.Quest
         private void Start()
         {
             // Try to load saved game
-            if (SaveManager.Instance != null)
+            SaveManager saveManager = SaveManager.Instance != null
+                ? SaveManager.Instance
+                : FindFirstObjectByType<SaveManager>();
+
+            if (saveManager != null)
             {
-                GameSaveData saveData = SaveManager.Instance.LoadGame();
+                GameSaveData saveData = saveManager.LoadGame();
 
                 if (saveData != null && saveData.PlayerData != null)
                 {
@@ -128,7 +132,7 @@ namespace DeliveryDriver.Quest
             }
             else
             {
-                Debug.LogWarning("[PlayerProgressionManager] SaveManager not found. Starting with default values.");
+                Debug.Log("[PlayerProgressionManager] SaveManager not found. Starting with default values.");
             }
         }
 
