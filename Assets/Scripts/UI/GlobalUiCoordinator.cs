@@ -74,6 +74,7 @@ public class GlobalUiCoordinator : MonoBehaviour
         BuildOrFindRootCanvas();
         BuildOrFindCanvasGroupRoot();
         EnsurePauseMenuComponent();
+        EnsureBalanceHudComponent();
         RefreshSceneBindings();
     }
 
@@ -127,6 +128,7 @@ public class GlobalUiCoordinator : MonoBehaviour
         BuildOrFindRootCanvas();
         BuildOrFindCanvasGroupRoot();
         EnsurePauseMenuComponent();
+        EnsureBalanceHudComponent();
         if (adoptExistingCanvases)
         {
             ReparentSceneCanvases();
@@ -209,6 +211,14 @@ public class GlobalUiCoordinator : MonoBehaviour
         if (pauseMenu == null)
         {
             gameObject.AddComponent<PauseMenuUI>();
+        }
+    }
+
+    private void EnsureBalanceHudComponent()
+    {
+        if (GetComponent<BalanceHudUI>() == null)
+        {
+            gameObject.AddComponent<BalanceHudUI>();
         }
     }
 
