@@ -25,6 +25,11 @@ namespace DeliveryDriver.Quest.UI
         [Header("Driving Feedback")]
         [SerializeField] private float feedbackDuration = 1.3f;
 
+        [Header("Layout")]
+        [SerializeField] private Vector2 minimumPanelSize = new Vector2(520f, 250f);
+        [SerializeField] private int minimumObjectiveFontSize = 26;
+        [SerializeField] private int minimumDetailFontSize = 20;
+
         private QuestData currentQuest;
         private string objectiveBaseText = string.Empty;
         private string lastObjectiveText = string.Empty;
@@ -45,6 +50,7 @@ namespace DeliveryDriver.Quest.UI
         private void Awake()
         {
             AutoBindTextReferences();
+            EnsureReadableLayout();
             questManager = QuestManager.Instance;
         }
 
@@ -471,6 +477,65 @@ namespace DeliveryDriver.Quest.UI
 
             feedbackText.text = currentFeedbackText;
             feedbackText.color = currentFeedbackColor;
+        }
+
+        private void EnsureReadableLayout()
+        {
+            Canvas parentCanvas = GetComponentInParent<Canvas>();
+            if (parentCanvas != null && parentCanvas.name == "Quest UI Canvas")
+            {
+                CanvasScaler scaler = parentCanvas.GetComponent<CanvasScaler>();
+                if (scaler != null)
+                {
+                    scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+                    scaler.referenceResolution = new Vector2(1920f, 1080f);
+                    scaler.matchWidthOrHeight = 0.5f;
+                }
+
+                RectTransform canvasRect = parentCanvas.transform as RectTransform;
+                if (canvasRect != null)
+                {
+                    canvasRect.localScale = Vector3.one;
+                }
+            }
+
+            RectTransform panelRect = transform as RectTransform;
+            if (panelRect != null)
+            {
+                Vector2 currentSize = panelRect.sizeDelta;
+                float width = currentSize.x <= 0f ? minimumPanelSize.x : currentSize.x;
+                float height = currentSize.y <= 0f ? minimumPanelSize.y : currentSize.y;
+                if (width < minimumPanelSize.x || height < minimumPanelSize.y)
+                {
+                    panelRect.sizeDelta = new Vector2(
+                        Mathf.Max(width, minimumPanelSize.x),
+                        Mathf.Max(height, minimumPanelSize.y));
+                }
+            }
+
+            ApplyMinimumTextStyle(objectiveText, minimumObjectiveFontSize);
+            ApplyMinimumTextStyle(distanceText, minimumDetailFontSize);
+            ApplyMinimumTextStyle(timerText, minimumDetailFontSize);
+            ApplyMinimumTextStyle(feedbackText, minimumDetailFontSize);
+        }
+
+        private static void ApplyMinimumTextStyle(TextMeshProUGUI text, int minimumFontSize)
+        {
+            if (text == null)
+            {
+                return;
+            }
+
+            if (text.fontSize < minimumFontSize)
+            {
+                text.fontSize = minimumFontSize;
+            }
+
+            text.textWrappingMode = TextWrappingModes.Normal;
+            if (TMP_Settings.defaultFontAsset != null)
+            {
+                text.font = TMP_Settings.defaultFontAsset;
+            }
         }
     }
 }

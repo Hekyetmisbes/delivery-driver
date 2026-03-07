@@ -25,10 +25,18 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private AudioSource successSound;
         [SerializeField] private AudioSource failureSound;
 
+        [Header("Layout")]
+        [SerializeField] private Vector2 minimumResultPanelSize = new Vector2(860f, 560f);
+        [SerializeField] private int minimumResultFontSize = 48;
+        [SerializeField] private int minimumTitleFontSize = 30;
+        [SerializeField] private int minimumBodyFontSize = 24;
+
         private Action continueAction;
 
         private void Awake()
         {
+            EnsureReadableLayout();
+
             if (continueButton != null)
             {
                 continueButton.onClick.AddListener(HandleContinueClicked);
@@ -202,6 +210,48 @@ namespace DeliveryDriver.Quest.UI
             int minutes = Mathf.FloorToInt(timeSeconds / 60f);
             int seconds = Mathf.FloorToInt(timeSeconds % 60f);
             return $"{minutes:00}:{seconds:00}";
+        }
+
+        private void EnsureReadableLayout()
+        {
+            Transform resultPanel = transform.Find("ResultPanel");
+            if (resultPanel == null && rootPanel != null)
+            {
+                resultPanel = rootPanel.transform.Find("ResultPanel");
+            }
+
+            RectTransform resultRect = resultPanel as RectTransform;
+            if (resultRect != null)
+            {
+                Vector2 size = resultRect.sizeDelta;
+                resultRect.sizeDelta = new Vector2(
+                    Mathf.Max(size.x, minimumResultPanelSize.x),
+                    Mathf.Max(size.y, minimumResultPanelSize.y));
+            }
+
+            ApplyMinimumTextStyle(resultText, minimumResultFontSize);
+            ApplyMinimumTextStyle(questNameText, minimumTitleFontSize);
+            ApplyMinimumTextStyle(statsText, minimumBodyFontSize);
+            ApplyMinimumTextStyle(rewardText, minimumTitleFontSize);
+        }
+
+        private static void ApplyMinimumTextStyle(TextMeshProUGUI text, int minimumFontSize)
+        {
+            if (text == null)
+            {
+                return;
+            }
+
+            if (text.fontSize < minimumFontSize)
+            {
+                text.fontSize = minimumFontSize;
+            }
+
+            text.textWrappingMode = TextWrappingModes.Normal;
+            if (TMP_Settings.defaultFontAsset != null)
+            {
+                text.font = TMP_Settings.defaultFontAsset;
+            }
         }
     }
 }
