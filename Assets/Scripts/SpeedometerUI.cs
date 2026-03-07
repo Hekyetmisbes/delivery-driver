@@ -1,70 +1,63 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using DeliveryDriver.Quest;
 
-/// <summary>
-/// Standalone speedometer HUD component.
-/// Extracted from DeliveryManager for separation of concerns.
-/// Uses TMP zero-allocation SetText API and only updates when integer km/h changes.
-/// </summary>
 public class SpeedometerUI : MonoBehaviour
 {
-    private enum SpeedometerTier
-    {
-        Eco,
-        Cruise,
-        Fast,
-        Max
-    }
-
-    [Header("Speedometer UI")]
+    [Header("Visibility")]
     [SerializeField] private bool showSpeedometer = true;
-    [SerializeField] private string speedometerLabel = "Hiz";
-    [SerializeField] private Vector2 speedometerAnchoredPosition = new Vector2(-28f, 24f);
-    [SerializeField] private int speedometerFontSize = 34;
-    [SerializeField] private Color speedometerColor = Color.white;
-    [SerializeField] private Vector2 speedometerPanelSize = new Vector2(320f, 116f);
-    [SerializeField] private Color speedometerPanelBaseColor = new Color(0.07f, 0.08f, 0.1f, 0.72f);
-    [SerializeField] private Color speedometerPanelEcoColor = new Color(0.08f, 0.2f, 0.12f, 0.78f);
-    [SerializeField] private Color speedometerPanelCruiseColor = new Color(0.08f, 0.13f, 0.2f, 0.78f);
-    [SerializeField] private Color speedometerPanelFastColor = new Color(0.24f, 0.18f, 0.06f, 0.8f);
-    [SerializeField] private Color speedometerPanelMaxColor = new Color(0.3f, 0.08f, 0.08f, 0.84f);
-    [SerializeField] private Color speedometerIconEcoColor = new Color(0.35f, 0.9f, 0.45f, 1f);
-    [SerializeField] private Color speedometerIconCruiseColor = new Color(0.35f, 0.7f, 1f, 1f);
-    [SerializeField] private Color speedometerIconFastColor = new Color(1f, 0.78f, 0.3f, 1f);
-    [SerializeField] private Color speedometerIconMaxColor = new Color(1f, 0.32f, 0.32f, 1f);
-    [SerializeField] private float cruiseThresholdKmh = 20f;
-    [SerializeField] private float fastThresholdKmh = 60f;
-    [SerializeField] private float maxThresholdKmh = 100f;
-    [SerializeField] private Sprite speedIconEcoSprite;
-    [SerializeField] private Sprite speedIconCruiseSprite;
-    [SerializeField] private Sprite speedIconFastSprite;
-    [SerializeField] private Sprite speedIconMaxSprite;
-    [SerializeField] private bool useKenneySpeedometerSkin = true;
-    [SerializeField] private Sprite speedometerPanelSprite;
-    [SerializeField] private Sprite speedometerBarTrackSprite;
-    [SerializeField] private Sprite speedometerBarFillSprite;
-    [SerializeField] private Sprite speedometerDefaultIconSprite;
-    [SerializeField] private int updateEveryNFrames = 3;
 
-    private RectTransform panelRect;
+    [Header("Layout")]
+    [SerializeField] private Vector2 anchoredPosition = new Vector2(-32f, 28f);
+    [SerializeField] private Vector2 panelSize = new Vector2(280f, 220f);
+    [SerializeField] private float gaugeRadius = 88f;
+    [SerializeField] private int tickCount = 28;
+    [SerializeField] private float gaugeStartAngle = 220f;
+    [SerializeField] private float gaugeSweepAngle = 280f;
+
+    [Header("Display")]
+    [SerializeField] private bool displayMph = false;
+    [SerializeField] private bool useGameSettingsUnit = true;
+    [SerializeField] private int speedFontSize = 114;
+    [SerializeField] private int unitFontSize = 38;
+    [SerializeField] private float maxGaugeSpeedMph = 160f;
+    [SerializeField] private float maxGaugeSpeedKmh = 260f;
+    [SerializeField] private float redThresholdKmh = 100f;
+    [SerializeField] private float redThresholdMph = 62f;
+    [SerializeField] private int updateEveryNFrames = 2;
+
+    [Header("Colors")]
+    [SerializeField] private Color panelColor = new Color(0f, 0f, 0f, 0.6f);
+    [SerializeField] private Color lowSpeedColor = new Color(0f, 0.78f, 1f, 1f);
+    [SerializeField] private Color highSpeedColor = new Color(1f, 0.06f, 0.06f, 1f);
+    [SerializeField] private Color inactiveTickColor = new Color(1f, 1f, 1f, 0.34f);
+
+    private RectTransform rootRect;
     private Image panelImage;
-    private Image iconImage;
-    private Image barFillImage;
-    private RectTransform barFillRect;
-    private TextMeshProUGUI speedText;
+    private TextMeshProUGUI speedValueText;
+    private TextMeshProUGUI unitText;
     private Rigidbody playerRigidbody;
+    private Image[] tickImages;
     private int frameCounter;
-    private int lastDisplayedKmh = -1;
-
-    // Pre-built format template for TMP SetText zero-allocation overload.
-    // Uses TMP's {0} placeholder which accepts float args.
-    private string tmProTemplate;
+    private int lastDisplayedSpeed = -1;
 
     public void Initialize(Rigidbody rb)
     {
         playerRigidbody = rb;
+        SyncUnitPreferenceFromSettings();
         EnsureUI();
+    }
+
+    private void OnEnable()
+    {
+        GameSettings.OnSpeedUnitChanged += HandleSpeedUnitChanged;
+        SyncUnitPreferenceFromSettings();
+    }
+
+    private void OnDisable()
+    {
+        GameSettings.OnSpeedUnitChanged -= HandleSpeedUnitChanged;
     }
 
     private void Update()
@@ -79,242 +72,236 @@ public class SpeedometerUI : MonoBehaviour
 
     private void EnsureUI()
     {
-        if (!showSpeedometer || speedText != null)
+        if (!showSpeedometer || rootRect != null)
         {
             return;
         }
 
-        ResolveSpeedometerSkinSprites();
         Canvas targetCanvas = GetOrCreateHudCanvas();
-        if (targetCanvas == null)
-        {
-            GameObject canvasObject = new GameObject("GameplayHUDCanvas");
-            targetCanvas = canvasObject.AddComponent<Canvas>();
-            targetCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            CanvasScaler scaler = canvasObject.AddComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1920f, 1080f);
-            scaler.matchWidthOrHeight = 0.5f;
-            canvasObject.AddComponent<GraphicRaycaster>();
-        }
-
         Sprite fallback = DeliveryUiSpriteHelper.GetFallbackSprite();
 
-        GameObject panelObject = new GameObject("SpeedometerPanel");
+        GameObject panelObject = new GameObject("SpeedometerPanel", typeof(RectTransform), typeof(Image));
         panelObject.transform.SetParent(targetCanvas.transform, false);
-        panelRect = panelObject.AddComponent<RectTransform>();
-        panelRect.anchorMin = new Vector2(1f, 0f);
-        panelRect.anchorMax = new Vector2(1f, 0f);
-        panelRect.pivot = new Vector2(1f, 0f);
-        panelRect.anchoredPosition = speedometerAnchoredPosition;
-        panelRect.sizeDelta = speedometerPanelSize;
 
-        panelImage = panelObject.AddComponent<Image>();
-        panelImage.color = useKenneySpeedometerSkin ? new Color(1f, 1f, 1f, 0.98f) : speedometerPanelBaseColor;
+        rootRect = panelObject.GetComponent<RectTransform>();
+        rootRect.anchorMin = new Vector2(1f, 0f);
+        rootRect.anchorMax = new Vector2(1f, 0f);
+        rootRect.pivot = new Vector2(1f, 0f);
+        rootRect.anchoredPosition = anchoredPosition;
+        rootRect.sizeDelta = panelSize;
+
+        panelImage = panelObject.GetComponent<Image>();
+        panelImage.color = panelColor;
         panelImage.raycastTarget = false;
-        panelImage.sprite = speedometerPanelSprite != null ? speedometerPanelSprite : fallback;
-        panelImage.type = speedometerPanelSprite != null ? Image.Type.Sliced : Image.Type.Simple;
+        panelImage.sprite = fallback;
+        panelImage.type = Image.Type.Simple;
 
-        GameObject iconObject = new GameObject("SpeedometerIcon");
-        iconObject.transform.SetParent(panelObject.transform, false);
-        RectTransform iconRect = iconObject.AddComponent<RectTransform>();
-        iconRect.anchorMin = new Vector2(0f, 0.5f);
-        iconRect.anchorMax = new Vector2(0f, 0.5f);
-        iconRect.pivot = new Vector2(0f, 0.5f);
-        iconRect.anchoredPosition = new Vector2(14f, 10f);
-        iconRect.sizeDelta = new Vector2(40f, 40f);
-
-        iconImage = iconObject.AddComponent<Image>();
-        iconImage.raycastTarget = false;
-        iconImage.sprite = speedIconEcoSprite != null
-            ? speedIconEcoSprite
-            : (speedometerDefaultIconSprite != null ? speedometerDefaultIconSprite : fallback);
-        iconImage.color = speedometerIconEcoColor;
-        iconImage.preserveAspect = true;
-
-        GameObject speedTextObject = new GameObject("SpeedometerText");
-        speedTextObject.transform.SetParent(panelObject.transform, false);
-        RectTransform textRect = speedTextObject.AddComponent<RectTransform>();
-        textRect.anchorMin = new Vector2(0f, 0f);
-        textRect.anchorMax = new Vector2(1f, 1f);
-        textRect.pivot = new Vector2(0.5f, 0.5f);
-        textRect.offsetMin = new Vector2(60f, 28f);
-        textRect.offsetMax = new Vector2(-14f, -8f);
-
-        speedText = speedTextObject.AddComponent<TextMeshProUGUI>();
-        speedText.fontSize = Mathf.Max(14, speedometerFontSize);
-        speedText.color = speedometerColor;
-        speedText.alignment = TextAlignmentOptions.BottomRight;
-        speedText.enableAutoSizing = false;
-
-        // Build TMP template once — {0} is the zero-alloc float placeholder
-        int bigSize = Mathf.Max(18, speedometerFontSize + 4);
-        tmProTemplate = $"{speedometerLabel}\n<size={bigSize}>{{0}}</size> <size=20>km/h</size>";
-        speedText.SetText(tmProTemplate, 0f);
-
-        GameObject barTrackObject = new GameObject("SpeedometerBarTrack");
-        barTrackObject.transform.SetParent(panelObject.transform, false);
-        RectTransform barTrackRect = barTrackObject.AddComponent<RectTransform>();
-        barTrackRect.anchorMin = new Vector2(0f, 0f);
-        barTrackRect.anchorMax = new Vector2(1f, 0f);
-        barTrackRect.pivot = new Vector2(0.5f, 0f);
-        barTrackRect.offsetMin = new Vector2(16f, 10f);
-        barTrackRect.offsetMax = new Vector2(-16f, 24f);
-
-        Image barTrackImage = barTrackObject.AddComponent<Image>();
-        barTrackImage.raycastTarget = false;
-        barTrackImage.color = new Color(1f, 1f, 1f, 0.78f);
-        barTrackImage.sprite = speedometerBarTrackSprite != null ? speedometerBarTrackSprite : fallback;
-        barTrackImage.type = speedometerBarTrackSprite != null ? Image.Type.Sliced : Image.Type.Simple;
-
-        GameObject barFillObject = new GameObject("SpeedometerBarFill");
-        barFillObject.transform.SetParent(barTrackObject.transform, false);
-        barFillRect = barFillObject.AddComponent<RectTransform>();
-        barFillRect.anchorMin = new Vector2(0f, 0f);
-        barFillRect.anchorMax = new Vector2(0f, 1f);
-        barFillRect.pivot = new Vector2(0f, 0.5f);
-        barFillRect.offsetMin = new Vector2(3f, 3f);
-        barFillRect.offsetMax = new Vector2(0f, -3f);
-        barFillRect.sizeDelta = new Vector2(0f, 0f);
-
-        barFillImage = barFillObject.AddComponent<Image>();
-        barFillImage.raycastTarget = false;
-        barFillImage.color = speedometerIconEcoColor;
-        barFillImage.sprite = speedometerBarFillSprite != null ? speedometerBarFillSprite : fallback;
-        barFillImage.type = speedometerBarFillSprite != null ? Image.Type.Sliced : Image.Type.Simple;
+        BuildGaugeTicks(panelObject.transform, fallback);
+        BuildSpeedTexts(panelObject.transform);
     }
 
     private void UpdateUI()
     {
         if (!showSpeedometer)
         {
-            if (panelRect != null)
+            if (rootRect != null)
             {
-                panelRect.gameObject.SetActive(false);
+                rootRect.gameObject.SetActive(false);
             }
             return;
         }
 
-        if (speedText == null || panelRect == null)
+        if (speedValueText == null || rootRect == null)
         {
             EnsureUI();
         }
 
-        if (speedText == null || panelRect == null)
+        if (speedValueText == null || rootRect == null)
         {
             return;
         }
 
-        float speedKmh = playerRigidbody != null
-            ? playerRigidbody.linearVelocity.magnitude * 3.6f
-            : 0f;
+        float speedMps = playerRigidbody != null ? playerRigidbody.linearVelocity.magnitude : 0f;
+        float speedKmh = speedMps * 3.6f;
+        float speedMph = speedMps * 2.2369363f;
+        float shownSpeed = displayMph ? speedMph : speedKmh;
+        float maxShownSpeed = displayMph ? Mathf.Max(10f, maxGaugeSpeedMph) : Mathf.Max(10f, maxGaugeSpeedKmh);
+        float normalized = Mathf.Clamp01(shownSpeed / maxShownSpeed);
+        Color activeColor = EvaluateSpeedColor(normalized, shownSpeed);
 
-        SpeedometerTier tier = EvaluateTier(speedKmh);
-        ApplyTierVisual(tier);
-        UpdateProgress(speedKmh);
+        rootRect.gameObject.SetActive(true);
+        UpdateTicks(normalized, activeColor);
+        unitText.color = activeColor;
+        speedValueText.color = activeColor;
 
-        panelRect.gameObject.SetActive(true);
-
-        // Zero-allocation: only update text when integer value changes
-        int currentKmh = Mathf.RoundToInt(speedKmh);
-        if (currentKmh != lastDisplayedKmh)
+        int roundedSpeed = Mathf.RoundToInt(shownSpeed);
+        if (roundedSpeed != lastDisplayedSpeed)
         {
-            lastDisplayedKmh = currentKmh;
-            speedText.SetText(tmProTemplate, (float)currentKmh);
+            lastDisplayedSpeed = roundedSpeed;
+            speedValueText.SetText("{0:00}", roundedSpeed);
         }
     }
 
-    private SpeedometerTier EvaluateTier(float speedKmh)
+    private void BuildSpeedTexts(Transform parent)
     {
-        if (speedKmh >= maxThresholdKmh) return SpeedometerTier.Max;
-        if (speedKmh >= fastThresholdKmh) return SpeedometerTier.Fast;
-        if (speedKmh >= cruiseThresholdKmh) return SpeedometerTier.Cruise;
-        return SpeedometerTier.Eco;
+        GameObject speedTextObject = new GameObject("SpeedValue", typeof(RectTransform), typeof(TextMeshProUGUI));
+        speedTextObject.transform.SetParent(parent, false);
+        RectTransform speedRect = speedTextObject.GetComponent<RectTransform>();
+        speedRect.anchorMin = new Vector2(0.5f, 0.42f);
+        speedRect.anchorMax = new Vector2(0.5f, 0.42f);
+        speedRect.pivot = new Vector2(0.5f, 0.5f);
+        speedRect.sizeDelta = new Vector2(210f, 120f);
+
+        speedValueText = speedTextObject.GetComponent<TextMeshProUGUI>();
+        speedValueText.alignment = TextAlignmentOptions.Center;
+        speedValueText.fontSize = Mathf.Max(48, speedFontSize);
+        speedValueText.fontStyle = FontStyles.Bold;
+        speedValueText.textWrappingMode = TextWrappingModes.NoWrap;
+        speedValueText.outlineWidth = 0.2f;
+        speedValueText.outlineColor = new Color(0f, 0f, 0f, 0.95f);
+        speedValueText.text = "00";
+
+        GameObject unitTextObject = new GameObject("SpeedUnit", typeof(RectTransform), typeof(TextMeshProUGUI));
+        unitTextObject.transform.SetParent(parent, false);
+        RectTransform unitRect = unitTextObject.GetComponent<RectTransform>();
+        unitRect.anchorMin = new Vector2(0.72f, 0.12f);
+        unitRect.anchorMax = new Vector2(0.72f, 0.12f);
+        unitRect.pivot = new Vector2(0.5f, 0.5f);
+        unitRect.sizeDelta = new Vector2(90f, 46f);
+
+        unitText = unitTextObject.GetComponent<TextMeshProUGUI>();
+        unitText.alignment = TextAlignmentOptions.Center;
+        unitText.fontSize = Mathf.Max(16, unitFontSize);
+        unitText.fontStyle = FontStyles.Bold;
+        unitText.textWrappingMode = TextWrappingModes.NoWrap;
+        unitText.outlineWidth = 0.16f;
+        unitText.outlineColor = new Color(0f, 0f, 0f, 0.95f);
+        unitText.text = displayMph ? "MPH" : "KM/H";
     }
 
-    private void ApplyTierVisual(SpeedometerTier tier)
+    private void BuildGaugeTicks(Transform parent, Sprite fallbackSprite)
     {
-        if (panelImage == null || iconImage == null)
-        {
-            return;
-        }
+        int safeTickCount = Mathf.Max(10, tickCount);
+        tickImages = new Image[safeTickCount];
 
-        Sprite fallback = DeliveryUiSpriteHelper.GetFallbackSprite();
-        Sprite selectedSprite = fallback;
-        switch (tier)
-        {
-            case SpeedometerTier.Max:
-                panelImage.color = useKenneySpeedometerSkin ? new Color(1f, 0.86f, 0.86f, 0.98f) : speedometerPanelMaxColor;
-                iconImage.color = speedometerIconMaxColor;
-                selectedSprite = speedIconMaxSprite != null ? speedIconMaxSprite : fallback;
-                break;
-            case SpeedometerTier.Fast:
-                panelImage.color = useKenneySpeedometerSkin ? new Color(1f, 0.95f, 0.84f, 0.98f) : speedometerPanelFastColor;
-                iconImage.color = speedometerIconFastColor;
-                selectedSprite = speedIconFastSprite != null ? speedIconFastSprite : fallback;
-                break;
-            case SpeedometerTier.Cruise:
-                panelImage.color = useKenneySpeedometerSkin ? new Color(0.88f, 0.94f, 1f, 0.98f) : speedometerPanelCruiseColor;
-                iconImage.color = speedometerIconCruiseColor;
-                selectedSprite = speedIconCruiseSprite != null ? speedIconCruiseSprite : fallback;
-                break;
-            default:
-                panelImage.color = useKenneySpeedometerSkin ? new Color(0.9f, 1f, 0.9f, 0.98f) : speedometerPanelEcoColor;
-                iconImage.color = speedometerIconEcoColor;
-                selectedSprite = speedIconEcoSprite != null ? speedIconEcoSprite : fallback;
-                break;
-        }
+        GameObject ticksRootObject = new GameObject("GaugeTicks", typeof(RectTransform));
+        ticksRootObject.transform.SetParent(parent, false);
+        RectTransform ticksRoot = ticksRootObject.GetComponent<RectTransform>();
+        ticksRoot.anchorMin = new Vector2(0.5f, 0.5f);
+        ticksRoot.anchorMax = new Vector2(0.5f, 0.5f);
+        ticksRoot.pivot = new Vector2(0.5f, 0.5f);
+        ticksRoot.sizeDelta = Vector2.zero;
 
-        iconImage.sprite = selectedSprite;
-        iconImage.type = Image.Type.Simple;
-        iconImage.fillAmount = 1f;
-        if (barFillImage != null)
+        float safeRadius = Mathf.Max(40f, gaugeRadius);
+        float angleStep = gaugeSweepAngle / (safeTickCount - 1);
+        for (int i = 0; i < safeTickCount; i++)
         {
-            barFillImage.color = iconImage.color;
+            float angleDeg = gaugeStartAngle - (angleStep * i);
+            float angleRad = angleDeg * Mathf.Deg2Rad;
+            Vector2 direction = new Vector2(Mathf.Cos(angleRad), Mathf.Sin(angleRad));
+
+            bool isMajorTick = i % 4 == 0;
+            float tickLength = isMajorTick ? 17f : 9f;
+            float tickWidth = isMajorTick ? 3.2f : 2.2f;
+            Vector2 tickPosition = direction * safeRadius;
+
+            GameObject tickObject = new GameObject("Tick_" + i, typeof(RectTransform), typeof(Image));
+            tickObject.transform.SetParent(ticksRoot, false);
+
+            RectTransform tickRect = tickObject.GetComponent<RectTransform>();
+            tickRect.anchorMin = new Vector2(0.5f, 0.5f);
+            tickRect.anchorMax = new Vector2(0.5f, 0.5f);
+            tickRect.pivot = new Vector2(0.5f, 0.5f);
+            tickRect.anchoredPosition = tickPosition;
+            tickRect.sizeDelta = new Vector2(tickWidth, tickLength);
+            tickRect.localRotation = Quaternion.Euler(0f, 0f, angleDeg - 90f);
+
+            Image tickImage = tickObject.GetComponent<Image>();
+            tickImage.sprite = fallbackSprite;
+            tickImage.raycastTarget = false;
+            tickImage.color = inactiveTickColor;
+
+            tickImages[i] = tickImage;
         }
     }
 
-    private void UpdateProgress(float speedKmh)
+    private void UpdateTicks(float normalizedSpeed, Color activeColor)
     {
-        if (barFillRect == null)
+        if (tickImages == null || tickImages.Length == 0)
         {
             return;
         }
 
-        RectTransform trackRect = barFillRect.parent as RectTransform;
-        if (trackRect == null)
+        int activeTickCount = Mathf.RoundToInt(normalizedSpeed * tickImages.Length);
+        for (int i = 0; i < tickImages.Length; i++)
         {
-            return;
-        }
+            if (tickImages[i] == null)
+            {
+                continue;
+            }
 
-        float maxVisualSpeed = Mathf.Max(10f, maxThresholdKmh * 1.25f);
-        float normalized = Mathf.Clamp01(speedKmh / maxVisualSpeed);
-        float availableWidth = Mathf.Max(0f, trackRect.rect.width - 6f);
-        barFillRect.sizeDelta = new Vector2(availableWidth * normalized, 0f);
+            tickImages[i].color = i < activeTickCount ? activeColor : inactiveTickColor;
+        }
     }
 
-    private void ResolveSpeedometerSkinSprites()
+    private Color EvaluateSpeedColor(float normalizedSpeed, float shownSpeed)
     {
-        if (!useKenneySpeedometerSkin)
+        float safeT = Mathf.Clamp01(normalizedSpeed);
+        float threshold = displayMph ? Mathf.Max(1f, redThresholdMph) : Mathf.Max(1f, redThresholdKmh);
+
+        if (shownSpeed >= threshold)
+        {
+            Color forcedRed = highSpeedColor;
+            forcedRed.a = 1f;
+            return forcedRed;
+        }
+
+        float thresholdT = Mathf.Clamp01(shownSpeed / threshold);
+        float hue = Mathf.Lerp(0.56f, 0.04f, thresholdT);
+        float sat = Mathf.Lerp(0.96f, 0.9f, safeT);
+        float val = Mathf.Lerp(0.98f, 0.94f, safeT);
+        Color visible = Color.HSVToRGB(hue, sat, val);
+        visible.a = 1f;
+        return visible;
+    }
+
+    private void HandleSpeedUnitChanged(SpeedUnitPreference preference)
+    {
+        if (!useGameSettingsUnit)
         {
             return;
         }
 
-        speedometerPanelSprite ??= RuntimeUiSkinLoader.LoadSprite(
-            "UI/Kenney/panel_bg",
-            "Assets/kenney_ui-pack/PNG/Grey/Double/button_rectangle_depth_flat.png");
+        bool shouldDisplayMph = preference == SpeedUnitPreference.Mph;
+        if (displayMph == shouldDisplayMph)
+        {
+            return;
+        }
 
-        speedometerBarTrackSprite ??= RuntimeUiSkinLoader.LoadSprite(
-            "UI/Kenney/speed_track",
-            "Assets/kenney_ui-pack/PNG/Grey/Default/slide_horizontal_grey_section_wide.png");
+        displayMph = shouldDisplayMph;
+        lastDisplayedSpeed = -1;
+        if (unitText != null)
+        {
+            unitText.text = displayMph ? "MPH" : "KM/H";
+        }
 
-        speedometerBarFillSprite ??= RuntimeUiSkinLoader.LoadSprite(
-            "UI/Kenney/speed_fill",
-            "Assets/kenney_ui-pack/PNG/Blue/Default/slide_horizontal_color_section_wide.png");
+        UpdateUI();
+    }
 
-        speedometerDefaultIconSprite ??= RuntimeUiSkinLoader.LoadSprite(
-            "UI/Kenney/speed_icon",
-            "Assets/kenney_ui-pack/PNG/Blue/Default/icon_circle.png");
+    private void SyncUnitPreferenceFromSettings()
+    {
+        if (!useGameSettingsUnit)
+        {
+            return;
+        }
+
+        GameSettings settings = GameSettings.Instance;
+        if (settings == null)
+        {
+            return;
+        }
+
+        HandleSpeedUnitChanged(settings.SpeedUnitPreference);
     }
 
     private Canvas GetOrCreateHudCanvas()
@@ -361,19 +348,5 @@ public class SpeedometerUI : MonoBehaviour
             rect.offsetMax = Vector2.zero;
             rect.localScale = Vector3.one;
         }
-    }
-
-    private Canvas FindBestHudCanvas()
-    {
-        Canvas[] canvases = FindObjectsByType<Canvas>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-        for (int i = 0; i < canvases.Length; i++)
-        {
-            if (canvases[i] != null && canvases[i].isActiveAndEnabled && canvases[i].renderMode == RenderMode.ScreenSpaceOverlay)
-            {
-                return canvases[i];
-            }
-        }
-
-        return FindFirstObjectByType<Canvas>();
     }
 }

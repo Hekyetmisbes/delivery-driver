@@ -5,6 +5,12 @@ using UnityEngine.InputSystem;
 
 namespace DeliveryDriver.Quest
 {
+    public enum SpeedUnitPreference
+    {
+        Kmh = 0,
+        Mph = 1
+    }
+
     public enum QuestDifficultyPreference
     {
         MatchPlayerLevel = 0,
@@ -29,6 +35,7 @@ namespace DeliveryDriver.Quest
         private const string ResolutionHeightKey = "ResolutionHeight";
         private const string FullScreenKey = "FullScreen";
         private const string TargetFpsKey = "TargetFPS";
+        private const string SpeedUnitKey = "SpeedUnitPreference";
 
         [Header("Audio")]
         [Range(0f, 1f)] [SerializeField] private float masterVolume = 1f;
@@ -37,6 +44,7 @@ namespace DeliveryDriver.Quest
 
         [Header("Gameplay")]
         [SerializeField] private QuestDifficultyPreference questDifficultyPreference = QuestDifficultyPreference.MatchPlayerLevel;
+        [SerializeField] private SpeedUnitPreference speedUnitPreference = SpeedUnitPreference.Kmh;
 
         [Header("Graphics")]
         [SerializeField] private int qualityLevel = -1;
@@ -64,6 +72,9 @@ namespace DeliveryDriver.Quest
         public int ResolutionIndex => resolutionIndex;
         public bool FullScreen => fullScreen;
         public int TargetFps => targetFps;
+        public SpeedUnitPreference SpeedUnitPreference => speedUnitPreference;
+
+        public static event System.Action<SpeedUnitPreference> OnSpeedUnitChanged;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void EnsureInstance()
@@ -114,6 +125,20 @@ namespace DeliveryDriver.Quest
         public void SetQuestDifficultyPreference(QuestDifficultyPreference preference)
         {
             questDifficultyPreference = preference;
+        }
+
+        public void SetSpeedUnitPreference(SpeedUnitPreference preference)
+        {
+            SpeedUnitPreference clamped = preference == SpeedUnitPreference.Mph
+                ? SpeedUnitPreference.Mph
+                : SpeedUnitPreference.Kmh;
+            if (speedUnitPreference == clamped)
+            {
+                return;
+            }
+
+            speedUnitPreference = clamped;
+            OnSpeedUnitChanged?.Invoke(speedUnitPreference);
         }
 
         public void SetQualityLevel(int level)
@@ -202,6 +227,8 @@ namespace DeliveryDriver.Quest
                     }
                 }
             }
+
+            OnSpeedUnitChanged?.Invoke(speedUnitPreference);
         }
 
         public void SaveSettings()
@@ -217,6 +244,7 @@ namespace DeliveryDriver.Quest
             PlayerPrefs.SetInt(ResolutionHeightKey, resolutionHeight);
             PlayerPrefs.SetInt(FullScreenKey, fullScreen ? 1 : 0);
             PlayerPrefs.SetInt(TargetFpsKey, targetFps);
+            PlayerPrefs.SetInt(SpeedUnitKey, (int)speedUnitPreference);
             PlayerPrefs.Save();
         }
 
@@ -275,6 +303,14 @@ namespace DeliveryDriver.Quest
             if (PlayerPrefs.HasKey(TargetFpsKey))
             {
                 targetFps = PlayerPrefs.GetInt(TargetFpsKey, targetFps);
+            }
+
+            if (PlayerPrefs.HasKey(SpeedUnitKey))
+            {
+                int savedUnit = PlayerPrefs.GetInt(SpeedUnitKey, (int)SpeedUnitPreference.Kmh);
+                speedUnitPreference = savedUnit == (int)SpeedUnitPreference.Mph
+                    ? SpeedUnitPreference.Mph
+                    : SpeedUnitPreference.Kmh;
             }
         }
     }
