@@ -17,6 +17,10 @@ public class MainMenuRuntimeUI : MonoBehaviour
     [Header("Credits")]
     [SerializeField] private string developerName = "hekye";
 
+    [Header("Main Panel Layout")]
+    [SerializeField] private Vector2 mainPanelSize = new Vector2(560f, 380f);
+    [SerializeField] private Vector2 mainPanelOffset = new Vector2(0f, -110f);
+
     [Header("Kenney Skin")]
     [SerializeField] private Sprite panelBackgroundSprite;
     [SerializeField] private Sprite buttonBackgroundSprite;
@@ -93,7 +97,8 @@ public class MainMenuRuntimeUI : MonoBehaviour
         overlayRect.offsetMax = Vector2.zero;
         overlay.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.35f);
 
-        mainPanel = CreatePanel(overlay.transform, "MainPanel", new Vector2(560f, 520f));
+        mainPanel = CreatePanel(overlay.transform, "MainPanel", mainPanelSize);
+        mainPanel.GetComponent<RectTransform>().anchoredPosition = mainPanelOffset;
         settingsPanel = CreatePanel(overlay.transform, "SettingsPanel", new Vector2(760f, 720f));
         creditsPanel = CreatePanel(overlay.transform, "CreditsPanel", new Vector2(900f, 720f));
 
