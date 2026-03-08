@@ -168,6 +168,14 @@ public class CameraFollow : MonoBehaviour
             limitMiniMapToBounds = true;
             ResolveMiniMapBounds();
             ConfigureMiniMapLayerFilter();
+
+            // Exclude MiniMapMarker layer from main camera so markers are only visible on minimap
+            int markerLayer = ResolveMiniMapMarkerLayer();
+            if (mainCamera != null && markerLayer >= 0)
+            {
+                mainCamera.cullingMask &= ~(1 << markerLayer);
+            }
+
             SetupMiniMapCamera();
             SetupReverseCameraHUD();
         }
@@ -575,20 +583,11 @@ public class CameraFollow : MonoBehaviour
             Destroy(markerCollider);
         }
 
-        Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
-        if (shader == null)
+        MeshRenderer renderer = miniMapPlayerMarker.GetComponent<MeshRenderer>();
+        miniMapPlayerMarkerMaterial = MinimapShaderHelper.CreateColorMaterial(miniMapPlayerMarkerColor, renderer);
+        if (miniMapPlayerMarkerMaterial != null && renderer != null)
         {
-            shader = Shader.Find("Unlit/Color");
-        }
-
-        if (shader != null)
-        {
-            miniMapPlayerMarkerMaterial = new Material(shader);
-            MeshRenderer renderer = miniMapPlayerMarker.GetComponent<MeshRenderer>();
-            if (renderer != null)
-            {
-                renderer.material = miniMapPlayerMarkerMaterial;
-            }
+            renderer.material = miniMapPlayerMarkerMaterial;
         }
     }
 
