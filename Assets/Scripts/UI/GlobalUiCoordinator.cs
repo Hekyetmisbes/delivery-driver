@@ -244,6 +244,14 @@ public class GlobalUiCoordinator : MonoBehaviour
                 continue;
             }
 
+            // Skip canvases that have their own ScaleWithScreenSize scaler
+            // (e.g. Quest UI Canvas) to preserve their CanvasScaler behavior
+            CanvasScaler existingScaler = canvas.GetComponent<CanvasScaler>();
+            if (existingScaler != null && existingScaler.uiScaleMode == CanvasScaler.ScaleMode.ScaleWithScreenSize)
+            {
+                continue;
+            }
+
             if (canvas.transform.IsChildOf(rootCanvas.transform))
             {
                 if (!canvas.transform.IsChildOf(canvasGroupRoot))

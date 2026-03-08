@@ -962,17 +962,25 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
     private static Canvas EnsureCanvas(out bool wasCreated)
     {
-        Canvas existingCanvas = FindFirstObjectByType<Canvas>();
-        if (existingCanvas != null)
+        // Check if a MainMenuCanvas already exists (e.g. from a previous run)
+        GameObject existing = GameObject.Find("MainMenuCanvas");
+        if (existing != null)
         {
-            wasCreated = false;
-            return existingCanvas;
+            Canvas existingCanvas = existing.GetComponent<Canvas>();
+            if (existingCanvas != null)
+            {
+                wasCreated = false;
+                return existingCanvas;
+            }
         }
 
+        // Always create our own canvas so it doesn't conflict with GlobalUICanvas
+        // or other DontDestroyOnLoad canvases that may overlay this one.
         wasCreated = true;
         GameObject canvasObject = new GameObject("MainMenuCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
         Canvas canvas = canvasObject.GetComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 600;
 
         CanvasScaler scaler = canvasObject.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
