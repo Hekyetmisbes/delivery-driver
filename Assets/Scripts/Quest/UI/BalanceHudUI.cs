@@ -78,7 +78,9 @@ namespace DeliveryDriver.Quest.UI
 
         private void EnsureHud()
         {
-            if (!showBalance)
+            // Hide balance HUD in the main menu scene
+            bool isMainMenu = SceneManager.GetActiveScene().name.Equals("MainMenu", System.StringComparison.OrdinalIgnoreCase);
+            if (!showBalance || isMainMenu)
             {
                 if (balanceText != null)
                 {
