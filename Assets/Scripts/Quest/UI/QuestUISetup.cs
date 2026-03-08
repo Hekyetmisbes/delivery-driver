@@ -328,7 +328,8 @@ namespace DeliveryDriver.Quest.UI
             Image bgImage = completeObj.AddComponent<Image>();
             bgImage.color = new Color(0, 0, 0, 0.7f);
 
-            QuestCompleteUI questCompleteUI = completeObj.AddComponent<QuestCompleteUI>();
+            // NOTE: QuestCompleteUI component is added AFTER all children are created
+            // so that Awake -> EnsureReadableLayout() can find "ResultPanel" and child texts.
 
             // Create result panel (center)
             GameObject panelObj = new GameObject("ResultPanel");
@@ -442,6 +443,10 @@ namespace DeliveryDriver.Quest.UI
             buttonText.alignment = TextAlignmentOptions.Center;
             buttonText.color = Color.white;
 
+            // Add QuestCompleteUI component AFTER all children exist
+            // so Awake -> EnsureReadableLayout() can find ResultPanel and text components
+            QuestCompleteUI questCompleteUI = completeObj.AddComponent<QuestCompleteUI>();
+
             // Wire references using reflection
             var rootPanelField = typeof(QuestCompleteUI).GetField("rootPanel",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -462,6 +467,12 @@ namespace DeliveryDriver.Quest.UI
             statsTextField?.SetValue(questCompleteUI, statsText);
             rewardTextField?.SetValue(questCompleteUI, rewardText);
             continueButtonField?.SetValue(questCompleteUI, continueButton);
+
+            // Re-run EnsureReadableLayout now that reflection fields are set
+            // (Awake ran before reflection, so text fields were null at that point)
+            var ensureLayoutMethod = typeof(QuestCompleteUI).GetMethod("EnsureReadableLayout",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            ensureLayoutMethod?.Invoke(questCompleteUI, null);
 
             // Setup button click handler - CRITICAL: Must be done AFTER field is set
             continueButton.onClick.RemoveAllListeners(); // Clear any existing listeners
