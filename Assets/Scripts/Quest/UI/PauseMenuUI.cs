@@ -68,6 +68,13 @@ namespace DeliveryDriver.Quest.UI
 
         private void Update()
         {
+            // Rebuild pause panel if it was destroyed (e.g. scene change destroyed its parent canvas)
+            if (runtimePausePanelBuilt && pausePanel == null)
+            {
+                runtimePausePanelBuilt = false;
+                EnsurePauseMenu();
+            }
+
             HandlePauseInput();
         }
 
@@ -183,7 +190,13 @@ namespace DeliveryDriver.Quest.UI
 
         private GameObject BuildPausePanel()
         {
-            Canvas rootCanvas = FindFirstObjectByType<Canvas>();
+            // Prefer the GlobalUiCoordinator's DontDestroyOnLoad canvas so the panel
+            // survives scene transitions instead of being destroyed with a scene canvas.
+            Canvas rootCanvas = GlobalUiCoordinator.PrimaryCanvas;
+            if (rootCanvas == null)
+            {
+                rootCanvas = FindFirstObjectByType<Canvas>();
+            }
             if (rootCanvas == null)
             {
                 GameObject canvasObject = new GameObject("PauseMenuCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
@@ -215,6 +228,12 @@ namespace DeliveryDriver.Quest.UI
             }
 
             pausePanelCanvasGroup = panelObject.AddComponent<CanvasGroup>();
+
+            // Ensure the pause panel renders on top of all other UI
+            Canvas pauseOverrideCanvas = panelObject.AddComponent<Canvas>();
+            pauseOverrideCanvas.overrideSorting = true;
+            pauseOverrideCanvas.sortingOrder = 9990;
+            panelObject.AddComponent<GraphicRaycaster>();
 
             VerticalLayoutGroup layout = panelObject.AddComponent<VerticalLayoutGroup>();
             layout.padding = new RectOffset(30, 30, 28, 24);
@@ -1197,7 +1216,14 @@ namespace DeliveryDriver.Quest.UI
             if (eventSystem == null)
             {
                 GameObject eventSystemObject = new GameObject("EventSystem", typeof(EventSystem));
-                eventSystemObject.hideFlags = HideFlags.DontSave;
+                if (Application.isPlaying)
+                {
+                    DontDestroyOnLoad(eventSystemObject);
+                }
+                else
+                {
+                    eventSystemObject.hideFlags = HideFlags.DontSave;
+                }
                 eventSystem = eventSystemObject.GetComponent<EventSystem>();
             }
 
