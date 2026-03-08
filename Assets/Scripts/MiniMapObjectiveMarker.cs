@@ -178,16 +178,11 @@ public class MiniMapObjectiveMarker : MonoBehaviour
             Destroy(markerCollider);
         }
 
-        Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
-        if (shader == null)
+        MeshRenderer renderer = markerObject.GetComponent<MeshRenderer>();
+        markerMaterial = MinimapShaderHelper.CreateColorMaterial(miniMapPickupMarkerColor, renderer);
+        if (markerMaterial != null && renderer != null)
         {
-            shader = Shader.Find("Unlit/Color");
-        }
-
-        if (shader != null)
-        {
-            markerMaterial = new Material(shader);
-            markerObject.GetComponent<MeshRenderer>().material = markerMaterial;
+            renderer.material = markerMaterial;
         }
     }
 

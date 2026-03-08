@@ -900,9 +900,12 @@ public class DeliveryManager : MonoBehaviour
         Destroy(indicator.GetComponent<Collider>());
 
         // Create glowing material
-        Material indicatorMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
-        indicatorMat.color = new Color(1f, 0.8f, 0f, 1f); // Yellow-orange
-        indicator.GetComponent<MeshRenderer>().material = indicatorMat;
+        MeshRenderer indicatorRenderer = indicator.GetComponent<MeshRenderer>();
+        Material indicatorMat = MinimapShaderHelper.CreateColorMaterial(new Color(1f, 0.8f, 0f, 1f), indicatorRenderer);
+        if (indicatorMat != null && indicatorRenderer != null)
+        {
+            indicatorRenderer.material = indicatorMat;
+        }
 
         // Add rotation script
         DeliveryIndicator script = indicator.AddComponent<DeliveryIndicator>();
