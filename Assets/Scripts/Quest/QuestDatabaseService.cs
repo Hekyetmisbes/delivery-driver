@@ -9,6 +9,8 @@ namespace DeliveryDriver.Quest
     public class QuestDatabaseService : MonoBehaviour
     {
         private const string ConnTypeName = "Mono.Data.Sqlite.SqliteConnection, Mono.Data.Sqlite";
+        public const string DefaultPlayerId = "local-player";
+        public const string DefaultPlayerDisplayName = "Local Player";
         private static QuestDatabaseService instance;
         private readonly object gate = new object();
 
@@ -58,6 +60,70 @@ namespace DeliveryDriver.Quest
             (player_id,display_name,created_at,last_login_at,level,xp,xp_to_next_level,money_balance,reputation_score)
             VALUES (@id,@name,datetime('now'),datetime('now'),1,0,100,0,0);";
             return ExecuteNonQuery(sql, new Dictionary<string, object> { ["@id"] = playerId, ["@name"] = displayName });
+        }
+
+        public bool EnsureDefaultPlayer()
+        {
+            return EnsurePlayer(DefaultPlayerId, DefaultPlayerDisplayName);
+        }
+
+        public bool PlayerExists(string playerId)
+        {
+            if (!IsReady || string.IsNullOrWhiteSpace(playerId))
+            {
+                return false;
+            }
+
+            object result = ExecuteScalar(
+                "SELECT COUNT(1) FROM players WHERE player_id=@id LIMIT 1;",
+                new Dictionary<string, object> { ["@id"] = playerId });
+            return CvI(result, 0) > 0;
+        }
+
+        public int GetPlayerBalance(string playerId, int fallback = 0)
+        {
+            if (!IsReady || string.IsNullOrWhiteSpace(playerId))
+            {
+                return fallback;
+            }
+
+            object result = ExecuteScalar(
+                "SELECT money_balance FROM players WHERE player_id=@id LIMIT 1;",
+                new Dictionary<string, object> { ["@id"] = playerId });
+            return CvI(result, fallback);
+        }
+
+        public int GetDefaultPlayerBalance(int fallback = 0)
+        {
+            return GetPlayerBalance(DefaultPlayerId, fallback);
+        }
+
+        public bool SetPlayerBalance(string playerId, int balance)
+        {
+            if (string.IsNullOrWhiteSpace(playerId))
+            {
+                return false;
+            }
+
+            if (!EnsurePlayer(playerId))
+            {
+                return false;
+            }
+
+            const string sql = @"UPDATE players
+            SET money_balance=@balance,
+                last_login_at=datetime('now')
+            WHERE player_id=@id;";
+            return ExecuteNonQuery(sql, new Dictionary<string, object>
+            {
+                ["@id"] = playerId,
+                ["@balance"] = Mathf.Max(0, balance)
+            });
+        }
+
+        public bool SetDefaultPlayerBalance(int balance)
+        {
+            return SetPlayerBalance(DefaultPlayerId, balance);
         }
 
         public bool SaveQuestInstance(string playerId, QuestData quest)

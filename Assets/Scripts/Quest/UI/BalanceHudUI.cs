@@ -61,7 +61,12 @@ namespace DeliveryDriver.Quest.UI
             if (subscribedManager == null)
             {
                 TrySubscribeToProgression();
-                RefreshBalanceText();
+            }
+
+            int activeBalance = GetActiveBalance();
+            if (activeBalance != lastKnownBalance)
+            {
+                OnMoneyChanged(activeBalance);
             }
         }
 
@@ -192,6 +197,7 @@ namespace DeliveryDriver.Quest.UI
 
             UnsubscribeFromProgression();
             subscribedManager = manager;
+            lastKnownBalance = subscribedManager.CurrentMoney;
             subscribedManager.OnMoneyChanged.AddListener(OnMoneyChanged);
         }
 
@@ -277,7 +283,8 @@ namespace DeliveryDriver.Quest.UI
 
         private void RefreshBalanceText()
         {
-            int amount = PlayerProgressionManager.Instance != null ? PlayerProgressionManager.Instance.CurrentMoney : 0;
+            int amount = GetActiveBalance();
+            lastKnownBalance = amount;
             RefreshBalanceText(amount);
         }
 
@@ -289,6 +296,21 @@ namespace DeliveryDriver.Quest.UI
             }
 
             balanceText.text = $"{LocalizationTable.Get("balance_label")}: ${amount:N0}";
+        }
+
+        private static int GetActiveBalance()
+        {
+            if (PlayerProgressionManager.Instance != null)
+            {
+                return PlayerProgressionManager.Instance.CurrentMoney;
+            }
+
+            if (QuestDatabaseService.Instance != null && QuestDatabaseService.Instance.IsReady)
+            {
+                return QuestDatabaseService.Instance.GetDefaultPlayerBalance(0);
+            }
+
+            return 0;
         }
 
         private Canvas GetOrCreateHudCanvas()
