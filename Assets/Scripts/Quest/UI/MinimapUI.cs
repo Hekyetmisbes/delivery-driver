@@ -65,6 +65,9 @@ namespace DeliveryDriver.Quest.UI
         private GameObject playerMarker;
         private Transform playerTransform;
         private QuestData currentQuest;
+        private bool lastKnownHasPickedUpCargo;
+        private int lastKnownDeliveryIndex = -1;
+        private int lastKnownDeliveryCount = -1;
         private float routeRefreshTimer;
         private bool subscribedToQuestEvents;
         private float targetZoom;
@@ -72,6 +75,7 @@ namespace DeliveryDriver.Quest.UI
         private bool zoomControlsBuilt;
         private readonly List<RectTransform> markerRects = new List<RectTransform>();
         private CanvasGroup minimapCanvasGroup;
+        private DeliveryManager deliveryManager;
 
         // Road graph pathfinding
         private RoadGraph roadGraph;
@@ -93,6 +97,7 @@ namespace DeliveryDriver.Quest.UI
         private void Start()
         {
             ResolvePlayerTransform();
+            ResolveDeliveryManager();
             ResolveRoadGraph();
             SubscribeToQuestEvents();
 
@@ -101,6 +106,8 @@ namespace DeliveryDriver.Quest.UI
                 playerMarker = Instantiate(playerMarkerPrefab, markerContainer);
                 playerMarker.name = "PlayerMarker";
             }
+
+            SyncCurrentQuestState();
         }
 
         private void OnDestroy()
@@ -126,6 +133,25 @@ namespace DeliveryDriver.Quest.UI
             if (!subscribedToQuestEvents)
             {
                 SubscribeToQuestEvents();
+            }
+
+            if (playerTransform == null)
+            {
+                ResolvePlayerTransform();
+            }
+
+            if (deliveryManager == null)
+            {
+                ResolveDeliveryManager();
+            }
+
+            if (currentQuest == null)
+            {
+                SyncCurrentQuestState();
+            }
+            else
+            {
+                SyncQuestProgressVisualState();
             }
 
             if (playerMarker != null && playerTransform != null)
@@ -233,6 +259,7 @@ namespace DeliveryDriver.Quest.UI
 
             if (quest == null)
             {
+                ResetQuestVisualStateCache();
                 ClearRoutePreview();
                 return;
             }
@@ -252,6 +279,7 @@ namespace DeliveryDriver.Quest.UI
                 ShowDeliveryMarkers(quest);
             }
 
+            CacheQuestVisualState(quest);
             UpdateRoutePreview(quest);
         }
 
@@ -260,6 +288,7 @@ namespace DeliveryDriver.Quest.UI
             if (quest == null)
             {
                 currentQuest = null;
+                ResetQuestVisualStateCache();
                 ClearAllMarkers();
                 ClearRoutePreview();
                 return;
@@ -268,13 +297,15 @@ namespace DeliveryDriver.Quest.UI
             currentQuest = quest;
 
             // Update markers based on quest progress
-            if (quest.HasPickedUpCargo && currentPickupMarker != null)
+            if (quest.HasPickedUpCargo)
             {
-                // Cargo picked up, remove pickup marker and show delivery markers
-                Destroy(currentPickupMarker);
-                currentPickupMarker = null;
+                if (currentPickupMarker != null)
+                {
+                    Destroy(currentPickupMarker);
+                    currentPickupMarker = null;
+                }
+
                 ShowDeliveryMarkers(quest);
-                // Force route recalculation on cargo state change
                 cachedRoadPath = null;
                 ResolveRoadGraph();
             }
@@ -285,11 +316,7 @@ namespace DeliveryDriver.Quest.UI
                     ShowPickupMarker(quest.PickupLocation.Position);
                 }
             }
-            else if (quest.HasPickedUpCargo && currentDeliveryMarkers.Count == 0)
-            {
-                ShowDeliveryMarkers(quest);
-            }
-
+            CacheQuestVisualState(quest);
             UpdateRoutePreview(quest);
         }
 
@@ -297,6 +324,7 @@ namespace DeliveryDriver.Quest.UI
         {
             ClearAllMarkers();
             currentQuest = null;
+            ResetQuestVisualStateCache();
             ClearRoutePreview();
         }
 
@@ -304,6 +332,7 @@ namespace DeliveryDriver.Quest.UI
         {
             ClearAllMarkers();
             currentQuest = null;
+            ResetQuestVisualStateCache();
             ClearRoutePreview();
         }
 
@@ -336,7 +365,7 @@ namespace DeliveryDriver.Quest.UI
 
         private void ShowDeliveryMarkers(QuestData quest)
         {
-            if (markerContainer == null || quest.DeliveryLocations == null)
+            if (markerContainer == null)
             {
                 return;
             }
@@ -352,10 +381,8 @@ namespace DeliveryDriver.Quest.UI
             currentDeliveryMarkers.Clear();
             currentDeliveryWorldPositions.Clear();
 
-            // Show only the current delivery location
-            if (quest.CurrentDeliveryIndex < quest.DeliveryLocations.Count)
+            if (TryGetCurrentDeliveryWorldPosition(quest, out Vector3 worldPosition))
             {
-                QuestLocation currentDelivery = quest.DeliveryLocations[quest.CurrentDeliveryIndex];
                 GameObject marker;
                 if (deliveryMarkerPrefab != null)
                 {
@@ -368,7 +395,6 @@ namespace DeliveryDriver.Quest.UI
                 }
                 marker.name = $"DeliveryMarker_{quest.CurrentDeliveryIndex}";
                 currentDeliveryMarkers.Add(marker);
-                Vector3 worldPosition = currentDelivery != null ? currentDelivery.Position : Vector3.zero;
                 currentDeliveryWorldPositions.Add(worldPosition);
                 UpdateMarkerPosition(marker, worldPosition);
             }
@@ -447,6 +473,11 @@ namespace DeliveryDriver.Quest.UI
 
         private List<Vector3> BuildRoadRoutePoints(QuestData quest)
         {
+            if (playerTransform == null)
+            {
+                ResolvePlayerTransform();
+            }
+
             if (roadGraph == null)
             {
                 ResolveRoadGraph();
@@ -470,7 +501,6 @@ namespace DeliveryDriver.Quest.UI
                 return cachedRoadPath;
             }
 
-            // Build straight-line waypoints as fallback
             List<Vector3> straightPoints = BuildRoutePoints(quest);
             if (includePlayerInRoute && playerTransform != null)
             {
@@ -479,16 +509,9 @@ namespace DeliveryDriver.Quest.UI
 
             if (roadGraph == null || straightPoints.Count < 2)
             {
-                cachedRoadPath = straightPoints;
-                cachedPathPlayerPos = playerPos;
-                cachedPathQuest = quest;
-                cachedPathPickedUp = quest.HasPickedUpCargo;
-                cachedPathDeliveryIndex = quest.CurrentDeliveryIndex;
-                cachedPathUsedRoadGraph = false;
-                return cachedRoadPath;
+                return cachedRoadPath ?? new List<Vector3>();
             }
 
-            // Build road path between consecutive waypoints
             var roadPath = new List<Vector3>();
             roadPath.Add(straightPoints[0]);
 
@@ -499,7 +522,6 @@ namespace DeliveryDriver.Quest.UI
 
                 if (segment != null && segment.Count >= 2)
                 {
-                    // Skip first point to avoid duplicates (already added)
                     for (int j = 1; j < segment.Count; j++)
                     {
                         roadPath.Add(segment[j]);
@@ -507,8 +529,7 @@ namespace DeliveryDriver.Quest.UI
                 }
                 else
                 {
-                    // Fallback: straight line
-                    roadPath.Add(straightPoints[i + 1]);
+                    return cachedRoadPath ?? new List<Vector3>();
                 }
             }
 
@@ -651,6 +672,11 @@ namespace DeliveryDriver.Quest.UI
                 }
             }
 
+            if (points.Count == 0 && quest.HasPickedUpCargo && TryGetCurrentDeliveryWorldPosition(quest, out Vector3 fallbackDeliveryPoint))
+            {
+                points.Add(fallbackDeliveryPoint);
+            }
+
             return points;
         }
 
@@ -681,6 +707,99 @@ namespace DeliveryDriver.Quest.UI
             {
                 playerTransform = controller.transform;
             }
+        }
+
+        private void SyncCurrentQuestState()
+        {
+            if (QuestManager.Instance == null || QuestManager.Instance.CurrentQuest == null)
+            {
+                if (currentQuest != null)
+                {
+                    currentQuest = null;
+                    ResetQuestVisualStateCache();
+                    ClearAllMarkers();
+                    ClearRoutePreview();
+                }
+                return;
+            }
+
+            if (QuestManager.Instance.CurrentQuest == currentQuest)
+            {
+                return;
+            }
+
+            HandleQuestUpdated(QuestManager.Instance.CurrentQuest);
+        }
+
+        private void SyncQuestProgressVisualState()
+        {
+            if (currentQuest == null)
+            {
+                return;
+            }
+
+            int deliveryCount = currentQuest.DeliveryLocations != null ? currentQuest.DeliveryLocations.Count : 0;
+            if (currentQuest.HasPickedUpCargo != lastKnownHasPickedUpCargo ||
+                currentQuest.CurrentDeliveryIndex != lastKnownDeliveryIndex ||
+                deliveryCount != lastKnownDeliveryCount)
+            {
+                HandleQuestUpdated(currentQuest);
+            }
+        }
+
+        private void CacheQuestVisualState(QuestData quest)
+        {
+            if (quest == null)
+            {
+                ResetQuestVisualStateCache();
+                return;
+            }
+
+            lastKnownHasPickedUpCargo = quest.HasPickedUpCargo;
+            lastKnownDeliveryIndex = quest.CurrentDeliveryIndex;
+            lastKnownDeliveryCount = quest.DeliveryLocations != null ? quest.DeliveryLocations.Count : 0;
+        }
+
+        private void ResetQuestVisualStateCache()
+        {
+            lastKnownHasPickedUpCargo = false;
+            lastKnownDeliveryIndex = -1;
+            lastKnownDeliveryCount = -1;
+        }
+
+        private void ResolveDeliveryManager()
+        {
+            if (deliveryManager == null)
+            {
+                deliveryManager = FindAnyObjectByType<DeliveryManager>();
+            }
+        }
+
+        private bool TryGetCurrentDeliveryWorldPosition(QuestData quest, out Vector3 worldPosition)
+        {
+            worldPosition = Vector3.zero;
+
+            if (quest != null &&
+                quest.DeliveryLocations != null &&
+                quest.CurrentDeliveryIndex >= 0 &&
+                quest.CurrentDeliveryIndex < quest.DeliveryLocations.Count)
+            {
+                QuestLocation currentDelivery = quest.DeliveryLocations[quest.CurrentDeliveryIndex];
+                if (currentDelivery != null)
+                {
+                    worldPosition = currentDelivery.Position;
+                    return true;
+                }
+            }
+
+            ResolveDeliveryManager();
+            if (deliveryManager != null && deliveryManager.IsDeliveryActive)
+            {
+                worldPosition = deliveryManager.CurrentDeliveryPoint;
+                return true;
+            }
+
+            return false;
         }
 
         public void OnScroll(PointerEventData eventData)

@@ -70,14 +70,18 @@ public class MiniMapObjectiveMarker : MonoBehaviour
     {
         currentMode = TargetMode.Pickup;
         currentTargetPoint = point;
+        ClearRouteLine();
         UpdateMarker();
+        UpdateRoutePreview();
     }
 
     public void SetDeliveryTarget(Vector3 point)
     {
         currentMode = TargetMode.Delivery;
         currentTargetPoint = point;
+        ClearRouteLine();
         UpdateMarker();
+        UpdateRoutePreview();
     }
 
     public void ClearTarget()
@@ -202,10 +206,12 @@ public class MiniMapObjectiveMarker : MonoBehaviour
 
         if (needsRebuild)
         {
-            RebuildRoutePoints(start, end);
-            cachedRouteStart = start;
-            cachedRouteEnd = end;
-            hasCachedRouteBounds = true;
+            if (RebuildRoutePoints(start, end))
+            {
+                cachedRouteStart = start;
+                cachedRouteEnd = end;
+                hasCachedRouteBounds = true;
+            }
         }
 
         if (cachedRoutePoints.Count < 2)
@@ -238,20 +244,22 @@ public class MiniMapObjectiveMarker : MonoBehaviour
         }
     }
 
-    private void RebuildRoutePoints(Vector3 start, Vector3 end)
+    private bool RebuildRoutePoints(Vector3 start, Vector3 end)
     {
-        cachedRoutePoints.Clear();
-
         if (!TryResolveRoadGraph(out RoadGraph graph))
         {
-            return;
+            return false;
         }
 
         List<Vector3> path = RoadGraphPathfinder.FindPath(graph, start, end, 10f);
         if (path != null && path.Count >= 2)
         {
+            cachedRoutePoints.Clear();
             cachedRoutePoints.AddRange(path);
+            return true;
         }
+
+        return false;
     }
 
     private bool TryResolvePlayerTransform(out Transform player)

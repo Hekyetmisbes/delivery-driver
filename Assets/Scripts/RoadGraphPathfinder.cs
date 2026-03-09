@@ -5,17 +5,26 @@ namespace TrafficSystem
 {
     public static class RoadGraphPathfinder
     {
+        private const float LeftLanePenalty = 6f;
+        private const float UnnamedLanePenalty = 1.25f;
+        private const float ReverseAlignmentPenalty = 20f;
+        private const float HardReverseTurnPenalty = 10f;
+        private const float TransferBackwardDotThreshold = -0.15f;
+        private const float TransferLeftAllowance = 0.75f;
+
         private readonly struct WaypointRef
         {
             public readonly RoadSegment segment;
             public readonly int index;
             public readonly Vector3 position;
+            public readonly Vector3 forward;
 
-            public WaypointRef(RoadSegment waypointSegment, int waypointIndex, Vector3 waypointPosition)
+            public WaypointRef(RoadSegment waypointSegment, int waypointIndex, Vector3 waypointPosition, Vector3 waypointForward)
             {
                 segment = waypointSegment;
                 index = waypointIndex;
                 position = waypointPosition;
+                forward = waypointForward;
             }
         }
 
@@ -30,20 +39,12 @@ namespace TrafficSystem
                 return null;
             }
 
-            var (_, _, projectedStart, _) = graph.ProjectPointOnRoad(startWorld);
-            var (_, _, projectedEnd, _) = graph.ProjectPointOnRoad(endWorld);
-            var (startSeg, startIdx, _) = graph.FindNearestPoint(projectedStart);
-            var (endSeg, endIdx, _) = graph.FindNearestPoint(projectedEnd);
+            var (projectedStartSegment, projectedStartEdgeIndex, projectedStart, projectedStartTangent) = graph.ProjectPointOnRoad(startWorld);
+            var (projectedEndSegment, projectedEndEdgeIndex, projectedEnd, projectedEndTangent) = graph.ProjectPointOnRoad(endWorld);
 
-            if (startSeg == null || endSeg == null)
+            if (projectedStartSegment == null || projectedEndSegment == null)
             {
                 return null;
-            }
-
-            // Same segment shortcut
-            if (startSeg.id == endSeg.id)
-            {
-                return CollectWaypointsBetween(startSeg, startIdx, endIdx, projectedStart, projectedEnd);
             }
 
             // Build lookups and a spatial grid index for fast neighbor discovery.
@@ -60,8 +61,9 @@ namespace TrafficSystem
                 for (int i = 0; i < seg.waypoints.Count; i++)
                 {
                     Vector3 wpPos = seg.waypoints[i].position;
+                    Vector3 wpForward = GetWaypointForward(seg, i);
                     long key = PackKey(seg.id, i);
-                    waypointByKey[key] = new WaypointRef(seg, i, wpPos);
+                    waypointByKey[key] = new WaypointRef(seg, i, wpPos, wpForward);
 
                     Vector2Int cell = ToGridCell(wpPos, spatialCellSize);
                     if (!spatialGrid.TryGetValue(cell, out var bucket))
@@ -71,6 +73,52 @@ namespace TrafficSystem
                     }
                     bucket.Add(key);
                 }
+            }
+
+            Vector3 desiredTravelDirection = GetPlanarDirection(projectedEnd - projectedStart);
+            if (desiredTravelDirection.sqrMagnitude < 0.0001f)
+            {
+                desiredTravelDirection = GetPlanarDirection(projectedStartTangent);
+            }
+
+            if (desiredTravelDirection.sqrMagnitude < 0.0001f)
+            {
+                desiredTravelDirection = GetPlanarDirection(projectedEndTangent);
+            }
+
+            int projectedStartFallbackIndex = Mathf.Clamp(
+                projectedStartEdgeIndex + 1,
+                0,
+                projectedStartSegment.waypoints.Count - 1);
+            int projectedEndFallbackIndex = Mathf.Clamp(
+                projectedEndEdgeIndex,
+                0,
+                projectedEndSegment.waypoints.Count - 1);
+
+            float waypointSearchRadius = Mathf.Max(6f, transferMaxDistance * 1.5f);
+            long startKey = SelectPreferredWaypointKey(
+                waypointByKey,
+                projectedStart,
+                desiredTravelDirection,
+                waypointSearchRadius,
+                PackKey(projectedStartSegment.id, projectedStartFallbackIndex));
+            long endKey = SelectPreferredWaypointKey(
+                waypointByKey,
+                projectedEnd,
+                desiredTravelDirection,
+                waypointSearchRadius,
+                PackKey(projectedEndSegment.id, projectedEndFallbackIndex));
+
+            if (!waypointByKey.TryGetValue(startKey, out WaypointRef startRef) ||
+                !waypointByKey.TryGetValue(endKey, out WaypointRef endRef))
+            {
+                return null;
+            }
+
+            // Same-segment shortcut is only safe when it continues forward on the lane.
+            if (startRef.segment.id == endRef.segment.id && startRef.index <= endRef.index)
+            {
+                return CollectWaypointsBetween(startRef.segment, startRef.index, endRef.index, projectedStart, projectedEnd);
             }
 
             // A* search with Manhattan-grid heuristic.
@@ -101,12 +149,9 @@ namespace TrafficSystem
                 return key;
             }
 
-            long startKey = PackKey(startSeg.id, startIdx);
-            long endKey = PackKey(endSeg.id, endIdx);
-
-            Vector3 endPos = endSeg.waypoints[endIdx].position;
+            Vector3 endPos = endRef.position;
             gScore[startKey] = 0f;
-            Enqueue(startKey, GridManhattanHeuristic(startSeg.waypoints[startIdx].position, endPos, heuristicCellSize));
+            Enqueue(startKey, GridManhattanHeuristic(startRef.position, endPos, heuristicCellSize));
 
             while (pq.Count > 0)
             {
@@ -136,22 +181,16 @@ namespace TrafficSystem
                 }
 
                 Vector3 curPos = curSeg.waypoints[curWpIdx].position;
+                Vector3 curForward = GetWaypointForward(curSeg, curWpIdx);
 
-                void TryNeighbor(int neighborIdx)
+                void TryNeighbor(long nKey, Vector3 nPos, float extraCost)
                 {
-                    if (neighborIdx < 0 || neighborIdx >= curSeg.waypoints.Count)
-                    {
-                        return;
-                    }
-
-                    long nKey = PackKey(curSegId, neighborIdx);
                     if (closed.Contains(nKey))
                     {
                         return;
                     }
 
-                    Vector3 nPos = curSeg.waypoints[neighborIdx].position;
-                    float tentativeG = currentG + Vector3.Distance(curPos, nPos);
+                    float tentativeG = currentG + Vector3.Distance(curPos, nPos) + extraCost;
                     if (!gScore.TryGetValue(nKey, out float bestKnownG) || tentativeG < bestKnownG)
                     {
                         gScore[nKey] = tentativeG;
@@ -161,9 +200,17 @@ namespace TrafficSystem
                     }
                 }
 
-                // Intra-segment edges (both directions).
-                TryNeighbor(curWpIdx - 1);
-                TryNeighbor(curWpIdx + 1);
+                // Stay lane-faithful: keep moving forward on the current segment.
+                int forwardNeighborIndex = curWpIdx + 1;
+                if (forwardNeighborIndex < curSeg.waypoints.Count)
+                {
+                    Vector3 nextPos = curSeg.waypoints[forwardNeighborIndex].position;
+                    Vector3 nextForward = GetWaypointForward(curSeg, forwardNeighborIndex);
+                    float forwardCost = GetLanePenalty(curSeg) +
+                                        GetAlignmentPenalty(nextForward, desiredTravelDirection) +
+                                        GetTurnPenalty(curForward, nextForward);
+                    TryNeighbor(PackKey(curSegId, forwardNeighborIndex), nextPos, forwardCost);
+                }
 
                 // Inter-segment edges (explicit road connections).
                 foreach (var conn in curSeg.connections)
@@ -180,17 +227,14 @@ namespace TrafficSystem
                     }
 
                     Vector3 nPos = conn.toSegment.waypoints[conn.toWaypointIndex].position;
-                    float tentativeG = currentG + Vector3.Distance(curPos, nPos);
-                    if (!gScore.TryGetValue(nKey, out float bestKnownG) || tentativeG < bestKnownG)
-                    {
-                        gScore[nKey] = tentativeG;
-                        prev[nKey] = currentKey;
-                        float f = tentativeG + GridManhattanHeuristic(nPos, endPos, heuristicCellSize);
-                        Enqueue(nKey, f);
-                    }
+                    Vector3 nForward = GetWaypointForward(conn.toSegment, conn.toWaypointIndex);
+                    float connectionCost = GetLanePenalty(conn.toSegment) +
+                                           GetAlignmentPenalty(nForward, desiredTravelDirection) +
+                                           GetTurnPenalty(curForward, nForward);
+                    TryNeighbor(nKey, nPos, connectionCost);
                 }
 
-                // Recovery edges: short transfer hops, searched through nearby spatial grid cells.
+                // Recovery edges: short transfer hops, but do not allow minimap routing to drift into left-lane shortcuts.
                 if (transferMaxDistance > 0.01f)
                 {
                     Vector2Int curCell = ToGridCell(curPos, spatialCellSize);
@@ -219,20 +263,24 @@ namespace TrafficSystem
                                 }
 
                                 Vector3 delta = candidate.position - curPos;
+                                delta.y = 0f;
                                 float d2 = delta.sqrMagnitude;
                                 if (d2 <= 0.0001f || d2 > transferMaxDistanceSqr)
                                 {
                                     continue;
                                 }
 
-                                float tentativeG = currentG + (Mathf.Sqrt(d2) * 1.05f);
-                                if (!gScore.TryGetValue(nKey, out float bestKnownG) || tentativeG < bestKnownG)
+                                if (!TryGetTransferPenalty(curPos, curForward, candidate.position, out float lateralPenalty))
                                 {
-                                    gScore[nKey] = tentativeG;
-                                    prev[nKey] = currentKey;
-                                    float f = tentativeG + GridManhattanHeuristic(candidate.position, endPos, heuristicCellSize);
-                                    Enqueue(nKey, f);
+                                    continue;
                                 }
+
+                                float transferCost = (Mathf.Sqrt(d2) * 0.05f) +
+                                                     lateralPenalty +
+                                                     GetLanePenalty(candidate.segment) +
+                                                     GetAlignmentPenalty(candidate.forward, desiredTravelDirection) +
+                                                     GetTurnPenalty(curForward, candidate.forward);
+                                TryNeighbor(nKey, candidate.position, transferCost);
                             }
                         }
                     }
@@ -273,6 +321,53 @@ namespace TrafficSystem
             return path;
         }
 
+        private static long SelectPreferredWaypointKey(
+            Dictionary<long, WaypointRef> waypointByKey,
+            Vector3 targetPosition,
+            Vector3 desiredTravelDirection,
+            float searchRadius,
+            long fallbackKey)
+        {
+            long bestKey = fallbackKey;
+            float bestScore = float.MaxValue;
+            long globalBestKey = fallbackKey;
+            float globalBestScore = float.MaxValue;
+            float searchRadiusSqr = searchRadius * searchRadius;
+            bool foundInRadius = false;
+
+            foreach (var entry in waypointByKey)
+            {
+                WaypointRef candidate = entry.Value;
+                Vector3 delta = candidate.position - targetPosition;
+                delta.y = 0f;
+                float distanceSqr = delta.sqrMagnitude;
+                float distance = Mathf.Sqrt(distanceSqr);
+                float score = distance +
+                              (GetLanePenalty(candidate.segment) * 2f) +
+                              GetAlignmentPenalty(candidate.forward, desiredTravelDirection);
+
+                if (score < globalBestScore)
+                {
+                    globalBestScore = score;
+                    globalBestKey = entry.Key;
+                }
+
+                if (distanceSqr > searchRadiusSqr)
+                {
+                    continue;
+                }
+
+                foundInRadius = true;
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    bestKey = entry.Key;
+                }
+            }
+
+            return foundInRadius ? bestKey : globalBestKey;
+        }
+
         private static long PackKey(int segmentId, int waypointIndex)
         {
             return ((long)segmentId << 20) | (uint)waypointIndex;
@@ -297,6 +392,146 @@ namespace TrafficSystem
             Vector2Int toCell = ToGridCell(to, cellSize);
             int manhattanSteps = Mathf.Abs(fromCell.x - toCell.x) + Mathf.Abs(fromCell.y - toCell.y);
             return manhattanSteps * cellSize * 0.70710678f;
+        }
+
+        private static Vector3 GetWaypointForward(RoadSegment segment, int waypointIndex)
+        {
+            if (segment == null || segment.waypoints == null || segment.waypoints.Count == 0)
+            {
+                return Vector3.forward;
+            }
+
+            waypointIndex = Mathf.Clamp(waypointIndex, 0, segment.waypoints.Count - 1);
+            Vector3 forward = segment.waypoints[waypointIndex].forward;
+
+            if (forward.sqrMagnitude < 0.0001f)
+            {
+                if (waypointIndex < segment.waypoints.Count - 1)
+                {
+                    forward = segment.waypoints[waypointIndex + 1].position - segment.waypoints[waypointIndex].position;
+                }
+                else if (waypointIndex > 0)
+                {
+                    forward = segment.waypoints[waypointIndex].position - segment.waypoints[waypointIndex - 1].position;
+                }
+            }
+
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.0001f)
+            {
+                return Vector3.forward;
+            }
+
+            return forward.normalized;
+        }
+
+        private static Vector3 GetPlanarDirection(Vector3 direction)
+        {
+            direction.y = 0f;
+            return direction.sqrMagnitude < 0.0001f ? Vector3.zero : direction.normalized;
+        }
+
+        private static float GetLanePenalty(RoadSegment segment)
+        {
+            if (segment == null || string.IsNullOrEmpty(segment.name))
+            {
+                return UnnamedLanePenalty;
+            }
+
+            string lowerName = segment.name.ToLowerInvariant();
+            if (lowerName.Contains("lane_right") || lowerName.Contains("right_lane"))
+            {
+                return 0f;
+            }
+
+            if (lowerName.Contains("lane_left") || lowerName.Contains("left_lane"))
+            {
+                return LeftLanePenalty;
+            }
+
+            return UnnamedLanePenalty;
+        }
+
+        private static float GetAlignmentPenalty(Vector3 waypointForward, Vector3 desiredTravelDirection)
+        {
+            if (desiredTravelDirection.sqrMagnitude < 0.0001f)
+            {
+                return 0f;
+            }
+
+            float dot = Vector3.Dot(GetPlanarDirection(waypointForward), desiredTravelDirection);
+            if (dot < 0f)
+            {
+                return ReverseAlignmentPenalty + (-dot * 10f);
+            }
+
+            return (1f - dot) * 2f;
+        }
+
+        private static float GetTurnPenalty(Vector3 currentForward, Vector3 nextForward)
+        {
+            Vector3 a = GetPlanarDirection(currentForward);
+            Vector3 b = GetPlanarDirection(nextForward);
+            if (a.sqrMagnitude < 0.0001f || b.sqrMagnitude < 0.0001f)
+            {
+                return 0f;
+            }
+
+            float dot = Vector3.Dot(a, b);
+            if (dot < -0.1f)
+            {
+                return HardReverseTurnPenalty;
+            }
+
+            return Mathf.Max(0f, (1f - dot) * 0.75f);
+        }
+
+        private static bool TryGetTransferPenalty(
+            Vector3 currentPosition,
+            Vector3 currentForward,
+            Vector3 candidatePosition,
+            out float lateralPenalty)
+        {
+            lateralPenalty = 0f;
+
+            Vector3 planarForward = GetPlanarDirection(currentForward);
+            if (planarForward.sqrMagnitude < 0.0001f)
+            {
+                return true;
+            }
+
+            Vector3 delta = candidatePosition - currentPosition;
+            delta.y = 0f;
+            if (delta.sqrMagnitude < 0.0001f)
+            {
+                return false;
+            }
+
+            Vector3 moveDirection = delta.normalized;
+            float forwardDot = Vector3.Dot(moveDirection, planarForward);
+            if (forwardDot < TransferBackwardDotThreshold)
+            {
+                return false;
+            }
+
+            Vector3 right = Vector3.Cross(Vector3.up, planarForward).normalized;
+            if (right.sqrMagnitude < 0.0001f)
+            {
+                return true;
+            }
+
+            float lateralOffset = Vector3.Dot(delta, right);
+            if (lateralOffset < -TransferLeftAllowance)
+            {
+                return false;
+            }
+
+            if (lateralOffset < 0f)
+            {
+                lateralPenalty = Mathf.Abs(lateralOffset) * 2.5f;
+            }
+
+            return true;
         }
 
         private static List<Vector3> CollectWaypointsBetween(
