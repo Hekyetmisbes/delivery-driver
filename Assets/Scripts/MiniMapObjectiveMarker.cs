@@ -1,5 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
+using System.Collections.Generic;
+using TrafficSystem;
 
 /// <summary>
 /// Standalone component that manages the minimap objective marker and edge indicator.
@@ -29,8 +31,19 @@ public class MiniMapObjectiveMarker : MonoBehaviour
     [SerializeField] private Sprite miniMapEdgeIndicatorSprite;
     [SerializeField] private int updateEveryNFrames = 3;
 
+    [Header("Route Preview")]
+    [SerializeField] private bool showRoutePreview = true;
+    [SerializeField] private Color routeLineColor = new Color(0.2f, 0.85f, 1f, 0.95f);
+    [SerializeField] private float routeLineWidth = 2.4f;
+    [SerializeField] private float routeHeightOffset = 18f;
+    [SerializeField] private float routeRefreshDistanceThreshold = 5f;
+    [SerializeField] private string routeLineLayerName = "MiniMapMarker";
+
     private GameObject markerObject;
     private Material markerMaterial;
+    private GameObject routeLineObject;
+    private LineRenderer routeLineRenderer;
+    private Material routeLineMaterial;
     private int cachedMarkerLayer = int.MinValue;
     private Camera cachedMiniMapCamera;
     private Canvas edgeCanvas;
@@ -40,6 +53,13 @@ public class MiniMapObjectiveMarker : MonoBehaviour
     private Vector2 edgeIndicatorVelocity;
     private bool hasMarkerPosition;
     private bool hasEdgeIndicatorPosition;
+    private Transform cachedPlayerTransform;
+    private RoadGraphBuilder cachedRoadGraphBuilder;
+    private RoadGraph cachedRoadGraph;
+    private readonly List<Vector3> cachedRoutePoints = new List<Vector3>();
+    private Vector3 cachedRouteStart;
+    private Vector3 cachedRouteEnd;
+    private bool hasCachedRouteBounds;
 
     private enum TargetMode { None, Pickup, Delivery }
     private TargetMode currentMode = TargetMode.None;
@@ -63,6 +83,7 @@ public class MiniMapObjectiveMarker : MonoBehaviour
     public void ClearTarget()
     {
         currentMode = TargetMode.None;
+        ClearRouteLine();
         RemoveMarker();
     }
 
@@ -73,11 +94,13 @@ public class MiniMapObjectiveMarker : MonoBehaviour
         if (frameCounter % safeFrameInterval == 0)
         {
             UpdateMarker();
+            UpdateRoutePreview();
         }
     }
 
     private void OnDestroy()
     {
+        ClearRouteLine();
         RemoveMarker();
         RemoveEdgeIndicator();
     }
@@ -153,6 +176,191 @@ public class MiniMapObjectiveMarker : MonoBehaviour
         if (markerMaterial != null)
         {
             markerMaterial.color = markerColor;
+        }
+    }
+
+    private void UpdateRoutePreview()
+    {
+        if (!showRoutePreview || currentMode == TargetMode.None)
+        {
+            ClearRouteLine();
+            return;
+        }
+
+        if (!TryResolvePlayerTransform(out Transform player))
+        {
+            ClearRouteLine();
+            return;
+        }
+
+        Vector3 start = player.position;
+        Vector3 end = currentTargetPoint;
+
+        bool needsRebuild = !hasCachedRouteBounds ||
+                            Vector3.Distance(start, cachedRouteStart) > routeRefreshDistanceThreshold ||
+                            Vector3.Distance(end, cachedRouteEnd) > routeRefreshDistanceThreshold;
+
+        if (needsRebuild)
+        {
+            RebuildRoutePoints(start, end);
+            cachedRouteStart = start;
+            cachedRouteEnd = end;
+            hasCachedRouteBounds = true;
+        }
+
+        if (cachedRoutePoints.Count < 2)
+        {
+            ClearRouteLine();
+            return;
+        }
+
+        EnsureRouteLine();
+        if (routeLineRenderer == null)
+        {
+            return;
+        }
+
+        routeLineRenderer.startWidth = routeLineWidth;
+        routeLineRenderer.endWidth = routeLineWidth;
+        routeLineRenderer.positionCount = cachedRoutePoints.Count;
+
+        float routeY = Mathf.Max(routeHeightOffset, miniMapMarkerHeight - 1f);
+        for (int i = 0; i < cachedRoutePoints.Count; i++)
+        {
+            Vector3 p = cachedRoutePoints[i];
+            p.y = routeY;
+            routeLineRenderer.SetPosition(i, p);
+        }
+
+        if (routeLineMaterial != null)
+        {
+            routeLineMaterial.color = routeLineColor;
+        }
+    }
+
+    private void RebuildRoutePoints(Vector3 start, Vector3 end)
+    {
+        cachedRoutePoints.Clear();
+
+        if (!TryResolveRoadGraph(out RoadGraph graph))
+        {
+            return;
+        }
+
+        List<Vector3> path = RoadGraphPathfinder.FindPath(graph, start, end, 10f);
+        if (path != null && path.Count >= 2)
+        {
+            cachedRoutePoints.AddRange(path);
+        }
+    }
+
+    private bool TryResolvePlayerTransform(out Transform player)
+    {
+        if (cachedPlayerTransform == null)
+        {
+            CarController car = FindFirstObjectByType<CarController>();
+            if (car != null)
+            {
+                cachedPlayerTransform = car.transform;
+            }
+            else
+            {
+                GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+                if (playerObj != null)
+                {
+                    cachedPlayerTransform = playerObj.transform;
+                }
+            }
+        }
+
+        player = cachedPlayerTransform;
+        return player != null;
+    }
+
+    private bool TryResolveRoadGraph(out RoadGraph graph)
+    {
+        if (cachedRoadGraph != null && cachedRoadGraph.roadSegments != null && cachedRoadGraph.roadSegments.Count > 0)
+        {
+            graph = cachedRoadGraph;
+            return true;
+        }
+
+        if (cachedRoadGraphBuilder == null)
+        {
+            cachedRoadGraphBuilder = FindFirstObjectByType<RoadGraphBuilder>();
+        }
+
+        if (cachedRoadGraphBuilder == null)
+        {
+            graph = null;
+            return false;
+        }
+
+        if (cachedRoadGraphBuilder.HasBuiltRoadGraph)
+        {
+            cachedRoadGraph = cachedRoadGraphBuilder.RoadGraph;
+            graph = cachedRoadGraph;
+            return graph != null && graph.roadSegments != null && graph.roadSegments.Count > 0;
+        }
+
+        if (!cachedRoadGraphBuilder.HasPendingBuild)
+        {
+            cachedRoadGraphBuilder.BeginBuildWithDelay(0f);
+        }
+
+        graph = null;
+        return false;
+    }
+
+    private void EnsureRouteLine()
+    {
+        if (routeLineRenderer != null)
+        {
+            return;
+        }
+
+        routeLineObject = new GameObject("MiniMapRouteLine");
+        int routeLayer = LayerMask.NameToLayer(routeLineLayerName);
+        if (routeLayer >= 0)
+        {
+            routeLineObject.layer = routeLayer;
+        }
+
+        routeLineRenderer = routeLineObject.AddComponent<LineRenderer>();
+        routeLineRenderer.loop = false;
+        routeLineRenderer.useWorldSpace = true;
+        routeLineRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        routeLineRenderer.receiveShadows = false;
+        routeLineRenderer.alignment = LineAlignment.View;
+        routeLineRenderer.numCapVertices = 2;
+        routeLineRenderer.textureMode = LineTextureMode.Stretch;
+        routeLineRenderer.sortingOrder = 120;
+        routeLineRenderer.startColor = routeLineColor;
+        routeLineRenderer.endColor = routeLineColor;
+
+        routeLineMaterial = MinimapShaderHelper.CreateColorMaterial(routeLineColor, null);
+        if (routeLineMaterial != null)
+        {
+            routeLineRenderer.material = routeLineMaterial;
+        }
+    }
+
+    private void ClearRouteLine()
+    {
+        cachedRoutePoints.Clear();
+        hasCachedRouteBounds = false;
+
+        if (routeLineObject != null)
+        {
+            Destroy(routeLineObject);
+            routeLineObject = null;
+            routeLineRenderer = null;
+        }
+
+        if (routeLineMaterial != null)
+        {
+            Destroy(routeLineMaterial);
+            routeLineMaterial = null;
         }
     }
 

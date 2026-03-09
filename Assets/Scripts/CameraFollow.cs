@@ -1,5 +1,8 @@
 using UnityEngine;
 using System.Collections.Generic;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 public class CameraFollow : MonoBehaviour
 {
@@ -44,6 +47,7 @@ public class CameraFollow : MonoBehaviour
     [Header("MiniMap Settings")]
     [Tooltip("Sol altta minimap goster")]
     [SerializeField] private bool enableMiniMap = true;
+    [SerializeField] private bool allowMiniMapToggleKey = true;
     [Tooltip("Minimap boyutu (ekran oranina gore, 0-1)")]
     [SerializeField] private float miniMapViewportSize = 0.3f;
     [Tooltip("Minimapin soldan ve alttan bosluk degeri (0-1)")]
@@ -190,6 +194,22 @@ public class CameraFollow : MonoBehaviour
         if (target == null)
         {
             return;
+        }
+
+        if (allowMiniMapToggleKey)
+        {
+#if ENABLE_INPUT_SYSTEM
+            bool miniMapTogglePressed = Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame;
+#if ENABLE_LEGACY_INPUT_MANAGER
+            miniMapTogglePressed = miniMapTogglePressed || Input.GetKeyDown(KeyCode.M);
+#endif
+#else
+            bool miniMapTogglePressed = Input.GetKeyDown(KeyCode.M);
+#endif
+            if (miniMapTogglePressed)
+            {
+                enableMiniMap = !enableMiniMap;
+            }
         }
 
         HandleCameraMovement(Time.deltaTime);

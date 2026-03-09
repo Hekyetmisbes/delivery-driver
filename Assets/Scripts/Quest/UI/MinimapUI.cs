@@ -3,7 +3,11 @@ using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using System.Collections.Generic;
 using DeliveryDriver.UI;
+using TrafficSystem;
 using TMPro;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 namespace DeliveryDriver.Quest.UI
 {
@@ -67,6 +71,17 @@ namespace DeliveryDriver.Quest.UI
         private float currentZoom;
         private bool zoomControlsBuilt;
         private readonly List<RectTransform> markerRects = new List<RectTransform>();
+        private CanvasGroup minimapCanvasGroup;
+
+        // Road graph pathfinding
+        private RoadGraph roadGraph;
+        private List<Vector3> cachedRoadPath;
+        private Vector3 cachedPathPlayerPos;
+        private QuestData cachedPathQuest;
+        private bool cachedPathPickedUp;
+        private int cachedPathDeliveryIndex;
+        private bool cachedPathUsedRoadGraph;
+        private const float PathRecalcDistanceThreshold = 5f;
 
         private void Awake()
         {
@@ -78,6 +93,7 @@ namespace DeliveryDriver.Quest.UI
         private void Start()
         {
             ResolvePlayerTransform();
+            ResolveRoadGraph();
             SubscribeToQuestEvents();
 
             if (playerMarkerPrefab != null && markerContainer != null)
@@ -94,6 +110,19 @@ namespace DeliveryDriver.Quest.UI
 
         private void Update()
         {
+#if ENABLE_INPUT_SYSTEM
+            bool mPressed = Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame;
+#if ENABLE_LEGACY_INPUT_MANAGER
+            mPressed = mPressed || Input.GetKeyDown(KeyCode.M);
+#endif
+#else
+            bool mPressed = Input.GetKeyDown(KeyCode.M);
+#endif
+            if (mPressed)
+            {
+                ToggleMinimap();
+            }
+
             if (!subscribedToQuestEvents)
             {
                 SubscribeToQuestEvents();
@@ -208,6 +237,10 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
+            // Ensure road graph is available for route display
+            ResolveRoadGraph();
+            cachedRoadPath = null;
+
             // Show pickup marker if cargo not picked up
             if (!quest.HasPickedUpCargo && quest.PickupLocation != null)
             {
@@ -241,6 +274,9 @@ namespace DeliveryDriver.Quest.UI
                 Destroy(currentPickupMarker);
                 currentPickupMarker = null;
                 ShowDeliveryMarkers(quest);
+                // Force route recalculation on cargo state change
+                cachedRoadPath = null;
+                ResolveRoadGraph();
             }
             else if (!quest.HasPickedUpCargo)
             {
@@ -384,11 +420,7 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            List<Vector3> worldPoints = BuildRoutePoints(quest);
-            if (includePlayerInRoute && playerTransform != null)
-            {
-                worldPoints.Insert(0, playerTransform.position);
-            }
+            List<Vector3> worldPoints = BuildRoadRoutePoints(quest);
 
             if (worldPoints.Count < 2)
             {
@@ -411,6 +443,107 @@ namespace DeliveryDriver.Quest.UI
             routeLine.color = routeLineColor;
             routeLine.SetLineWidth(routeLineWidth);
             routeLine.SetPoints(localPoints);
+        }
+
+        private List<Vector3> BuildRoadRoutePoints(QuestData quest)
+        {
+            if (roadGraph == null)
+            {
+                ResolveRoadGraph();
+            }
+
+            Vector3 playerPos = (includePlayerInRoute && playerTransform != null)
+                ? playerTransform.position
+                : Vector3.zero;
+
+            // Check if cached path is still valid
+            bool needsRecalc = cachedRoadPath == null
+                || cachedPathQuest != quest
+                || cachedPathPickedUp != quest.HasPickedUpCargo
+                || cachedPathDeliveryIndex != quest.CurrentDeliveryIndex
+                || (!cachedPathUsedRoadGraph && roadGraph != null)
+                || (includePlayerInRoute && playerTransform != null
+                    && Vector3.Distance(playerPos, cachedPathPlayerPos) > PathRecalcDistanceThreshold);
+
+            if (!needsRecalc)
+            {
+                return cachedRoadPath;
+            }
+
+            // Build straight-line waypoints as fallback
+            List<Vector3> straightPoints = BuildRoutePoints(quest);
+            if (includePlayerInRoute && playerTransform != null)
+            {
+                straightPoints.Insert(0, playerPos);
+            }
+
+            if (roadGraph == null || straightPoints.Count < 2)
+            {
+                cachedRoadPath = straightPoints;
+                cachedPathPlayerPos = playerPos;
+                cachedPathQuest = quest;
+                cachedPathPickedUp = quest.HasPickedUpCargo;
+                cachedPathDeliveryIndex = quest.CurrentDeliveryIndex;
+                cachedPathUsedRoadGraph = false;
+                return cachedRoadPath;
+            }
+
+            // Build road path between consecutive waypoints
+            var roadPath = new List<Vector3>();
+            roadPath.Add(straightPoints[0]);
+
+            for (int i = 0; i < straightPoints.Count - 1; i++)
+            {
+                List<Vector3> segment = RoadGraphPathfinder.FindPath(
+                    roadGraph, straightPoints[i], straightPoints[i + 1]);
+
+                if (segment != null && segment.Count >= 2)
+                {
+                    // Skip first point to avoid duplicates (already added)
+                    for (int j = 1; j < segment.Count; j++)
+                    {
+                        roadPath.Add(segment[j]);
+                    }
+                }
+                else
+                {
+                    // Fallback: straight line
+                    roadPath.Add(straightPoints[i + 1]);
+                }
+            }
+
+            cachedRoadPath = roadPath;
+            cachedPathPlayerPos = playerPos;
+            cachedPathQuest = quest;
+            cachedPathPickedUp = quest.HasPickedUpCargo;
+            cachedPathDeliveryIndex = quest.CurrentDeliveryIndex;
+            cachedPathUsedRoadGraph = true;
+            return cachedRoadPath;
+        }
+
+        private void ResolveRoadGraph()
+        {
+            // Always re-check if the current graph is empty or stale
+            if (roadGraph != null && roadGraph.roadSegments != null && roadGraph.roadSegments.Count > 0)
+            {
+                return;
+            }
+
+            RoadGraphBuilder builder = FindAnyObjectByType<RoadGraphBuilder>();
+            if (builder == null)
+            {
+                return;
+            }
+
+            if (builder.HasBuiltRoadGraph)
+            {
+                roadGraph = builder.RoadGraph;
+            }
+            else if (!builder.HasPendingBuild)
+            {
+                // Graph not built yet and no build pending - trigger a build
+                builder.BeginBuildWithDelay(0f);
+            }
         }
 
         private void UpdateObjectiveMarkerPositions()
@@ -527,6 +660,7 @@ namespace DeliveryDriver.Quest.UI
             {
                 routeLine.Clear();
             }
+            cachedRoadPath = null;
         }
 
         private void ResolvePlayerTransform()
@@ -701,7 +835,20 @@ namespace DeliveryDriver.Quest.UI
 
             if (minimapContainer != null)
             {
-                minimapContainer.gameObject.SetActive(visible);
+                // Use CanvasGroup instead of SetActive so the MinimapUI script
+                // keeps running and the M key toggle always works.
+                if (minimapCanvasGroup == null)
+                {
+                    minimapCanvasGroup = minimapContainer.GetComponent<CanvasGroup>();
+                    if (minimapCanvasGroup == null)
+                    {
+                        minimapCanvasGroup = minimapContainer.gameObject.AddComponent<CanvasGroup>();
+                    }
+                }
+
+                minimapCanvasGroup.alpha = visible ? 1f : 0f;
+                minimapCanvasGroup.interactable = visible;
+                minimapCanvasGroup.blocksRaycasts = visible;
             }
 
             if (cameraComponent != null)
