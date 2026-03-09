@@ -72,7 +72,21 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
+            TrySubscribeToProgression();
             EnsureHud();
+            RefreshBalanceText();
+
+            // Safety net: if manager wasn't ready yet, retry after one frame
+            if (subscribedManager == null)
+            {
+                StartCoroutine(DelayedResubscribe());
+            }
+        }
+
+        private IEnumerator DelayedResubscribe()
+        {
+            yield return null;
+            TrySubscribeToProgression();
             RefreshBalanceText();
         }
 
@@ -194,6 +208,7 @@ namespace DeliveryDriver.Quest.UI
 
         private void OnMoneyChanged(int newAmount)
         {
+            EnsureHud();
             int delta = newAmount - lastKnownBalance;
             lastKnownBalance = newAmount;
             RefreshBalanceText(newAmount);

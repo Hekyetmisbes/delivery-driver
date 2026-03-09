@@ -165,6 +165,7 @@ public class DeliveryManager : MonoBehaviour
         // This project flow requires phone acceptance before showing delivery objective UI.
         // Force this at runtime so scene/prefab inspector mismatches cannot bypass it.
         requirePhoneMissionAccept = true;
+        useQuestSystem = true;
 
         if (roadGraphBuilder == null)
         {
@@ -2088,6 +2089,16 @@ public class DeliveryManager : MonoBehaviour
 
         isFinishingDeliveryLifecycle = true;
         isDeliveryActive = false;
+
+        if (success && (QuestManager.Instance == null || currentDeliveryQuest == null))
+        {
+            GetMissionRewardValues(currentMissionType, currentMissionRewardMultiplier, out int baseReward, out int bonusReward);
+            int fallbackReward = Mathf.Max(0, baseReward + bonusReward);
+            if (fallbackReward > 0 && PlayerProgressionManager.Instance != null)
+            {
+                PlayerProgressionManager.Instance.AwardMoney(fallbackReward);
+            }
+        }
 
         if (success && currentDeliveryStopNeighborhoods.Count > 0)
         {
