@@ -338,17 +338,11 @@ public class DeliveryManager : MonoBehaviour
             deliveryUI.UpdateDistance(distance);
         }
 
-        // Wrong neighborhood delivery attempts are treated as hard failure for mission clarity.
-        if (distance <= deliveryRadius * 1.1f && !IsPlayerInExpectedNeighborhood(player.position))
+        // Delivery success is already validated by the actual target point / quest trigger.
+        // Keep neighborhood text in sync, but do not hard-fail when zone borders are noisy.
+        if (distance <= deliveryRadius * 1.1f)
         {
-            if (QuestManager.Instance != null && currentDeliveryQuest != null && currentDeliveryQuest.Status == QuestStatus.Active)
-            {
-                QuestManager.Instance.FailQuest(currentDeliveryQuest, "Wrong neighborhood delivery");
-            }
-            else
-            {
-                HandleDeliveryFailure("Wrong neighborhood delivery");
-            }
+            RefreshDeliveryNeighborhoodLabel();
         }
     }
 
@@ -2183,6 +2177,7 @@ public class DeliveryManager : MonoBehaviour
         currentDeliveryStopIndex = questIndex;
         currentDeliveryPoint = currentDeliveryStops[currentDeliveryStopIndex];
         currentDeliveryNeighborhoodName = currentDeliveryStopNeighborhoods[currentDeliveryStopIndex];
+        RefreshDeliveryNeighborhoodLabel();
 
         if (currentDeliveryIndicator != null)
         {
@@ -2203,21 +2198,24 @@ public class DeliveryManager : MonoBehaviour
         miniMapMarker?.SetDeliveryTarget(currentDeliveryPoint);
     }
 
-
-    private bool IsPlayerInExpectedNeighborhood(Vector3 playerPosition)
+    private void RefreshDeliveryNeighborhoodLabel()
     {
-        if (string.IsNullOrWhiteSpace(currentDeliveryNeighborhoodName) || currentDeliveryNeighborhoodName == "Bilinmiyor")
+        if (currentDeliveryStops.Count == 0 || currentDeliveryStopIndex < 0 || currentDeliveryStopIndex >= currentDeliveryStops.Count)
         {
-            return true;
+            return;
         }
 
-        string playerNeighborhood = ResolveNeighborhoodName(playerPosition);
-        if (string.IsNullOrWhiteSpace(playerNeighborhood) || playerNeighborhood == "Bilinmiyor")
+        string resolvedNeighborhood = ResolveNeighborhoodName(currentDeliveryPoint);
+        if (string.IsNullOrWhiteSpace(resolvedNeighborhood) || resolvedNeighborhood == "Bilinmiyor")
         {
-            return false;
+            return;
         }
 
-        return string.Equals(playerNeighborhood, currentDeliveryNeighborhoodName, StringComparison.OrdinalIgnoreCase);
+        currentDeliveryNeighborhoodName = resolvedNeighborhood;
+        if (currentDeliveryStopIndex < currentDeliveryStopNeighborhoods.Count)
+        {
+            currentDeliveryStopNeighborhoods[currentDeliveryStopIndex] = resolvedNeighborhood;
+        }
     }
 
     private void EnsurePhoneMissionUI()
