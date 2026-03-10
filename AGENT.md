@@ -336,8 +336,8 @@ Validate all of these together:
 1. `RoadGraphBuilder` can still build a graph
 2. `QuestManager` startup quest generation still waits and succeeds
 3. `DeliveryManager` can still derive valid spawn points
-4. `MinimapUI` route preview still renders
-5. `MiniMapObjectiveMarker` route line and edge marker still update
+4. `NavigationService` route calculation still works
+5. `MinimapUI` route preview, `WorldRouteRenderer`, `ObjectiveMarker3D`, and `EdgeIndicator` still update
 6. NPC traffic still follows usable routes
 
 ## Performance Guidance
