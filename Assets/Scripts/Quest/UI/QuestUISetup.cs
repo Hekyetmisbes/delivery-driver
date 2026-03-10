@@ -426,7 +426,7 @@ namespace DeliveryDriver.Quest.UI
 
             // Add button navigation
             var navigation = continueButton.navigation;
-            navigation.mode = Navigation.Mode.None;
+            navigation.mode = UnityEngine.UI.Navigation.Mode.None;
             continueButton.navigation = navigation;
 
             GameObject buttonTextObj = new GameObject("Text");

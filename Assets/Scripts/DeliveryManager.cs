@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using DeliveryDriver.Quest;
 using DeliveryDriver.City;
+using DeliveryDriver.Navigation;
 using TrafficSystem;
 
 /// <summary>
@@ -87,7 +88,6 @@ public class DeliveryManager : MonoBehaviour
     [SerializeField] private bool showDebugInfo = false;
 
     [Header("Extracted Components")]
-    [SerializeField] private MiniMapObjectiveMarker miniMapMarker;
     [SerializeField] private SpeedometerUI speedometerUI;
 
     private DeliveryBox currentBox;
@@ -144,13 +144,8 @@ public class DeliveryManager : MonoBehaviour
     private void Awake()
     {
         EnsureRoadSurfaceMask();
+        NavigationService.EnsureInstance();
 
-        if (miniMapMarker == null)
-            miniMapMarker = GetComponent<MiniMapObjectiveMarker>();
-        if (miniMapMarker == null)
-            miniMapMarker = FindFirstObjectByType<MiniMapObjectiveMarker>();
-        if (miniMapMarker == null)
-            miniMapMarker = gameObject.AddComponent<MiniMapObjectiveMarker>();
         if (speedometerUI == null)
             speedometerUI = GetComponent<SpeedometerUI>();
         if (speedometerUI == null)
@@ -792,7 +787,7 @@ public class DeliveryManager : MonoBehaviour
             Debug.Log($"[DeliveryManager] Spawned box at {spawnPos}. MissionType={currentMissionType}, Conditions x{currentMissionRewardMultiplier:F2}");
         }
 
-        miniMapMarker?.SetPickupTarget(currentPickupPoint);
+        NavigationService.EnsureInstance()?.SetObjective(new NavigationObjective(ObjectiveType.Pickup, currentPickupPoint));
     }
 
     private bool TryGetPickupSpawnPoint(out Vector3 spawnPoint)
@@ -877,7 +872,7 @@ public class DeliveryManager : MonoBehaviour
             Debug.Log($"[DeliveryManager] Delivery route prepared. Stops={currentDeliveryStops.Count}, FirstTarget={currentDeliveryPoint}, Distance={distance:F1}m");
         }
 
-        miniMapMarker?.SetDeliveryTarget(currentDeliveryPoint);
+        NavigationService.EnsureInstance()?.SetObjective(new NavigationObjective(ObjectiveType.Delivery, currentDeliveryPoint, currentDeliveryStopIndex, currentDeliveryStops.Count));
     }
 
     /// <summary>
@@ -2129,7 +2124,7 @@ public class DeliveryManager : MonoBehaviour
             currentBox = null;
         }
 
-        miniMapMarker?.ClearTarget();
+        NavigationService.EnsureInstance()?.ClearObjective();
 
         currentDeliveryStops.Clear();
         currentDeliveryStopNeighborhoods.Clear();
@@ -2195,7 +2190,7 @@ public class DeliveryManager : MonoBehaviour
             QuestManager.Instance?.OnQuestUpdated?.Invoke(currentDeliveryQuest);
         }
 
-        miniMapMarker?.SetDeliveryTarget(currentDeliveryPoint);
+        NavigationService.EnsureInstance()?.SetObjective(new NavigationObjective(ObjectiveType.Delivery, currentDeliveryPoint, currentDeliveryStopIndex, currentDeliveryStops.Count));
     }
 
     private void RefreshDeliveryNeighborhoodLabel()

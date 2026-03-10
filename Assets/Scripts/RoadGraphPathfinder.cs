@@ -12,22 +12,6 @@ namespace TrafficSystem
         private const float TransferBackwardDotThreshold = -0.15f;
         private const float TransferLeftAllowance = 0.75f;
 
-        private readonly struct WaypointRef
-        {
-            public readonly RoadSegment segment;
-            public readonly int index;
-            public readonly Vector3 position;
-            public readonly Vector3 forward;
-
-            public WaypointRef(RoadSegment waypointSegment, int waypointIndex, Vector3 waypointPosition, Vector3 waypointForward)
-            {
-                segment = waypointSegment;
-                index = waypointIndex;
-                position = waypointPosition;
-                forward = waypointForward;
-            }
-        }
-
         public static List<Vector3> FindPath(
             RoadGraph graph,
             Vector3 startWorld,
@@ -47,33 +31,12 @@ namespace TrafficSystem
                 return null;
             }
 
-            // Build lookups and a spatial grid index for fast neighbor discovery.
+            // Use cached spatial index instead of rebuilding every call
             float spatialCellSize = Mathf.Max(1f, transferMaxDistance);
             float heuristicCellSize = Mathf.Max(2f, spatialCellSize * 0.5f);
             float transferMaxDistanceSqr = transferMaxDistance * transferMaxDistance;
 
-            var segmentById = new Dictionary<int, RoadSegment>(graph.roadSegments.Count);
-            var waypointByKey = new Dictionary<long, WaypointRef>();
-            var spatialGrid = new Dictionary<Vector2Int, List<long>>();
-            foreach (var seg in graph.roadSegments)
-            {
-                segmentById[seg.id] = seg;
-                for (int i = 0; i < seg.waypoints.Count; i++)
-                {
-                    Vector3 wpPos = seg.waypoints[i].position;
-                    Vector3 wpForward = GetWaypointForward(seg, i);
-                    long key = PackKey(seg.id, i);
-                    waypointByKey[key] = new WaypointRef(seg, i, wpPos, wpForward);
-
-                    Vector2Int cell = ToGridCell(wpPos, spatialCellSize);
-                    if (!spatialGrid.TryGetValue(cell, out var bucket))
-                    {
-                        bucket = new List<long>();
-                        spatialGrid[cell] = bucket;
-                    }
-                    bucket.Add(key);
-                }
-            }
+            RoadGraphSpatialIndex idx = graph.GetOrBuildSpatialIndex(spatialCellSize);
 
             Vector3 desiredTravelDirection = GetPlanarDirection(projectedEnd - projectedStart);
             if (desiredTravelDirection.sqrMagnitude < 0.0001f)
@@ -97,20 +60,20 @@ namespace TrafficSystem
 
             float waypointSearchRadius = Mathf.Max(6f, transferMaxDistance * 1.5f);
             long startKey = SelectPreferredWaypointKey(
-                waypointByKey,
+                idx,
                 projectedStart,
                 desiredTravelDirection,
                 waypointSearchRadius,
-                PackKey(projectedStartSegment.id, projectedStartFallbackIndex));
+                RoadGraphSpatialIndex.PackKey(projectedStartSegment.id, projectedStartFallbackIndex));
             long endKey = SelectPreferredWaypointKey(
-                waypointByKey,
+                idx,
                 projectedEnd,
                 desiredTravelDirection,
                 waypointSearchRadius,
-                PackKey(projectedEndSegment.id, projectedEndFallbackIndex));
+                RoadGraphSpatialIndex.PackKey(projectedEndSegment.id, projectedEndFallbackIndex));
 
-            if (!waypointByKey.TryGetValue(startKey, out WaypointRef startRef) ||
-                !waypointByKey.TryGetValue(endKey, out WaypointRef endRef))
+            if (!idx.waypointByKey.TryGetValue(startKey, out RoadGraphSpatialIndex.WaypointRef startRef) ||
+                !idx.waypointByKey.TryGetValue(endKey, out RoadGraphSpatialIndex.WaypointRef endRef))
             {
                 return null;
             }
@@ -173,15 +136,17 @@ namespace TrafficSystem
                     continue;
                 }
 
-                UnpackKey(currentKey, out int curSegId, out int curWpIdx);
+                RoadGraphSpatialIndex.UnpackKey(currentKey, out int curSegId, out int curWpIdx);
 
-                if (!segmentById.TryGetValue(curSegId, out RoadSegment curSeg))
+                if (!idx.segmentById.TryGetValue(curSegId, out RoadSegment curSeg))
                 {
                     continue;
                 }
 
                 Vector3 curPos = curSeg.waypoints[curWpIdx].position;
-                Vector3 curForward = GetWaypointForward(curSeg, curWpIdx);
+                Vector3 curForward = idx.waypointByKey.TryGetValue(currentKey, out var curRef)
+                    ? curRef.forward
+                    : GetWaypointForward(curSeg, curWpIdx);
 
                 void TryNeighbor(long nKey, Vector3 nPos, float extraCost)
                 {
@@ -205,11 +170,14 @@ namespace TrafficSystem
                 if (forwardNeighborIndex < curSeg.waypoints.Count)
                 {
                     Vector3 nextPos = curSeg.waypoints[forwardNeighborIndex].position;
-                    Vector3 nextForward = GetWaypointForward(curSeg, forwardNeighborIndex);
+                    long fwdKey = RoadGraphSpatialIndex.PackKey(curSegId, forwardNeighborIndex);
+                    Vector3 nextForward = idx.waypointByKey.TryGetValue(fwdKey, out var fwdRef)
+                        ? fwdRef.forward
+                        : GetWaypointForward(curSeg, forwardNeighborIndex);
                     float forwardCost = GetLanePenalty(curSeg) +
                                         GetAlignmentPenalty(nextForward, desiredTravelDirection) +
                                         GetTurnPenalty(curForward, nextForward);
-                    TryNeighbor(PackKey(curSegId, forwardNeighborIndex), nextPos, forwardCost);
+                    TryNeighbor(fwdKey, nextPos, forwardCost);
                 }
 
                 // Inter-segment edges (explicit road connections).
@@ -220,31 +188,33 @@ namespace TrafficSystem
                         continue;
                     }
 
-                    long nKey = PackKey(conn.toSegment.id, conn.toWaypointIndex);
+                    long nKey = RoadGraphSpatialIndex.PackKey(conn.toSegment.id, conn.toWaypointIndex);
                     if (closed.Contains(nKey))
                     {
                         continue;
                     }
 
                     Vector3 nPos = conn.toSegment.waypoints[conn.toWaypointIndex].position;
-                    Vector3 nForward = GetWaypointForward(conn.toSegment, conn.toWaypointIndex);
+                    Vector3 nForward = idx.waypointByKey.TryGetValue(nKey, out var connRef)
+                        ? connRef.forward
+                        : GetWaypointForward(conn.toSegment, conn.toWaypointIndex);
                     float connectionCost = GetLanePenalty(conn.toSegment) +
                                            GetAlignmentPenalty(nForward, desiredTravelDirection) +
                                            GetTurnPenalty(curForward, nForward);
                     TryNeighbor(nKey, nPos, connectionCost);
                 }
 
-                // Recovery edges: short transfer hops, but do not allow minimap routing to drift into left-lane shortcuts.
+                // Recovery edges: short transfer hops.
                 if (transferMaxDistance > 0.01f)
                 {
-                    Vector2Int curCell = ToGridCell(curPos, spatialCellSize);
+                    Vector2Int curCell = RoadGraphSpatialIndex.ToGridCell(curPos, spatialCellSize);
                     int radius = Mathf.CeilToInt(transferMaxDistance / spatialCellSize);
                     for (int gx = curCell.x - radius; gx <= curCell.x + radius; gx++)
                     {
                         for (int gz = curCell.y - radius; gz <= curCell.y + radius; gz++)
                         {
                             var lookupCell = new Vector2Int(gx, gz);
-                            if (!spatialGrid.TryGetValue(lookupCell, out var bucket))
+                            if (!idx.spatialGrid.TryGetValue(lookupCell, out var bucket))
                             {
                                 continue;
                             }
@@ -257,7 +227,7 @@ namespace TrafficSystem
                                     continue;
                                 }
 
-                                if (!waypointByKey.TryGetValue(nKey, out WaypointRef candidate))
+                                if (!idx.waypointByKey.TryGetValue(nKey, out RoadGraphSpatialIndex.WaypointRef candidate))
                                 {
                                     continue;
                                 }
@@ -309,8 +279,8 @@ namespace TrafficSystem
             path.Add(projectedStart);
             foreach (long key in pathKeys)
             {
-                UnpackKey(key, out int segId, out int wpIdx);
-                if (segmentById.TryGetValue(segId, out RoadSegment seg) &&
+                RoadGraphSpatialIndex.UnpackKey(key, out int segId, out int wpIdx);
+                if (idx.segmentById.TryGetValue(segId, out RoadSegment seg) &&
                     wpIdx < seg.waypoints.Count)
                 {
                     path.Add(seg.waypoints[wpIdx].position);
@@ -322,61 +292,59 @@ namespace TrafficSystem
         }
 
         private static long SelectPreferredWaypointKey(
-            Dictionary<long, WaypointRef> waypointByKey,
+            RoadGraphSpatialIndex idx,
             Vector3 targetPosition,
             Vector3 desiredTravelDirection,
             float searchRadius,
             long fallbackKey)
         {
+            // Use spatial grid for local search instead of iterating all waypoints
             long bestKey = fallbackKey;
             float bestScore = float.MaxValue;
-            long globalBestKey = fallbackKey;
-            float globalBestScore = float.MaxValue;
             float searchRadiusSqr = searchRadius * searchRadius;
-            bool foundInRadius = false;
+            int gridRadius = Mathf.CeilToInt(searchRadius / idx.cellSize) + 1;
+            Vector2Int centerCell = RoadGraphSpatialIndex.ToGridCell(targetPosition, idx.cellSize);
 
-            foreach (var entry in waypointByKey)
+            for (int gx = centerCell.x - gridRadius; gx <= centerCell.x + gridRadius; gx++)
             {
-                WaypointRef candidate = entry.Value;
-                Vector3 delta = candidate.position - targetPosition;
-                delta.y = 0f;
-                float distanceSqr = delta.sqrMagnitude;
-                float distance = Mathf.Sqrt(distanceSqr);
-                float score = distance +
-                              (GetLanePenalty(candidate.segment) * 2f) +
-                              GetAlignmentPenalty(candidate.forward, desiredTravelDirection);
-
-                if (score < globalBestScore)
+                for (int gz = centerCell.y - gridRadius; gz <= centerCell.y + gridRadius; gz++)
                 {
-                    globalBestScore = score;
-                    globalBestKey = entry.Key;
-                }
+                    if (!idx.spatialGrid.TryGetValue(new Vector2Int(gx, gz), out var bucket))
+                    {
+                        continue;
+                    }
 
-                if (distanceSqr > searchRadiusSqr)
-                {
-                    continue;
-                }
+                    for (int i = 0; i < bucket.Count; i++)
+                    {
+                        long key = bucket[i];
+                        if (!idx.waypointByKey.TryGetValue(key, out RoadGraphSpatialIndex.WaypointRef candidate))
+                        {
+                            continue;
+                        }
 
-                foundInRadius = true;
-                if (score < bestScore)
-                {
-                    bestScore = score;
-                    bestKey = entry.Key;
+                        Vector3 delta = candidate.position - targetPosition;
+                        delta.y = 0f;
+                        float distanceSqr = delta.sqrMagnitude;
+                        if (distanceSqr > searchRadiusSqr)
+                        {
+                            continue;
+                        }
+
+                        float distance = Mathf.Sqrt(distanceSqr);
+                        float score = distance +
+                                      (GetLanePenalty(candidate.segment) * 2f) +
+                                      GetAlignmentPenalty(candidate.forward, desiredTravelDirection);
+
+                        if (score < bestScore)
+                        {
+                            bestScore = score;
+                            bestKey = key;
+                        }
+                    }
                 }
             }
 
-            return foundInRadius ? bestKey : globalBestKey;
-        }
-
-        private static long PackKey(int segmentId, int waypointIndex)
-        {
-            return ((long)segmentId << 20) | (uint)waypointIndex;
-        }
-
-        private static void UnpackKey(long key, out int segmentId, out int waypointIndex)
-        {
-            segmentId = (int)(key >> 20);
-            waypointIndex = (int)(key & 0xFFFFF);
+            return bestKey;
         }
 
         private static Vector2Int ToGridCell(Vector3 position, float cellSize)
