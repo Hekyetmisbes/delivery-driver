@@ -196,7 +196,10 @@ Many UI bugs here are canvas layering or duplicate-runtime-object issues, not pu
 - `Assets/Scripts/CarController.cs`: vehicle handling
 - `Assets/Scripts/CameraFollow.cs`: camera behavior
 - `Assets/Scripts/DeliveryManager.cs`: mission spawning and phone offer flow
-- `Assets/Scripts/MiniMapObjectiveMarker.cs`: world minimap objective and route preview
+- `Assets/Scripts/Navigation/NavigationService.cs`: central GPS-style route and objective service
+- `Assets/Scripts/Navigation/ObjectiveMarker3D.cs`: world 3D objective marker
+- `Assets/Scripts/Navigation/EdgeIndicator.cs`: screen-edge directional arrow
+- `Assets/Scripts/Navigation/WorldRouteRenderer.cs`: world-space route line
 - `Assets/Scripts/RoadGraphBuilder.cs`: road extraction and waypoint generation
 - `Assets/Scripts/RoadGraphPathfinder.cs`: road graph path search used by minimap route preview
 - `Assets/Scripts/NpcCarAgent.cs`: NPC driving logic
