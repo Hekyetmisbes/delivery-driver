@@ -2,8 +2,8 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using System.Collections.Generic;
+using DeliveryDriver.Navigation;
 using DeliveryDriver.UI;
-using TrafficSystem;
 using TMPro;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
@@ -11,9 +11,6 @@ using UnityEngine.InputSystem;
 
 namespace DeliveryDriver.Quest.UI
 {
-    /// <summary>
-    /// Controls the minimap UI display and quest markers on the minimap
-    /// </summary>
     public class MinimapUI : MonoBehaviour, IScrollHandler
     {
         [Header("UI References")]
@@ -33,10 +30,8 @@ namespace DeliveryDriver.Quest.UI
 
         [Header("Route Preview")]
         [SerializeField] private bool showRoutePreview = true;
-        [SerializeField] private bool includePlayerInRoute = true;
         [SerializeField] private Color routeLineColor = new Color(0.2f, 0.8f, 1f, 0.8f);
         [SerializeField] private float routeLineWidth = 2f;
-        [SerializeField] private float routeRefreshInterval = 0.25f;
         [SerializeField] private RouteLineGraphic routeLine;
 
         [Header("Settings")]
@@ -59,33 +54,16 @@ namespace DeliveryDriver.Quest.UI
 
         private GameObject currentPickupMarker;
         private List<GameObject> currentDeliveryMarkers = new List<GameObject>();
-        private Vector3 currentPickupWorldPosition;
-        private bool hasPickupMarkerWorldPosition;
-        private readonly List<Vector3> currentDeliveryWorldPositions = new List<Vector3>();
+        private Vector3 currentObjectiveWorldPosition;
+        private bool hasObjectiveWorldPosition;
         private GameObject playerMarker;
         private Transform playerTransform;
-        private QuestData currentQuest;
-        private bool lastKnownHasPickedUpCargo;
-        private int lastKnownDeliveryIndex = -1;
-        private int lastKnownDeliveryCount = -1;
-        private float routeRefreshTimer;
-        private bool subscribedToQuestEvents;
         private float targetZoom;
         private float currentZoom;
         private bool zoomControlsBuilt;
+        private NavigationService subscribedNavigationService;
         private readonly List<RectTransform> markerRects = new List<RectTransform>();
         private CanvasGroup minimapCanvasGroup;
-        private DeliveryManager deliveryManager;
-
-        // Road graph pathfinding
-        private RoadGraph roadGraph;
-        private List<Vector3> cachedRoadPath;
-        private Vector3 cachedPathPlayerPos;
-        private QuestData cachedPathQuest;
-        private bool cachedPathPickedUp;
-        private int cachedPathDeliveryIndex;
-        private bool cachedPathUsedRoadGraph;
-        private const float PathRecalcDistanceThreshold = 5f;
 
         private void Awake()
         {
@@ -97,9 +75,6 @@ namespace DeliveryDriver.Quest.UI
         private void Start()
         {
             ResolvePlayerTransform();
-            ResolveDeliveryManager();
-            ResolveRoadGraph();
-            SubscribeToQuestEvents();
 
             if (playerMarkerPrefab != null && markerContainer != null)
             {
@@ -107,12 +82,12 @@ namespace DeliveryDriver.Quest.UI
                 playerMarker.name = "PlayerMarker";
             }
 
-            SyncCurrentQuestState();
+            TryBindNavigationService();
         }
 
         private void OnDestroy()
         {
-            UnsubscribeFromQuestEvents();
+            UnbindNavigationService();
         }
 
         private void Update()
@@ -130,48 +105,133 @@ namespace DeliveryDriver.Quest.UI
                 ToggleMinimap();
             }
 
-            if (!subscribedToQuestEvents)
-            {
-                SubscribeToQuestEvents();
-            }
-
             if (playerTransform == null)
             {
                 ResolvePlayerTransform();
             }
 
-            if (deliveryManager == null)
-            {
-                ResolveDeliveryManager();
-            }
-
-            if (currentQuest == null)
-            {
-                SyncCurrentQuestState();
-            }
-            else
-            {
-                SyncQuestProgressVisualState();
-            }
+            TryBindNavigationService();
 
             if (playerMarker != null && playerTransform != null)
             {
                 UpdatePlayerMarkerRotation();
             }
 
-            UpdateObjectiveMarkerPositions();
+            UpdateObjectiveMarkerPosition();
             UpdateZoomLerp();
             UpdateMarkerPulse();
+        }
 
-            if (showRoutePreview && includePlayerInRoute && currentQuest != null)
+        private void TryBindNavigationService()
+        {
+            NavigationService navigationService = NavigationService.Instance;
+            if (navigationService == null || subscribedNavigationService == navigationService)
             {
-                routeRefreshTimer += Time.deltaTime;
-                if (routeRefreshTimer >= routeRefreshInterval)
-                {
-                    UpdateRoutePreview(currentQuest);
-                    routeRefreshTimer = 0f;
-                }
+                return;
             }
+
+            UnbindNavigationService();
+
+            subscribedNavigationService = navigationService;
+            subscribedNavigationService.OnObjectiveChanged += HandleObjectiveChanged;
+            subscribedNavigationService.OnRouteChanged += HandleRouteChanged;
+            subscribedNavigationService.OnNavigationCleared += HandleNavigationCleared;
+
+            SyncNavigationState();
+        }
+
+        private void UnbindNavigationService()
+        {
+            if (subscribedNavigationService == null)
+            {
+                return;
+            }
+
+            subscribedNavigationService.OnObjectiveChanged -= HandleObjectiveChanged;
+            subscribedNavigationService.OnRouteChanged -= HandleRouteChanged;
+            subscribedNavigationService.OnNavigationCleared -= HandleNavigationCleared;
+            subscribedNavigationService = null;
+        }
+
+        private void SyncNavigationState()
+        {
+            if (subscribedNavigationService == null)
+            {
+                return;
+            }
+
+            NavigationObjective objective = subscribedNavigationService.CurrentObjective;
+            if (objective.IsValid)
+            {
+                HandleObjectiveChanged(objective);
+            }
+            else
+            {
+                HandleNavigationCleared();
+            }
+
+            HandleRouteChanged(subscribedNavigationService.CurrentRoute);
+        }
+
+        private void HandleObjectiveChanged(NavigationObjective objective)
+        {
+            ClearAllMarkers();
+
+            if (!objective.IsValid)
+            {
+                hasObjectiveWorldPosition = false;
+                ClearRoutePreview();
+                return;
+            }
+
+            currentObjectiveWorldPosition = objective.WorldPosition;
+            hasObjectiveWorldPosition = true;
+
+            if (objective.Type == ObjectiveType.Pickup)
+            {
+                ShowPickupMarker(objective.WorldPosition);
+            }
+            else if (objective.Type == ObjectiveType.Delivery)
+            {
+                ShowDeliveryMarker(objective.WorldPosition, objective.DeliveryIndex);
+            }
+        }
+
+        private void HandleRouteChanged(RouteResult route)
+        {
+            if (!showRoutePreview || routeLine == null || cameraComponent == null || minimapContainer == null)
+            {
+                return;
+            }
+
+            if (route == null || !route.IsValid)
+            {
+                ClearRoutePreview();
+                return;
+            }
+
+            Rect rect = minimapContainer.rect;
+            List<Vector2> localPoints = new List<Vector2>(route.Points.Count);
+            for (int i = 0; i < route.Points.Count; i++)
+            {
+                Vector3 viewport = cameraComponent.WorldToViewportPoint(route.Points[i]);
+                Vector2 local = new Vector2(
+                    (viewport.x - 0.5f) * rect.width,
+                    (viewport.y - 0.5f) * rect.height
+                );
+                localPoints.Add(local);
+            }
+
+            routeLine.color = routeLineColor;
+            routeLine.SetLineWidth(routeLineWidth);
+            routeLine.SetPoints(localPoints);
+        }
+
+        private void HandleNavigationCleared()
+        {
+            ClearAllMarkers();
+            hasObjectiveWorldPosition = false;
+            ClearRoutePreview();
         }
 
         private void SetupMinimap()
@@ -181,7 +241,6 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            // Create render texture if not assigned
             if (minimapRenderTexture == null)
             {
                 minimapRenderTexture = new RenderTexture(512, 512, 16);
@@ -191,7 +250,6 @@ namespace DeliveryDriver.Quest.UI
             cameraComponent.targetTexture = minimapRenderTexture;
             minimapImage.texture = minimapRenderTexture;
 
-            // Set minimap size
             if (minimapContainer != null)
             {
                 minimapContainer.sizeDelta = minimapSize;
@@ -225,117 +283,6 @@ namespace DeliveryDriver.Quest.UI
             rectTransform.offsetMax = Vector2.zero;
         }
 
-        private void SubscribeToQuestEvents()
-        {
-            if (subscribedToQuestEvents || QuestManager.Instance == null)
-            {
-                return;
-            }
-
-            QuestManager.Instance.OnQuestStarted.AddListener(HandleQuestStarted);
-            QuestManager.Instance.OnQuestUpdated.AddListener(HandleQuestUpdated);
-            QuestManager.Instance.OnQuestCompleted.AddListener(HandleQuestCompleted);
-            QuestManager.Instance.OnQuestFailed.AddListener(HandleQuestFailed);
-            subscribedToQuestEvents = true;
-        }
-
-        private void UnsubscribeFromQuestEvents()
-        {
-            if (QuestManager.Instance == null)
-            {
-                return;
-            }
-
-            QuestManager.Instance.OnQuestStarted.RemoveListener(HandleQuestStarted);
-            QuestManager.Instance.OnQuestUpdated.RemoveListener(HandleQuestUpdated);
-            QuestManager.Instance.OnQuestCompleted.RemoveListener(HandleQuestCompleted);
-            QuestManager.Instance.OnQuestFailed.RemoveListener(HandleQuestFailed);
-        }
-
-        private void HandleQuestStarted(QuestData quest)
-        {
-            ClearAllMarkers();
-            currentQuest = quest;
-
-            if (quest == null)
-            {
-                ResetQuestVisualStateCache();
-                ClearRoutePreview();
-                return;
-            }
-
-            // Ensure road graph is available for route display
-            ResolveRoadGraph();
-            cachedRoadPath = null;
-
-            // Show pickup marker if cargo not picked up
-            if (!quest.HasPickedUpCargo && quest.PickupLocation != null)
-            {
-                ShowPickupMarker(quest.PickupLocation.Position);
-            }
-            // Show delivery markers if cargo picked up
-            else if (quest.HasPickedUpCargo && quest.DeliveryLocations != null)
-            {
-                ShowDeliveryMarkers(quest);
-            }
-
-            CacheQuestVisualState(quest);
-            UpdateRoutePreview(quest);
-        }
-
-        private void HandleQuestUpdated(QuestData quest)
-        {
-            if (quest == null)
-            {
-                currentQuest = null;
-                ResetQuestVisualStateCache();
-                ClearAllMarkers();
-                ClearRoutePreview();
-                return;
-            }
-
-            currentQuest = quest;
-
-            // Update markers based on quest progress
-            if (quest.HasPickedUpCargo)
-            {
-                if (currentPickupMarker != null)
-                {
-                    Destroy(currentPickupMarker);
-                    currentPickupMarker = null;
-                }
-
-                ShowDeliveryMarkers(quest);
-                cachedRoadPath = null;
-                ResolveRoadGraph();
-            }
-            else if (!quest.HasPickedUpCargo)
-            {
-                if (quest.PickupLocation != null && currentPickupMarker == null)
-                {
-                    ShowPickupMarker(quest.PickupLocation.Position);
-                }
-            }
-            CacheQuestVisualState(quest);
-            UpdateRoutePreview(quest);
-        }
-
-        private void HandleQuestCompleted(QuestData quest)
-        {
-            ClearAllMarkers();
-            currentQuest = null;
-            ResetQuestVisualStateCache();
-            ClearRoutePreview();
-        }
-
-        private void HandleQuestFailed(QuestData quest)
-        {
-            ClearAllMarkers();
-            currentQuest = null;
-            ResetQuestVisualStateCache();
-            ClearRoutePreview();
-        }
-
         private void ShowPickupMarker(Vector3 worldPosition)
         {
             if (markerContainer == null)
@@ -358,19 +305,16 @@ namespace DeliveryDriver.Quest.UI
                 currentPickupMarker.transform.SetParent(markerContainer, false);
             }
             currentPickupMarker.name = "PickupMarker";
-            currentPickupWorldPosition = worldPosition;
-            hasPickupMarkerWorldPosition = true;
             UpdateMarkerPosition(currentPickupMarker, worldPosition);
         }
 
-        private void ShowDeliveryMarkers(QuestData quest)
+        private void ShowDeliveryMarker(Vector3 worldPosition, int deliveryIndex)
         {
             if (markerContainer == null)
             {
                 return;
             }
 
-            // Clear existing delivery markers
             foreach (var marker in currentDeliveryMarkers)
             {
                 if (marker != null)
@@ -379,25 +323,20 @@ namespace DeliveryDriver.Quest.UI
                 }
             }
             currentDeliveryMarkers.Clear();
-            currentDeliveryWorldPositions.Clear();
 
-            if (TryGetCurrentDeliveryWorldPosition(quest, out Vector3 worldPosition))
+            GameObject markerObj;
+            if (deliveryMarkerPrefab != null)
             {
-                GameObject marker;
-                if (deliveryMarkerPrefab != null)
-                {
-                    marker = Instantiate(deliveryMarkerPrefab, markerContainer);
-                }
-                else
-                {
-                    marker = CreateDefaultMarkerUI(deliveryMarkerColor);
-                    marker.transform.SetParent(markerContainer, false);
-                }
-                marker.name = $"DeliveryMarker_{quest.CurrentDeliveryIndex}";
-                currentDeliveryMarkers.Add(marker);
-                currentDeliveryWorldPositions.Add(worldPosition);
-                UpdateMarkerPosition(marker, worldPosition);
+                markerObj = Instantiate(deliveryMarkerPrefab, markerContainer);
             }
+            else
+            {
+                markerObj = CreateDefaultMarkerUI(deliveryMarkerColor);
+                markerObj.transform.SetParent(markerContainer, false);
+            }
+            markerObj.name = $"DeliveryMarker_{deliveryIndex}";
+            currentDeliveryMarkers.Add(markerObj);
+            UpdateMarkerPosition(markerObj, worldPosition);
         }
 
         private void ClearAllMarkers()
@@ -407,7 +346,6 @@ namespace DeliveryDriver.Quest.UI
                 Destroy(currentPickupMarker);
                 currentPickupMarker = null;
             }
-            hasPickupMarkerWorldPosition = false;
 
             foreach (var marker in currentDeliveryMarkers)
             {
@@ -417,7 +355,6 @@ namespace DeliveryDriver.Quest.UI
                 }
             }
             currentDeliveryMarkers.Clear();
-            currentDeliveryWorldPositions.Clear();
             markerRects.Clear();
         }
 
@@ -428,167 +365,29 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            // Rotate player marker to match player's heading
             float yRotation = playerTransform.eulerAngles.y;
             playerMarker.transform.rotation = Quaternion.Euler(0f, 0f, -yRotation);
         }
 
-        private void UpdateRoutePreview(QuestData quest)
+        private void UpdateObjectiveMarkerPosition()
         {
-            if (!showRoutePreview || routeLine == null || cameraComponent == null || minimapContainer == null)
+            if (cameraComponent == null || minimapContainer == null || !hasObjectiveWorldPosition)
             {
                 return;
             }
 
-            if (quest == null)
+            if (currentPickupMarker != null)
             {
-                ClearRoutePreview();
-                return;
+                UpdateMarkerPosition(currentPickupMarker, currentObjectiveWorldPosition);
             }
 
-            List<Vector3> worldPoints = BuildRoadRoutePoints(quest);
-
-            if (worldPoints.Count < 2)
-            {
-                ClearRoutePreview();
-                return;
-            }
-
-            Rect rect = minimapContainer.rect;
-            List<Vector2> localPoints = new List<Vector2>(worldPoints.Count);
-            for (int i = 0; i < worldPoints.Count; i++)
-            {
-                Vector3 viewport = cameraComponent.WorldToViewportPoint(worldPoints[i]);
-                Vector2 local = new Vector2(
-                    (viewport.x - 0.5f) * rect.width,
-                    (viewport.y - 0.5f) * rect.height
-                );
-                localPoints.Add(local);
-            }
-
-            routeLine.color = routeLineColor;
-            routeLine.SetLineWidth(routeLineWidth);
-            routeLine.SetPoints(localPoints);
-        }
-
-        private List<Vector3> BuildRoadRoutePoints(QuestData quest)
-        {
-            if (playerTransform == null)
-            {
-                ResolvePlayerTransform();
-            }
-
-            if (roadGraph == null)
-            {
-                ResolveRoadGraph();
-            }
-
-            Vector3 playerPos = (includePlayerInRoute && playerTransform != null)
-                ? playerTransform.position
-                : Vector3.zero;
-
-            // Check if cached path is still valid
-            bool needsRecalc = cachedRoadPath == null
-                || cachedPathQuest != quest
-                || cachedPathPickedUp != quest.HasPickedUpCargo
-                || cachedPathDeliveryIndex != quest.CurrentDeliveryIndex
-                || (!cachedPathUsedRoadGraph && roadGraph != null)
-                || (includePlayerInRoute && playerTransform != null
-                    && Vector3.Distance(playerPos, cachedPathPlayerPos) > PathRecalcDistanceThreshold);
-
-            if (!needsRecalc)
-            {
-                return cachedRoadPath;
-            }
-
-            List<Vector3> straightPoints = BuildRoutePoints(quest);
-            if (includePlayerInRoute && playerTransform != null)
-            {
-                straightPoints.Insert(0, playerPos);
-            }
-
-            if (roadGraph == null || straightPoints.Count < 2)
-            {
-                return cachedRoadPath ?? new List<Vector3>();
-            }
-
-            var roadPath = new List<Vector3>();
-            roadPath.Add(straightPoints[0]);
-
-            for (int i = 0; i < straightPoints.Count - 1; i++)
-            {
-                List<Vector3> segment = RoadGraphPathfinder.FindPath(
-                    roadGraph, straightPoints[i], straightPoints[i + 1]);
-
-                if (segment != null && segment.Count >= 2)
-                {
-                    for (int j = 1; j < segment.Count; j++)
-                    {
-                        roadPath.Add(segment[j]);
-                    }
-                }
-                else
-                {
-                    return cachedRoadPath ?? new List<Vector3>();
-                }
-            }
-
-            cachedRoadPath = roadPath;
-            cachedPathPlayerPos = playerPos;
-            cachedPathQuest = quest;
-            cachedPathPickedUp = quest.HasPickedUpCargo;
-            cachedPathDeliveryIndex = quest.CurrentDeliveryIndex;
-            cachedPathUsedRoadGraph = true;
-            return cachedRoadPath;
-        }
-
-        private void ResolveRoadGraph()
-        {
-            // Always re-check if the current graph is empty or stale
-            if (roadGraph != null && roadGraph.roadSegments != null && roadGraph.roadSegments.Count > 0)
-            {
-                return;
-            }
-
-            RoadGraphBuilder builder = FindAnyObjectByType<RoadGraphBuilder>();
-            if (builder == null)
-            {
-                return;
-            }
-
-            if (builder.HasBuiltRoadGraph)
-            {
-                roadGraph = builder.RoadGraph;
-            }
-            else if (!builder.HasPendingBuild)
-            {
-                // Graph not built yet and no build pending - trigger a build
-                builder.BeginBuildWithDelay(0f);
-            }
-        }
-
-        private void UpdateObjectiveMarkerPositions()
-        {
-            if (cameraComponent == null || minimapContainer == null)
-            {
-                return;
-            }
-
-            if (currentPickupMarker != null && hasPickupMarkerWorldPosition)
-            {
-                UpdateMarkerPosition(currentPickupMarker, currentPickupWorldPosition);
-            }
-
-            int count = Mathf.Min(currentDeliveryMarkers.Count, currentDeliveryWorldPositions.Count);
-            for (int i = 0; i < count; i++)
+            for (int i = 0; i < currentDeliveryMarkers.Count; i++)
             {
                 GameObject marker = currentDeliveryMarkers[i];
-                if (marker == null)
+                if (marker != null)
                 {
-                    continue;
+                    UpdateMarkerPosition(marker, currentObjectiveWorldPosition);
                 }
-
-                UpdateMarkerPosition(marker, currentDeliveryWorldPositions[i]);
             }
         }
 
@@ -608,7 +407,6 @@ namespace DeliveryDriver.Quest.UI
 
             markerObject.SetActive(true);
 
-            // Clamp to minimap edge with padding so off-screen markers stay visible at the border
             const float edgePadding = 0.05f;
             float clampedX = Mathf.Clamp(viewport.x, edgePadding, 1f - edgePadding);
             float clampedY = Mathf.Clamp(viewport.y, edgePadding, 1f - edgePadding);
@@ -646,47 +444,12 @@ namespace DeliveryDriver.Quest.UI
             return markerObj;
         }
 
-        private List<Vector3> BuildRoutePoints(QuestData quest)
-        {
-            List<Vector3> points = new List<Vector3>();
-            if (quest == null)
-            {
-                return points;
-            }
-
-            if (!quest.HasPickedUpCargo && quest.PickupLocation != null)
-            {
-                points.Add(quest.PickupLocation.Position);
-            }
-
-            if (quest.DeliveryLocations != null)
-            {
-                int startIndex = quest.HasPickedUpCargo ? quest.CurrentDeliveryIndex : 0;
-                for (int i = startIndex; i < quest.DeliveryLocations.Count; i++)
-                {
-                    QuestLocation location = quest.DeliveryLocations[i];
-                    if (location != null)
-                    {
-                        points.Add(location.Position);
-                    }
-                }
-            }
-
-            if (points.Count == 0 && quest.HasPickedUpCargo && TryGetCurrentDeliveryWorldPosition(quest, out Vector3 fallbackDeliveryPoint))
-            {
-                points.Add(fallbackDeliveryPoint);
-            }
-
-            return points;
-        }
-
         private void ClearRoutePreview()
         {
             if (routeLine != null)
             {
                 routeLine.Clear();
             }
-            cachedRoadPath = null;
         }
 
         private void ResolvePlayerTransform()
@@ -707,99 +470,6 @@ namespace DeliveryDriver.Quest.UI
             {
                 playerTransform = controller.transform;
             }
-        }
-
-        private void SyncCurrentQuestState()
-        {
-            if (QuestManager.Instance == null || QuestManager.Instance.CurrentQuest == null)
-            {
-                if (currentQuest != null)
-                {
-                    currentQuest = null;
-                    ResetQuestVisualStateCache();
-                    ClearAllMarkers();
-                    ClearRoutePreview();
-                }
-                return;
-            }
-
-            if (QuestManager.Instance.CurrentQuest == currentQuest)
-            {
-                return;
-            }
-
-            HandleQuestUpdated(QuestManager.Instance.CurrentQuest);
-        }
-
-        private void SyncQuestProgressVisualState()
-        {
-            if (currentQuest == null)
-            {
-                return;
-            }
-
-            int deliveryCount = currentQuest.DeliveryLocations != null ? currentQuest.DeliveryLocations.Count : 0;
-            if (currentQuest.HasPickedUpCargo != lastKnownHasPickedUpCargo ||
-                currentQuest.CurrentDeliveryIndex != lastKnownDeliveryIndex ||
-                deliveryCount != lastKnownDeliveryCount)
-            {
-                HandleQuestUpdated(currentQuest);
-            }
-        }
-
-        private void CacheQuestVisualState(QuestData quest)
-        {
-            if (quest == null)
-            {
-                ResetQuestVisualStateCache();
-                return;
-            }
-
-            lastKnownHasPickedUpCargo = quest.HasPickedUpCargo;
-            lastKnownDeliveryIndex = quest.CurrentDeliveryIndex;
-            lastKnownDeliveryCount = quest.DeliveryLocations != null ? quest.DeliveryLocations.Count : 0;
-        }
-
-        private void ResetQuestVisualStateCache()
-        {
-            lastKnownHasPickedUpCargo = false;
-            lastKnownDeliveryIndex = -1;
-            lastKnownDeliveryCount = -1;
-        }
-
-        private void ResolveDeliveryManager()
-        {
-            if (deliveryManager == null)
-            {
-                deliveryManager = FindAnyObjectByType<DeliveryManager>();
-            }
-        }
-
-        private bool TryGetCurrentDeliveryWorldPosition(QuestData quest, out Vector3 worldPosition)
-        {
-            worldPosition = Vector3.zero;
-
-            if (quest != null &&
-                quest.DeliveryLocations != null &&
-                quest.CurrentDeliveryIndex >= 0 &&
-                quest.CurrentDeliveryIndex < quest.DeliveryLocations.Count)
-            {
-                QuestLocation currentDelivery = quest.DeliveryLocations[quest.CurrentDeliveryIndex];
-                if (currentDelivery != null)
-                {
-                    worldPosition = currentDelivery.Position;
-                    return true;
-                }
-            }
-
-            ResolveDeliveryManager();
-            if (deliveryManager != null && deliveryManager.IsDeliveryActive)
-            {
-                worldPosition = deliveryManager.CurrentDeliveryPoint;
-                return true;
-            }
-
-            return false;
         }
 
         public void OnScroll(PointerEventData eventData)
@@ -954,8 +624,6 @@ namespace DeliveryDriver.Quest.UI
 
             if (minimapContainer != null)
             {
-                // Use CanvasGroup instead of SetActive so the MinimapUI script
-                // keeps running and the M key toggle always works.
                 if (minimapCanvasGroup == null)
                 {
                     minimapCanvasGroup = minimapContainer.GetComponent<CanvasGroup>();

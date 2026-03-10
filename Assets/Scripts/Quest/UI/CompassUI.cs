@@ -1,12 +1,10 @@
 using UnityEngine;
 using UnityEngine.UI;
+using DeliveryDriver.Navigation;
 using TMPro;
 
 namespace DeliveryDriver.Quest.UI
 {
-    /// <summary>
-    /// Displays a compass HUD element showing direction to the next quest objective
-    /// </summary>
     public class CompassUI : MonoBehaviour
     {
         [Header("UI References")]
@@ -24,8 +22,8 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private float distanceDisplayMultiplier = 10f;
 
         [Header("Colors")]
-        [SerializeField] private Color pickupColor = new Color(0.2f, 0.5f, 1f, 1f); // Blue
-        [SerializeField] private Color deliveryColor = new Color(0.2f, 1f, 0.2f, 1f); // Green
+        [SerializeField] private Color pickupColor = new Color(0.2f, 0.5f, 1f, 1f);
+        [SerializeField] private Color deliveryColor = new Color(0.2f, 1f, 0.2f, 1f);
 
         private Transform playerTransform;
         private Vector3 currentObjectivePosition;
@@ -33,6 +31,7 @@ namespace DeliveryDriver.Quest.UI
         private float targetRotation = 0f;
         private Image cachedNeedleImage;
         private int frameCounter;
+        private NavigationService subscribedNavigationService;
 
         private void Start()
         {
@@ -42,22 +41,24 @@ namespace DeliveryDriver.Quest.UI
             }
 
             ResolvePlayerTransform();
-            SubscribeToQuestEvents();
+            TryBindNavigationService();
             SetCompassVisible(showCompass);
         }
 
         private void OnDestroy()
         {
-            UnsubscribeFromQuestEvents();
+            UnbindNavigationService();
         }
 
         private void Update()
         {
             if (!hasObjective || playerTransform == null)
             {
+                TryBindNavigationService();
                 return;
             }
 
+            TryBindNavigationService();
             UpdateCompassDirection();
 
             frameCounter++;
@@ -74,83 +75,67 @@ namespace DeliveryDriver.Quest.UI
             }
         }
 
-        private void SubscribeToQuestEvents()
+        private void TryBindNavigationService()
         {
-            if (QuestManager.Instance == null)
+            NavigationService navigationService = NavigationService.Instance;
+            if (navigationService == null || subscribedNavigationService == navigationService)
             {
                 return;
             }
 
-            QuestManager.Instance.OnQuestStarted.AddListener(HandleQuestStarted);
-            QuestManager.Instance.OnQuestUpdated.AddListener(HandleQuestUpdated);
-            QuestManager.Instance.OnQuestCompleted.AddListener(HandleQuestCompleted);
-            QuestManager.Instance.OnQuestFailed.AddListener(HandleQuestFailed);
+            UnbindNavigationService();
+
+            subscribedNavigationService = navigationService;
+            subscribedNavigationService.OnObjectiveChanged += HandleObjectiveChanged;
+            subscribedNavigationService.OnNavigationCleared += HandleNavigationCleared;
+
+            NavigationObjective objective = subscribedNavigationService.CurrentObjective;
+            if (objective.IsValid)
+            {
+                HandleObjectiveChanged(objective);
+            }
+            else
+            {
+                HandleNavigationCleared();
+            }
         }
 
-        private void UnsubscribeFromQuestEvents()
+        private void UnbindNavigationService()
         {
-            if (QuestManager.Instance == null)
+            if (subscribedNavigationService == null)
             {
                 return;
             }
 
-            QuestManager.Instance.OnQuestStarted.RemoveListener(HandleQuestStarted);
-            QuestManager.Instance.OnQuestUpdated.RemoveListener(HandleQuestUpdated);
-            QuestManager.Instance.OnQuestCompleted.RemoveListener(HandleQuestCompleted);
-            QuestManager.Instance.OnQuestFailed.RemoveListener(HandleQuestFailed);
+            subscribedNavigationService.OnObjectiveChanged -= HandleObjectiveChanged;
+            subscribedNavigationService.OnNavigationCleared -= HandleNavigationCleared;
+            subscribedNavigationService = null;
         }
 
-        private void HandleQuestStarted(QuestData quest)
+        private void HandleObjectiveChanged(NavigationObjective objective)
         {
-            if (quest == null)
+            if (!objective.IsValid)
             {
+                hasObjective = false;
+                SetCompassVisible(false);
                 return;
             }
 
-            UpdateObjective(quest);
+            currentObjectivePosition = objective.WorldPosition;
+            hasObjective = true;
+
+            if (cachedNeedleImage != null)
+            {
+                cachedNeedleImage.color = objective.Type == ObjectiveType.Delivery ? deliveryColor : pickupColor;
+            }
+
             SetCompassVisible(true);
         }
 
-        private void HandleQuestUpdated(QuestData quest)
-        {
-            if (quest == null)
-            {
-                return;
-            }
-
-            UpdateObjective(quest);
-        }
-
-        private void HandleQuestCompleted(QuestData quest)
+        private void HandleNavigationCleared()
         {
             hasObjective = false;
             SetCompassVisible(false);
-        }
-
-        private void HandleQuestFailed(QuestData quest)
-        {
-            hasObjective = false;
-            SetCompassVisible(false);
-        }
-
-        private void UpdateObjective(QuestData quest)
-        {
-            QuestLocation objective = GetCurrentObjective(quest);
-
-            if (objective == null)
-            {
-                hasObjective = false;
-                return;
-            }
-
-            currentObjectivePosition = objective.Position;
-            hasObjective = true;
-
-            // Update compass color based on objective type
-            if (cachedNeedleImage != null)
-            {
-                cachedNeedleImage.color = quest.HasPickedUpCargo ? deliveryColor : pickupColor;
-            }
         }
 
         private void UpdateCompassDirection()
@@ -160,24 +145,20 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            // Calculate direction to objective
             Vector3 directionToObjective = currentObjectivePosition - playerTransform.position;
-            directionToObjective.y = 0; // Flatten to horizontal plane
+            directionToObjective.y = 0;
 
             if (directionToObjective.magnitude < 0.1f)
             {
                 return;
             }
 
-            // Calculate angle relative to player's forward direction
             float angleToObjective = Vector3.SignedAngle(playerTransform.forward, directionToObjective, Vector3.up);
-            targetRotation = -angleToObjective; // Negative because UI rotates opposite
+            targetRotation = -angleToObjective;
 
-            // Apply rotation
             if (smoothRotation)
             {
                 float currentZ = compassNeedle.localEulerAngles.z;
-                // Handle 360-degree wrap
                 if (Mathf.Abs(targetRotation - currentZ) > 180f)
                 {
                     if (targetRotation > currentZ)
@@ -231,14 +212,12 @@ namespace DeliveryDriver.Quest.UI
 
             float angle = Vector3.SignedAngle(playerTransform.forward, directionToObjective, Vector3.up);
 
-            // Convert to compass directions
             string direction = GetCardinalDirection(angle);
             directionText.text = direction;
         }
 
         private string GetCardinalDirection(float angle)
         {
-            // Normalize angle to 0-360
             if (angle < 0)
             {
                 angle += 360f;
@@ -260,27 +239,6 @@ namespace DeliveryDriver.Quest.UI
                 return "W";
             else
                 return "NW";
-        }
-
-        private QuestLocation GetCurrentObjective(QuestData quest)
-        {
-            if (quest == null)
-            {
-                return null;
-            }
-
-            if (!quest.HasPickedUpCargo)
-            {
-                return quest.PickupLocation;
-            }
-
-            if (quest.DeliveryLocations == null || quest.DeliveryLocations.Count == 0)
-            {
-                return null;
-            }
-
-            int index = Mathf.Clamp(quest.CurrentDeliveryIndex, 0, quest.DeliveryLocations.Count - 1);
-            return quest.DeliveryLocations[index];
         }
 
         private void ResolvePlayerTransform()
