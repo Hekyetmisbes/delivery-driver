@@ -152,15 +152,19 @@ If a change affects mission acceptance, pickup state, delivery targets, or objec
 
 ### Route and minimap stack
 
-Route and objective display is spread across multiple components:
+Navigation follows a GPS-style architecture with a central service:
 
-- `MinimapUI`: UI minimap, route line, quest marker icons, zoom behavior
-- `MiniMapObjectiveMarker`: world-space minimap marker, edge indicator, world route line
+- `NavigationService` (singleton): owns route and objective state, single consumer of `RoadGraphPathfinder`
+- `ObjectiveMarker3D`: subscribes to NavigationService, renders spinning 3D cylinder marker
+- `EdgeIndicator`: subscribes to NavigationService, shows screen-edge directional arrow
+- `WorldRouteRenderer`: subscribes to NavigationService, renders world-space route LineRenderer
+- `MinimapUI`: subscribes to NavigationService for minimap markers and route preview overlay
+- `CompassUI`: subscribes to NavigationService for compass needle direction
 - `MinimapCamera`: minimap camera follow behavior
-- `RoadGraphPathfinder`: path search utility used for route preview
+- `RoadGraphPathfinder`: path search utility (only called by NavigationService)
 - `RoadGraphBuilder`: source of road graph data
 
-If minimap behavior looks inconsistent, inspect both `MinimapUI` and `MiniMapObjectiveMarker`. They overlap in responsibility.
+DeliveryManager calls `NavigationService.Instance.SetObjective()` / `ClearObjective()` to drive navigation.
 
 ### UI ownership
 
