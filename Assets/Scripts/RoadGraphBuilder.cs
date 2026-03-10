@@ -47,7 +47,7 @@ namespace TrafficSystem
         [SerializeField] private float startupBuildDelay = 0f;
 
         [Header("Debug Visualization")]
-        [SerializeField] private bool showWaypoints = true;
+        [SerializeField] private bool showWaypoints = false;
         [SerializeField] private bool showConnections = true;
         [SerializeField] private bool showWaypointForward = false;
         [SerializeField] private float waypointGizmoSize = 0.5f;
