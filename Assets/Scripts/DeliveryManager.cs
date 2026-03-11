@@ -285,6 +285,24 @@ public class DeliveryManager : MonoBehaviour
         }
     }
 
+    public void SetPlayerVehicle(CarController controller)
+    {
+        cachedPlayerTransform = controller != null ? controller.transform : null;
+        cachedPlayerRigidbody = controller != null ? controller.GetComponent<Rigidbody>() : null;
+
+        if (deliveryUI == null)
+        {
+            deliveryUI = FindFirstObjectByType<DeliveryUI>();
+        }
+
+        if (deliveryUI != null)
+        {
+            deliveryUI.SetPlayerTransform(cachedPlayerTransform);
+        }
+
+        speedometerUI?.Initialize(cachedPlayerRigidbody);
+    }
+
     private void SubscribeToQuestEvents()
     {
         if (QuestManager.Instance == null)

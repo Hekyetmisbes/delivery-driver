@@ -86,6 +86,12 @@ public class DeliveryUI : MonoBehaviour
         }
     }
 
+    public void SetPlayerTransform(Transform player)
+    {
+        playerTransform = player;
+        nextPlayerResolveTime = 0f;
+    }
+
     private void UpdateUI()
     {
         bool hasObjective = deliveryManager.ShouldShowObjectiveUI;

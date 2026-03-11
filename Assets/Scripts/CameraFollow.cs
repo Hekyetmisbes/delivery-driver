@@ -2,6 +2,9 @@ using System.Collections;
 using UnityEngine;
 using System.Collections.Generic;
 using TrafficSystem;
+using DeliveryDriver.Quest.UI;
+using DeliveryDriver.Vehicle;
+using Unity.Cinemachine;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -15,6 +18,7 @@ public class CameraFollow : MonoBehaviour
     [Header("Offset Settings")]
     [Tooltip("Kameranin araca gore konumu (X, Y, Z). Z negatif olmali ki arkada dursun.")]
     [SerializeField] private Vector3 offset = new Vector3(0, 4f, -8f);
+    [SerializeField] private Vector3 lookAtTargetOffset = new Vector3(0f, 1.5f, 0f);
 
     [Header("Smooth Settings")]
     [Tooltip("Kamera takip yumusakligi (Dusuk = daha siki, Yuksek = daha gevek)")]
@@ -152,98 +156,285 @@ public class CameraFollow : MonoBehaviour
     private Texture2D reverseCamWhiteTex;
     private GUIStyle reverseCamLabelStyle;
     private float currentZoomOffset;
+    private VehicleCameraAnchors vehicleCameraAnchors;
+    private CinemachineBrain cinemachineBrain;
+    private CinemachineCamera gameplayCamera;
+    private CinemachineFollow cinemachineFollow;
+    private CinemachineRotationComposer rotationComposer;
+    private ReverseCameraHUD reverseCameraController;
+    private MinimapCamera minimapCameraController;
+    private float currentGameplayFov;
+    private bool warnedMissingGameplayCamera;
+
+    void Awake()
+    {
+        mainCamera = GetComponent<Camera>();
+        cinemachineBrain = GetComponent<CinemachineBrain>();
+        currentGameplayFov = baseFov;
+
+        ResolveGameplayRig();
+        EnsureExternalCameraControllers();
+    }
 
     void Start()
     {
-        // Eger target atanmamissa otomatik bulmaya calis
-        if (target == null)
-        {
-            GameObject player = GameObject.FindGameObjectWithTag("Player");
-            if (player != null)
-            {
-                target = player.transform;
-            }
-            else
-            {
-                // CarController olan objeyi bul
-                CarController car = FindFirstObjectByType<CarController>();
-                if (car != null)
-                {
-                    target = car.transform;
-                }
-            }
-        }
-
         if (target != null)
         {
-            mainCamera = GetComponent<Camera>();
-            targetRb = target.GetComponent<Rigidbody>();
-            // Rigidbody target'in tam uzerinde yoksa ust/alt hiyerarside ara
-            if (targetRb == null) targetRb = target.GetComponentInParent<Rigidbody>();
-            if (targetRb == null) targetRb = target.GetComponentInChildren<Rigidbody>();
-            // CarController referansini al (geri tus inputunu okumak icin)
-            carController = target.GetComponent<CarController>();
-            if (carController == null) carController = target.GetComponentInParent<CarController>();
-            if (carController == null) carController = target.GetComponentInChildren<CarController>();
+            SetTarget(target);
+            return;
+        }
 
-            Debug.Log($"[CameraFollow] Start: target={target.name}, targetRb={targetRb != null}, carController={carController != null}");
+        TryResolveTarget();
 
-            limitMiniMapToBounds = true;
-            ResolveMiniMapBounds();
-            if (enableMiniMap)
+        if (target == null)
+        {
+            Debug.LogWarning("[CameraFollow] Target (Arac) bulunamadi!");
+        }
+    }
+
+    public void SetTarget(Transform newTarget)
+    {
+        VehicleCameraBinding binding = VehicleCameraTargetResolver.Resolve(newTarget);
+        target = binding.Target;
+        targetRb = binding.Rigidbody;
+        carController = binding.CarController;
+        vehicleCameraAnchors = binding.CameraAnchors;
+
+        ResolveGameplayRig();
+        EnsureExternalCameraControllers();
+
+        if (target == null)
+        {
+            if (cinemachineBrain != null)
             {
-                EnsureMiniMapRuntimeSetup();
-                SetupMiniMapCamera();
+                cinemachineBrain.WorldUpOverride = null;
             }
 
-            SetupReverseCameraHUD();
+            reverseCameraController?.SetTarget(null);
+            minimapCameraController?.SetPlayer(null);
+            return;
         }
-        else
-        {
-            Debug.LogWarning("CameraFollow: Target (Arac) bulunamadi!");
-        }
+
+        currentZoomOffset = 0f;
+        currentGameplayFov = ResolveCurrentLensFov();
+
+        BindGameplayRig();
+        reverseCameraController?.SetGameplayCamera(mainCamera);
+        reverseCameraController?.SetTarget(target);
+        minimapCameraController?.SetPlayer(target);
+        ApplyCinemachineRigSettings(true);
+
+        Debug.Log($"[CameraFollow] Target updated: target={target.name}, targetRb={targetRb != null}, carController={carController != null}, cinemachine={gameplayCamera != null}");
     }
 
     void LateUpdate()
     {
         if (target == null)
         {
+            TryResolveTarget();
             return;
         }
 
-        if (allowMiniMapToggleKey)
-        {
-#if ENABLE_INPUT_SYSTEM
-            bool miniMapTogglePressed = Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame;
-#if ENABLE_LEGACY_INPUT_MANAGER
-            miniMapTogglePressed = miniMapTogglePressed || Input.GetKeyDown(KeyCode.M);
-#endif
-#else
-            bool miniMapTogglePressed = Input.GetKeyDown(KeyCode.M);
-#endif
-            if (miniMapTogglePressed)
-            {
-                enableMiniMap = !enableMiniMap;
-            }
-        }
-
-        HandleCameraMovement(Time.deltaTime);
         UpdateSpeedFov(Time.deltaTime);
-        UpdateMiniMapCamera();
-        UpdateReverseCameraHUD();
+        UpdateCinemachineFollowOffset(Time.deltaTime);
+        ApplyCinemachineRigSettings(false);
     }
 
     void UpdateSpeedFov(float deltaTime)
     {
-        if (!enableSpeedFov || mainCamera == null || targetRb == null)
+        float desiredFov = baseFov;
+        if (enableSpeedFov && targetRb != null)
+        {
+            float speedKmh = targetRb.linearVelocity.magnitude * 3.6f;
+            float t = fovMaxSpeedKmh > 1f ? Mathf.Clamp01(speedKmh / fovMaxSpeedKmh) : 0f;
+            desiredFov = Mathf.Lerp(baseFov, maxSpeedFov, t);
+        }
+
+        currentGameplayFov = Mathf.Lerp(currentGameplayFov, desiredFov, Mathf.Max(0.01f, fovLerpSpeed) * deltaTime);
+    }
+
+    void TryResolveTarget()
+    {
+        Transform resolvedTarget = VehicleCameraTargetResolver.ResolveDefaultTarget();
+        if (resolvedTarget != null && resolvedTarget != target)
+        {
+            SetTarget(resolvedTarget);
+        }
+    }
+
+    void ResolveGameplayRig()
+    {
+        if (mainCamera == null)
+        {
+            mainCamera = GetComponent<Camera>();
+        }
+
+        if (cinemachineBrain == null)
+        {
+            cinemachineBrain = GetComponent<CinemachineBrain>();
+        }
+
+        if (gameplayCamera == null)
+        {
+            gameplayCamera = FindFirstObjectByType<CinemachineCamera>();
+        }
+
+        cinemachineFollow = gameplayCamera != null ? gameplayCamera.GetComponent<CinemachineFollow>() : null;
+        rotationComposer = gameplayCamera != null ? gameplayCamera.GetComponent<CinemachineRotationComposer>() : null;
+
+        if (gameplayCamera == null && !warnedMissingGameplayCamera)
+        {
+            warnedMissingGameplayCamera = true;
+            Debug.LogWarning("[CameraFollow] No CinemachineCamera found. Main gameplay follow will stay unbound.");
+        }
+    }
+
+    void EnsureExternalCameraControllers()
+    {
+        if (enableReverseCamera)
+        {
+            if (reverseCameraController == null)
+            {
+                reverseCameraController = FindFirstObjectByType<ReverseCameraHUD>();
+            }
+
+            if (reverseCameraController == null)
+            {
+                reverseCameraController = GetComponent<ReverseCameraHUD>();
+                if (reverseCameraController == null)
+                {
+                    reverseCameraController = gameObject.AddComponent<ReverseCameraHUD>();
+                }
+            }
+
+            reverseCameraController.Configure(
+                reverseCamOffset,
+                reverseCamEuler,
+                reverseCamFov,
+                new Rect(reverseCamVpX, reverseCamVpY, reverseCamVpW, reverseCamVpH),
+                -0.1f,
+                reverseCamStationaryThreshold,
+                reverseCamBorderColor,
+                reverseCamBorderWidth,
+                reverseCamFramePadding,
+                reverseCamFadeSpeed,
+                reverseCamGradientHeight);
+            reverseCameraController.SetGameplayCamera(mainCamera);
+        }
+
+        if (!enableMiniMap)
         {
             return;
         }
 
-        float speedKmh = targetRb.linearVelocity.magnitude * 3.6f;
-        float t = fovMaxSpeedKmh > 1f ? Mathf.Clamp01(speedKmh / fovMaxSpeedKmh) : 0f;
-        float desiredFov = Mathf.Lerp(baseFov, maxSpeedFov, t);
-        mainCamera.fieldOfView = Mathf.Lerp(mainCamera.fieldOfView, desiredFov, Mathf.Max(0.01f, fovLerpSpeed) * deltaTime);
+        if (minimapCameraController == null)
+        {
+            minimapCameraController = FindFirstObjectByType<MinimapCamera>();
+        }
+
+        if (minimapCameraController == null)
+        {
+            GameObject miniMapCameraObject = new GameObject("MinimapCamera");
+            miniMapCameraObject.AddComponent<Camera>();
+            minimapCameraController = miniMapCameraObject.AddComponent<MinimapCamera>();
+        }
+
+        minimapCameraController.ConfigureStandalone(
+            miniMapHeight,
+            miniMapOrthoSize,
+            miniMapRotateWithTarget,
+            allowMiniMapToggleKey,
+            miniMapViewportSize,
+            miniMapViewportMargin,
+            miniMapCullingMask,
+            miniMapBackgroundColor);
+    }
+
+    void BindGameplayRig()
+    {
+        if (gameplayCamera != null)
+        {
+            gameplayCamera.Target.TrackingTarget = target;
+            gameplayCamera.Target.LookAtTarget = null;
+            gameplayCamera.Target.CustomLookAtTarget = false;
+            gameplayCamera.CancelDamping(true);
+        }
+
+        if (cinemachineBrain != null)
+        {
+            cinemachineBrain.WorldUpOverride = target;
+        }
+    }
+
+    void UpdateCinemachineFollowOffset(float deltaTime)
+    {
+        if (cinemachineFollow == null || target == null)
+        {
+            return;
+        }
+
+        float desiredZoomOffset = 0f;
+        if (targetRb != null)
+        {
+            float localVelZ = target.InverseTransformDirection(targetRb.linearVelocity).z;
+            bool isReversing = (carController != null && carController.IsReverseInputActive) || localVelZ < -0.3f;
+            if (!isReversing)
+            {
+                float forwardKmh = Mathf.Max(0f, localVelZ * 3.6f);
+                float zoomT = Mathf.Clamp01(forwardKmh / Mathf.Max(1f, forwardZoomOutSpeedKmh));
+                desiredZoomOffset = -zoomT * forwardZoomOutExtra;
+            }
+        }
+
+        currentZoomOffset = Mathf.Lerp(currentZoomOffset, desiredZoomOffset, Mathf.Max(0.01f, dynamicZoomLerpSpeed) * deltaTime);
+    }
+
+    void ApplyCinemachineRigSettings(bool snap)
+    {
+        if (cinemachineFollow != null)
+        {
+            Vector3 desiredOffset = new Vector3(offset.x, offset.y, offset.z + currentZoomOffset);
+            if ((cinemachineFollow.FollowOffset - desiredOffset).sqrMagnitude > 0.0001f)
+            {
+                cinemachineFollow.FollowOffset = desiredOffset;
+            }
+        }
+
+        if (rotationComposer != null)
+        {
+            rotationComposer.TargetOffset = lookAtTargetOffset;
+        }
+
+        if (gameplayCamera != null)
+        {
+            LensSettings lens = gameplayCamera.Lens;
+            lens.FieldOfView = currentGameplayFov;
+            gameplayCamera.Lens = lens;
+
+            if (snap)
+            {
+                gameplayCamera.CancelDamping(true);
+            }
+        }
+        else if (mainCamera != null)
+        {
+            mainCamera.fieldOfView = currentGameplayFov;
+        }
+    }
+
+    float ResolveCurrentLensFov()
+    {
+        if (gameplayCamera != null)
+        {
+            return gameplayCamera.Lens.FieldOfView;
+        }
+
+        if (mainCamera != null)
+        {
+            return mainCamera.fieldOfView;
+        }
+
+        return baseFov;
     }
 
     void HandleCameraMovement(float deltaTime)
@@ -1164,9 +1355,11 @@ public class CameraFollow : MonoBehaviour
 
         if (!reverseCamShowing) return;
 
-        // Yalnızca yaw (Y ekseni) — pitch/roll titremesini önler
+        Transform reverseAnchor = vehicleCameraAnchors != null ? vehicleCameraAnchors.ReverseCameraAnchor : null;
         Quaternion yaw = Quaternion.Euler(0f, target.eulerAngles.y, 0f);
-        reverseCamHUD.transform.position = target.position + yaw * reverseCamOffset;
+        reverseCamHUD.transform.position = reverseAnchor != null
+            ? reverseAnchor.position
+            : target.position + yaw * reverseCamOffset;
         reverseCamHUD.transform.rotation = yaw * Quaternion.Euler(reverseCamEuler);
     }
 

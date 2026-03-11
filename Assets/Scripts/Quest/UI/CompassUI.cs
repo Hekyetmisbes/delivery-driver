@@ -261,6 +261,11 @@ namespace DeliveryDriver.Quest.UI
             }
         }
 
+        public void SetPlayerTransform(Transform player)
+        {
+            playerTransform = player;
+        }
+
         public void SetCompassVisible(bool visible)
         {
             showCompass = visible;

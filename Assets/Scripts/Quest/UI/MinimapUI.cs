@@ -472,6 +472,15 @@ namespace DeliveryDriver.Quest.UI
             }
         }
 
+        public void SetPlayerTransform(Transform player)
+        {
+            playerTransform = player;
+            if (minimapCamera != null)
+            {
+                minimapCamera.SetPlayer(player);
+            }
+        }
+
         public void OnScroll(PointerEventData eventData)
         {
             float scroll = eventData.scrollDelta.y;

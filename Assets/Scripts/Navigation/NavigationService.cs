@@ -141,6 +141,15 @@ namespace DeliveryDriver.Navigation
             OnNavigationCleared?.Invoke();
         }
 
+        public void SetPlayerTransform(Transform player)
+        {
+            cachedPlayerTransform = player;
+            if (CurrentObjective.IsValid)
+            {
+                ForceRouteRebuild();
+            }
+        }
+
         private void ForceRouteRebuild()
         {
             if (!CurrentObjective.IsValid)
