@@ -16,6 +16,15 @@ CREATE TABLE IF NOT EXISTS players (
   reputation_score INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS company_profiles (
+  company_id TEXT PRIMARY KEY,
+  player_id TEXT NOT NULL UNIQUE REFERENCES players(player_id) ON DELETE CASCADE,
+  company_name TEXT NOT NULL,
+  selected_vehicle_type TEXT NOT NULL DEFAULT 'Van' CHECK (selected_vehicle_type IN ('Van', 'Truck')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS neighborhoods (
   neighborhood_id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
@@ -233,6 +242,9 @@ CREATE INDEX IF NOT EXISTS idx_quest_events_instance_time
 
 CREATE INDEX IF NOT EXISTS idx_wallet_tx_player_created
   ON wallet_transactions(player_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_company_profiles_player
+  ON company_profiles(player_id);
 
 CREATE INDEX IF NOT EXISTS idx_pricing_rules_active_scope
   ON pricing_rules(is_active, neighborhood_id, difficulty, hour_start, hour_end);

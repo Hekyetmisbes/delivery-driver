@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using DeliveryDriver.Company;
 using UnityEngine;
 
 namespace DeliveryDriver.Quest
@@ -11,6 +12,8 @@ namespace DeliveryDriver.Quest
         private const string ConnTypeName = "Mono.Data.Sqlite.SqliteConnection, Mono.Data.Sqlite";
         public const string DefaultPlayerId = "local-player";
         public const string DefaultPlayerDisplayName = "Local Player";
+        public const string DefaultCompanyId = "company-local-player";
+        public const string DefaultCompanyName = "Hekye Logistics";
         private static QuestDatabaseService instance;
         private readonly object gate = new object();
 
@@ -18,10 +21,12 @@ namespace DeliveryDriver.Quest
         private Type connType;
         private string dbPath;
         private bool providerHealthy;
+        private VehicleType currentSelectedVehicleType = VehicleType.Van;
 
         public static QuestDatabaseService Instance => instance;
         public bool IsReady => connType != null && providerHealthy && File.Exists(dbPath);
         public string DatabasePath => dbPath;
+        public VehicleType CurrentSelectedVehicleType => currentSelectedVehicleType;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Bootstrap()
@@ -124,6 +129,161 @@ namespace DeliveryDriver.Quest
         public bool SetDefaultPlayerBalance(int balance)
         {
             return SetPlayerBalance(DefaultPlayerId, balance);
+        }
+
+        public bool EnsureDefaultCompanyProfile()
+        {
+            return EnsureDefaultCompanyProfile(DefaultPlayerId, DefaultCompanyName);
+        }
+
+        public bool EnsureDefaultCompanyProfile(string playerId, string companyName)
+        {
+            if (!IsReady)
+            {
+                Debug.LogError("[QuestDatabaseService] Cannot ensure company profile because the database is not ready.");
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(playerId))
+            {
+                Debug.LogError("[QuestDatabaseService] Cannot ensure company profile without a valid player id.");
+                return false;
+            }
+
+            string resolvedCompanyName = string.IsNullOrWhiteSpace(companyName) ? DefaultCompanyName : companyName.Trim();
+            string displayName = string.Equals(playerId, DefaultPlayerId, StringComparison.Ordinal)
+                ? DefaultPlayerDisplayName
+                : "Player";
+            if (!EnsurePlayer(playerId, displayName))
+            {
+                Debug.LogError($"[QuestDatabaseService] Failed to ensure player '{playerId}' before creating company profile.");
+                return false;
+            }
+
+            const string sql = @"INSERT OR IGNORE INTO company_profiles
+            (company_id,player_id,company_name,selected_vehicle_type,created_at,updated_at)
+            VALUES (@companyId,@playerId,@companyName,@vehicleType,datetime('now'),datetime('now'));";
+
+            bool inserted = ExecuteNonQuery(sql, new Dictionary<string, object>
+            {
+                ["@companyId"] = GetCompanyIdForPlayer(playerId),
+                ["@playerId"] = playerId,
+                ["@companyName"] = resolvedCompanyName,
+                ["@vehicleType"] = VehicleTypeExtensions.ToDatabaseValue(VehicleType.Van)
+            });
+
+            if (!inserted)
+            {
+                Debug.LogError($"[QuestDatabaseService] Failed to ensure company profile for player '{playerId}'.");
+                return false;
+            }
+
+            Debug.Log($"[QuestDatabaseService] Company profile ensured for player '{playerId}'.");
+            return true;
+        }
+
+        public CompanyProfileData GetCompanyProfile(string playerId)
+        {
+            if (!IsReady)
+            {
+                Debug.LogError("[QuestDatabaseService] Cannot load company profile because the database is not ready.");
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(playerId))
+            {
+                Debug.LogError("[QuestDatabaseService] Cannot load company profile without a valid player id.");
+                return null;
+            }
+
+            if (!EnsureDefaultCompanyProfile(playerId, DefaultCompanyName))
+            {
+                Debug.LogError($"[QuestDatabaseService] Company profile could not be ensured for player '{playerId}'.");
+                return null;
+            }
+
+            const string sql = @"SELECT cp.company_id,cp.player_id,cp.company_name,cp.selected_vehicle_type,
+            p.display_name,p.money_balance
+            FROM company_profiles cp
+            INNER JOIN players p ON p.player_id=cp.player_id
+            WHERE cp.player_id=@playerId
+            LIMIT 1;";
+
+            List<Dictionary<string, object>> rows = ExecuteQuery(sql, new Dictionary<string, object>
+            {
+                ["@playerId"] = playerId
+            });
+
+            if (rows.Count == 0)
+            {
+                Debug.LogError($"[QuestDatabaseService] Company profile record was not found for player '{playerId}'.");
+                return null;
+            }
+
+            Dictionary<string, object> row = rows[0];
+            string vehicleValue = S(row, "selected_vehicle_type");
+            if (!VehicleTypeExtensions.TryParseDatabaseValue(vehicleValue, out VehicleType vehicleType))
+            {
+                Debug.LogError($"[QuestDatabaseService] Invalid vehicle type '{vehicleValue}' for player '{playerId}'.");
+                return null;
+            }
+
+            currentSelectedVehicleType = vehicleType;
+
+            CompanyProfileData profile = new CompanyProfileData
+            {
+                CompanyId = S(row, "company_id"),
+                PlayerId = S(row, "player_id"),
+                CompanyName = S(row, "company_name"),
+                PlayerDisplayName = S(row, "display_name"),
+                Balance = I(row, "money_balance", 0),
+                SelectedVehicleType = vehicleType
+            };
+
+            Debug.Log($"[QuestDatabaseService] Company profile found for player '{playerId}' with vehicle '{vehicleValue}'.");
+            return profile;
+        }
+
+        public bool SaveSelectedVehicleType(string playerId, VehicleType vehicleType)
+        {
+            if (!IsReady)
+            {
+                Debug.LogError("[QuestDatabaseService] Cannot save vehicle type because the database is not ready.");
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(playerId))
+            {
+                Debug.LogError("[QuestDatabaseService] Cannot save vehicle type without a valid player id.");
+                return false;
+            }
+
+            if (!EnsureDefaultCompanyProfile(playerId, DefaultCompanyName))
+            {
+                Debug.LogError($"[QuestDatabaseService] Company profile could not be ensured before saving vehicle type for '{playerId}'.");
+                return false;
+            }
+
+            const string sql = @"UPDATE company_profiles
+            SET selected_vehicle_type=@vehicleType,
+                updated_at=datetime('now')
+            WHERE player_id=@playerId;";
+
+            bool saved = ExecuteNonQuery(sql, new Dictionary<string, object>
+            {
+                ["@playerId"] = playerId,
+                ["@vehicleType"] = VehicleTypeExtensions.ToDatabaseValue(vehicleType)
+            });
+
+            if (!saved)
+            {
+                Debug.LogError($"[QuestDatabaseService] Failed to save vehicle type '{vehicleType}' for player '{playerId}'.");
+                return false;
+            }
+
+            currentSelectedVehicleType = vehicleType;
+            Debug.Log($"[QuestDatabaseService] Selected vehicle type saved for player '{playerId}': {VehicleTypeExtensions.ToDatabaseValue(vehicleType)}");
+            return true;
         }
 
         public bool SaveQuestInstance(string playerId, QuestData quest)
@@ -552,6 +712,12 @@ namespace DeliveryDriver.Quest
             }
 
             prop.SetValue(o, v);
+        }
+        private static string GetCompanyIdForPlayer(string playerId)
+        {
+            return string.Equals(playerId, DefaultPlayerId, StringComparison.Ordinal)
+                ? DefaultCompanyId
+                : $"company-{playerId}";
         }
         private static string UtcNow() => DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
         private static object Db(object v) => v ?? DBNull.Value;

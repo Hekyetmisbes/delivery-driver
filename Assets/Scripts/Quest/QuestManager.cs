@@ -467,6 +467,12 @@ namespace DeliveryDriver.Quest
                 availableQuests.Add(quest);
             }
         }
+
+        public void SetPlayerVehicle(CarController controller)
+        {
+            playerController = controller;
+            playerTransform = controller != null ? controller.transform : null;
+        }
         
         /// <summary>
         /// Task 9.2: Generates a quest procedurally based on difficulty parameters.
