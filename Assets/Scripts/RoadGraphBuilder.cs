@@ -348,7 +348,7 @@ namespace TrafficSystem
 
                     if (segment.waypoints.Count > 0)
                     {
-                        NormalizeWaypointForwards(segment);
+                        RoadGraphMeshSampler.NormalizeWaypointForwards(segment);
                         roadGraph.roadSegments.Add(segment);
                         Debug.Log($"[RoadGraphBuilder] Sampled road '{segment.name}' via ERRoad API: {segment.waypoints.Count} waypoints");
                         return true;
@@ -376,7 +376,7 @@ namespace TrafficSystem
             if (markerPositions == null || markerPositions.Count < 2)
                 return false;
 
-            List<Vector3> sampled = ResamplePolyline(markerPositions, sampleStepMeters);
+            List<Vector3> sampled = RoadGraphMeshSampler.ResamplePolyline(markerPositions, sampleStepMeters);
             if (sampled.Count < 2)
                 return false;
 
@@ -398,7 +398,7 @@ namespace TrafficSystem
                 segment.waypoints.Add(new Waypoint(pos, forward, segmentId));
             }
 
-            NormalizeWaypointForwards(segment);
+            RoadGraphMeshSampler.NormalizeWaypointForwards(segment);
             roadGraph.roadSegments.Add(segment);
             Debug.Log($"[RoadGraphBuilder] Sampled road '{segment.name}' from markers: {segment.waypoints.Count} waypoints");
             return true;
@@ -566,7 +566,7 @@ namespace TrafficSystem
             foreach (var item in ordered)
                 positions.Add(item.pos);
 
-            List<Vector3> sampled = ResamplePolyline(positions, sampleStepMeters);
+            List<Vector3> sampled = RoadGraphMeshSampler.ResamplePolyline(positions, sampleStepMeters);
             if (sampled.Count < 2) return false;
 
             RoadSegment segment = new RoadSegment(segmentId, root.name);
@@ -583,7 +583,7 @@ namespace TrafficSystem
                 segment.waypoints.Add(new Waypoint(pos, forward, segmentId));
             }
 
-            NormalizeWaypointForwards(segment);
+            RoadGraphMeshSampler.NormalizeWaypointForwards(segment);
             roadGraph.roadSegments.Add(segment);
             Debug.Log($"[RoadGraphBuilder] Sampled road '{segment.name}' from marker components: {segment.waypoints.Count} waypoints");
             return true;
@@ -650,7 +650,7 @@ namespace TrafficSystem
             if (markerPositions == null || markerPositions.Count < 2)
                 return false;
 
-            List<Vector3> sampled = ResamplePolyline(markerPositions, sampleStepMeters);
+            List<Vector3> sampled = RoadGraphMeshSampler.ResamplePolyline(markerPositions, sampleStepMeters);
             if (sampled.Count < 2)
                 return false;
 
@@ -668,7 +668,7 @@ namespace TrafficSystem
                 segment.waypoints.Add(new Waypoint(pos, forward, segmentId));
             }
 
-            NormalizeWaypointForwards(segment);
+            RoadGraphMeshSampler.NormalizeWaypointForwards(segment);
             roadGraph.roadSegments.Add(segment);
             Debug.Log($"[RoadGraphBuilder] Sampled road from road object markers: {segment.waypoints.Count} waypoints");
             return true;
@@ -764,11 +764,11 @@ namespace TrafficSystem
             if (best == null) return false;
 
             RoadSegment segment = new RoadSegment(segmentId, root.name);
-            SampleFromMesh(best, segment, segmentId);
+            RoadGraphMeshSampler.SampleFromMesh(best, segment, segmentId, sampleStepMeters);
 
             if (segment.waypoints.Count > 0)
             {
-                NormalizeWaypointForwards(segment);
+                RoadGraphMeshSampler.NormalizeWaypointForwards(segment);
                 roadGraph.roadSegments.Add(segment);
                 Debug.Log($"[RoadGraphBuilder] Sampled road '{segment.name}' from mesh hierarchy: {segment.waypoints.Count} waypoints");
                 return true;
@@ -803,10 +803,10 @@ namespace TrafficSystem
                 if (IsEasyRoadsObject(go)) continue;
 
                 RoadSegment centerSegment = new RoadSegment(roadGraph.roadSegments.Count, go.name);
-                SampleFromMesh(meshFilter, centerSegment, centerSegment.id);
+                RoadGraphMeshSampler.SampleFromMesh(meshFilter, centerSegment, centerSegment.id, sampleStepMeters);
                 if (centerSegment.waypoints.Count < 2) continue;
 
-                NormalizeWaypointForwards(centerSegment);
+                RoadGraphMeshSampler.NormalizeWaypointForwards(centerSegment);
 
                 if (dualLaneMode)
                 {
@@ -900,7 +900,7 @@ namespace TrafficSystem
                 laneSegment.waypoints.Add(new Waypoint(lanePos, fwd, laneSegment.id));
             }
 
-            NormalizeWaypointForwards(laneSegment);
+            RoadGraphMeshSampler.NormalizeWaypointForwards(laneSegment);
             roadGraph.roadSegments.Add(laneSegment);
         }
 
@@ -1071,7 +1071,7 @@ namespace TrafficSystem
             if (meshFilter != null && meshFilter.sharedMesh != null)
             {
                 Debug.Log($"[RoadGraphBuilder] Sampling road '{roadTransform.name}' from mesh");
-                SampleFromMesh(meshFilter, segment, segmentId);
+                RoadGraphMeshSampler.SampleFromMesh(meshFilter, segment, segmentId, sampleStepMeters);
 
                 if (segment.waypoints.Count > 0)
                 {
@@ -1137,7 +1137,7 @@ namespace TrafficSystem
 
             if (segment.waypoints.Count > 0)
             {
-                NormalizeWaypointForwards(segment);
+                RoadGraphMeshSampler.NormalizeWaypointForwards(segment);
                 roadGraph.roadSegments.Add(segment);
                 Debug.Log($"[RoadGraphBuilder] Sampled road '{segment.name}' from transforms: {segment.waypoints.Count} waypoints");
             }
@@ -1148,106 +1148,7 @@ namespace TrafficSystem
         /// </summary>
         private void BuildConnections()
         {
-            float threshold = connectionThresholdMeters;
-            float recoveryThreshold = Mathf.Max(connectionThresholdMeters, sampleStepMeters);
-
-            foreach (var segment in roadGraph.roadSegments)
-            {
-                if (segment != null)
-                {
-                    segment.connections = new List<RoadConnection>();
-                }
-            }
-
-            foreach (var segment in roadGraph.roadSegments)
-            {
-                if (segment.waypoints.Count == 0) continue;
-
-                // Check start and end points for connections
-                Vector3 startPos = segment.waypoints[0].position;
-                Vector3 endPos = segment.waypoints[segment.waypoints.Count - 1].position;
-                int lastIdx = segment.waypoints.Count - 1;
-
-                // Self-loop connection for closed roads
-                if (Vector3.Distance(endPos, startPos) < threshold)
-                {
-                    AddConnectionIfMissing(segment, segment, lastIdx, 0);
-                }
-
-                foreach (var otherSegment in roadGraph.roadSegments)
-                {
-                    if (otherSegment == segment || otherSegment.waypoints.Count == 0) continue;
-
-                    Vector3 otherStart = otherSegment.waypoints[0].position;
-                    Vector3 otherEnd = otherSegment.waypoints[otherSegment.waypoints.Count - 1].position;
-                    int otherLastIdx = otherSegment.waypoints.Count - 1;
-
-                    // End of current -> Start of other
-                    if (Vector3.Distance(endPos, otherStart) < threshold)
-                    {
-                        AddConnectionIfMissing(segment, otherSegment, lastIdx, 0);
-                    }
-
-                    // End of current -> End of other (reverse direction)
-                    if (Vector3.Distance(endPos, otherEnd) < threshold)
-                    {
-                        AddConnectionIfMissing(segment, otherSegment, lastIdx, otherLastIdx);
-                    }
-
-                    // Start of current -> Start of other (both segments start at same intersection)
-                    if (Vector3.Distance(startPos, otherStart) < threshold)
-                    {
-                        AddConnectionIfMissing(segment, otherSegment, 0, 0);
-                    }
-
-                    // Start of current -> End of other
-                    if (Vector3.Distance(startPos, otherEnd) < threshold)
-                    {
-                        AddConnectionIfMissing(segment, otherSegment, 0, otherLastIdx);
-                    }
-                }
-            }
-
-            if (recoveryThreshold > threshold + 0.01f)
-            {
-                foreach (var segment in roadGraph.roadSegments)
-                {
-                    if (segment.waypoints.Count == 0) continue;
-
-                    Vector3 startPos = segment.waypoints[0].position;
-                    Vector3 endPos = segment.waypoints[segment.waypoints.Count - 1].position;
-                    int lastIdx = segment.waypoints.Count - 1;
-
-                    foreach (var otherSegment in roadGraph.roadSegments)
-                    {
-                        if (otherSegment == segment || otherSegment.waypoints.Count == 0) continue;
-
-                        Vector3 otherStart = otherSegment.waypoints[0].position;
-                        Vector3 otherEnd = otherSegment.waypoints[otherSegment.waypoints.Count - 1].position;
-                        int otherLastIdx = otherSegment.waypoints.Count - 1;
-
-                        if (ShouldCreateRecoveryConnection(endPos, otherStart, recoveryThreshold))
-                        {
-                            AddConnectionIfMissing(segment, otherSegment, lastIdx, 0);
-                        }
-
-                        if (ShouldCreateRecoveryConnection(endPos, otherEnd, recoveryThreshold))
-                        {
-                            AddConnectionIfMissing(segment, otherSegment, lastIdx, otherLastIdx);
-                        }
-
-                        if (ShouldCreateRecoveryConnection(startPos, otherStart, recoveryThreshold))
-                        {
-                            AddConnectionIfMissing(segment, otherSegment, 0, 0);
-                        }
-
-                        if (ShouldCreateRecoveryConnection(startPos, otherEnd, recoveryThreshold))
-                        {
-                            AddConnectionIfMissing(segment, otherSegment, 0, otherLastIdx);
-                        }
-                    }
-                }
-            }
+            RoadGraphConnectionBuilder.BuildConnections(roadGraph, connectionThresholdMeters, sampleStepMeters);
 
             int totalConnections = 0;
             foreach (var segment in roadGraph.roadSegments)
@@ -1256,242 +1157,6 @@ namespace TrafficSystem
             }
 
             Debug.Log($"[RoadGraphBuilder] Built {totalConnections} connections between road segments");
-        }
-
-        private static void AddConnectionIfMissing(RoadSegment fromSegment, RoadSegment toSegment, int fromWaypointIndex, int toWaypointIndex)
-        {
-            if (fromSegment == null || toSegment == null)
-            {
-                return;
-            }
-
-            if (fromSegment.connections == null)
-            {
-                fromSegment.connections = new List<RoadConnection>();
-            }
-
-            for (int i = 0; i < fromSegment.connections.Count; i++)
-            {
-                RoadConnection existing = fromSegment.connections[i];
-                if (existing == null)
-                {
-                    continue;
-                }
-
-                if (existing.toSegment == toSegment &&
-                    existing.fromWaypointIndex == fromWaypointIndex &&
-                    existing.toWaypointIndex == toWaypointIndex)
-                {
-                    return;
-                }
-            }
-
-            fromSegment.connections.Add(new RoadConnection(
-                fromSegment,
-                toSegment,
-                fromWaypointIndex,
-                toWaypointIndex));
-        }
-
-        private static bool ShouldCreateRecoveryConnection(Vector3 from, Vector3 to, float threshold)
-        {
-            Vector3 delta = to - from;
-            if (Mathf.Abs(delta.y) > 2.5f)
-            {
-                return false;
-            }
-
-            delta.y = 0f;
-            return delta.sqrMagnitude <= threshold * threshold;
-        }
-
-        /// <summary>
-        /// Sample waypoints from road mesh centerline
-        /// </summary>
-        private void SampleFromMesh(MeshFilter meshFilter, RoadSegment segment, int segmentId)
-        {
-            Mesh mesh = meshFilter.sharedMesh;
-            Vector3[] vertices = mesh.vertices;
-            Transform transform = meshFilter.transform;
-
-            if (vertices.Length < 2)
-            {
-                Debug.LogWarning($"[RoadGraphBuilder] Mesh has too few vertices: {vertices.Length}");
-                return;
-            }
-
-            // For road meshes, find the centerline in local mesh space first, then convert to world space.
-            // This keeps sampling aligned when the road GameObject is rotated in world space.
-            List<Vector3> centerlinePoints = ExtractCenterline(vertices, transform);
-
-            if (centerlinePoints.Count < 2)
-            {
-                Debug.LogWarning($"[RoadGraphBuilder] Could not extract centerline from mesh");
-                return;
-            }
-
-            // Create waypoints from centerline
-            for (int i = 0; i < centerlinePoints.Count; i++)
-            {
-                Vector3 pos = centerlinePoints[i];
-                Vector3 forward = Vector3.forward;
-
-                if (i < centerlinePoints.Count - 1)
-                {
-                    forward = (centerlinePoints[i + 1] - pos).normalized;
-                }
-                else if (i > 0)
-                {
-                    forward = (pos - centerlinePoints[i - 1]).normalized;
-                }
-
-                segment.waypoints.Add(new Waypoint(pos, forward, segmentId));
-            }
-
-            NormalizeWaypointForwards(segment);
-        }
-
-        /// <summary>
-        /// Extract centerline from mesh vertices
-        /// </summary>
-        private List<Vector3> ExtractCenterline(Vector3[] localVertices, Transform meshTransform)
-        {
-            List<Vector3> centerline = new List<Vector3>();
-
-            if (localVertices == null || localVertices.Length == 0 || meshTransform == null) return centerline;
-
-            // Find dominant axis length to avoid sampling severely curved roads
-            float minX = float.MaxValue, maxX = float.MinValue;
-            float minZ = float.MaxValue, maxZ = float.MinValue;
-            foreach (Vector3 v in localVertices)
-            {
-                if (v.x < minX) minX = v.x;
-                if (v.x > maxX) maxX = v.x;
-                if (v.z < minZ) minZ = v.z;
-                if (v.z > maxZ) maxZ = v.z;
-            }
-
-            float spanX = maxX - minX;
-            float spanZ = maxZ - minZ;
-            bool useZ = spanZ >= spanX;
-            float dominantScale = Mathf.Abs(useZ ? meshTransform.lossyScale.z : meshTransform.lossyScale.x);
-            if (dominantScale < 0.0001f) dominantScale = 1f;
-
-            float roadLength = (useZ ? spanZ : spanX) * dominantScale;
-            if (roadLength < 1f) return centerline;
-
-            int sampleCount = Mathf.Max(2, Mathf.CeilToInt(roadLength / sampleStepMeters));
-            float axisToleranceLocal = (sampleStepMeters * 0.5f) / dominantScale;
-
-            // Sample points along the road
-            for (int i = 0; i < sampleCount; i++)
-            {
-                float t = (float)i / (sampleCount - 1);
-                float targetAxis = useZ ? Mathf.Lerp(minZ, maxZ, t) : Mathf.Lerp(minX, maxX, t);
-
-                // Find all vertices near this Z position
-                List<Vector3> nearVertices = new List<Vector3>();
-
-                foreach (Vector3 v in localVertices)
-                {
-                    float axisValue = useZ ? v.z : v.x;
-                    if (Mathf.Abs(axisValue - targetAxis) < axisToleranceLocal)
-                    {
-                        nearVertices.Add(v);
-                    }
-                }
-
-                if (nearVertices.Count > 0)
-                {
-                    // Average to find centerline
-                    Vector3 center = Vector3.zero;
-                    foreach (Vector3 v in nearVertices)
-                    {
-                        center += v;
-                    }
-                    center /= nearVertices.Count;
-                    centerline.Add(meshTransform.TransformPoint(center));
-                }
-            }
-
-            return centerline;
-        }
-
-        private List<Vector3> ResamplePolyline(List<Vector3> points, float step)
-        {
-            List<Vector3> result = new List<Vector3>();
-            if (points == null || points.Count == 0) return result;
-
-            if (step <= 0.01f)
-            {
-                result.AddRange(points);
-                return result;
-            }
-
-            result.Add(points[0]);
-            float remaining = step;
-
-            for (int i = 1; i < points.Count; i++)
-            {
-                Vector3 start = points[i - 1];
-                Vector3 end = points[i];
-                float dist = Vector3.Distance(start, end);
-                if (dist < 0.001f) continue;
-
-                Vector3 dir = (end - start).normalized;
-                float traveled = 0f;
-
-                while (traveled + remaining <= dist)
-                {
-                    Vector3 pos = start + dir * (traveled + remaining);
-                    result.Add(pos);
-                    traveled += remaining;
-                    remaining = step;
-                }
-
-                remaining -= (dist - traveled);
-                if (remaining < 0.001f) remaining = step;
-            }
-
-            if (Vector3.Distance(result[result.Count - 1], points[points.Count - 1]) > 0.01f)
-                result.Add(points[points.Count - 1]);
-
-            return result;
-        }
-
-        private void NormalizeWaypointForwards(RoadSegment segment)
-        {
-            if (segment == null || segment.waypoints.Count == 0) return;
-
-            Vector3 prev = segment.waypoints[0].forward;
-            if (prev.sqrMagnitude < 0.01f && segment.waypoints.Count > 1)
-            {
-                prev = segment.waypoints[1].position - segment.waypoints[0].position;
-            }
-
-            prev.y = 0f;
-            if (prev.sqrMagnitude < 0.01f)
-                prev = Vector3.forward;
-            prev.Normalize();
-            segment.waypoints[0].forward = prev;
-
-            for (int i = 1; i < segment.waypoints.Count; i++)
-            {
-                Vector3 fwd = segment.waypoints[i].forward;
-                if (fwd.sqrMagnitude < 0.01f)
-                    fwd = prev;
-
-                fwd.y = 0f;
-                if (fwd.sqrMagnitude < 0.01f)
-                    fwd = prev;
-
-                if (Vector3.Dot(fwd, prev) < 0f)
-                    fwd = -fwd;
-
-                fwd.Normalize();
-                segment.waypoints[i].forward = fwd;
-                prev = fwd;
-            }
         }
 
         private static Type ResolveType(string typeName)

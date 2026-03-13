@@ -13,6 +13,8 @@
 - [x] Step 9 - Replaced the company installer's editor-only prefab dependency with a runtime-loadable `Resources/Company/VehiclePrefabCatalog` asset and kept editor asset-path loading only as a fallback for development workflows.
 - [x] Step 10 - Isolated `MemoryProfiler`, `PerformanceRegressionDetector`, and `PerformanceBenchmark` behind editor/debug-build runtime gates so profiling and regression tooling no longer stays active in normal gameplay builds.
 - [x] Step 11 - Re-verified the newest company/diagnostics changes with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
+- [x] Step 12 - Split `RoadGraphBuilder` responsibilities by extracting graph connection construction into `RoadGraphConnectionBuilder` and mesh/centerline waypoint sampling into `RoadGraphMeshSampler`, leaving `RoadGraphBuilder` as the orchestration layer for graph assembly.
+- [x] Step 13 - Re-verified the `RoadGraphBuilder` refactor with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
 
 Rewrite, optimize, and reorganize all C# scripts under `Assets/Scripts/` in this Unity project. The goal is not to patch individual issues. The goal is to rebuild the scripting architecture so it is faster, cleaner, easier to maintain, easier to extend, and significantly more readable.
 
