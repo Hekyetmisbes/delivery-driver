@@ -70,8 +70,6 @@ namespace DeliveryDriver.Quest
         [SerializeField] private AudioClip deliveryMusicClip;
         [SerializeField] private float timeWarningThreshold = 30f;
         [SerializeField] private float musicCrossfadeDuration = 2f;
-        private bool timeWarningPlayed = false;
-        private bool isCrossfading = false;
 
         [Header("Cargo Visuals")]
         [SerializeField] private CargoVisual cargoVisual;
@@ -83,7 +81,6 @@ namespace DeliveryDriver.Quest
         [SerializeField] private GameObject damageEffectPrefab;
         [SerializeField] private GameObject levelUpEffectPrefab;
         [SerializeField] private int particlePoolSize = 10;
-        private Queue<GameObject> particlePool = new Queue<GameObject>();
 
         [Header("Fragile Cargo Damage")]
         [SerializeField] private float collisionDamageThreshold = 10000f;
@@ -180,6 +177,8 @@ namespace DeliveryDriver.Quest
         private Coroutine startupInitCoroutine;
         private QuestLocationAssignmentService questLocationAssignmentService;
         private QuestZoneMarkerService questZoneMarkerService;
+        private QuestAudioPresentationService questAudioPresentationService;
+        private QuestParticleEffectService questParticleEffectService;
 
         public UnityEvent<QuestData> OnQuestStarted = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnQuestCompleted = new UnityEvent<QuestData>();
@@ -230,9 +229,43 @@ namespace DeliveryDriver.Quest
                 () => pickupMarkerPrefab,
                 () => deliveryMarkerPrefab,
                 activeZones,
-                SpawnMarkerParticles);
+                position => GetParticleEffectService().SpawnMarkerParticles(position));
 
             return questZoneMarkerService;
+        }
+
+        private QuestAudioPresentationService GetAudioPresentationService()
+        {
+            questAudioPresentationService ??= new QuestAudioPresentationService(
+                questSfxSource,
+                musicSource,
+                timeWarningClip,
+                levelUpClip,
+                explorationMusicClip,
+                deliveryMusicClip,
+                timeWarningThreshold,
+                musicCrossfadeDuration);
+
+            return questAudioPresentationService;
+        }
+
+        private QuestParticleEffectService GetParticleEffectService()
+        {
+            questParticleEffectService ??= new QuestParticleEffectService(
+                this,
+                questMarkerParticlePrefab,
+                pickupEffectPrefab,
+                deliveryEffectPrefab,
+                damageEffectPrefab,
+                levelUpEffectPrefab,
+                particlePoolSize);
+
+            return questParticleEffectService;
+        }
+
+        private Coroutine StartManagedCoroutine(IEnumerator routine)
+        {
+            return StartCoroutine(routine);
         }
 
         private void Awake()
@@ -296,7 +329,7 @@ namespace DeliveryDriver.Quest
         private void Start()
         {
             // Task 10.2: Initialize particle pool
-            InitializeParticlePool();
+            GetParticleEffectService().InitializeParticlePool();
 
             if (markerPool != null)
             {
@@ -305,12 +338,7 @@ namespace DeliveryDriver.Quest
             }
 
             // Task 10.1: Start exploration music
-            if (musicSource != null && explorationMusicClip != null)
-            {
-                musicSource.clip = explorationMusicClip;
-                musicSource.loop = true;
-                musicSource.Play();
-            }
+            GetAudioPresentationService().InitializeExplorationMusic();
 
             // Delay quest generation until road graph is built to avoid startup warnings.
             startupInitCoroutine = StartCoroutine(InitializeQuestStateWhenReady());
@@ -403,14 +431,13 @@ namespace DeliveryDriver.Quest
 
             // Task 10.1: Time Warning Audio
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (!debugInfiniteTime && currentQuest.TimeRemaining < timeWarningThreshold && !timeWarningPlayed)
-#else
-            if (currentQuest.TimeRemaining < timeWarningThreshold && !timeWarningPlayed)
-#endif
+            if (!debugInfiniteTime)
             {
-                PlayTimeWarning();
-                timeWarningPlayed = true;
+                GetAudioPresentationService().TryPlayTimeWarning(currentQuest.TimeRemaining);
             }
+#else
+            GetAudioPresentationService().TryPlayTimeWarning(currentQuest.TimeRemaining);
+#endif
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (!debugInfiniteTime && currentQuest.IsTimeExpired())
@@ -675,11 +702,11 @@ namespace DeliveryDriver.Quest
             }
 
             // Task 10.1: Play quest accepted sound and switch music
-            PlayQuestClip(questAcceptedClip);
-            SwitchToDeliveryMusic();
+            GetAudioPresentationService().PlayQuestClip(questAcceptedClip);
+            GetAudioPresentationService().SwitchToDeliveryMusic(StartManagedCoroutine);
 
             // Reset time warning flag
-            timeWarningPlayed = false;
+            GetAudioPresentationService().ResetTimeWarning();
             MarkQuestUiDirty();
 
             OnQuestStarted.Invoke(quest);
@@ -769,16 +796,16 @@ namespace DeliveryDriver.Quest
             Debug.Log($"[QuestManager] Quest completed with {quest.Rating} rank! Reward={finalReward}, Penalty={payout.TotalPenalty}, Streak={consecutiveSuccesses} ({streakMultiplier:F2}x)");
 
             // Task 10.1: Play success sound
-            PlayQuestClip(deliveryClip);
+            GetAudioPresentationService().PlayQuestClip(deliveryClip);
 
             // Task 10.2: Play delivery particle effect
             if (playerTransform != null)
             {
-                PlayParticleEffect(deliveryEffectPrefab, playerTransform.position);
+                GetParticleEffectService().PlayParticleEffect(deliveryEffectPrefab, playerTransform.position);
             }
 
             // Task 10.1: Switch back to exploration music
-            SwitchToExplorationMusic();
+            GetAudioPresentationService().SwitchToExplorationMusic(StartManagedCoroutine);
 
             OnQuestCompleted.Invoke(quest);
             GetZoneMarkerService().CleanupQuestMarkers(quest);
@@ -835,10 +862,10 @@ namespace DeliveryDriver.Quest
 
             GetZoneMarkerService().CleanupQuestMarkers(quest);
             GetZoneMarkerService().ClearAllZones();
-            PlayQuestClip(failureClip);
+            GetAudioPresentationService().PlayQuestClip(failureClip);
 
             // Task 10.1: Switch back to exploration music
-            SwitchToExplorationMusic();
+            GetAudioPresentationService().SwitchToExplorationMusic(StartManagedCoroutine);
 
             GenerateAvailableQuests(1);
         }
@@ -932,12 +959,12 @@ namespace DeliveryDriver.Quest
             currentQuest.HasPickedUpCargo = true;
             currentQuest.PickupLocation?.HideMarker();
             GetZoneMarkerService().ClearAllZones();
-            PlayQuestClip(pickupClip);
+            GetAudioPresentationService().PlayQuestClip(pickupClip);
 
             // Task 10.2: Play pickup particle effect
             if (playerTransform != null)
             {
-                PlayParticleEffect(pickupEffectPrefab, playerTransform.position);
+                GetParticleEffectService().PlayParticleEffect(pickupEffectPrefab, playerTransform.position);
             }
 
             TryApplyCargoWeight(currentQuest.Cargo);
@@ -988,7 +1015,7 @@ namespace DeliveryDriver.Quest
             {
                 TryRemoveCargoWeight();
                 cargoVisual?.DetachCargo();
-                PlayQuestClip(deliveryClip);
+                GetAudioPresentationService().PlayQuestClip(deliveryClip);
 
                 // Task 10.4: Tutorial integration
                 if (TutorialManager.Instance != null)
@@ -1009,7 +1036,7 @@ namespace DeliveryDriver.Quest
 
             TryRemoveCargoWeight();
             cargoVisual?.DetachCargo();
-            PlayQuestClip(destroyedClip);
+            GetAudioPresentationService().PlayQuestClip(destroyedClip);
             FailQuest(currentQuest, "Cargo destroyed");
         }
 
@@ -1068,12 +1095,12 @@ namespace DeliveryDriver.Quest
                 }
                 currentQuest.Cargo.TakeDamage(damage);
                 cargoVisual?.PlayDamageEffect();
-                PlayQuestClip(damageClip);
+                GetAudioPresentationService().PlayQuestClip(damageClip);
 
                 // Task 10.2: Play damage particle effect
                 if (playerTransform != null)
                 {
-                    PlayParticleEffect(damageEffectPrefab, playerTransform.position);
+                    GetParticleEffectService().PlayParticleEffect(damageEffectPrefab, playerTransform.position);
                 }
 
                 if (currentQuest.Cargo.IsDestroyed())
@@ -1317,16 +1344,6 @@ namespace DeliveryDriver.Quest
         }
 #endif
 
-        private void PlayQuestClip(AudioClip clip)
-        {
-            if (questSfxSource == null || clip == null)
-            {
-                return;
-            }
-
-            questSfxSource.PlayOneShot(clip);
-        }
-
         private void TryApplyCargoWeight(CargoData cargo)
         {
             if (playerController == null || cargo == null)
@@ -1547,101 +1564,11 @@ namespace DeliveryDriver.Quest
         #region Task 10.1: Audio & Music System
 
         /// <summary>
-        /// Task 10.1: Plays the time warning sound effect
-        /// </summary>
-        private void PlayTimeWarning()
-        {
-            if (questSfxSource != null && timeWarningClip != null)
-            {
-                questSfxSource.PlayOneShot(timeWarningClip);
-                Debug.Log("[QuestManager] Time warning! Less than 30 seconds remaining!");
-            }
-        }
-
-        /// <summary>
-        /// Task 10.1: Switches background music to delivery mode (intense)
-        /// </summary>
-        private void SwitchToDeliveryMusic()
-        {
-            if (musicSource == null || deliveryMusicClip == null)
-            {
-                return;
-            }
-
-            if (musicSource.clip == deliveryMusicClip)
-            {
-                return; // Already playing delivery music
-            }
-
-            StartCoroutine(CrossfadeMusic(deliveryMusicClip));
-        }
-
-        /// <summary>
-        /// Task 10.1: Switches background music to exploration mode (calm)
-        /// </summary>
-        private void SwitchToExplorationMusic()
-        {
-            if (musicSource == null || explorationMusicClip == null)
-            {
-                return;
-            }
-
-            if (musicSource.clip == explorationMusicClip)
-            {
-                return; // Already playing exploration music
-            }
-
-            StartCoroutine(CrossfadeMusic(explorationMusicClip));
-        }
-
-        /// <summary>
-        /// Task 10.1: Crossfades between music tracks smoothly
-        /// </summary>
-        private System.Collections.IEnumerator CrossfadeMusic(AudioClip newClip)
-        {
-            if (isCrossfading)
-            {
-                yield break; // Don't interrupt existing crossfade
-            }
-
-            isCrossfading = true;
-            float startVolume = musicSource.volume;
-
-            // Fade out current music
-            float elapsed = 0f;
-            while (elapsed < musicCrossfadeDuration / 2f)
-            {
-                elapsed += Time.deltaTime;
-                musicSource.volume = Mathf.Lerp(startVolume, 0f, elapsed / (musicCrossfadeDuration / 2f));
-                yield return null;
-            }
-
-            // Switch clip
-            musicSource.clip = newClip;
-            musicSource.Play();
-
-            // Fade in new music
-            elapsed = 0f;
-            while (elapsed < musicCrossfadeDuration / 2f)
-            {
-                elapsed += Time.deltaTime;
-                musicSource.volume = Mathf.Lerp(0f, startVolume, elapsed / (musicCrossfadeDuration / 2f));
-                yield return null;
-            }
-
-            musicSource.volume = startVolume;
-            isCrossfading = false;
-        }
-
-        /// <summary>
         /// Task 10.1: Plays a level up sound effect (can be called from PlayerProgressionManager)
         /// </summary>
         public void PlayLevelUpSound()
         {
-            if (questSfxSource != null && levelUpClip != null)
-            {
-                questSfxSource.PlayOneShot(levelUpClip);
-            }
+            GetAudioPresentationService().PlayLevelUpSound();
         }
 
         /// <summary>
@@ -1649,10 +1576,7 @@ namespace DeliveryDriver.Quest
         /// </summary>
         public void SetMusicVolume(float volume)
         {
-            if (musicSource != null)
-            {
-                musicSource.volume = Mathf.Clamp01(volume);
-            }
+            GetAudioPresentationService().SetMusicVolume(volume);
         }
 
         /// <summary>
@@ -1660,10 +1584,7 @@ namespace DeliveryDriver.Quest
         /// </summary>
         public void SetSFXVolume(float volume)
         {
-            if (questSfxSource != null)
-            {
-                questSfxSource.volume = Mathf.Clamp01(volume);
-            }
+            GetAudioPresentationService().SetSfxVolume(volume);
         }
 
         #endregion
@@ -1671,115 +1592,11 @@ namespace DeliveryDriver.Quest
         #region Task 10.2: Particle Effects System
 
         /// <summary>
-        /// Task 10.2: Initializes the particle effect object pool
-        /// </summary>
-        private void InitializeParticlePool()
-        {
-            particlePool.Clear();
-
-            // Pre-instantiate particle effects for pooling
-            GameObject[] prefabs = { pickupEffectPrefab, deliveryEffectPrefab, damageEffectPrefab, levelUpEffectPrefab };
-
-            foreach (GameObject prefab in prefabs)
-            {
-                if (prefab == null) continue;
-
-                for (int i = 0; i < particlePoolSize / prefabs.Length; i++)
-                {
-                    GameObject particle = Instantiate(prefab);
-                    particle.SetActive(false);
-                    particlePool.Enqueue(particle);
-                }
-            }
-
-            Debug.Log($"[QuestManager] Particle pool initialized with {particlePool.Count} objects.");
-        }
-
-        /// <summary>
-        /// Task 10.2: Plays a particle effect at the specified position
-        /// </summary>
-        private void PlayParticleEffect(GameObject effectPrefab, Vector3 position)
-        {
-            if (effectPrefab == null)
-            {
-                return;
-            }
-
-            GameObject effect = null;
-
-            // Try to get from pool first
-            if (particlePool.Count > 0)
-            {
-                effect = particlePool.Dequeue();
-            }
-
-            // If pool is empty, instantiate new one
-            if (effect == null)
-            {
-                effect = Instantiate(effectPrefab, position, Quaternion.identity);
-            }
-            else
-            {
-                effect.transform.position = position;
-                effect.transform.rotation = Quaternion.identity;
-                effect.SetActive(true);
-            }
-
-            // Get particle system and play
-            ParticleSystem ps = effect.GetComponent<ParticleSystem>();
-            if (ps != null)
-            {
-                ps.Play();
-
-                // Return to pool after particle duration
-                float duration = ps.main.duration + ps.main.startLifetime.constantMax;
-                StartCoroutine(ReturnParticleToPool(effect, duration));
-            }
-            else
-            {
-                // If no particle system, just destroy after 5 seconds
-                StartCoroutine(ReturnParticleToPool(effect, 5f));
-            }
-        }
-
-        /// <summary>
-        /// Task 10.2: Returns a particle effect to the pool after duration
-        /// </summary>
-        private System.Collections.IEnumerator ReturnParticleToPool(GameObject particle, float delay)
-        {
-            yield return new UnityEngine.WaitForSeconds(delay);
-
-            if (particle != null)
-            {
-                particle.SetActive(false);
-                particlePool.Enqueue(particle);
-            }
-        }
-
-        /// <summary>
         /// Task 10.2: Plays a level up particle effect (can be called from PlayerProgressionManager)
         /// </summary>
         public void PlayLevelUpEffect(Vector3 position)
         {
-            PlayParticleEffect(levelUpEffectPrefab, position);
-        }
-
-        /// <summary>
-        /// Task 10.2: Spawns marker particles at quest zone locations
-        /// </summary>
-        private void SpawnMarkerParticles(Vector3 position)
-        {
-            if (questMarkerParticlePrefab == null)
-            {
-                return;
-            }
-
-            GameObject markerParticle = Instantiate(questMarkerParticlePrefab, position, Quaternion.identity);
-            ParticleSystem ps = markerParticle.GetComponent<ParticleSystem>();
-            if (ps != null)
-            {
-                ps.Play();
-            }
+            GetParticleEffectService().PlayLevelUpEffect(position);
         }
 
         #endregion

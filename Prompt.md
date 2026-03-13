@@ -25,30 +25,12 @@
 - [x] Step 21 - Re-verified the `QuestManager` reward/penalty refactor with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
 - [x] Step 22 - Extracted quest location assignment into `QuestLocationAssignmentService` and marker/zone lifecycle ownership into `QuestZoneMarkerService`, leaving `QuestManager` responsible for quest orchestration while delegating location generation, marker cleanup, zone spawning, and marker restoration.
 - [x] Step 23 - Extracted quest save/load conversion and restore orchestration into `QuestSaveRestoreService`, so `QuestManager` now delegates save-data building, record-to-runtime conversion, current-quest resolution, and load-time marker/UI restoration callbacks instead of owning raw serialization plumbing directly.
+- [x] Step 24 - Extracted quest audio/music presentation into `QuestAudioPresentationService` and particle pooling/effect triggering into `QuestParticleEffectService`, so `QuestManager` now delegates warning SFX, music crossfades, level-up presentation, pooled impact effects, and quest-zone marker particles to dedicated presentation helpers.
 
 ## Planned Next Steps
 
 ```xml
 <planned_next_steps>
-  <step id="24" status="planned" area="QuestManager">
-    <title>Extract Quest Audio and Particle Flow</title>
-    <summary>Move music switching, SFX playback, particle pooling, and effect triggering into focused helpers or services.</summary>
-    <targets>
-      <file>Assets/Scripts/Quest/QuestManager.cs</file>
-    </targets>
-    <candidate_methods>
-      <method>PlayQuestClip</method>
-      <method>PlayTimeWarning</method>
-      <method>SwitchToDeliveryMusic</method>
-      <method>SwitchToExplorationMusic</method>
-      <method>CrossfadeMusic</method>
-      <method>InitializeParticlePool</method>
-      <method>PlayParticleEffect</method>
-      <method>ReturnParticleToPool</method>
-      <method>SpawnMarkerParticles</method>
-    </candidate_methods>
-    <goal>Isolate presentation effects from core quest rules.</goal>
-  </step>
   <step id="25" status="planned" area="CameraFollow">
     <title>Split CameraFollow Responsibilities</title>
     <summary>Separate gameplay follow camera logic from minimap camera, reverse camera, and cached minimap surface generation.</summary>
