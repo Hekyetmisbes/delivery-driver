@@ -1,434 +1,432 @@
-# Delivery Driver - Agent Guide
+# Delivery Driver - General Agent Guide
 
 ## Purpose
 
-This file is the single working reference for agents operating in this repository. It combines the short operational notes from `AGENTS.md` with the broader architectural guidance from `AGENT_GUIDE.md`.
+This document is the concise operating guide for agents working in this repository.
 
-When information conflicts, prefer the most recent dated snapshot in this document over older implementation notes.
+Use it for:
+- quick repository orientation
+- current project constraints
+- safe change guidelines
+- high-risk system awareness
 
-## Current Project Snapshot (2026-03-07)
+For deeper architectural context and a fuller project snapshot, also read `CLAUDE.md`.
 
-- Active branch at snapshot time: `feature/ui-ux-improvements`
-- Snapshot state: local and `origin/feature/ui-ux-improvements` were in sync
-- Latest delivered commits:
-  - `f7b3300` Integrate balance HUD into global UI flow
-  - `6412d1f` Add configurable speed units across HUD and settings
-  - `9d806c5` Tune hard brake detection thresholds
+If guidance conflicts, prefer the more detailed and more recently updated information in `CLAUDE.md`.
 
-## Recent Functional Progress
+---
 
-- Added speed unit preference (`KMH` / `MPH`) in settings flow.
-- Refactored and improved in-game speedometer UI behavior and visuals.
-- Integrated `BalanceHudUI` into the global UI coordinator lifecycle.
-- Tuned hard-brake notification thresholds to reduce noisy triggers.
+## Repository Summary
 
-## Project Overview
+`Delivery Driver` is a Unity driving and delivery game project focused on:
+- vehicle handling and driving feedback
+- delivery and quest gameplay
+- player progression and rewards
+- NPC traffic and road-graph navigation
+- layered runtime-built UI
+- save/load plus SQLite-backed quest history
 
-`Delivery Driver` is a Unity-based 3D driving and cargo delivery game. The project combines vehicle physics, quest generation, NPC traffic, progression systems, save/load support, and layered UI feedback.
+The repository is script-heavy and mixes scene-authored objects with runtime bootstrap systems.
 
-### Core game loop
+---
 
-1. Player reviews available delivery quests.
-2. Player accepts a quest and drives to pickup.
-3. Cargo is loaded and affects vehicle handling.
-4. Player delivers within the time limit.
-5. Rewards, XP, and unlocks are granted.
-6. The loop repeats with harder or more varied quests.
+## Current Verified Project State
 
-### Technology stack
+### Unity and packages
+- Unity Editor version: `6000.3.9f1`
+- Input System package present
+- Cinemachine package present
+- worldbuilding package present
 
-- Unity 2022.3+ LTS
-- C# 10
-- Unity Input System
-- Unity PhysX with `WheelCollider`
-- EasyRoads3D integration where available
-- `JsonUtility` plus custom save structures
-- Event-driven, manager-centric architecture
-- SQLite-backed quest telemetry and persistence helpers
-
-## Scene Entry Points
-
-### Build settings scenes
-
+### Build scenes
+Only these scenes are enabled in build settings:
 - `Assets/Scenes/MainMenu.unity`
 - `Assets/Scenes/Game.unity`
 
-There are currently only two enabled scenes in build settings. Do not assume separate playable `SettingsScene` or `CreditsScene` assets exist just because some runtime bootstrap code mentions those names.
+Do not assume playable `SettingsScene` or `CreditsScene` assets exist just because some scripts reference those names.
 
-### Runtime scene behavior
+### Git/LFS
+- `Assets/Scenes/Game.unity` is tracked with Git LFS
+- Treat scene edits as high-risk and avoid noise-only scene changes
 
-- `MainMenu.unity` is heavily runtime-built through `MainMenuRuntimeUI`.
-- `Game.unity` contains core scene objects such as `QuestManager` and `GlobalUIRoot`.
-- `Game.unity` also contains `QuestUISetupHelper`, so quest UI can be built or repaired at runtime.
+### Current branch snapshot reflected in repository metadata
+- branch: `feature/ui-ux-improvements`
 
-## Runtime Bootstrap Map
+Recent project direction includes:
+- speed unit settings (`KMH` / `MPH`)
+- balance HUD integration into the global UI flow
+- minimap and navigation UI work
+- company page and vehicle selection flow
 
-Several systems create themselves automatically. Missing scene references do not always fail loudly because fallback creation is common.
+---
 
-### Systems created before or during scene load
+## Important Top-Level Files
 
-- `GameSettings`: auto-created before scene load and persisted with `DontDestroyOnLoad`
-- `QuestDatabaseBootstrap`: auto-created before scene load to initialize `quest.db`
-- `QuestDatabaseService`: auto-created before scene load for SQLite access
-- `MenuSceneBootstrap`: listens for scene loads and injects menu runtime UI when needed
-- `GlobalUiCoordinator`: ensured after scene load and persisted across scenes
-- `ProgressionSceneInstaller`: ensured after scene load; spawns progression systems if missing
-- `QuestDatabaseAutoSync`: ensured after scene load; mirrors quest lifecycle into SQLite
-- `SceneTransitionManager`: created on demand when a scene transition is requested
+- `AGENTS.md`: concise operating guide
+- `CLAUDE.md`: detailed project guide and architecture notes
+- `README.md`: user-facing repository overview
 
-### Practical implications
+When updating docs, keep these aligned with the real repository state.
 
-- Do not add duplicate singleton-like scene objects casually; many systems resolve dependencies via `FindFirstObjectByType` or `FindAnyObjectByType`.
-- A scene can appear to work even when serialized references are incomplete, because fallback auto-creation masks the problem.
-- When debugging startup issues, check both scene wiring and runtime bootstrap order.
+---
 
-## Implementation Status
-
-### Stable or mostly implemented
-
-- Core quest data, generation, lifecycle, and zone logic
-- Cargo weight and cargo visuals
-- Reward and progression flow
-- Save/load foundations
-- Audio and particle feedback foundations
-- Balance HUD integration
-- Speed unit configuration across HUD and settings
-
-### Still worth validating during changes
-
-- Traffic edge-case recovery
-- Vehicle physics tuning
-- Minimap and route feedback
-- Tutorial or onboarding flow
-- Full optimization, debugging tools, and balancing pass
-
-### Known risks
-
-- Road graph extraction can be unreliable in more complex road layouts.
-- NPC recovery can still loop in rare cases.
-- UI can need extra validation on non-16:9 layouts.
-- Performance can degrade with high NPC counts on weaker hardware.
-
-## High-Level Architecture
-
-### Main runtime systems
-
-- `CarController`: player vehicle physics and input response
-- `CameraFollow`: player camera behavior
-- `DeliveryManager`: phone-driven mission offer flow, pickup and delivery point spawning, objective wiring
-- `QuestManager`: central quest lifecycle and reward coordinator
-- `PlayerProgressionManager`: money, XP, levels, achievements
-- `DriverProgressionSystem`: skill tree, level rewards, performance XP modifiers
-- `SaveManager`: persistence entry point
-- `RoadGraphBuilder`: road network extraction for traffic and routing
-- `NpcCarAgent`, `NpcSpawner`, `NpcRecovery`: traffic simulation stack
-- `QuestUIManager` and related UI classes: HUD, quest list, popups, settings-adjacent flow
-- `GlobalUiCoordinator`: cross-scene UI root and canvas adoption layer
-
-### Main design patterns
-
-- Singleton managers for globally coordinated systems
-- Observer/event-style hooks for UI and progression reactions
-- ScriptableObject-backed data sources such as quest and cargo databases
-- Component-based Unity behaviours for gameplay actors
-- Object pooling where repeated effect spawning matters
-
-## System Boundaries
-
-### Delivery flow versus quest flow
-
-There are two tightly related but distinct gameplay layers:
-
-- `DeliveryManager` owns mission offer UX, pickup and delivery spawn points, phone acceptance flow, and some objective marker behavior.
-- `QuestManager` owns quest state, rewards, penalties, save data, progression hooks, audio feedback, and quest events.
-
-Important runtime behavior:
-
-- `DeliveryManager.Start()` forces `requirePhoneMissionAccept = true`.
-- `DeliveryManager.Start()` also forces `useQuestSystem = true`.
-- `QuestManager` is the authoritative source for quest lifecycle events consumed by UI, progression, tutorial, and SQLite sync.
-
-If a change affects mission acceptance, pickup state, delivery targets, or objective visibility, inspect both systems together instead of only one.
-
-### Route and minimap stack
-
-Navigation follows a GPS-style architecture with a central service:
-
-- `NavigationService` (singleton): owns route and objective state, single consumer of `RoadGraphPathfinder`
-- `ObjectiveMarker3D`: subscribes to NavigationService, renders spinning 3D cylinder marker
-- `EdgeIndicator`: subscribes to NavigationService, shows screen-edge directional arrow
-- `WorldRouteRenderer`: subscribes to NavigationService, renders world-space route LineRenderer
-- `MinimapUI`: subscribes to NavigationService for minimap markers and route preview overlay
-- `CompassUI`: subscribes to NavigationService for compass needle direction
-- `MinimapCamera`: minimap camera follow behavior
-- `RoadGraphPathfinder`: path search utility (only called by NavigationService)
-- `RoadGraphBuilder`: source of road graph data
-
-DeliveryManager calls `NavigationService.Instance.SetObjective()` / `ClearObjective()` to drive navigation.
-
-### UI ownership
-
-- `GlobalUiCoordinator` owns a persistent global canvas and reparents many scene canvases under it.
-- Canvases already using `ScaleWithScreenSize` are intentionally skipped to preserve their own scaler behavior.
-- `BalanceHudUI` is injected onto the global UI root and rebuilds its own panel if needed.
-- `PhoneMissionUI` can create its own canvas at runtime if no scene canvas is supplied.
-
-Many UI bugs here are canvas layering or duplicate-runtime-object issues, not pure widget logic bugs.
-
-## Code Organization
-
-### Important directories
+## Important Directories
 
 - `Assets/Scripts/`
 - `Assets/Scripts/Quest/`
 - `Assets/Scripts/Quest/UI/`
 - `Assets/Scripts/Quest/SaveSystem/`
-- `Assets/Scripts/Neighborhood/`
+- `Assets/Scripts/Navigation/`
 - `Assets/Scripts/UI/`
+- `Assets/Scripts/Company/`
+- `Assets/Scripts/Neighborhood/`
 - `Assets/Scripts/Performance/`
-- `Assets/Prefabs/`
-- `Assets/Resources/`
-- `Assets/StreamingAssets/Database/`
 - `Assets/Scenes/`
+- `Assets/Resources/`
+- `Assets/Prefabs/`
+- `Assets/StreamingAssets/Database/`
+- `Assets/Plugins/x86_64/`
 
-### Files commonly touched
+---
 
-- `Assets/Scripts/CarController.cs`: vehicle handling
-- `Assets/Scripts/CameraFollow.cs`: camera behavior
-- `Assets/Scripts/DeliveryManager.cs`: mission spawning and phone offer flow
-- `Assets/Scripts/Navigation/NavigationService.cs`: central GPS-style route and objective service
-- `Assets/Scripts/Navigation/ObjectiveMarker3D.cs`: world 3D objective marker
-- `Assets/Scripts/Navigation/EdgeIndicator.cs`: screen-edge directional arrow
-- `Assets/Scripts/Navigation/WorldRouteRenderer.cs`: world-space route line
-- `Assets/Scripts/RoadGraphBuilder.cs`: road extraction and waypoint generation
-- `Assets/Scripts/RoadGraphPathfinder.cs`: road graph path search used by minimap route preview
-- `Assets/Scripts/NpcCarAgent.cs`: NPC driving logic
-- `Assets/Scripts/NpcRecovery.cs`: recovery rules
-- `Assets/Scripts/Quest/QuestManager.cs`: quest generation and lifecycle
-- `Assets/Scripts/Quest/QuestEnums.cs`: quest types, status, difficulty
-- `Assets/Scripts/Quest/PlayerProgressionManager.cs`: XP, level, achievements
-- `Assets/Scripts/Quest/DriverProgressionSystem.cs`: skill tree and reward unlocks
-- `Assets/Scripts/Quest/GameSettings.cs`: PlayerPrefs-backed settings
-- `Assets/Scripts/Quest/QuestDatabaseBootstrap.cs`: SQLite schema and seed initialization
-- `Assets/Scripts/Quest/QuestDatabaseService.cs`: SQLite access layer
-- `Assets/Scripts/Quest/SaveSystem/SaveManager.cs`: save/load orchestration
-- `Assets/Scripts/Quest/UI/`: in-game quest, HUD, minimap, popup, and settings-adjacent UI logic
-- `Assets/Scripts/UI/GlobalUiCoordinator.cs`: global canvas and persistent UI integration
-- `Assets/Scripts/UI/MainMenuRuntimeUI.cs`: main menu UI is mostly built in code
+## Major Runtime Systems
 
-### Inspector references that usually matter
+### Gameplay and vehicle
+- `CarController`: core player vehicle controller
+- `CameraFollow`: player camera behavior
+- `DeliveryManager`: delivery flow, mission offer logic, pickup and dropoff spawning
+- `SpeedometerUI`: speed HUD
+- `ReverseCameraHUD`: reverse camera support
 
-#### `QuestManager`
+### Quest and progression
+- `QuestManager`: central quest lifecycle
+- `PlayerProgressionManager`: money, XP, level, statistics, achievements
+- `DriverProgressionSystem`: progression bonuses and skill-style systems
+- `SaveManager`: JSON save/load entry point
+- `GameSettings`: PlayerPrefs-backed settings singleton
 
-- `questDatabase`
-- `cargoLibrary`
-- `roadGraphBuilder`
-- `playerTransform`
-- `playerController`
-- pickup and delivery marker prefabs
-- quest zone prefab
-- quest audio clips
-- quest particle prefabs
+### Navigation and traffic
+- `NavigationService`: central route/objective service
+- `ObjectiveMarker3D`: world objective marker
+- `EdgeIndicator`: edge-of-screen navigation indicator
+- `WorldRouteRenderer`: world-space route line
+- `RoadGraphBuilder`: road graph generation
+- `RoadGraphPathfinder`: graph path search
+- `NpcCarAgent`, `NpcSpawner`, `NpcRecovery`: traffic stack
 
-#### `RoadGraphBuilder`
+### UI
+- `GlobalUiCoordinator`: persistent global canvas adoption layer
+- `MainMenuRuntimeUI`: main menu is largely built in code
+- `PauseMenuUI`: pause/settings flow
+- `QuestUIManager`: quest HUD coordination
+- `MinimapUI`: minimap, route preview, marker management
+- `BalanceHudUI`: balance panel attached to global UI flow
 
-- `autoDetectRoads`
-- `sampleStepMeters`
-- `connectionThresholdMeters`
-- `includeSimplePolyRoads`
-- `generateDualLaneSegmentsForSimplePoly`
-- `buildOnStart`
-- `startupBuildDelay`
+### Company flow
+- `CompanyPageUI`: company setup/overlay in game scene
+- `PlayerVehicleManager`: runtime player vehicle switching/setup
+- `GameSceneCompanyPageInstaller`: scene bootstrap for company page flow
 
-#### `PlayerProgressionManager`
+---
 
-- starting money
-- starting level
+## Scene and Bootstrap Reality
 
-#### `DeliveryManager`
+This project uses many runtime-created systems.
 
-- `roadGraphBuilder`
-- `cargoLibrary`
-- `phoneMissionUI`
-- `useRoadGraphSpawnPoints`
-- `spawnOnlyInNeighborhoods`
-- `miniMapMarker`
-- `speedometerUI`
+### Known bootstrap behavior
+The following systems are created automatically at runtime or ensured on scene load:
+- `GameSettings`
+- `QuestDatabaseBootstrap`
+- `QuestDatabaseService`
+- `MenuSceneBootstrap`
+- `GlobalUiCoordinator`
+- `ProgressionSceneInstaller`
+- `QuestDatabaseAutoSync`
+- `SceneTransitionManager`
+- `GameSceneCompanyPageInstaller`
 
-#### `MinimapUI`
+### Practical rule
+If something seems missing in a scene, do not assume the feature is absent. Check whether it is created at runtime.
 
-- `minimapCamera`
-- render texture and camera bindings
-- pickup, delivery, and player marker prefabs
-- `showRoutePreview`
-- zoom limits and marker container
+### Important consequence
+Do not casually add duplicate singleton-like objects to scenes. Many systems use runtime discovery and duplicates can cause inconsistent behavior, especially after scene reloads.
+
+---
+
+## Architecture Notes That Matter During Edits
+
+### Delivery flow vs quest flow
+There are two related systems:
+- `DeliveryManager` handles mission offer UX, pickup/dropoff spawning, and moment-to-moment delivery setup
+- `QuestManager` handles authoritative quest state, rewards, penalties, progression hooks, and save-facing state
+
+When changing mission acceptance, objective visibility, or delivery completion, inspect both systems.
+
+### Current enforced delivery behavior
+`DeliveryManager` forces these values at runtime in `Start()`:
+- `requirePhoneMissionAccept = true`
+- `useQuestSystem = true`
+
+Do not document or implement flows that bypass phone acceptance unless you intentionally change this behavior.
+
+### Navigation ownership
+`NavigationService` is the central source of route and objective state.
+UI and world guidance systems subscribe to it:
+- `MinimapUI`
+- `CompassUI`
+- `EdgeIndicator`
+- `ObjectiveMarker3D`
+- `WorldRouteRenderer`
+
+If route guidance changes, validate the whole stack rather than just one widget.
+
+### UI ownership
+`GlobalUiCoordinator` owns a persistent global canvas and may adopt scene canvases beneath it.
+Many UI bugs come from:
+- duplicate persistent UI roots
+- canvas sort order problems
+- runtime-created overlays
+- scene reload listener duplication
+
+---
 
 ## Namespace Map
 
-- Global namespace: driving, mission, and some UI bootstrap classes such as `CarController`, `DeliveryManager`, `PhoneMissionUI`, `GlobalUiCoordinator`
-- `DeliveryDriver.Quest`: quest state, progression, save, database, tutorial
-- `DeliveryDriver.Quest.UI`: quest HUD, minimap, pause, settings, statistics
-- `DeliveryDriver.UI`: general-purpose runtime UI framework and menu systems
-- `TrafficSystem`: road graph, NPC traffic, weather, signals, route helpers
-- `DeliveryDriver.City`: neighborhoods and city-zone metadata
-- `DeliveryDriver.Optimization`: chunking, HLOD, performance controllers
+This repository mixes global-namespace and namespaced classes.
 
-When moving or duplicating code, preserve namespace boundaries or update imports carefully. This repository mixes namespaced and global classes.
+### Common namespaces
+- global namespace: several gameplay and UI bootstrap classes such as `CarController`, `DeliveryManager`, `MainMenuRuntimeUI`, `GlobalUiCoordinator`
+- `DeliveryDriver.Quest`
+- `DeliveryDriver.Quest.UI`
+- `DeliveryDriver.Navigation`
+- `DeliveryDriver.UI`
+- `DeliveryDriver.Company`
+- `DeliveryDriver.City`
+- `DeliveryDriver.Optimization`
+- `TrafficSystem`
+
+When moving code, preserve namespace intent and fix imports carefully.
+
+---
+
+## Data and Persistence
+
+### JSON save
+- manager: `SaveManager`
+- file: `savegame.json`
+- location: `Application.persistentDataPath`
+
+### Settings
+- manager: `GameSettings`
+- storage: `PlayerPrefs`
+
+Known settings include:
+- audio
+- graphics
+- UI scale
+- language
+- accessibility
+- minimap zoom
+- speed unit preference
+
+### SQLite
+- bootstrap: `QuestDatabaseBootstrap`
+- service: `QuestDatabaseService`
+- sync: `QuestDatabaseAutoSync`
+- database file: `quest.db`
+- schema path: `Assets/StreamingAssets/Database/schema.sql`
+- seed path: `Assets/StreamingAssets/Database/seed.sql`
+
+Do not assume JSON save replaces SQLite history or vice versa. Both exist.
+
+---
+
+## File and Folder Guidance
+
+### Often edited files
+- `Assets/Scripts/CarController.cs`
+- `Assets/Scripts/CameraFollow.cs`
+- `Assets/Scripts/DeliveryManager.cs`
+- `Assets/Scripts/RoadGraphBuilder.cs`
+- `Assets/Scripts/RoadGraphPathfinder.cs`
+- `Assets/Scripts/NpcCarAgent.cs`
+- `Assets/Scripts/Quest/QuestManager.cs`
+- `Assets/Scripts/Quest/PlayerProgressionManager.cs`
+- `Assets/Scripts/Quest/GameSettings.cs`
+- `Assets/Scripts/Quest/SaveSystem/SaveManager.cs`
+- `Assets/Scripts/Quest/UI/MinimapUI.cs`
+- `Assets/Scripts/Quest/UI/QuestUIManager.cs`
+- `Assets/Scripts/Quest/UI/PauseMenuUI.cs`
+- `Assets/Scripts/UI/GlobalUiCoordinator.cs`
+- `Assets/Scripts/UI/MainMenuRuntimeUI.cs`
+- `Assets/Scripts/Company/CompanyPageUI.cs`
+- `Assets/Scripts/Company/PlayerVehicleManager.cs`
+
+### Resource assets currently relevant
+- `Assets/Resources/CargoLibrary.asset`
+- `Assets/Resources/QuestDatabase.asset`
+- `Assets/Resources/Minimap/`
+- `Assets/Resources/UI/`
+
+---
 
 ## Coding Conventions
 
-- Use PascalCase for classes, methods, enums, and event names.
-- Use camelCase for fields and locals.
-- Keep one main class per file unless a small nested helper is justified.
-- Match file names to class names exactly.
-- Group related systems into folders instead of large mixed directories.
-- Cache component references in `Awake` or `Start` when reused often.
-- Prefer low-allocation patterns in gameplay loops.
-- Use `sqrMagnitude` for frequent distance checks when exact distance is unnecessary.
-- Keep public APIs and serialized fields explicit and readable.
+- Use PascalCase for classes, methods, enums, and events
+- Use camelCase for fields and locals
+- Match file names to class names
+- Keep public serialized fields explicit and readable
+- Prefer low-allocation code in gameplay loops
+- Avoid repeated expensive component lookups in per-frame code
+- Use one main class per file unless a small helper is justified
 
-### Unity lifecycle order
+### Preferred Unity member order
+1. `Awake`
+2. `Start`
+3. `Update` / `FixedUpdate` / `LateUpdate`
+4. public methods
+5. private methods
+6. coroutines
+7. event handlers / cleanup
 
-Prefer a consistent class layout:
+---
 
-1. Unity messages: `Awake`, `Start`, `Update`, `FixedUpdate`, `LateUpdate`, `OnDestroy`
-2. Public methods
-3. Private methods
-4. Coroutines
-5. Event handlers
+## Editing Rules
 
-## Feature Work Guidelines
+### Before changing gameplay logic
+Check whether the behavior is controlled by:
+- scene references
+- runtime bootstrap
+- singleton instance lookup
+- both delivery and quest systems
+- both navigation service and UI listeners
 
-### Adding a quest type
+### Before changing UI
+Check:
+- whether UI is scene-authored or runtime-built
+- whether `GlobalUiCoordinator` reparents it
+- whether the element persists across scenes
+- whether duplicate event systems or duplicate canvases can exist
 
-1. Add the enum entry in `QuestEnums.cs`.
-2. Add generation logic in `QuestManager.cs`.
-3. Hook it into weighted quest selection.
-4. Update quest UI icon mapping if the type needs a dedicated visual.
+### Before changing company or vehicle flow
+Check:
+- `GameSceneCompanyPageInstaller`
+- `CompanyPageUI`
+- `PlayerVehicleManager`
+- selected vehicle persistence in quest/database systems
+- active quest restrictions around vehicle switching
 
-### Adding cargo
+### Before changing route, minimap, or NPC logic
+Validate together:
+- road graph generation
+- pathfinding
+- objective updates
+- minimap markers
+- world route rendering
+- NPC route usability
 
-1. Add the data to the cargo library asset or supporting code.
-2. Add or map visuals if needed.
-3. Add special-case logic only if the cargo truly behaves differently.
+### Before changing save/progression/settings
+Check compatibility across:
+- `SaveManager`
+- `GameSettings`
+- `QuestDatabaseService`
+- `QuestDatabaseAutoSync`
 
-### Adding achievements
+---
 
-1. Define the achievement data.
-2. Add unlock conditions in progression checks.
-3. Ensure quest completion or other relevant systems trigger those checks.
+## Known Risk Areas
 
-### Changing save, settings, or progression
+- duplicate singleton objects after scene reload
+- runtime UI layering conflicts
+- road graph extraction edge cases
+- NPC recovery loops in rare scenarios
+- non-16:9 UI layout issues
+- performance degradation with high NPC counts
+- editor-only asset loading paths in company vehicle setup if moved into player builds without adjustment
 
-Inspect all relevant persistence layers before editing:
+That last point matters because some company vehicle prefab loading currently relies on editor-only asset database access.
 
-- `SaveManager` and `SaveData`: JSON save file at `Application.persistentDataPath/savegame.json`
-- `GameSettings`: `PlayerPrefs` for audio, graphics, language, accessibility, speed unit, minimap zoom
-- `QuestDatabaseBootstrap` and `QuestDatabaseService`: SQLite database at `Application.persistentDataPath/quest.db`
-- `QuestDatabaseAutoSync`: quest lifecycle mirroring into SQLite
-
-Changing progression or quest data often requires checking both JSON save compatibility and SQLite sync behavior.
-
-### Changing road, routing, or traffic logic
-
-Validate all of these together:
-
-1. `RoadGraphBuilder` can still build a graph
-2. `QuestManager` startup quest generation still waits and succeeds
-3. `DeliveryManager` can still derive valid spawn points
-4. `NavigationService` route calculation still works
-5. `MinimapUI` route preview, `WorldRouteRenderer`, `ObjectiveMarker3D`, and `EdgeIndicator` still update
-6. NPC traffic still follows usable routes
-
-## Performance Guidance
-
-- Pool frequently spawned effects and other short-lived objects.
-- Avoid per-frame allocations in gameplay code.
-- Avoid repeated `GetComponent` calls in update loops.
-- Run expensive checks on intervals when frame-perfect updates are unnecessary.
-- Validate traffic-heavy scenes with realistic NPC counts before considering work done.
-- Route preview code should be treated as potentially expensive; cache and threshold-based recompute behavior already exists and should usually be preserved.
-
-## Git and Commit Workflow
-
-### Branching and commit expectations
-
-- Use logical commit grouping by scope: gameplay, settings/UI, scene/assets.
-- Use commit messages that describe the user-visible impact.
-- Treat `main` as stable and production-oriented.
-- Use `feature/[name]` for feature work and `bugfix/[name]` for targeted fixes.
-
-### Before pushing
-
-- Verify `git status -sb` is clean.
-- Verify the current branch and intended upstream target.
-- Run `git lfs status` when scene or asset files changed.
-
-### If the user asks for "commit/push all"
-
-- Prefer multiple logical commits over one large squash commit.
-
-### If push rejects with `cannot lock ref ... expected ...`
-
-Check these first before any force operation:
-
-- `git rev-parse HEAD`
-- `git rev-parse origin/<branch>`
-
-Re-evaluate from there.
-
-## Git LFS Policy
-
-- Keep LFS enabled unless the project owner explicitly requests otherwise.
-- Current tracked file of note: `Assets/Scenes/Game.unity`
-- Observed LFS usage in history was low at the time of the snapshot, so no immediate migration is required.
-
-### LFS safety rules
-
-- Do not remove `Game.unity` from LFS unless explicitly requested.
-- Push `Game.unity` only when there is a real scene, gameplay, or UI layout change.
-- Avoid committing editor-only or noise-only scene changes.
-- Re-check LFS usage periodically, especially before larger releases.
-- If LFS usage approaches a risk threshold, discuss a controlled migration before acting.
+---
 
 ## Testing Checklist
 
-Before major commits, verify what is relevant to the change:
+Use the subset relevant to your change.
 
-- No compile errors
-- No unexpected console errors during play
-- Main menu still opens and starts the game scene
-- First boot still works with no existing save file or PlayerPrefs assumptions
-- Quest generation still works
-- Phone mission offer appears and can be accepted or rejected
-- Quest acceptance and completion still work
-- Pickup and delivery triggers still work
-- Rewards and progression still update correctly
-- Save/load still preserves required state
-- Settings changes persist across restart when relevant
-- Minimap route preview and objective markers still behave correctly
-- UI reflects the changed gameplay state correctly
-- NPC vehicles do not introduce obvious regressions
-- Performance remains acceptable for the affected scene
-- Temporary debug logs are removed unless intentionally kept
+### Always important
+- project still compiles
+- no new console errors
+- `MainMenu` still loads
+- start game flow still reaches `Game`
+- no duplicate persistent manager/UI behavior after scene transitions
 
-## Agent Operating Notes
+### Delivery and quest changes
+- phone mission offer appears correctly
+- accepting a mission starts the intended flow
+- pickup works
+- delivery objective updates correctly
+- completion/failure updates progression and UI
+- rewards and penalties still apply correctly
 
-- Prefer the latest dated snapshot in this file over older assumptions.
-- Treat scene and asset changes carefully; they are higher risk than script-only edits.
-- When changing UI, validate interaction flow as well as visuals.
-- When changing traffic or road systems, test both nominal driving and recovery paths.
-- When working near save, progression, or quest lifecycle code, think through migration and backward compatibility risks.
-- Many systems use runtime fallback discovery. If behavior is inconsistent between clean boot and scene reload, suspect duplicate persistent objects first.
-- Because `DontDestroyOnLoad` usage is widespread, always think about second-load behavior, duplicate listeners, and stale singleton state.
-- The main menu is code-built, not just scene-authored. UI changes may require editing runtime menu builders rather than scene hierarchy.
-- The project has both JSON save data and SQLite quest history. Do not assume one replaces the other.
+### Navigation changes
+- route objective is set and cleared correctly
+- minimap markers update
+- world marker updates
+- edge indicator updates
+- route rendering behaves correctly
+
+### Settings/UI changes
+- settings persist across restart when applicable
+- speed unit changes propagate to HUD/UI
+- pause/settings flow still works
+- global canvas layering remains correct
+
+### Save/database changes
+- first boot works without existing save data
+- save file can be created and loaded
+- SQLite setup still initializes
+- quest sync still binds correctly
+
+### Company/vehicle changes
+- company page appears in `Game`
+- selected vehicle applies correctly
+- runtime vehicle setup does not break player control or camera binding
+- vehicle switching restrictions still behave during active quests
+
+---
+
+## Git Workflow Expectations
+
+- Keep commits logically grouped
+- Prefer user-visible or system-scope commit messages
+- Treat `main` as stable
+- Use care with scene and prefab churn
+- Avoid committing editor noise
+
+### Before push
+- verify branch
+- verify working tree
+- verify LFS state if scene/assets changed
+
+### If the user asks for commit/push all
+Prefer multiple logical commits instead of a single giant one.
+
+---
+
+## Documentation Maintenance Rules
+
+When updating repository docs:
+- keep `AGENTS.md`, `CLAUDE.md`, and `README.md` consistent
+- do not claim scenes, files, or systems that are not actually present
+- clearly separate verified current state from future intentions
+- prefer concrete file/class names over vague descriptions
+
+---
 
 ## Quick Decision Rules
 
-- If a change affects player-facing balance, inspect `QuestManager` and progression logic together.
-- If a change affects route guidance or NPC movement, inspect road graph, pathfinder, NPC agent, and minimap or marker UI together.
-- If a change affects HUD behavior, inspect both the local widget and the global UI coordinator lifecycle.
-- If a change touches scene layout, consider LFS, scene noise, and inspector wiring before committing.
-- If a change affects mission offers, objective visibility, or delivery state, inspect `DeliveryManager`, `QuestManager`, and the relevant UI listener together.
-- If a change affects settings, inspect `GameSettings`, the relevant UI, and any runtime subscribers reacting to setting-change events.
+- If it affects mission offers or delivery objective flow, inspect `DeliveryManager` and `QuestManager` together
+- If it affects navigation, inspect `NavigationService` and all main consumers together
+- If it affects HUD or overlays, inspect local widget logic and `GlobalUiCoordinator`
+- If it affects persistence, inspect JSON save, PlayerPrefs settings, and SQLite sync together
+- If it affects the main menu, remember the menu is code-built
+- If it affects the game scene startup, expect runtime bootstrap systems to be involved
