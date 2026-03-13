@@ -19,6 +19,8 @@
 - [x] Step 15 - Re-verified the `DeliveryManager` mission-rules refactor with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
 - [x] Step 16 - Split `DeliveryManager` spawn/environment validation and neighborhood/building/road collider decision logic into `DeliverySpawnEnvironment`, keeping `DeliveryManager` as the flow owner while centralizing physics/layer-based spawn rules in one helper.
 - [x] Step 17 - Re-verified the `DeliveryManager` spawn/environment refactor with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
+- [x] Step 18 - Split `DeliveryManager` quest lifecycle creation/update/completion logic into `DeliveryQuestFlow` and phone mission UI binding/presentation logic into `DeliveryPhoneMissionFlow`, leaving `DeliveryManager` primarily responsible for high-level delivery state orchestration.
+- [x] Step 19 - Re-verified the `DeliveryManager` quest/phone flow refactor with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
 
 Rewrite, optimize, and reorganize all C# scripts under `Assets/Scripts/` in this Unity project. The goal is not to patch individual issues. The goal is to rebuild the scripting architecture so it is faster, cleaner, easier to maintain, easier to extend, and significantly more readable.
 

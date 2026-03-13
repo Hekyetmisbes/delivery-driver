@@ -1490,91 +1490,16 @@ public class DeliveryManager : MonoBehaviour
     /// </summary>
     private void CreateDeliveryQuest(Vector3 pickupPos, DeliveryMissionType missionType)
     {
-        if (QuestManager.Instance == null)
-        {
-            Debug.LogWarning("[DeliveryManager] QuestManager not found! Quest will not be created.");
-            return;
-        }
-
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-        QuestManager.Instance.SetDebugInfiniteTime(false);
-#endif
-
-        QuestType questType = DeliveryMissionRules.ToQuestType(missionType);
-        QuestDifficulty difficulty = missionType switch
-        {
-            DeliveryMissionType.MultiStop => QuestDifficulty.Medium,
-            DeliveryMissionType.Fragile => QuestDifficulty.Medium,
-            DeliveryMissionType.Timed => QuestDifficulty.Medium,
-            _ => QuestDifficulty.Easy
-        };
-
-        float baseTimeLimit = missionType switch
-        {
-            DeliveryMissionType.Timed => 180f,
-            DeliveryMissionType.Fragile => 260f,
-            DeliveryMissionType.MultiStop => 420f,
-            _ => 300f
-        };
-
-        DeliveryMissionRules.GetMissionRewardValues(missionType, currentMissionRewardMultiplier, out int baseReward, out int bonusReward);
-        string missionLabel = DeliveryMissionRules.GetMissionLabel(missionType);
-
-        string conditionLine = BuildMissionConditionSummary();
-
-        // Create quest data
-        currentDeliveryQuest = new QuestData
-        {
-            QuestID = System.Guid.NewGuid().ToString(),
-            QuestName = missionLabel,
-            QuestDescription = $"Pick up package at {FormatCoordinates(pickupPos)}{conditionLine}",
-            QuestType = questType,
-            Difficulty = difficulty,
-            Status = QuestStatus.NotStarted,
-            TimeLimit = baseTimeLimit,
-            TimeRemaining = baseTimeLimit,
-            BaseReward = baseReward,
-            BonusReward = bonusReward,
-            PickupLocation = new QuestLocation(pickupPos, $"Pickup: {FormatCoordinates(pickupPos)}", deliveryRadius),
-            DeliveryLocations = new List<QuestLocation>()
-        };
-
-        if (currentDeliveryQuest.PickupLocation != null)
-        {
-            currentDeliveryQuest.PickupLocation.VisualMarker = pickupIndicatorPrefab != null
-                ? pickupIndicatorPrefab
-                : deliveryIndicatorPrefab;
-        }
-
-        // Add cargo if available
-        if (cargoLibrary != null)
-        {
-            CargoData randomCargo = cargoLibrary.GetRandomCargo();
-            if (randomCargo != null)
-            {
-                currentDeliveryQuest.Cargo = randomCargo;
-            }
-        }
-
-        if (currentDeliveryQuest.Cargo == null)
-        {
-            currentDeliveryQuest.Cargo = new CargoData("Package", 50f, false, "Delivery package");
-        }
-
-        if (missionType == DeliveryMissionType.Fragile)
-        {
-            currentDeliveryQuest.Cargo.IsFragile = true;
-            currentDeliveryQuest.Cargo.CargoHealth = 100f;
-        }
-
-        // Add quest to QuestManager
-        QuestManager.Instance.AddAvailableQuest(currentDeliveryQuest);
-        QuestManager.Instance.StartQuest(currentDeliveryQuest);
-
-        if (showDebugInfo)
-        {
-            Debug.Log($"[DeliveryManager] Created delivery quest: {currentDeliveryQuest.QuestName}");
-        }
+        currentDeliveryQuest = DeliveryQuestFlow.CreateDeliveryQuest(
+            pickupPos,
+            missionType,
+            currentMissionRewardMultiplier,
+            BuildMissionConditionSummary(),
+            cargoLibrary,
+            pickupIndicatorPrefab,
+            deliveryIndicatorPrefab,
+            deliveryRadius,
+            showDebugInfo);
     }
 
     /// <summary>
@@ -1582,39 +1507,16 @@ public class DeliveryManager : MonoBehaviour
     /// </summary>
     private void UpdateQuestWithDelivery(List<Vector3> deliveryStops, List<string> deliveryNeighborhoods)
     {
-        if (currentDeliveryQuest == null || deliveryStops == null || deliveryStops.Count == 0)
-        {
-            return;
-        }
-
-        currentDeliveryQuest.DeliveryLocations.Clear();
-        float questTriggerRadius = Mathf.Max(2f, deliveryRadius * 0.65f);
-        for (int i = 0; i < deliveryStops.Count; i++)
-        {
-            Vector3 stop = deliveryStops[i];
-            string neighborhood = (deliveryNeighborhoods != null && i < deliveryNeighborhoods.Count)
-                ? deliveryNeighborhoods[i]
-                : ResolveNeighborhoodName(stop);
-            QuestLocation deliveryLocation = new QuestLocation(
-                stop,
-                $"Delivery {i + 1}: {FormatCoordinates(stop)} ({neighborhood})",
-                questTriggerRadius
-            );
-            deliveryLocation.VisualMarker = deliveryIndicatorPrefab;
-            currentDeliveryQuest.DeliveryLocations.Add(deliveryLocation);
-        }
-
-        currentDeliveryQuest.QuestDescription = BuildDeliveryObjectiveDescription(0);
-        currentDeliveryQuest.Status = QuestStatus.Active;
-        currentDeliveryQuest.HasPickedUpCargo = true;
-        currentDeliveryQuest.CurrentDeliveryIndex = 0;
+        DeliveryQuestFlow.UpdateQuestWithDelivery(
+            currentDeliveryQuest,
+            deliveryStops,
+            deliveryNeighborhoods,
+            ResolveNeighborhoodName,
+            deliveryIndicatorPrefab,
+            deliveryRadius,
+            showDebugInfo,
+            BuildDeliveryObjectiveDescription(0));
         lastObservedQuestDeliveryIndex = 0;
-        QuestManager.Instance?.OnQuestUpdated?.Invoke(currentDeliveryQuest);
-
-        if (showDebugInfo)
-        {
-            Debug.Log($"[DeliveryManager] Updated quest with {deliveryStops.Count} delivery stop(s).");
-        }
     }
 
     /// <summary>
@@ -1622,13 +1524,7 @@ public class DeliveryManager : MonoBehaviour
     /// </summary>
     private void CompleteDeliveryQuest()
     {
-        if (currentDeliveryQuest == null || QuestManager.Instance == null) return;
-
-        if (currentDeliveryQuest.Status == QuestStatus.Active)
-        {
-            currentDeliveryQuest.Status = QuestStatus.Completed;
-            QuestManager.Instance.CompleteQuest(currentDeliveryQuest);
-        }
+        DeliveryQuestFlow.CompleteDeliveryQuest(currentDeliveryQuest);
     }
 
     private void HandleQuestCompleted(QuestData quest)
@@ -1728,10 +1624,7 @@ public class DeliveryManager : MonoBehaviour
 
         hasPendingPhoneOffer = false;
         hasAcceptedMission = false;
-        if (phoneMissionUI != null)
-        {
-            phoneMissionUI.HideOffer();
-        }
+        DeliveryPhoneMissionFlow.HideOffer(phoneMissionUI);
 
         CancelInvoke(nameof(SpawnNewBox));
         CancelInvoke(nameof(OfferMissionToPhone));
@@ -1807,27 +1700,12 @@ public class DeliveryManager : MonoBehaviour
 
     private void EnsurePhoneMissionUI()
     {
-        if (!requirePhoneMissionAccept)
-        {
-            return;
-        }
-
-        if (phoneMissionUI == null)
-        {
-            phoneMissionUI = FindFirstObjectByType<PhoneMissionUI>();
-        }
-
-        if (phoneMissionUI == null)
-        {
-            phoneMissionUI = gameObject.GetComponent<PhoneMissionUI>();
-        }
-
-        if (phoneMissionUI == null)
-        {
-            phoneMissionUI = gameObject.AddComponent<PhoneMissionUI>();
-        }
-
-        phoneMissionUI.BindCallbacks(HandlePhoneMissionAccepted, HandlePhoneMissionRejected);
+        phoneMissionUI = DeliveryPhoneMissionFlow.EnsurePhoneMissionUI(
+            gameObject,
+            phoneMissionUI,
+            requirePhoneMissionAccept,
+            HandlePhoneMissionAccepted,
+            HandlePhoneMissionRejected);
     }
 
     private void ScheduleMissionOffer(float delaySeconds)
@@ -1844,27 +1722,29 @@ public class DeliveryManager : MonoBehaviour
 
     private void OfferMissionToPhone()
     {
-        if (!requirePhoneMissionAccept || hasPendingPhoneOffer || isDeliveryActive || currentBox != null || isFinishingDeliveryLifecycle)
-        {
-            return;
-        }
-
         EnsurePhoneMissionUI();
-        if (phoneMissionUI == null)
-        {
-            Debug.LogError("[DeliveryManager] PhoneMissionUI not found. Mission offer cannot be shown.");
-            hasAcceptedMission = false;
-            return;
-        }
 
         pendingMissionType = PickMissionType();
         EvaluateMissionConditions(out pendingMissionRewardMultiplier, out pendingRushHourBonus, out pendingNightBonus, out pendingRainRiskBonus);
-        hasPendingPhoneOffer = true;
+        hasPendingPhoneOffer = DeliveryPhoneMissionFlow.TryShowOffer(
+            phoneMissionUI,
+            requirePhoneMissionAccept,
+            hasPendingPhoneOffer,
+            isDeliveryActive,
+            currentBox,
+            isFinishingDeliveryLifecycle,
+            pendingMissionType,
+            pendingMissionRewardMultiplier,
+            pendingRushHourBonus,
+            pendingNightBonus,
+            pendingRainRiskBonus,
+            multiStopMinStops,
+            multiStopMaxStops);
 
-        phoneMissionUI.ShowOffer(
-            DeliveryMissionRules.GetMissionLabel(pendingMissionType),
-            BuildMissionOfferBody(pendingMissionType, pendingMissionRewardMultiplier, pendingRushHourBonus, pendingNightBonus, pendingRainRiskBonus),
-            BuildMissionRewardPreview(pendingMissionType, pendingMissionRewardMultiplier));
+        if (!hasPendingPhoneOffer)
+        {
+            hasAcceptedMission = false;
+        }
     }
 
     private void HandlePhoneMissionAccepted()
@@ -1877,10 +1757,7 @@ public class DeliveryManager : MonoBehaviour
         hasPendingPhoneOffer = false;
         hasAcceptedMission = true;
         CancelInvoke(nameof(OfferMissionToPhone));
-        if (phoneMissionUI != null)
-        {
-            phoneMissionUI.HideOffer();
-        }
+        DeliveryPhoneMissionFlow.HideOffer(phoneMissionUI);
 
         PrepareMissionSettingsForSpawn(
             pendingMissionType,
@@ -1900,10 +1777,7 @@ public class DeliveryManager : MonoBehaviour
 
         hasPendingPhoneOffer = false;
         hasAcceptedMission = false;
-        if (phoneMissionUI != null)
-        {
-            phoneMissionUI.HideOffer();
-        }
+        DeliveryPhoneMissionFlow.HideOffer(phoneMissionUI);
 
         ScheduleMissionOffer(rejectedOfferRetryDelay);
     }
@@ -1921,29 +1795,6 @@ public class DeliveryManager : MonoBehaviour
         hasNightBonus = nightBonus;
         hasRainRiskBonus = rainRiskBonus;
         missionSettingsPreparedForSpawn = true;
-    }
-
-    private string BuildMissionOfferBody(
-        DeliveryMissionType missionType,
-        float rewardMultiplier,
-        bool rushHourBonus,
-        bool nightBonus,
-        bool rainRiskBonus)
-    {
-        string body = DeliveryMissionRules.BuildMissionOfferBody(
-            missionType,
-            rewardMultiplier,
-            rushHourBonus,
-            nightBonus,
-            rainRiskBonus,
-            multiStopMinStops,
-            multiStopMaxStops);
-        return $"Yeni gorev teklifi\n{body}\nKabul edersen gorev olusacak.";
-    }
-
-    private string BuildMissionRewardPreview(DeliveryMissionType missionType, float rewardMultiplier)
-    {
-        return DeliveryMissionRules.BuildMissionRewardPreview(missionType, rewardMultiplier);
     }
 
     private DeliveryMissionType PickMissionType()
@@ -1991,19 +1842,12 @@ public class DeliveryManager : MonoBehaviour
 
     private string BuildDeliveryObjectiveDescription(int currentStopIndex)
     {
-        int totalStops = Mathf.Max(1, currentDeliveryStops.Count);
-        int shownIndex = Mathf.Clamp(currentStopIndex + 1, 1, totalStops);
-        string target = FormatCoordinates(currentDeliveryPoint);
-        string neighborhood = string.IsNullOrWhiteSpace(currentDeliveryNeighborhoodName) ? "Bilinmiyor" : currentDeliveryNeighborhoodName;
-        return $"Deliver package to stop {shownIndex}/{totalStops} at {target} ({neighborhood}){BuildMissionConditionSummary()}";
-    }
-
-    /// <summary>
-    /// Format coordinates for display
-    /// </summary>
-    private string FormatCoordinates(Vector3 position)
-    {
-        return $"({position.x:F0}, {position.z:F0})";
+        return DeliveryQuestFlow.BuildDeliveryObjectiveDescription(
+            currentStopIndex,
+            currentDeliveryStops.Count,
+            currentDeliveryPoint,
+            currentDeliveryNeighborhoodName,
+            BuildMissionConditionSummary());
     }
 
     private void OnDrawGizmos()
