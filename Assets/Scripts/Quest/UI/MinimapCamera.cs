@@ -34,9 +34,12 @@ namespace DeliveryDriver.Quest.UI
         [Header("Smoothing")]
         [SerializeField] private bool smoothFollow = true;
         [SerializeField] private float smoothSpeed = 10f;
+        [SerializeField] private float playerResolveRetryInterval = 0.5f;
 
         private Camera minimapCamera;
         private bool isVisible = true;
+        private float nextPlayerResolveTime;
+        private PlayerVehicleManager cachedVehicleManager;
 
         public Camera CameraComponent => minimapCamera;
 
@@ -52,11 +55,25 @@ namespace DeliveryDriver.Quest.UI
             ResolvePlayerTransform();
         }
 
+        private void OnEnable()
+        {
+            PlayerVehicleManager.ActiveVehicleChanged += HandleActiveVehicleChanged;
+        }
+
+        private void OnDisable()
+        {
+            PlayerVehicleManager.ActiveVehicleChanged -= HandleActiveVehicleChanged;
+        }
+
         private void LateUpdate()
         {
             HandleToggleInput();
 
-            ResolvePlayerTransform();
+            if (!IsUsablePlayerTransform(playerTransform))
+            {
+                ResolvePlayerTransform();
+            }
+
             if (playerTransform == null)
             {
                 return;
@@ -176,13 +193,15 @@ namespace DeliveryDriver.Quest.UI
         {
             if (IsUsablePlayerTransform(playerTransform))
             {
-                if (!TryResolveAuthoritativePlayerTransform(out Transform authoritativePlayerTransform) ||
-                    authoritativePlayerTransform == playerTransform)
-                {
-                    return;
-                }
+                return;
             }
 
+            if (Time.unscaledTime < nextPlayerResolveTime)
+            {
+                return;
+            }
+
+            nextPlayerResolveTime = Time.unscaledTime + Mathf.Max(0.1f, playerResolveRetryInterval);
             if (TryResolveAuthoritativePlayerTransform(out Transform resolvedPlayerTransform))
             {
                 playerTransform = resolvedPlayerTransform;
@@ -209,7 +228,7 @@ namespace DeliveryDriver.Quest.UI
                 return true;
             }
 
-            PlayerVehicleManager vehicleManager = FindFirstObjectByType<PlayerVehicleManager>();
+            PlayerVehicleManager vehicleManager = TryGetVehicleManager();
             if (vehicleManager != null &&
                 vehicleManager.ActiveVehicleController != null &&
                 IsUsablePlayerTransform(vehicleManager.ActiveVehicleController.transform))
@@ -254,6 +273,22 @@ namespace DeliveryDriver.Quest.UI
         public void SetPlayer(Transform player)
         {
             playerTransform = player;
+            nextPlayerResolveTime = 0f;
+        }
+
+        private PlayerVehicleManager TryGetVehicleManager()
+        {
+            if (cachedVehicleManager == null)
+            {
+                cachedVehicleManager = PlayerVehicleManager.Instance ?? FindFirstObjectByType<PlayerVehicleManager>();
+            }
+
+            return cachedVehicleManager;
+        }
+
+        private void HandleActiveVehicleChanged(CarController controller)
+        {
+            SetPlayer(controller != null ? controller.transform : null);
         }
 
         public void ConfigureStandalone(

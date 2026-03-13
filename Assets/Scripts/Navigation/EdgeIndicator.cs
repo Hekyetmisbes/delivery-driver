@@ -19,6 +19,8 @@ namespace DeliveryDriver.Navigation
         [SerializeField] private Color pickupColor = new Color(0.1f, 1f, 1f, 1f);
         [SerializeField] private Color deliveryColor = new Color(1f, 0.9f, 0.05f, 1f);
         [SerializeField] private int updateEveryNFrames = 3;
+        [SerializeField] private float navigationBindRetryInterval = 0.5f;
+        [SerializeField] private float minimapCameraResolveRetryInterval = 0.5f;
 
         private Camera cachedMiniMapCamera;
         private Canvas edgeCanvas;
@@ -28,6 +30,9 @@ namespace DeliveryDriver.Navigation
         private bool hasEdgeIndicatorPosition;
         private NavigationObjective currentObjective;
         private int frameCounter;
+        private NavigationService subscribedNavigationService;
+        private float nextNavigationBindTime;
+        private float nextMiniMapCameraResolveTime;
 
         private void OnEnable()
         {
@@ -37,20 +42,12 @@ namespace DeliveryDriver.Navigation
                 return;
             }
 
-            if (NavigationService.Instance != null)
-            {
-                NavigationService.Instance.OnObjectiveChanged += HandleObjectiveChanged;
-                NavigationService.Instance.OnNavigationCleared += HandleNavigationCleared;
-            }
+            TryBindNavigationService();
         }
 
         private void OnDisable()
         {
-            if (NavigationService.Instance != null)
-            {
-                NavigationService.Instance.OnObjectiveChanged -= HandleObjectiveChanged;
-                NavigationService.Instance.OnNavigationCleared -= HandleNavigationCleared;
-            }
+            UnbindNavigationService();
         }
 
         private void OnDestroy()
@@ -64,6 +61,11 @@ namespace DeliveryDriver.Navigation
             {
                 HideEdgeIndicator();
                 return;
+            }
+
+            if (subscribedNavigationService == null && Time.unscaledTime >= nextNavigationBindTime)
+            {
+                TryBindNavigationService();
             }
 
             frameCounter++;
@@ -191,12 +193,16 @@ namespace DeliveryDriver.Navigation
         {
             if (edgeCanvas == null)
             {
-                GameObject canvasObject = new GameObject("MiniMapEdgeIndicatorCanvas");
-                edgeCanvas = canvasObject.AddComponent<Canvas>();
-                edgeCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                edgeCanvas.sortingOrder = 1000;
-                canvasObject.AddComponent<CanvasScaler>();
-                canvasObject.AddComponent<GraphicRaycaster>();
+                edgeCanvas = GlobalUiCoordinator.PrimaryCanvas;
+                if (edgeCanvas == null)
+                {
+                    GameObject canvasObject = new GameObject("MiniMapEdgeIndicatorCanvas");
+                    edgeCanvas = canvasObject.AddComponent<Canvas>();
+                    edgeCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                    edgeCanvas.sortingOrder = 1000;
+                    canvasObject.AddComponent<CanvasScaler>();
+                    canvasObject.AddComponent<GraphicRaycaster>();
+                }
             }
 
             if (edgeIndicatorRect == null)
@@ -214,6 +220,7 @@ namespace DeliveryDriver.Navigation
                     ? indicatorSprite
                     : DeliveryUiSpriteHelper.GetFallbackSprite();
                 edgeIndicatorImage.preserveAspect = true;
+                edgeIndicatorRect.SetAsLastSibling();
             }
         }
 
@@ -235,7 +242,7 @@ namespace DeliveryDriver.Navigation
                 edgeIndicatorImage = null;
             }
 
-            if (edgeCanvas != null)
+            if (edgeCanvas != null && edgeCanvas.gameObject.name == "MiniMapEdgeIndicatorCanvas")
             {
                 Destroy(edgeCanvas.gameObject);
                 edgeCanvas = null;
@@ -244,7 +251,7 @@ namespace DeliveryDriver.Navigation
 
         private bool TryGetMiniMapCamera(out Camera miniMapCamera)
         {
-            if (cachedMiniMapCamera == null)
+            if (cachedMiniMapCamera == null && Time.unscaledTime >= nextMiniMapCameraResolveTime)
             {
                 DeliveryDriver.Quest.UI.MinimapCamera minimapCameraController = FindFirstObjectByType<DeliveryDriver.Quest.UI.MinimapCamera>();
                 if (minimapCameraController != null)
@@ -253,10 +260,54 @@ namespace DeliveryDriver.Navigation
                         ? minimapCameraController.CameraComponent
                         : minimapCameraController.GetComponent<Camera>();
                 }
+
+                nextMiniMapCameraResolveTime = Time.unscaledTime + Mathf.Max(0.1f, minimapCameraResolveRetryInterval);
             }
 
             miniMapCamera = cachedMiniMapCamera;
             return miniMapCamera != null && miniMapCamera.gameObject.activeInHierarchy && miniMapCamera.enabled;
+        }
+
+        private void TryBindNavigationService()
+        {
+            NavigationService navigationService = NavigationService.Instance;
+            if (navigationService == null)
+            {
+                nextNavigationBindTime = Time.unscaledTime + Mathf.Max(0.1f, navigationBindRetryInterval);
+                return;
+            }
+
+            if (subscribedNavigationService == navigationService)
+            {
+                return;
+            }
+
+            UnbindNavigationService();
+            subscribedNavigationService = navigationService;
+            subscribedNavigationService.OnObjectiveChanged += HandleObjectiveChanged;
+            subscribedNavigationService.OnNavigationCleared += HandleNavigationCleared;
+
+            NavigationObjective objective = subscribedNavigationService.CurrentObjective;
+            if (objective.IsValid)
+            {
+                HandleObjectiveChanged(objective);
+            }
+            else
+            {
+                HandleNavigationCleared();
+            }
+        }
+
+        private void UnbindNavigationService()
+        {
+            if (subscribedNavigationService == null)
+            {
+                return;
+            }
+
+            subscribedNavigationService.OnObjectiveChanged -= HandleObjectiveChanged;
+            subscribedNavigationService.OnNavigationCleared -= HandleNavigationCleared;
+            subscribedNavigationService = null;
         }
     }
 }

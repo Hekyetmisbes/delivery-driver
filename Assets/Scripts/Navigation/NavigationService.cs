@@ -54,6 +54,8 @@ namespace DeliveryDriver.Navigation
         [SerializeField] private float routeRefreshInterval = 0.2f;
         [SerializeField] private float routePublishDistanceThreshold = 4f;
         [SerializeField] private float objectiveMoveThreshold = 3f;
+        [SerializeField] private float playerResolveRetryInterval = 0.5f;
+        [SerializeField] private float roadGraphResolveRetryInterval = 1f;
 
         [Header("Reroute")]
         [SerializeField] private float offRouteDistanceThreshold = 14f;
@@ -70,6 +72,7 @@ namespace DeliveryDriver.Navigation
         public event Action OnNavigationCleared;
 
         private Transform cachedPlayerTransform;
+        private PlayerVehicleManager cachedVehicleManager;
         private RoadGraphBuilder cachedRoadGraphBuilder;
         private RoadGraph cachedRoadGraph;
 
@@ -86,6 +89,8 @@ namespace DeliveryDriver.Navigation
         private float nextAllowedRerouteTime;
         private float nextNotificationTime;
         private float nextRouteLogTime;
+        private float nextPlayerResolveTime;
+        private float nextRoadGraphResolveTime;
         private bool routeBuildPending = true;
         private string lastResolvedPlayerSource = string.Empty;
 
@@ -125,8 +130,15 @@ namespace DeliveryDriver.Navigation
             Instance = this;
         }
 
+        private void OnEnable()
+        {
+            PlayerVehicleManager.ActiveVehicleChanged += HandleActiveVehicleChanged;
+        }
+
         private void OnDestroy()
         {
+            PlayerVehicleManager.ActiveVehicleChanged -= HandleActiveVehicleChanged;
+
             if (Instance == this)
             {
                 Instance = null;
@@ -212,6 +224,7 @@ namespace DeliveryDriver.Navigation
         public void SetPlayerTransform(Transform player)
         {
             cachedPlayerTransform = player;
+            nextPlayerResolveTime = 0f;
             if (CurrentObjective.IsValid)
             {
                 ForceRouteRebuild();
@@ -505,19 +518,17 @@ namespace DeliveryDriver.Navigation
         {
             if (IsUsablePlayerTransform(cachedPlayerTransform))
             {
-                if (!TryResolveAuthoritativePlayerTransform(out Transform authoritativePlayerTransform, out string authoritativeSource) ||
-                    authoritativePlayerTransform == cachedPlayerTransform)
-                {
-                    player = cachedPlayerTransform;
-                    return player != null;
-                }
-
-                cachedPlayerTransform = authoritativePlayerTransform;
-                lastResolvedPlayerSource = authoritativeSource;
                 player = cachedPlayerTransform;
                 return player != null;
             }
 
+            if (Time.unscaledTime < nextPlayerResolveTime)
+            {
+                player = null;
+                return false;
+            }
+
+            nextPlayerResolveTime = Time.unscaledTime + Mathf.Max(0.1f, playerResolveRetryInterval);
             if (TryResolveAuthoritativePlayerTransform(out Transform resolvedPlayerTransform, out string playerSource))
             {
                 cachedPlayerTransform = resolvedPlayerTransform;
@@ -533,9 +544,10 @@ namespace DeliveryDriver.Navigation
 
         private bool TryResolveRoadGraph(out RoadGraph graph)
         {
-            if (cachedRoadGraphBuilder == null)
+            if (cachedRoadGraphBuilder == null && Time.unscaledTime >= nextRoadGraphResolveTime)
             {
                 cachedRoadGraphBuilder = FindFirstObjectByType<RoadGraphBuilder>();
+                nextRoadGraphResolveTime = Time.unscaledTime + Mathf.Max(0.25f, roadGraphResolveRetryInterval);
             }
 
             if (cachedRoadGraphBuilder == null)
@@ -575,7 +587,7 @@ namespace DeliveryDriver.Navigation
                 return true;
             }
 
-            PlayerVehicleManager vehicleManager = FindFirstObjectByType<PlayerVehicleManager>();
+            PlayerVehicleManager vehicleManager = TryGetVehicleManager();
             if (vehicleManager != null &&
                 vehicleManager.ActiveVehicleController != null &&
                 IsUsablePlayerTransform(vehicleManager.ActiveVehicleController.transform))
@@ -608,6 +620,21 @@ namespace DeliveryDriver.Navigation
             }
 
             return false;
+        }
+
+        private PlayerVehicleManager TryGetVehicleManager()
+        {
+            if (cachedVehicleManager == null)
+            {
+                cachedVehicleManager = PlayerVehicleManager.Instance ?? FindFirstObjectByType<PlayerVehicleManager>();
+            }
+
+            return cachedVehicleManager;
+        }
+
+        private void HandleActiveVehicleChanged(CarController controller)
+        {
+            SetPlayerTransform(controller != null ? controller.transform : null);
         }
 
         private static bool IsUsablePlayerTransform(Transform candidate)

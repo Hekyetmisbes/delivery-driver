@@ -41,6 +41,17 @@ namespace DeliveryDriver.Company
         private CarController initialSceneVehicleController;
         private VehicleType activeVehicleType = VehicleType.Van;
         private bool prefabsConfigured;
+        private CameraFollow cachedCameraFollow;
+        private ReverseCameraHUD cachedReverseCameraHud;
+        private MinimapCamera cachedMinimapCamera;
+        private DeliveryManager cachedDeliveryManager;
+        private DeliveryUI cachedDeliveryUi;
+        private MinimapUI cachedMinimapUi;
+        private CompassUI cachedCompassUi;
+        private NavigationService cachedNavigationService;
+
+        public static PlayerVehicleManager Instance { get; private set; }
+        public static event Action<CarController> ActiveVehicleChanged;
 
         public CarController ActiveVehicleController => activeVehicleController;
         public VehicleType ActiveVehicleType => activeVehicleType;
@@ -48,6 +59,14 @@ namespace DeliveryDriver.Company
 
         private void Awake()
         {
+            if (Instance != null && Instance != this)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
+            Instance = this;
+
             if (!IsGameSceneActive())
             {
                 Destroy(gameObject);
@@ -57,6 +76,14 @@ namespace DeliveryDriver.Company
             CacheInitialSceneVehicleReference();
             SynchronizeSceneVehicleState();
             EnsureRuntimeVehicleReady();
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
         }
 
         public void SetVehiclePrefabs(GameObject vanVehiclePrefab, GameObject truckVehiclePrefab)
@@ -302,47 +329,49 @@ namespace DeliveryDriver.Company
                 return;
             }
 
-            CameraFollow cameraFollow = FindFirstObjectByType<CameraFollow>();
+            CameraFollow cameraFollow = GetCameraFollow();
             if (cameraFollow != null)
             {
                 cameraFollow.SetTarget(controller.transform);
             }
             else
             {
-                ReverseCameraHUD reverseCameraHud = FindFirstObjectByType<ReverseCameraHUD>();
+                ReverseCameraHUD reverseCameraHud = GetReverseCameraHud();
                 reverseCameraHud?.SetTarget(controller.transform);
 
-                MinimapCamera minimapCamera = FindFirstObjectByType<MinimapCamera>();
+                MinimapCamera minimapCamera = GetMinimapCamera();
                 minimapCamera?.SetPlayer(controller.transform);
             }
 
             QuestManager.Instance?.SetPlayerVehicle(controller);
 
-            DeliveryManager deliveryManager = FindFirstObjectByType<DeliveryManager>();
+            DeliveryManager deliveryManager = GetDeliveryManager();
             if (deliveryManager != null)
             {
                 deliveryManager.SetPlayerVehicle(controller);
             }
 
-            NavigationService.EnsureInstance()?.SetPlayerTransform(controller.transform);
+            GetNavigationService()?.SetPlayerTransform(controller.transform);
 
-            DeliveryUI deliveryUI = FindFirstObjectByType<DeliveryUI>();
+            DeliveryUI deliveryUI = GetDeliveryUi();
             if (deliveryUI != null)
             {
                 deliveryUI.SetPlayerTransform(controller.transform);
             }
 
-            MinimapUI minimapUi = MinimapUI.EnsureSceneInstance();
+            MinimapUI minimapUi = GetMinimapUi();
             if (minimapUi != null)
             {
                 minimapUi.SetPlayerTransform(controller.transform);
             }
 
-            CompassUI compassUi = FindFirstObjectByType<CompassUI>();
+            CompassUI compassUi = GetCompassUi();
             if (compassUi != null)
             {
                 compassUi.SetPlayerTransform(controller.transform);
             }
+
+            ActiveVehicleChanged?.Invoke(controller);
         }
 
         private static void ConfigureVehicleSpecializedBindings(CarController controller, VehicleType vehicleType)
@@ -407,7 +436,7 @@ namespace DeliveryDriver.Company
                 return true;
             }
 
-            CameraFollow cameraFollow = FindFirstObjectByType<CameraFollow>();
+            CameraFollow cameraFollow = GetCameraFollow();
             if (cameraFollow != null && cameraFollow.target != null && TryResolveController(cameraFollow.target, out controller))
             {
                 sourceLabel = "CameraFollow.target";
@@ -473,7 +502,7 @@ namespace DeliveryDriver.Company
             }
 
             Debug.Log("[PlayerVehicleManager] QuestManager player transform unavailable for spawn pose; trying CameraFollow target.");
-            CameraFollow cameraFollow = FindFirstObjectByType<CameraFollow>();
+            CameraFollow cameraFollow = GetCameraFollow();
             if (cameraFollow != null &&
                 cameraFollow.target != null &&
                 TryBuildSpawnSourceFromTransform(cameraFollow.target, "CameraFollow.target", out spawnSource))
@@ -612,6 +641,86 @@ namespace DeliveryDriver.Company
             return QuestManager.Instance != null &&
                    QuestManager.Instance.CurrentQuest != null &&
                    QuestManager.Instance.CurrentQuest.Status == QuestStatus.Active;
+        }
+
+        private CameraFollow GetCameraFollow()
+        {
+            if (cachedCameraFollow == null)
+            {
+                cachedCameraFollow = FindFirstObjectByType<CameraFollow>();
+            }
+
+            return cachedCameraFollow;
+        }
+
+        private ReverseCameraHUD GetReverseCameraHud()
+        {
+            if (cachedReverseCameraHud == null)
+            {
+                cachedReverseCameraHud = FindFirstObjectByType<ReverseCameraHUD>();
+            }
+
+            return cachedReverseCameraHud;
+        }
+
+        private MinimapCamera GetMinimapCamera()
+        {
+            if (cachedMinimapCamera == null)
+            {
+                cachedMinimapCamera = FindFirstObjectByType<MinimapCamera>();
+            }
+
+            return cachedMinimapCamera;
+        }
+
+        private DeliveryManager GetDeliveryManager()
+        {
+            if (cachedDeliveryManager == null)
+            {
+                cachedDeliveryManager = FindFirstObjectByType<DeliveryManager>();
+            }
+
+            return cachedDeliveryManager;
+        }
+
+        private DeliveryUI GetDeliveryUi()
+        {
+            if (cachedDeliveryUi == null)
+            {
+                cachedDeliveryUi = FindFirstObjectByType<DeliveryUI>();
+            }
+
+            return cachedDeliveryUi;
+        }
+
+        private MinimapUI GetMinimapUi()
+        {
+            if (cachedMinimapUi == null)
+            {
+                cachedMinimapUi = MinimapUI.EnsureSceneInstance();
+            }
+
+            return cachedMinimapUi;
+        }
+
+        private CompassUI GetCompassUi()
+        {
+            if (cachedCompassUi == null)
+            {
+                cachedCompassUi = FindFirstObjectByType<CompassUI>();
+            }
+
+            return cachedCompassUi;
+        }
+
+        private NavigationService GetNavigationService()
+        {
+            if (cachedNavigationService == null)
+            {
+                cachedNavigationService = NavigationService.Instance ?? NavigationService.EnsureInstance();
+            }
+
+            return cachedNavigationService;
         }
 
         private static bool IsGameSceneActive()

@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using DeliveryDriver.Navigation;
+using DeliveryDriver.Company;
 using TMPro;
 
 namespace DeliveryDriver.Quest.UI
@@ -20,6 +21,8 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private bool showDistance = true;
         [SerializeField] private bool showCardinalDirection = true;
         [SerializeField] private float distanceDisplayMultiplier = 10f;
+        [SerializeField] private float navigationBindRetryInterval = 0.5f;
+        [SerializeField] private float playerResolveRetryInterval = 0.5f;
 
         [Header("Colors")]
         [SerializeField] private Color pickupColor = new Color(0.2f, 0.5f, 1f, 1f);
@@ -32,6 +35,9 @@ namespace DeliveryDriver.Quest.UI
         private Image cachedNeedleImage;
         private int frameCounter;
         private NavigationService subscribedNavigationService;
+        private float nextNavigationBindTime;
+        private float nextPlayerResolveTime;
+        private PlayerVehicleManager cachedVehicleManager;
 
         private void Start()
         {
@@ -42,23 +48,33 @@ namespace DeliveryDriver.Quest.UI
 
             ResolvePlayerTransform();
             TryBindNavigationService();
+            PlayerVehicleManager.ActiveVehicleChanged += HandleActiveVehicleChanged;
             SetCompassVisible(showCompass);
         }
 
         private void OnDestroy()
         {
+            PlayerVehicleManager.ActiveVehicleChanged -= HandleActiveVehicleChanged;
             UnbindNavigationService();
         }
 
         private void Update()
         {
-            if (!hasObjective || playerTransform == null)
+            if (subscribedNavigationService == null && Time.unscaledTime >= nextNavigationBindTime)
             {
                 TryBindNavigationService();
+            }
+
+            if (playerTransform == null && Time.unscaledTime >= nextPlayerResolveTime)
+            {
+                ResolvePlayerTransform();
+            }
+
+            if (!hasObjective || playerTransform == null)
+            {
                 return;
             }
 
-            TryBindNavigationService();
             UpdateCompassDirection();
 
             frameCounter++;
@@ -78,7 +94,13 @@ namespace DeliveryDriver.Quest.UI
         private void TryBindNavigationService()
         {
             NavigationService navigationService = NavigationService.Instance;
-            if (navigationService == null || subscribedNavigationService == navigationService)
+            if (navigationService == null)
+            {
+                nextNavigationBindTime = Time.unscaledTime + Mathf.Max(0.1f, navigationBindRetryInterval);
+                return;
+            }
+
+            if (subscribedNavigationService == navigationService)
             {
                 return;
             }
@@ -248,9 +270,18 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
+            nextPlayerResolveTime = Time.unscaledTime + Mathf.Max(0.1f, playerResolveRetryInterval);
             if (QuestManager.Instance != null && QuestManager.Instance.PlayerTransform != null)
             {
                 playerTransform = QuestManager.Instance.PlayerTransform;
+                return;
+            }
+
+            PlayerVehicleManager vehicleManager = TryGetVehicleManager();
+            if (vehicleManager != null &&
+                vehicleManager.ActiveVehicleController != null)
+            {
+                playerTransform = vehicleManager.ActiveVehicleController.transform;
                 return;
             }
 
@@ -264,6 +295,7 @@ namespace DeliveryDriver.Quest.UI
         public void SetPlayerTransform(Transform player)
         {
             playerTransform = player;
+            nextPlayerResolveTime = 0f;
         }
 
         public void SetCompassVisible(bool visible)
@@ -275,6 +307,21 @@ namespace DeliveryDriver.Quest.UI
         public void ToggleCompass()
         {
             SetCompassVisible(!showCompass);
+        }
+
+        private PlayerVehicleManager TryGetVehicleManager()
+        {
+            if (cachedVehicleManager == null)
+            {
+                cachedVehicleManager = PlayerVehicleManager.Instance ?? FindFirstObjectByType<PlayerVehicleManager>();
+            }
+
+            return cachedVehicleManager;
+        }
+
+        private void HandleActiveVehicleChanged(CarController controller)
+        {
+            SetPlayerTransform(controller != null ? controller.transform : null);
         }
     }
 }
