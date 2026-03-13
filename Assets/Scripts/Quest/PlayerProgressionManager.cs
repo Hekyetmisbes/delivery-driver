@@ -103,6 +103,7 @@ namespace DeliveryDriver.Quest
             }
 
             Instance = this;
+            DontDestroyOnLoad(gameObject);
 
             // Initialize achievements
             InitializeAchievements();

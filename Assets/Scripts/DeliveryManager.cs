@@ -12,6 +12,8 @@ using TrafficSystem;
 /// </summary>
 public class DeliveryManager : MonoBehaviour
 {
+    private const float SpawnReachabilityTransferDistance = 24f;
+
     private enum DeliveryMissionType
     {
         Standard,
@@ -814,10 +816,11 @@ public class DeliveryManager : MonoBehaviour
 
         int attempts = Mathf.Max(40, numberOfAutoSpawnPoints * 8);
         float minDistanceSqr = Mathf.Max(0f, minPickupSpawnDistanceFromPlayer) * Mathf.Max(0f, minPickupSpawnDistanceFromPlayer);
+        Vector3 routeReferencePoint = cachedPlayerTransform != null ? cachedPlayerTransform.position : Vector3.zero;
 
         for (int i = 0; i < attempts; i++)
         {
-            if (!TryGetValidSpawnPoint(Vector3.zero, false, out Vector3 candidate))
+            if (!TryGetValidSpawnPoint(routeReferencePoint, false, out Vector3 candidate))
             {
                 continue;
             }
@@ -836,7 +839,7 @@ public class DeliveryManager : MonoBehaviour
             return true;
         }
 
-        return TryGetValidSpawnPoint(Vector3.zero, false, out spawnPoint);
+        return TryGetValidSpawnPoint(routeReferencePoint, false, out spawnPoint);
     }
 
     /// <summary>
@@ -1064,6 +1067,42 @@ public class DeliveryManager : MonoBehaviour
     {
         const int maxAttempts = 40;
         bool validateAsRoadGraph = usingRoadGraphSpawnCache && availableSpawnPoints.Count > 0;
+        bool preferReachableSpawn = TryGetReachabilityReferencePoint(referencePoint, out Vector3 reachabilityReferencePoint);
+        int reachabilityRejectCount = 0;
+
+        for (int i = 0; i < maxAttempts; i++)
+        {
+            Vector3 candidate = availableSpawnPoints.Count > 0
+                ? availableSpawnPoints[UnityEngine.Random.Range(0, availableSpawnPoints.Count)]
+                : GetRandomGroundPosition(false);
+
+            bool isValid = validateAsRoadGraph
+                ? IsValidRoadGraphSpawnPosition(candidate)
+                : IsValidSpawnPosition(candidate);
+            if (!isValid)
+            {
+                continue;
+            }
+
+            if (enforceMinDistance && Vector3.Distance(referencePoint, candidate) < minDistanceBetweenPoints)
+            {
+                continue;
+            }
+
+            if (preferReachableSpawn && !IsSpawnReachableOnRoadGraph(reachabilityReferencePoint, candidate))
+            {
+                reachabilityRejectCount++;
+                continue;
+            }
+
+            spawnPoint = candidate;
+            return true;
+        }
+
+        if (preferReachableSpawn && reachabilityRejectCount > 0)
+        {
+            Debug.LogWarning($"[DeliveryManager] No graph-reachable spawn found after rejecting {reachabilityRejectCount} unreachable candidate(s). Falling back to legacy spawn selection.");
+        }
 
         for (int i = 0; i < maxAttempts; i++)
         {
@@ -1112,6 +1151,47 @@ public class DeliveryManager : MonoBehaviour
 
         spawnPoint = Vector3.zero;
         return false;
+    }
+
+    private bool TryGetReachabilityReferencePoint(Vector3 referencePoint, out Vector3 resolvedReferencePoint)
+    {
+        resolvedReferencePoint = referencePoint;
+        if (!HasRoadGraphData())
+        {
+            return false;
+        }
+
+        if (!float.IsFinite(resolvedReferencePoint.x) ||
+            !float.IsFinite(resolvedReferencePoint.y) ||
+            !float.IsFinite(resolvedReferencePoint.z) ||
+            resolvedReferencePoint.sqrMagnitude <= 0.0001f)
+        {
+            ResolvePlayerTransform();
+            if (cachedPlayerTransform == null)
+            {
+                return false;
+            }
+
+            resolvedReferencePoint = cachedPlayerTransform.position;
+        }
+
+        return true;
+    }
+
+    private bool IsSpawnReachableOnRoadGraph(Vector3 referencePoint, Vector3 candidatePoint)
+    {
+        if (!HasRoadGraphData())
+        {
+            return true;
+        }
+
+        List<Vector3> path = RoadGraphPathfinder.FindPath(
+            roadGraphBuilder.RoadGraph,
+            referencePoint,
+            candidatePoint,
+            SpawnReachabilityTransferDistance);
+
+        return path != null && path.Count >= 2;
     }
 
     private bool TryGetEmergencyGroundSpawn(out Vector3 spawnPoint)

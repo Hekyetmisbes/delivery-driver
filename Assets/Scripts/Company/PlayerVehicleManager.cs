@@ -56,6 +56,7 @@ namespace DeliveryDriver.Company
 
             CacheInitialSceneVehicleReference();
             SynchronizeSceneVehicleState();
+            EnsureRuntimeVehicleReady();
         }
 
         public void SetVehiclePrefabs(GameObject vanVehiclePrefab, GameObject truckVehiclePrefab)
@@ -92,6 +93,7 @@ namespace DeliveryDriver.Company
             }
 
             SynchronizeSceneVehicleState();
+            EnsureRuntimeVehicleReady();
         }
 
         public bool ApplyVehicleType(VehicleType vehicleType)
@@ -229,6 +231,49 @@ namespace DeliveryDriver.Company
             activeVehicleRoot = null;
         }
 
+        private void EnsureRuntimeVehicleReady()
+        {
+            SynchronizeSceneVehicleState();
+
+            if (activeVehicleController != null && activeVehicleController.gameObject != null)
+            {
+                if (!activeVehicleController.gameObject.activeSelf)
+                {
+                    activeVehicleController.gameObject.SetActive(true);
+                }
+
+                activeVehicleRoot = activeVehicleController.gameObject;
+                activeVehicleType = ResolveVehicleType(activeVehicleRoot);
+                ConfigureVehicleSpecializedBindings(activeVehicleController, activeVehicleType);
+                EnsureSingleActivePlayerVehicle(activeVehicleRoot);
+                RebindSystems(activeVehicleController);
+                return;
+            }
+
+            if (!prefabsConfigured)
+            {
+                return;
+            }
+
+            VehicleType desiredVehicleType = ResolveDesiredVehicleType();
+            ApplyVehicleTypeInternal(desiredVehicleType, true);
+        }
+
+        private static VehicleType ResolveDesiredVehicleType()
+        {
+            QuestDatabaseService database = QuestDatabaseService.Instance;
+            if (database != null && database.IsReady)
+            {
+                CompanyProfileData profile = database.GetCompanyProfile(QuestDatabaseService.DefaultPlayerId);
+                if (profile != null)
+                {
+                    return profile.SelectedVehicleType;
+                }
+            }
+
+            return VehicleType.Van;
+        }
+
         private void EnsureSingleActivePlayerVehicle(GameObject activeRoot)
         {
             CarController[] vehicles = FindObjectsByType<CarController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
@@ -287,7 +332,7 @@ namespace DeliveryDriver.Company
                 deliveryUI.SetPlayerTransform(controller.transform);
             }
 
-            MinimapUI minimapUi = FindFirstObjectByType<MinimapUI>();
+            MinimapUI minimapUi = MinimapUI.EnsureSceneInstance();
             if (minimapUi != null)
             {
                 minimapUi.SetPlayerTransform(controller.transform);

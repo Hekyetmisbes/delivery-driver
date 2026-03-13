@@ -10,8 +10,11 @@ public class SpeedometerUI : MonoBehaviour
     [SerializeField] private bool showSpeedometer = true;
 
     [Header("Layout")]
-    [SerializeField] private Vector2 anchoredPosition = new Vector2(-32f, 28f);
+    [SerializeField] private Vector2 anchoredPosition = new Vector2(-40f, 36f);
     [SerializeField] private Vector2 panelSize = new Vector2(280f, 220f);
+    [SerializeField] private Vector2 minimumPanelSize = new Vector2(252f, 198f);
+    [SerializeField] private Vector2 maximumPanelSize = new Vector2(304f, 236f);
+    [SerializeField] private float responsiveReferenceShortSide = 1080f;
     [SerializeField] private float gaugeRadius = 88f;
     [SerializeField] private int tickCount = 28;
     [SerializeField] private float gaugeStartAngle = 220f;
@@ -44,6 +47,7 @@ public class SpeedometerUI : MonoBehaviour
     private int frameCounter;
     private int lastDisplayedSpeed = -1;
     private string lastGearDisplay = "";
+    private Vector2 lastScreenSize = Vector2.negativeInfinity;
 
     public void Initialize(Rigidbody rb)
     {
@@ -101,6 +105,7 @@ public class SpeedometerUI : MonoBehaviour
 
         BuildGaugeTicks(panelObject.transform, fallback);
         BuildSpeedTexts(panelObject.transform);
+        ApplyResponsiveLayout();
     }
 
     private void UpdateUI()
@@ -123,6 +128,8 @@ public class SpeedometerUI : MonoBehaviour
         {
             return;
         }
+
+        ApplyResponsiveLayout();
 
         float speedMps = playerRigidbody != null ? playerRigidbody.linearVelocity.magnitude : 0f;
         float speedKmh = speedMps * 3.6f;
@@ -426,5 +433,27 @@ public class SpeedometerUI : MonoBehaviour
             rect.offsetMax = Vector2.zero;
             rect.localScale = Vector3.one;
         }
+    }
+
+    private void ApplyResponsiveLayout()
+    {
+        if (rootRect == null)
+        {
+            return;
+        }
+
+        Vector2 screenSize = new Vector2(Screen.width, Screen.height);
+        if (screenSize == lastScreenSize)
+        {
+            return;
+        }
+
+        lastScreenSize = screenSize;
+        float scale = Mathf.Clamp(Mathf.Min(Screen.width, Screen.height) / Mathf.Max(1f, responsiveReferenceShortSide), 0.92f, 1.06f);
+        Vector2 size = panelSize * scale;
+        size.x = Mathf.Clamp(size.x, minimumPanelSize.x, maximumPanelSize.x);
+        size.y = Mathf.Clamp(size.y, minimumPanelSize.y, maximumPanelSize.y);
+        rootRect.sizeDelta = size;
+        rootRect.anchoredPosition = anchoredPosition;
     }
 }
