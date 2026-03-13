@@ -291,6 +291,12 @@ public class CameraFollow : MonoBehaviour
 
     void EnsureExternalCameraControllers()
     {
+        int minimapMarkerLayer = ResolveMiniMapMarkerLayer();
+        if (mainCamera != null && minimapMarkerLayer >= 0)
+        {
+            mainCamera.cullingMask &= ~(1 << minimapMarkerLayer);
+        }
+
         if (enableReverseCamera)
         {
             if (reverseCameraController == null)
@@ -339,15 +345,23 @@ public class CameraFollow : MonoBehaviour
             minimapCameraController = miniMapCameraObject.AddComponent<MinimapCamera>();
         }
 
-        minimapCameraController.ConfigureStandalone(
+        MinimapUI minimapUi = MinimapUI.EnsureSceneInstance();
+        bool useStandaloneOverlay = minimapUi == null;
+        minimapCameraController.ConfigureRuntime(
             miniMapHeight,
             miniMapOrthoSize,
             miniMapRotateWithTarget,
             allowMiniMapToggleKey,
+            useStandaloneOverlay,
             miniMapViewportSize,
             miniMapViewportMargin,
             miniMapCullingMask,
             miniMapBackgroundColor);
+
+        if (minimapUi != null && target != null)
+        {
+            minimapUi.SetPlayerTransform(target);
+        }
     }
 
     void BindGameplayRig()

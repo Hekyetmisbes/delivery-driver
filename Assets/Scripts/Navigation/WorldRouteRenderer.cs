@@ -5,6 +5,8 @@ namespace DeliveryDriver.Navigation
 {
     public class WorldRouteRenderer : MonoBehaviour
     {
+        [SerializeField] private bool enableLegacyWorldRoute = false;
+
         [Header("Route Line Settings")]
         [SerializeField] private Color routeLineColor = new Color(0.2f, 0.85f, 1f, 0.95f);
         [SerializeField] private float routeLineWidth = 2.4f;
@@ -19,6 +21,12 @@ namespace DeliveryDriver.Navigation
 
         private void OnEnable()
         {
+            if (!enableLegacyWorldRoute)
+            {
+                ClearRouteLine();
+                return;
+            }
+
             if (NavigationService.Instance != null)
             {
                 NavigationService.Instance.OnRouteChanged += HandleRouteChanged;
@@ -42,7 +50,7 @@ namespace DeliveryDriver.Navigation
 
         private void HandleRouteChanged(RouteResult route)
         {
-            if (route == null || !route.IsValid)
+            if (!enableLegacyWorldRoute || route == null || !route.IsRenderable)
             {
                 ClearRouteLine();
                 return;

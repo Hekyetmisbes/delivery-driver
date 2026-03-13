@@ -1,4 +1,5 @@
 using UnityEngine;
+using DeliveryDriver.Company;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -37,6 +38,8 @@ namespace DeliveryDriver.Quest.UI
         private Camera minimapCamera;
         private bool isVisible = true;
 
+        public Camera CameraComponent => minimapCamera;
+
         private void Awake()
         {
             minimapCamera = GetComponent<Camera>();
@@ -53,9 +56,9 @@ namespace DeliveryDriver.Quest.UI
         {
             HandleToggleInput();
 
+            ResolvePlayerTransform();
             if (playerTransform == null)
             {
-                ResolvePlayerTransform();
                 return;
             }
 
@@ -83,15 +86,26 @@ namespace DeliveryDriver.Quest.UI
             minimapCamera.farClipPlane = farClipPlane;
             minimapCamera.depth = depth;
 
-            if (useStandaloneOverlay && minimapCamera.targetTexture == null)
+            bool rendersToOverlay = useStandaloneOverlay && minimapCamera.targetTexture == null;
+            if (rendersToOverlay)
             {
                 minimapCamera.rect = BuildViewportRect();
+            }
+            else if (minimapCamera.targetTexture != null)
+            {
+                minimapCamera.rect = new Rect(0f, 0f, 1f, 1f);
+            }
+            else
+            {
+                minimapCamera.rect = new Rect(0f, 0f, 0f, 0f);
             }
 
             if (!rotateWithPlayer)
             {
                 transform.rotation = Quaternion.Euler(90f, 0f, 0f);
             }
+
+            minimapCamera.enabled = isVisible;
         }
 
         private void UpdateCameraPosition()
@@ -160,24 +174,81 @@ namespace DeliveryDriver.Quest.UI
 
         private void ResolvePlayerTransform()
         {
-            if (playerTransform != null)
+            if (IsUsablePlayerTransform(playerTransform))
             {
+                if (!TryResolveAuthoritativePlayerTransform(out Transform authoritativePlayerTransform) ||
+                    authoritativePlayerTransform == playerTransform)
+                {
+                    return;
+                }
+            }
+
+            if (TryResolveAuthoritativePlayerTransform(out Transform resolvedPlayerTransform))
+            {
+                playerTransform = resolvedPlayerTransform;
                 return;
             }
 
-            // Try to get from QuestManager
-            if (QuestManager.Instance != null && QuestManager.Instance.PlayerTransform != null)
+            playerTransform = null;
+        }
+
+        private static bool IsUsablePlayerTransform(Transform candidate)
+        {
+            return candidate != null &&
+                   candidate.gameObject != null &&
+                   candidate.gameObject.activeInHierarchy;
+        }
+
+        private bool TryResolveAuthoritativePlayerTransform(out Transform resolvedPlayerTransform)
+        {
+            resolvedPlayerTransform = null;
+
+            if (QuestManager.Instance != null && IsUsablePlayerTransform(QuestManager.Instance.PlayerTransform))
             {
-                playerTransform = QuestManager.Instance.PlayerTransform;
-                return;
+                resolvedPlayerTransform = QuestManager.Instance.PlayerTransform;
+                return true;
             }
 
-            // Try to find CarController
-            CarController controller = FindAnyObjectByType<CarController>();
-            if (controller != null)
+            PlayerVehicleManager vehicleManager = FindFirstObjectByType<PlayerVehicleManager>();
+            if (vehicleManager != null &&
+                vehicleManager.ActiveVehicleController != null &&
+                IsUsablePlayerTransform(vehicleManager.ActiveVehicleController.transform))
             {
-                playerTransform = controller.transform;
+                resolvedPlayerTransform = vehicleManager.ActiveVehicleController.transform;
+                return true;
             }
+
+            GameObject taggedPlayer = GameObject.FindGameObjectWithTag("Player");
+            if (taggedPlayer != null && IsUsablePlayerTransform(taggedPlayer.transform))
+            {
+                resolvedPlayerTransform = taggedPlayer.transform;
+                return true;
+            }
+
+            CarController[] controllers = FindObjectsByType<CarController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            Transform inactiveFallback = null;
+            for (int i = 0; i < controllers.Length; i++)
+            {
+                CarController controller = controllers[i];
+                if (controller == null || controller.transform == null)
+                {
+                    continue;
+                }
+
+                if (IsUsablePlayerTransform(controller.transform))
+                {
+                    resolvedPlayerTransform = controller.transform;
+                    return true;
+                }
+
+                if (inactiveFallback == null)
+                {
+                    inactiveFallback = controller.transform;
+                }
+            }
+
+            resolvedPlayerTransform = inactiveFallback;
+            return resolvedPlayerTransform != null;
         }
 
         public void SetPlayer(Transform player)
@@ -203,6 +274,35 @@ namespace DeliveryDriver.Quest.UI
             viewportMargin = overlayViewportMargin;
             cullingMask = overlayCullingMask;
             backgroundColor = overlayBackgroundColor;
+            SetupCamera();
+        }
+
+        public void ConfigureRuntime(
+            float followHeight,
+            float zoom,
+            bool rotate,
+            bool allowToggle,
+            bool useOverlay,
+            float overlayViewportSize,
+            Vector2 overlayViewportMargin,
+            LayerMask overlayCullingMask,
+            Color overlayBackgroundColor)
+        {
+            height = followHeight;
+            orthographicSize = zoom;
+            rotateWithPlayer = rotate;
+            allowToggleKey = allowToggle;
+            useStandaloneOverlay = useOverlay;
+            viewportSize = overlayViewportSize;
+            viewportMargin = overlayViewportMargin;
+            cullingMask = overlayCullingMask;
+            backgroundColor = overlayBackgroundColor;
+            SetupCamera();
+        }
+
+        public void SetUseStandaloneOverlay(bool useOverlay)
+        {
+            useStandaloneOverlay = useOverlay;
             SetupCamera();
         }
 

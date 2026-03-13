@@ -4,6 +4,8 @@ namespace DeliveryDriver.Navigation
 {
     public class ObjectiveMarker3D : MonoBehaviour
     {
+        [SerializeField] private bool enableLegacyWorldMarker = false;
+
         [Header("Marker Settings")]
         [SerializeField] private float markerHeight = 24f;
         [SerializeField] private Vector3 markerScale = new Vector3(4f, 10f, 4f);
@@ -24,6 +26,12 @@ namespace DeliveryDriver.Navigation
 
         private void OnEnable()
         {
+            if (!enableLegacyWorldMarker)
+            {
+                RemoveMarker();
+                return;
+            }
+
             if (NavigationService.Instance != null)
             {
                 NavigationService.Instance.OnObjectiveChanged += HandleObjectiveChanged;
@@ -47,7 +55,7 @@ namespace DeliveryDriver.Navigation
 
         private void Update()
         {
-            if (!currentObjective.IsValid)
+            if (!enableLegacyWorldMarker || !currentObjective.IsValid)
             {
                 return;
             }

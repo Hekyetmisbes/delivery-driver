@@ -47,6 +47,36 @@ public static class MinimapRoadTextureBuilder
         }
     }
 
+    public static List<List<Vector3>> BuildRoadPolylines(RoadGraph graph)
+    {
+        List<List<Vector3>> result = new List<List<Vector3>>();
+        if (graph == null || graph.roadSegments == null || graph.roadSegments.Count == 0)
+        {
+            return result;
+        }
+
+        List<Vector3> junctionCenters;
+        List<List<Vector3>> bridgeSegments;
+        List<List<Vector3>> lines = BuildDrawablePolylines(graph, out bridgeSegments, out junctionCenters);
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (lines[i] != null && lines[i].Count >= 2)
+            {
+                result.Add(lines[i]);
+            }
+        }
+
+        for (int i = 0; i < bridgeSegments.Count; i++)
+        {
+            if (bridgeSegments[i] != null && bridgeSegments[i].Count >= 2)
+            {
+                result.Add(bridgeSegments[i]);
+            }
+        }
+
+        return result;
+    }
+
     public static Texture2D Build(
         RoadGraph graph,
         Bounds worldBounds,
@@ -75,6 +105,7 @@ public static class MinimapRoadTextureBuilder
             List<Vector3> junctionCenters;
             List<List<Vector3>> bridgeSegments;
             List<List<Vector3>> drawablePolylines = BuildDrawablePolylines(graph, out bridgeSegments, out junctionCenters);
+            int outlineWidth = Mathf.Max(roadWidthPixels + 2, Mathf.RoundToInt(roadWidthPixels * 1.85f));
             for (int polylineIndex = 0; polylineIndex < drawablePolylines.Count; polylineIndex++)
             {
                 List<Vector3> polyline = drawablePolylines[polylineIndex];
@@ -87,6 +118,10 @@ public static class MinimapRoadTextureBuilder
                 {
                     Vector2Int a = WorldToPixel(polyline[waypointIndex - 1], worldBounds, size);
                     Vector2Int b = WorldToPixel(polyline[waypointIndex], worldBounds, size);
+                    if (roadOutlineColor.a > 0.01f)
+                    {
+                        DrawThickLine(pixels, size, a, b, roadOutlineColor, outlineWidth);
+                    }
                     DrawThickLine(pixels, size, a, b, roadColor, roadWidthPixels);
                 }
             }
@@ -103,6 +138,10 @@ public static class MinimapRoadTextureBuilder
                 {
                     Vector2Int a = WorldToPixel(bridge[pointIndex - 1], worldBounds, size);
                     Vector2Int b = WorldToPixel(bridge[pointIndex], worldBounds, size);
+                    if (roadOutlineColor.a > 0.01f)
+                    {
+                        DrawThickLine(pixels, size, a, b, roadOutlineColor, outlineWidth);
+                    }
                     DrawThickLine(pixels, size, a, b, roadColor, roadWidthPixels);
                 }
             }
@@ -111,6 +150,10 @@ public static class MinimapRoadTextureBuilder
             for (int i = 0; i < junctionCenters.Count; i++)
             {
                 Vector2Int pixel = WorldToPixel(junctionCenters[i], worldBounds, size);
+                if (roadOutlineColor.a > 0.01f)
+                {
+                    DrawDisc(pixels, size, pixel.x, pixel.y, junctionRadius + 1, roadOutlineColor);
+                }
                 DrawDisc(pixels, size, pixel.x, pixel.y, junctionRadius, roadColor);
             }
         }

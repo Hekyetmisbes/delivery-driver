@@ -1149,6 +1149,15 @@ namespace TrafficSystem
         private void BuildConnections()
         {
             float threshold = connectionThresholdMeters;
+            float recoveryThreshold = Mathf.Max(connectionThresholdMeters, sampleStepMeters);
+
+            foreach (var segment in roadGraph.roadSegments)
+            {
+                if (segment != null)
+                {
+                    segment.connections = new List<RoadConnection>();
+                }
+            }
 
             foreach (var segment in roadGraph.roadSegments)
             {
@@ -1162,10 +1171,7 @@ namespace TrafficSystem
                 // Self-loop connection for closed roads
                 if (Vector3.Distance(endPos, startPos) < threshold)
                 {
-                    segment.connections.Add(new RoadConnection(
-                        segment, segment,
-                        lastIdx, 0
-                    ));
+                    AddConnectionIfMissing(segment, segment, lastIdx, 0);
                 }
 
                 foreach (var otherSegment in roadGraph.roadSegments)
@@ -1179,37 +1185,66 @@ namespace TrafficSystem
                     // End of current -> Start of other
                     if (Vector3.Distance(endPos, otherStart) < threshold)
                     {
-                        segment.connections.Add(new RoadConnection(
-                            segment, otherSegment,
-                            lastIdx, 0
-                        ));
+                        AddConnectionIfMissing(segment, otherSegment, lastIdx, 0);
                     }
 
                     // End of current -> End of other (reverse direction)
                     if (Vector3.Distance(endPos, otherEnd) < threshold)
                     {
-                        segment.connections.Add(new RoadConnection(
-                            segment, otherSegment,
-                            lastIdx, otherLastIdx
-                        ));
+                        AddConnectionIfMissing(segment, otherSegment, lastIdx, otherLastIdx);
                     }
 
                     // Start of current -> Start of other (both segments start at same intersection)
                     if (Vector3.Distance(startPos, otherStart) < threshold)
                     {
-                        segment.connections.Add(new RoadConnection(
-                            segment, otherSegment,
-                            0, 0
-                        ));
+                        AddConnectionIfMissing(segment, otherSegment, 0, 0);
                     }
 
                     // Start of current -> End of other
                     if (Vector3.Distance(startPos, otherEnd) < threshold)
                     {
-                        segment.connections.Add(new RoadConnection(
-                            segment, otherSegment,
-                            0, otherLastIdx
-                        ));
+                        AddConnectionIfMissing(segment, otherSegment, 0, otherLastIdx);
+                    }
+                }
+            }
+
+            if (recoveryThreshold > threshold + 0.01f)
+            {
+                foreach (var segment in roadGraph.roadSegments)
+                {
+                    if (segment.waypoints.Count == 0) continue;
+
+                    Vector3 startPos = segment.waypoints[0].position;
+                    Vector3 endPos = segment.waypoints[segment.waypoints.Count - 1].position;
+                    int lastIdx = segment.waypoints.Count - 1;
+
+                    foreach (var otherSegment in roadGraph.roadSegments)
+                    {
+                        if (otherSegment == segment || otherSegment.waypoints.Count == 0) continue;
+
+                        Vector3 otherStart = otherSegment.waypoints[0].position;
+                        Vector3 otherEnd = otherSegment.waypoints[otherSegment.waypoints.Count - 1].position;
+                        int otherLastIdx = otherSegment.waypoints.Count - 1;
+
+                        if (ShouldCreateRecoveryConnection(endPos, otherStart, recoveryThreshold))
+                        {
+                            AddConnectionIfMissing(segment, otherSegment, lastIdx, 0);
+                        }
+
+                        if (ShouldCreateRecoveryConnection(endPos, otherEnd, recoveryThreshold))
+                        {
+                            AddConnectionIfMissing(segment, otherSegment, lastIdx, otherLastIdx);
+                        }
+
+                        if (ShouldCreateRecoveryConnection(startPos, otherStart, recoveryThreshold))
+                        {
+                            AddConnectionIfMissing(segment, otherSegment, 0, 0);
+                        }
+
+                        if (ShouldCreateRecoveryConnection(startPos, otherEnd, recoveryThreshold))
+                        {
+                            AddConnectionIfMissing(segment, otherSegment, 0, otherLastIdx);
+                        }
                     }
                 }
             }
@@ -1221,6 +1256,53 @@ namespace TrafficSystem
             }
 
             Debug.Log($"[RoadGraphBuilder] Built {totalConnections} connections between road segments");
+        }
+
+        private static void AddConnectionIfMissing(RoadSegment fromSegment, RoadSegment toSegment, int fromWaypointIndex, int toWaypointIndex)
+        {
+            if (fromSegment == null || toSegment == null)
+            {
+                return;
+            }
+
+            if (fromSegment.connections == null)
+            {
+                fromSegment.connections = new List<RoadConnection>();
+            }
+
+            for (int i = 0; i < fromSegment.connections.Count; i++)
+            {
+                RoadConnection existing = fromSegment.connections[i];
+                if (existing == null)
+                {
+                    continue;
+                }
+
+                if (existing.toSegment == toSegment &&
+                    existing.fromWaypointIndex == fromWaypointIndex &&
+                    existing.toWaypointIndex == toWaypointIndex)
+                {
+                    return;
+                }
+            }
+
+            fromSegment.connections.Add(new RoadConnection(
+                fromSegment,
+                toSegment,
+                fromWaypointIndex,
+                toWaypointIndex));
+        }
+
+        private static bool ShouldCreateRecoveryConnection(Vector3 from, Vector3 to, float threshold)
+        {
+            Vector3 delta = to - from;
+            if (Mathf.Abs(delta.y) > 2.5f)
+            {
+                return false;
+            }
+
+            delta.y = 0f;
+            return delta.sqrMagnitude <= threshold * threshold;
         }
 
         /// <summary>

@@ -6,6 +6,8 @@ namespace DeliveryDriver.Navigation
 {
     public class EdgeIndicator : MonoBehaviour
     {
+        [SerializeField] private bool enableLegacyOverlayIndicator = false;
+
         [Header("Settings")]
         [SerializeField] private bool showEdgeIndicator = true;
         [SerializeField] private float indicatorSize = 22f;
@@ -29,6 +31,12 @@ namespace DeliveryDriver.Navigation
 
         private void OnEnable()
         {
+            if (!enableLegacyOverlayIndicator)
+            {
+                RemoveEdgeIndicator();
+                return;
+            }
+
             if (NavigationService.Instance != null)
             {
                 NavigationService.Instance.OnObjectiveChanged += HandleObjectiveChanged;
@@ -52,7 +60,7 @@ namespace DeliveryDriver.Navigation
 
         private void Update()
         {
-            if (!showEdgeIndicator || !currentObjective.IsValid)
+            if (!enableLegacyOverlayIndicator || !showEdgeIndicator || !currentObjective.IsValid)
             {
                 HideEdgeIndicator();
                 return;
@@ -238,10 +246,12 @@ namespace DeliveryDriver.Navigation
         {
             if (cachedMiniMapCamera == null)
             {
-                GameObject miniMapCameraObject = GameObject.Find("MiniMapCamera");
-                if (miniMapCameraObject != null)
+                DeliveryDriver.Quest.UI.MinimapCamera minimapCameraController = FindFirstObjectByType<DeliveryDriver.Quest.UI.MinimapCamera>();
+                if (minimapCameraController != null)
                 {
-                    cachedMiniMapCamera = miniMapCameraObject.GetComponent<Camera>();
+                    cachedMiniMapCamera = minimapCameraController.CameraComponent != null
+                        ? minimapCameraController.CameraComponent
+                        : minimapCameraController.GetComponent<Camera>();
                 }
             }
 

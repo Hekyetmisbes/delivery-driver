@@ -9,12 +9,15 @@ namespace DeliveryDriver.Quest.UI
     /// </summary>
     public class RouteLineGraphic : Graphic
     {
-        [SerializeField] private float lineWidth = 3.5f;
+        [SerializeField] private float lineWidth = 4f;
+        [SerializeField] private bool showOutline = true;
+        [SerializeField] private float outlineWidthMultiplier = 1.7f;
+        [SerializeField] private float outlineAlpha = 0.92f;
         [SerializeField] private bool showGlow = true;
-        [SerializeField] private float glowWidthMultiplier = 2.5f;
-        [SerializeField] private float glowAlpha = 0.25f;
+        [SerializeField] private float glowWidthMultiplier = 2.1f;
+        [SerializeField] private float glowAlpha = 0.18f;
         [SerializeField] private bool smoothCorners = true;
-        [SerializeField] private int smoothingIterations = 1;
+        [SerializeField] private int smoothingIterations = 2;
 
         private readonly List<Vector2> points = new List<Vector2>();
         private readonly List<Vector2> drawablePoints = new List<Vector2>();
@@ -51,6 +54,13 @@ namespace DeliveryDriver.Quest.UI
             if (drawablePoints.Count < 2)
             {
                 return;
+            }
+
+            if (showOutline)
+            {
+                float outlineHalfWidth = lineWidth * outlineWidthMultiplier * 0.5f;
+                Color outlineColor = new Color(0.06f, 0.08f, 0.12f, color.a * outlineAlpha);
+                DrawLineSegments(vh, outlineHalfWidth, outlineColor);
             }
 
             // Draw glow layer first (wider, semi-transparent)

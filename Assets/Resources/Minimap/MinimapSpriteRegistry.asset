@@ -1,0 +1,23 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0c47fe0d51614878867ee00df120b5e6, type: 3}
+  m_Name: MinimapSpriteRegistry
+  m_EditorClassIdentifier: 
+  atlasTexture: {fileID: 2800000, guid: c9df26c71735cd84d893bf0fecc066ac, type: 3}
+  playerArrowRect:
+    serializedVersion: 2
+    x: 288
+    y: 162
+    width: 16
+    height: 16
+  playerArrowPivot: {x: 0.5, y: 0.5}
+  pixelsPerUnit: 100
