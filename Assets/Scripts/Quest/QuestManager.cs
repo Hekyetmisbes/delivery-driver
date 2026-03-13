@@ -1422,43 +1422,30 @@ namespace DeliveryDriver.Quest
 
         public QuestSaveData GetSaveData()
         {
-            QuestSaveData data = new QuestSaveData
-            {
-                ActiveQuests = ConvertQuestList(activeQuests),
-                AvailableQuests = ConvertQuestList(availableQuests),
-                CompletedQuests = ConvertQuestList(completedQuests),
-                CurrentQuestID = currentQuest?.QuestID
-            };
-
-            return data;
+            return QuestSaveRestoreService.BuildSaveData(activeQuests, availableQuests, completedQuests, currentQuest);
         }
 
         public void LoadSaveData(QuestSaveData data)
         {
-            if (data == null)
+            if (!QuestSaveRestoreService.TryRestoreSaveData(data, out QuestSaveRestoreState restoredState))
             {
-                Debug.LogWarning("[QuestManager] LoadSaveData called with null data.");
                 return;
             }
 
-            activeQuests = ConvertQuestRecords(data.ActiveQuests);
-            availableQuests = ConvertQuestRecords(data.AvailableQuests);
-            completedQuests = ConvertQuestRecords(data.CompletedQuests);
+            activeQuests = restoredState.ActiveQuests;
+            availableQuests = restoredState.AvailableQuests;
+            completedQuests = restoredState.CompletedQuests;
+            currentQuest = restoredState.CurrentQuest;
 
-            currentQuest = null;
-            if (!string.IsNullOrWhiteSpace(data.CurrentQuestID))
-            {
-                currentQuest = activeQuests.Find(q => q.QuestID == data.CurrentQuestID);
-            }
-
-            GetZoneMarkerService().RestoreQuestMarkers(activeQuests, quest => GetCurrentDeliveryLocation(quest));
-
-            if (currentQuest != null)
-            {
-                OnQuestStarted.Invoke(currentQuest);
-                CacheQuestUiState(currentQuest);
-                OnQuestUpdated.Invoke(currentQuest);
-            }
+            QuestSaveRestoreService.RestoreLoadedQuestState(
+                restoredState,
+                quests => GetZoneMarkerService().RestoreQuestMarkers(quests, quest => GetCurrentDeliveryLocation(quest)),
+                quest =>
+                {
+                    OnQuestStarted.Invoke(quest);
+                    CacheQuestUiState(quest);
+                    OnQuestUpdated.Invoke(quest);
+                });
         }
 
         private QuestLocation GetCurrentDeliveryLocation(QuestData quest)
@@ -1470,48 +1457,6 @@ namespace DeliveryDriver.Quest
 
             int index = Mathf.Clamp(quest.CurrentDeliveryIndex, 0, quest.DeliveryLocations.Count - 1);
             return quest.DeliveryLocations[index];
-        }
-
-        private List<QuestSaveData.QuestRecord> ConvertQuestList(List<QuestData> quests)
-        {
-            List<QuestSaveData.QuestRecord> records = new List<QuestSaveData.QuestRecord>();
-            if (quests == null)
-            {
-                return records;
-            }
-
-            foreach (QuestData quest in quests)
-            {
-                if (quest == null)
-                {
-                    continue;
-                }
-
-                records.Add(QuestSaveData.QuestRecord.FromQuestData(quest));
-            }
-
-            return records;
-        }
-
-        private List<QuestData> ConvertQuestRecords(List<QuestSaveData.QuestRecord> records)
-        {
-            List<QuestData> quests = new List<QuestData>();
-            if (records == null)
-            {
-                return quests;
-            }
-
-            foreach (QuestSaveData.QuestRecord record in records)
-            {
-                if (record == null)
-                {
-                    continue;
-                }
-
-                quests.Add(record.ToQuestData());
-            }
-
-            return quests;
         }
 
         public RewardPenaltyBreakdown GetQuestRewardPreview(QuestData quest)

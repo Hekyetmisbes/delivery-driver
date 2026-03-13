@@ -24,25 +24,12 @@
 - [x] Step 20 - Split `QuestManager` reward/penalty, streak, failure-penalty, and payout-award logic into `QuestRewardService`, leaving `QuestManager` to coordinate quest state while delegating reward math and progression payout application.
 - [x] Step 21 - Re-verified the `QuestManager` reward/penalty refactor with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
 - [x] Step 22 - Extracted quest location assignment into `QuestLocationAssignmentService` and marker/zone lifecycle ownership into `QuestZoneMarkerService`, leaving `QuestManager` responsible for quest orchestration while delegating location generation, marker cleanup, zone spawning, and marker restoration.
+- [x] Step 23 - Extracted quest save/load conversion and restore orchestration into `QuestSaveRestoreService`, so `QuestManager` now delegates save-data building, record-to-runtime conversion, current-quest resolution, and load-time marker/UI restoration callbacks instead of owning raw serialization plumbing directly.
 
 ## Planned Next Steps
 
 ```xml
 <planned_next_steps>
-  <step id="23" status="planned" area="QuestManager">
-    <title>Extract Quest Save and Restore Flow</title>
-    <summary>Move save-data conversion and marker/state restoration into a save-facing helper so QuestManager no longer owns raw serialization plumbing directly.</summary>
-    <targets>
-      <file>Assets/Scripts/Quest/QuestManager.cs</file>
-    </targets>
-    <candidate_methods>
-      <method>GetSaveData</method>
-      <method>LoadSaveData</method>
-      <method>ConvertQuestList</method>
-      <method>ConvertQuestRecords</method>
-    </candidate_methods>
-    <goal>Reduce persistence coupling inside QuestManager.</goal>
-  </step>
   <step id="24" status="planned" area="QuestManager">
     <title>Extract Quest Audio and Particle Flow</title>
     <summary>Move music switching, SFX playback, particle pooling, and effect triggering into focused helpers or services.</summary>
