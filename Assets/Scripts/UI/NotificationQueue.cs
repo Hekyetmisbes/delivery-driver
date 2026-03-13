@@ -24,6 +24,8 @@ namespace DeliveryDriver.UI
     public class NotificationQueue : MonoBehaviour
     {
         private static NotificationQueue instance;
+        private const string NotificationRootName = "NotificationRoot";
+        private const string NotificationContainerName = "Container";
 
         private const int MaxVisible = 3;
         private const float DefaultDuration = 3f;
@@ -32,6 +34,7 @@ namespace DeliveryDriver.UI
         private const float EntrySpacing = 8f;
 
         private Canvas notificationCanvas;
+        private RectTransform notificationRootRect;
         private RectTransform containerRect;
         private readonly Queue<NotificationData> pendingQueue = new Queue<NotificationData>();
         private readonly List<NotificationEntry> activeEntries = new List<NotificationEntry>();
@@ -210,28 +213,66 @@ namespace DeliveryDriver.UI
 
         private void CreateCanvas()
         {
-            if (notificationCanvas != null) return;
+            if (containerRect != null)
+            {
+                return;
+            }
 
-            GameObject canvasObj = new GameObject("NotificationCanvas", typeof(Canvas), typeof(CanvasScaler));
-            canvasObj.transform.SetParent(transform, false);
+            Transform uiParent = GlobalUiCoordinator.CanvasGroupRoot ?? GlobalUiCoordinator.PrimaryCanvas?.transform;
+            if (uiParent != null)
+            {
+                Transform existingRoot = uiParent.Find(NotificationRootName);
+                if (existingRoot == null)
+                {
+                    GameObject rootObject = new GameObject(NotificationRootName, typeof(RectTransform));
+                    rootObject.transform.SetParent(uiParent, false);
+                    notificationRootRect = rootObject.GetComponent<RectTransform>();
+                    notificationRootRect.anchorMin = Vector2.zero;
+                    notificationRootRect.anchorMax = Vector2.one;
+                    notificationRootRect.offsetMin = Vector2.zero;
+                    notificationRootRect.offsetMax = Vector2.zero;
+                }
+                else
+                {
+                    notificationRootRect = existingRoot as RectTransform;
+                }
+            }
+            else
+            {
+                GameObject canvasObj = new GameObject("NotificationCanvas", typeof(Canvas), typeof(CanvasScaler));
+                canvasObj.transform.SetParent(transform, false);
 
-            notificationCanvas = canvasObj.GetComponent<Canvas>();
-            notificationCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            notificationCanvas.sortingOrder = 800;
+                notificationCanvas = canvasObj.GetComponent<Canvas>();
+                notificationCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                notificationCanvas.sortingOrder = 800;
 
-            CanvasScaler scaler = canvasObj.GetComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1920f, 1080f);
-            scaler.matchWidthOrHeight = 0.5f;
+                CanvasScaler scaler = canvasObj.GetComponent<CanvasScaler>();
+                scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+                scaler.referenceResolution = new Vector2(1920f, 1080f);
+                scaler.matchWidthOrHeight = 0.5f;
+                notificationRootRect = canvasObj.GetComponent<RectTransform>();
+            }
 
-            GameObject container = new GameObject("Container", typeof(RectTransform));
-            container.transform.SetParent(canvasObj.transform, false);
-            containerRect = container.GetComponent<RectTransform>();
+            Transform existingContainer = notificationRootRect != null
+                ? notificationRootRect.Find(NotificationContainerName)
+                : null;
+            if (existingContainer != null)
+            {
+                containerRect = existingContainer as RectTransform;
+            }
+            else
+            {
+                GameObject container = new GameObject(NotificationContainerName, typeof(RectTransform));
+                container.transform.SetParent(notificationRootRect, false);
+                containerRect = container.GetComponent<RectTransform>();
+            }
+
             containerRect.anchorMin = new Vector2(0.5f, 1f);
             containerRect.anchorMax = new Vector2(0.5f, 1f);
             containerRect.pivot = new Vector2(0.5f, 1f);
             containerRect.anchoredPosition = new Vector2(0f, -20f);
             containerRect.sizeDelta = new Vector2(460f, 300f);
+            containerRect.SetAsLastSibling();
         }
     }
 }

@@ -8,8 +8,10 @@ namespace DeliveryDriver.UI
     public class TooltipUI : MonoBehaviour
     {
         private static TooltipUI instance;
+        private const string TooltipRootName = "TooltipRoot";
 
         private Canvas tooltipCanvas;
+        private RectTransform tooltipRootRect;
         private GameObject tooltipPanel;
         private TextMeshProUGUI tooltipText;
         private CanvasGroup canvasGroup;
@@ -125,24 +127,47 @@ namespace DeliveryDriver.UI
 
         private void BuildTooltip()
         {
-            // Canvas
-            GameObject canvasObj = new GameObject("TooltipCanvas", typeof(Canvas), typeof(CanvasScaler));
-            canvasObj.transform.SetParent(transform, false);
+            Transform uiParent = GlobalUiCoordinator.CanvasGroupRoot ?? GlobalUiCoordinator.PrimaryCanvas?.transform;
+            if (uiParent != null)
+            {
+                Transform existingRoot = uiParent.Find(TooltipRootName);
+                if (existingRoot == null)
+                {
+                    GameObject rootObject = new GameObject(TooltipRootName, typeof(RectTransform));
+                    rootObject.transform.SetParent(uiParent, false);
+                    tooltipRootRect = rootObject.GetComponent<RectTransform>();
+                    tooltipRootRect.anchorMin = Vector2.zero;
+                    tooltipRootRect.anchorMax = Vector2.one;
+                    tooltipRootRect.offsetMin = Vector2.zero;
+                    tooltipRootRect.offsetMax = Vector2.zero;
+                }
+                else
+                {
+                    tooltipRootRect = existingRoot as RectTransform;
+                }
+            }
+            else
+            {
+                GameObject canvasObj = new GameObject("TooltipCanvas", typeof(Canvas), typeof(CanvasScaler));
+                canvasObj.transform.SetParent(transform, false);
 
-            tooltipCanvas = canvasObj.GetComponent<Canvas>();
-            tooltipCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            tooltipCanvas.sortingOrder = 950;
+                tooltipCanvas = canvasObj.GetComponent<Canvas>();
+                tooltipCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                tooltipCanvas.sortingOrder = 950;
 
-            CanvasScaler scaler = canvasObj.GetComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+                CanvasScaler scaler = canvasObj.GetComponent<CanvasScaler>();
+                scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+                tooltipRootRect = canvasObj.GetComponent<RectTransform>();
+            }
 
             // Panel
             tooltipPanel = new GameObject("TooltipPanel", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));
-            tooltipPanel.transform.SetParent(canvasObj.transform, false);
+            tooltipPanel.transform.SetParent(tooltipRootRect, false);
 
             panelRect = tooltipPanel.GetComponent<RectTransform>();
             panelRect.pivot = new Vector2(0f, 1f);
             panelRect.sizeDelta = new Vector2(200f, 40f);
+            panelRect.SetAsLastSibling();
 
             Image bg = tooltipPanel.GetComponent<Image>();
             bg.color = new Color(0.08f, 0.1f, 0.14f, 0.95f);
