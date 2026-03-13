@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -11,6 +12,7 @@ namespace DeliveryDriver.Quest
     /// </summary>
     public class PlayerProgressionManager : MonoBehaviour
     {
+        private const float DatabaseReadyWaitTimeoutSeconds = 5f;
         public static PlayerProgressionManager Instance { get; private set; }
 
         [Header("Currency")]
@@ -101,6 +103,7 @@ namespace DeliveryDriver.Quest
             }
 
             Instance = this;
+            DontDestroyOnLoad(gameObject);
 
             // Initialize achievements
             InitializeAchievements();
@@ -109,9 +112,13 @@ namespace DeliveryDriver.Quest
         private void Start()
         {
             // Try to load saved game
-            if (SaveManager.Instance != null)
+            SaveManager saveManager = SaveManager.Instance != null
+                ? SaveManager.Instance
+                : FindFirstObjectByType<SaveManager>();
+
+            if (saveManager != null)
             {
-                GameSaveData saveData = SaveManager.Instance.LoadGame();
+                GameSaveData saveData = saveManager.LoadGame();
 
                 if (saveData != null && saveData.PlayerData != null)
                 {
@@ -128,8 +135,10 @@ namespace DeliveryDriver.Quest
             }
             else
             {
-                Debug.LogWarning("[PlayerProgressionManager] SaveManager not found. Starting with default values.");
+                Debug.Log("[PlayerProgressionManager] SaveManager not found. Starting with default values.");
             }
+
+            StartCoroutine(InitializeMoneyFromDatabaseRoutine());
         }
 
         private void Update()
@@ -153,6 +162,7 @@ namespace DeliveryDriver.Quest
             currentMoney += amount;
             totalMoneyEarned += amount;
             RecordDailyMoney(amount);
+            SyncMoneyToDatabase();
             OnMoneyChanged.Invoke(currentMoney);
 
             Debug.Log($"[PlayerProgressionManager] Awarded ${amount}. Total: ${currentMoney}");
@@ -194,6 +204,7 @@ namespace DeliveryDriver.Quest
             }
 
             currentMoney -= amount;
+            SyncMoneyToDatabase();
             OnMoneyChanged.Invoke(currentMoney);
 
             Debug.Log($"[PlayerProgressionManager] Spent ${amount}. Remaining: ${currentMoney}");
@@ -525,6 +536,7 @@ namespace DeliveryDriver.Quest
                 achievement.IsUnlocked = false;
             }
 
+            SyncMoneyToDatabase();
             OnMoneyChanged.Invoke(currentMoney);
             OnLevelUp.Invoke(currentLevel);
 
@@ -791,11 +803,62 @@ namespace DeliveryDriver.Quest
                 }
             }
 
+            SyncMoneyToDatabase();
             // Invoke events to update UI
             OnMoneyChanged.Invoke(currentMoney);
             OnLevelUp.Invoke(currentLevel);
 
             Debug.Log($"[PlayerProgressionManager] Loaded save data: Level {currentLevel}, ${currentMoney}, {currentXP}/{xpToNextLevel} XP");
+        }
+
+        private IEnumerator InitializeMoneyFromDatabaseRoutine()
+        {
+            float timeoutAt = Time.realtimeSinceStartup + DatabaseReadyWaitTimeoutSeconds;
+
+            while ((QuestDatabaseService.Instance == null || !QuestDatabaseService.Instance.IsReady) &&
+                   Time.realtimeSinceStartup < timeoutAt)
+            {
+                yield return null;
+            }
+
+            QuestDatabaseService database = QuestDatabaseService.Instance;
+            if (database == null || !database.IsReady)
+            {
+                yield break;
+            }
+
+            bool playerExisted = database.PlayerExists(QuestDatabaseService.DefaultPlayerId);
+            if (!database.EnsureDefaultPlayer())
+            {
+                yield break;
+            }
+
+            int databaseBalance = database.GetDefaultPlayerBalance(currentMoney);
+            bool shouldSeedDatabaseBalance = !playerExisted || (databaseBalance <= 0 && currentMoney > 0);
+
+            if (shouldSeedDatabaseBalance)
+            {
+                database.SetDefaultPlayerBalance(currentMoney);
+            }
+            else if (databaseBalance != currentMoney)
+            {
+                currentMoney = Mathf.Max(0, databaseBalance);
+            }
+
+            OnMoneyChanged.Invoke(currentMoney);
+            Debug.Log($"[PlayerProgressionManager] Active balance synced from database: ${currentMoney}");
+        }
+
+        private void SyncMoneyToDatabase()
+        {
+            QuestDatabaseService database = QuestDatabaseService.Instance;
+            if (database == null || !database.IsReady)
+            {
+                return;
+            }
+
+            database.EnsureDefaultPlayer();
+            database.SetDefaultPlayerBalance(currentMoney);
         }
 
         #endregion

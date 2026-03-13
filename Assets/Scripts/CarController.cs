@@ -101,11 +101,13 @@ public class CarController : MonoBehaviour
 
     [Header("--- FEEDBACK ---")]
     [Tooltip("Sert fren bildirimi icin minimum hiz (km/s).")]
-    [SerializeField] private float hardBrakeMinSpeedKmh = 35f;
+    [SerializeField] private float hardBrakeMinSpeedKmh = 45f;
     [Tooltip("Sert fren bildirimi icin minimum yavaslama (m/s^2).")]
-    [SerializeField] private float hardBrakeMinDeceleration = 8f;
+    [SerializeField] private float hardBrakeMinDeceleration = 10f;
+    [Tooltip("Sert fren bildirimi icin minimum anlik hiz dususu (m/s).")]
+    [SerializeField] private float hardBrakeMinSpeedDropMetersPerSec = 1.6f;
     [Tooltip("Sert fren bildirimleri arasindaki min sure (s).")]
-    [SerializeField] private float hardBrakeNotifyCooldown = 1.2f;
+    [SerializeField] private float hardBrakeNotifyCooldown = 1.8f;
     
     // Public geri vites input durumu - CameraFollow tarafindan okunur
     public bool IsReverseInputActive => moveInput.y < -0.1f;
@@ -513,6 +515,7 @@ public class CarController : MonoBehaviour
         float currentSpeed = rb.linearVelocity.magnitude;
         float previousSpeed = previousSpeedMetersPerSec;
         previousSpeedMetersPerSec = currentSpeed;
+        float speedDrop = previousSpeed - currentSpeed;
 
         if (!isBraking && !isHandbraking)
         {
@@ -525,7 +528,12 @@ public class CarController : MonoBehaviour
             return;
         }
 
-        float deceleration = (previousSpeed - currentSpeed) / deltaTime;
+        if (speedDrop < hardBrakeMinSpeedDropMetersPerSec)
+        {
+            return;
+        }
+
+        float deceleration = speedDrop / deltaTime;
         if (deceleration < hardBrakeMinDeceleration)
         {
             return;

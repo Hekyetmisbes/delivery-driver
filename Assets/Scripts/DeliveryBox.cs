@@ -221,9 +221,12 @@ public class DeliveryBox : MonoBehaviour
         Destroy(indicator.GetComponent<Collider>());
 
         // Create glowing material
-        Material indicatorMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
-        indicatorMat.color = Color.green;
-        indicator.GetComponent<MeshRenderer>().material = indicatorMat;
+        MeshRenderer indicatorRenderer = indicator.GetComponent<MeshRenderer>();
+        Material indicatorMat = MinimapShaderHelper.CreateColorMaterial(Color.green, indicatorRenderer);
+        if (indicatorMat != null && indicatorRenderer != null)
+        {
+            indicatorRenderer.material = indicatorMat;
+        }
 
         pickupIndicator = indicator;
     }

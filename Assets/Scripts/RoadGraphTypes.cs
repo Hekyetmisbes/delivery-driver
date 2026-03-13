@@ -93,12 +93,123 @@ namespace TrafficSystem
     }
 
     /// <summary>
+    /// Pre-built spatial lookup for fast pathfinding queries.
+    /// Built once per road graph and reused across all FindPath calls.
+    /// </summary>
+    public class RoadGraphSpatialIndex
+    {
+        public readonly struct WaypointRef
+        {
+            public readonly RoadSegment segment;
+            public readonly int index;
+            public readonly Vector3 position;
+            public readonly Vector3 forward;
+
+            public WaypointRef(RoadSegment s, int i, Vector3 p, Vector3 f)
+            {
+                segment = s;
+                index = i;
+                position = p;
+                forward = f;
+            }
+        }
+
+        public Dictionary<int, RoadSegment> segmentById;
+        public Dictionary<long, WaypointRef> waypointByKey;
+        public Dictionary<Vector2Int, List<long>> spatialGrid;
+        public float cellSize;
+
+        public static long PackKey(int segmentId, int waypointIndex)
+        {
+            return ((long)segmentId << 20) | (uint)waypointIndex;
+        }
+
+        public static void UnpackKey(long key, out int segmentId, out int waypointIndex)
+        {
+            segmentId = (int)(key >> 20);
+            waypointIndex = (int)(key & 0xFFFFF);
+        }
+
+        public static Vector2Int ToGridCell(Vector3 position, float cs)
+        {
+            return new Vector2Int(
+                Mathf.FloorToInt(position.x / cs),
+                Mathf.FloorToInt(position.z / cs));
+        }
+    }
+
+    /// <summary>
     /// Complete road network graph
     /// </summary>
     [System.Serializable]
     public class RoadGraph
     {
         public List<RoadSegment> roadSegments = new List<RoadSegment>();
+
+        [System.NonSerialized]
+        private RoadGraphSpatialIndex cachedIndex;
+
+        public RoadGraphSpatialIndex GetOrBuildSpatialIndex(float cellSize)
+        {
+            if (cachedIndex != null && Mathf.Approximately(cachedIndex.cellSize, cellSize))
+            {
+                return cachedIndex;
+            }
+
+            var index = new RoadGraphSpatialIndex();
+            index.cellSize = cellSize;
+            index.segmentById = new Dictionary<int, RoadSegment>(roadSegments.Count);
+            index.waypointByKey = new Dictionary<long, RoadGraphSpatialIndex.WaypointRef>();
+            index.spatialGrid = new Dictionary<Vector2Int, List<long>>();
+
+            foreach (var seg in roadSegments)
+            {
+                index.segmentById[seg.id] = seg;
+                for (int i = 0; i < seg.waypoints.Count; i++)
+                {
+                    Vector3 wpPos = seg.waypoints[i].position;
+                    Vector3 wpFwd = GetWaypointForward(seg, i);
+                    long key = RoadGraphSpatialIndex.PackKey(seg.id, i);
+                    index.waypointByKey[key] = new RoadGraphSpatialIndex.WaypointRef(seg, i, wpPos, wpFwd);
+
+                    Vector2Int cell = RoadGraphSpatialIndex.ToGridCell(wpPos, cellSize);
+                    if (!index.spatialGrid.TryGetValue(cell, out var bucket))
+                    {
+                        bucket = new List<long>();
+                        index.spatialGrid[cell] = bucket;
+                    }
+                    bucket.Add(key);
+                }
+            }
+
+            cachedIndex = index;
+            return index;
+        }
+
+        public void InvalidateSpatialIndex()
+        {
+            cachedIndex = null;
+        }
+
+        private static Vector3 GetWaypointForward(RoadSegment segment, int waypointIndex)
+        {
+            if (segment == null || segment.waypoints == null || segment.waypoints.Count == 0)
+                return Vector3.forward;
+
+            waypointIndex = Mathf.Clamp(waypointIndex, 0, segment.waypoints.Count - 1);
+            Vector3 forward = segment.waypoints[waypointIndex].forward;
+
+            if (forward.sqrMagnitude < 0.0001f)
+            {
+                if (waypointIndex < segment.waypoints.Count - 1)
+                    forward = segment.waypoints[waypointIndex + 1].position - segment.waypoints[waypointIndex].position;
+                else if (waypointIndex > 0)
+                    forward = segment.waypoints[waypointIndex].position - segment.waypoints[waypointIndex - 1].position;
+            }
+
+            forward.y = 0f;
+            return forward.sqrMagnitude < 0.0001f ? Vector3.forward : forward.normalized;
+        }
 
         /// <summary>
         /// Get random road segment from network

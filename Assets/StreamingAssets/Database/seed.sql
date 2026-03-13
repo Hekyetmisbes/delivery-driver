@@ -7,7 +7,13 @@ BEGIN TRANSACTION;
 INSERT OR IGNORE INTO players (
   player_id, display_name, created_at, last_login_at, level, xp, xp_to_next_level, money_balance, reputation_score
 ) VALUES
+('local-player', 'hekye', '2026-03-07 09:00:00', '2026-03-07 09:00:00', 4, 240, 300, 2500, 8),
 ('11111111-1111-1111-1111-111111111111', 'PlayerOne', '2026-02-14 10:00:00', '2026-02-14 10:00:00', 3, 120, 200, 1500, 5);
+
+INSERT OR IGNORE INTO company_profiles (
+  company_id, player_id, company_name, selected_vehicle_type, created_at, updated_at
+) VALUES
+('company-local-player', 'local-player', 'Hekye Logistics', 'Van', '2026-03-07 09:00:00', '2026-03-07 09:00:00');
 
 INSERT OR IGNORE INTO neighborhoods (neighborhood_id, name, risk_level, traffic_density_factor, is_active) VALUES
 (1, 'Downtown', 3, 1.30, 1),

@@ -49,6 +49,7 @@ namespace DeliveryDriver.Optimization
 
         private float lastShrinkCheck;
         private static AdvancedObjectPool instance;
+        private GUIStyle poolHeaderStyle;
 
         public static AdvancedObjectPool Instance
         {
@@ -313,7 +314,12 @@ namespace DeliveryDriver.Optimization
             GUILayout.BeginArea(new Rect(10, 360, 350, 300));
             GUILayout.BeginVertical("box");
 
-            GUILayout.Label($"<b>Object Pool Stats</b>", new GUIStyle(GUI.skin.label) { richText = true });
+            if (poolHeaderStyle == null)
+            {
+                poolHeaderStyle = new GUIStyle(GUI.skin.label) { richText = true };
+            }
+
+            GUILayout.Label($"<b>Object Pool Stats</b>", poolHeaderStyle);
             GUILayout.Label($"Total Pools: {pools.Count}");
             GUILayout.Space(5);
 

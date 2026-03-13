@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using System.Collections;
+using DeliveryDriver.UI;
 
 namespace DeliveryDriver.Quest.UI
 {
@@ -31,8 +32,14 @@ namespace DeliveryDriver.Quest.UI
         [Header("Colors")]
         [SerializeField] private Color overlayColor = new Color(0f, 0f, 0f, 0.7f);
 
+        [Header("Arrow Bounce")]
+        [SerializeField] private float arrowBounceAmount = 10f;
+        [SerializeField] private float arrowBounceSpeed = 3f;
+
         private TutorialStep currentStep;
         private bool isVisible = false;
+        private Vector3 arrowBasePosition;
+        private bool arrowBouncing;
 
         private void Awake()
         {
@@ -47,6 +54,19 @@ namespace DeliveryDriver.Quest.UI
 
             SetupButtons();
             Hide();
+        }
+
+        private void Update()
+        {
+            if (arrowBouncing && arrowPointer != null)
+            {
+                RectTransform arrowRect = arrowPointer.GetComponent<RectTransform>();
+                if (arrowRect != null)
+                {
+                    float bounce = Mathf.Sin(Time.unscaledTime * arrowBounceSpeed * Mathf.PI) * arrowBounceAmount;
+                    arrowRect.anchoredPosition = (Vector2)arrowBasePosition + new Vector2(0f, bounce);
+                }
+            }
         }
 
         private void SetupButtons()
@@ -111,15 +131,16 @@ namespace DeliveryDriver.Quest.UI
                 messageText.text = step.message;
             }
 
-            // Update step counter
+            // Update step counter with localized format
             if (stepCounterText != null && TutorialManager.Instance != null)
             {
                 int current = TutorialManager.Instance.CurrentStepIndex + 1;
-                int total = 6; // Default, should be configurable
-                stepCounterText.text = $"Step {current} of {total}";
+                int total = TutorialManager.Instance.TotalSteps;
+                string template = LocalizationTable.Get("step_of");
+                stepCounterText.text = string.Format(template, current, total);
             }
 
-            // Update buttons visibility
+            // Update buttons visibility with localized text
             if (nextButton != null)
             {
                 nextButton.gameObject.SetActive(step.triggerType == TutorialTriggerType.ManualAdvance);
@@ -127,26 +148,36 @@ namespace DeliveryDriver.Quest.UI
                 TextMeshProUGUI buttonText = nextButton.GetComponentInChildren<TextMeshProUGUI>();
                 if (buttonText != null)
                 {
-                    buttonText.text = "Next";
+                    buttonText.text = LocalizationTable.Get("next");
                 }
             }
 
             if (skipButton != null)
             {
                 skipButton.gameObject.SetActive(step.canSkip);
+                TextMeshProUGUI skipText = skipButton.GetComponentInChildren<TextMeshProUGUI>();
+                if (skipText != null)
+                {
+                    skipText.text = LocalizationTable.Get("skip");
+                }
             }
 
             // Update highlight
             UpdateHighlight(step);
 
-            // Show waiting indicator if waiting for trigger
+            // Show waiting indicator or keyboard hint
             if (step.triggerType != TutorialTriggerType.ManualAdvance)
             {
                 ShowWaitingIndicator(step);
             }
             else
             {
-                HideWaitingIndicator();
+                // Show keyboard shortcut hint
+                if (messageText != null)
+                {
+                    string hint = LocalizationTable.Get("continue_space");
+                    messageText.text = step.message + $"\n\n<size=80%><i>{hint}</i></size>";
+                }
             }
         }
 
@@ -159,18 +190,18 @@ namespace DeliveryDriver.Quest.UI
                 highlightWindow.position = step.highlightTarget.position;
                 highlightWindow.sizeDelta = step.highlightTarget.sizeDelta;
 
-                // Show arrow pointer
+                // Show arrow pointer with bounce
                 if (arrowPointer != null)
                 {
                     arrowPointer.SetActive(true);
-                    // Position arrow relative to highlight
                     RectTransform arrowRect = arrowPointer.GetComponent<RectTransform>();
                     if (arrowRect != null)
                     {
                         arrowRect.position = step.highlightTarget.position;
-                        // Rotate arrow based on direction
+                        arrowBasePosition = arrowRect.anchoredPosition;
                         float angle = Mathf.Atan2(step.arrowDirection.y, step.arrowDirection.x) * Mathf.Rad2Deg;
                         arrowRect.rotation = Quaternion.Euler(0f, 0f, angle);
+                        arrowBouncing = true;
                     }
                 }
             }
@@ -185,6 +216,7 @@ namespace DeliveryDriver.Quest.UI
                 if (arrowPointer != null)
                 {
                     arrowPointer.SetActive(false);
+                    arrowBouncing = false;
                 }
             }
 

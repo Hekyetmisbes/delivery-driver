@@ -1,4 +1,5 @@
 using System;
+using DeliveryDriver.UI;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -24,9 +25,16 @@ public class PhoneMissionUI : MonoBehaviour
     [SerializeField] private Vector2 panelOffset = new Vector2(-24f, -24f);
     [SerializeField] private string acceptButtonLabel = "Kabul Et";
     [SerializeField] private string rejectButtonLabel = "Reddet";
+    [SerializeField] private bool useKenneySkin = true;
+    [SerializeField] private Sprite panelBackgroundSprite;
+    [SerializeField] private Sprite buttonBackgroundSprite;
+    [SerializeField] private Sprite acceptIconSprite;
+    [SerializeField] private Sprite rejectIconSprite;
 
     private Action onAccept;
     private Action onReject;
+    private CanvasGroup panelCanvasGroup;
+    private RectTransform panelRect;
 
     private void Awake()
     {
@@ -49,6 +57,7 @@ public class PhoneMissionUI : MonoBehaviour
     public void ShowOffer(string title, string body, string reward)
     {
         EnsureRuntimeUI();
+        StopAllCoroutines();
 
         if (titleText != null)
         {
@@ -70,24 +79,76 @@ public class PhoneMissionUI : MonoBehaviour
         if (panelRoot != null)
         {
             panelRoot.SetActive(true);
+            EnsureCanvasGroup();
+            if (panelCanvasGroup != null && panelRect != null)
+            {
+                panelRect.anchoredPosition = panelOffset;
+                panelCanvasGroup.alpha = 0f;
+                Vector2 targetPos = panelRect.anchoredPosition;
+                Vector2 offScreen = new Vector2(targetPos.x + 400f, targetPos.y);
+                UIAnimationHelper.SlideIn(this, panelRect, offScreen, targetPos, UIThemeConstants.SlideInDuration);
+                UIAnimationHelper.FadeIn(this, panelCanvasGroup, UIThemeConstants.PanelFadeDuration);
+            }
         }
     }
 
     public void HideOffer()
     {
+        StopAllCoroutines();
+
         if (panelRoot != null)
         {
-            panelRoot.SetActive(false);
+            EnsureCanvasGroup();
+            if (panelCanvasGroup != null && panelRect != null)
+            {
+                Vector2 currentPos = panelRect.anchoredPosition;
+                Vector2 offScreen = new Vector2(currentPos.x + 400f, currentPos.y);
+                UIAnimationHelper.SlideOut(this, panelRect, currentPos, offScreen, UIThemeConstants.SlideInDuration * 0.7f);
+                UIAnimationHelper.FadeOut(this, panelCanvasGroup, UIThemeConstants.PanelFadeDuration * 0.7f, () =>
+                {
+                    panelRoot.SetActive(false);
+                    panelRect.anchoredPosition = panelOffset;
+                });
+            }
+            else
+            {
+                panelRoot.SetActive(false);
+            }
+        }
+    }
+
+    private void EnsureCanvasGroup()
+    {
+        if (panelRoot == null) return;
+        if (panelCanvasGroup == null)
+        {
+            panelCanvasGroup = panelRoot.GetComponent<CanvasGroup>();
+            if (panelCanvasGroup == null)
+            {
+                panelCanvasGroup = panelRoot.AddComponent<CanvasGroup>();
+            }
+        }
+        if (panelRect == null)
+        {
+            panelRect = panelRoot.GetComponent<RectTransform>();
         }
     }
 
     private void HandleAcceptClicked()
     {
+        if (UIAudioFeedback.Instance != null)
+        {
+            UIAudioFeedback.Instance.PlayClick();
+        }
         onAccept?.Invoke();
     }
 
     private void HandleRejectClicked()
     {
+        if (UIAudioFeedback.Instance != null)
+        {
+            UIAudioFeedback.Instance.PlayError();
+        }
         onReject?.Invoke();
     }
 
@@ -129,12 +190,8 @@ public class PhoneMissionUI : MonoBehaviour
             return;
         }
 
+        ResolveSkinSprites();
         EnsureEventSystem();
-
-        if (rootCanvas == null)
-        {
-            rootCanvas = FindFirstObjectByType<Canvas>();
-        }
 
         if (rootCanvas == null)
         {
@@ -142,6 +199,16 @@ public class PhoneMissionUI : MonoBehaviour
             rootCanvas = canvasObject.AddComponent<Canvas>();
             rootCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
             rootCanvas.sortingOrder = 120;
+
+            RectTransform canvasRect = canvasObject.GetComponent<RectTransform>();
+            if (canvasRect != null)
+            {
+                canvasRect.anchorMin = Vector2.zero;
+                canvasRect.anchorMax = Vector2.one;
+                canvasRect.offsetMin = Vector2.zero;
+                canvasRect.offsetMax = Vector2.zero;
+                canvasRect.localScale = Vector3.one;
+            }
 
             CanvasScaler scaler = canvasObject.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -174,6 +241,12 @@ public class PhoneMissionUI : MonoBehaviour
         Image panelImage = panel.GetComponent<Image>();
         panelImage.color = new Color(0.06f, 0.08f, 0.12f, 0.95f);
         panelImage.raycastTarget = true;
+        if (panelBackgroundSprite != null)
+        {
+            panelImage.sprite = panelBackgroundSprite;
+            panelImage.type = Image.Type.Sliced;
+            panelImage.pixelsPerUnitMultiplier = 1f;
+        }
 
         VerticalLayoutGroup vertical = panel.GetComponent<VerticalLayoutGroup>();
         vertical.padding = new RectOffset(18, 18, 18, 18);
@@ -205,8 +278,11 @@ public class PhoneMissionUI : MonoBehaviour
         rowLayout.minHeight = 58f;
         rowLayout.flexibleHeight = 0f;
 
-        acceptButton = CreateButton(buttonRow.transform, "AcceptButton", new Color(0.16f, 0.62f, 0.3f, 1f), acceptButtonLabel);
-        rejectButton = CreateButton(buttonRow.transform, "RejectButton", new Color(0.68f, 0.22f, 0.2f, 1f), rejectButtonLabel);
+        acceptButton = CreateButton(buttonRow.transform, "AcceptButton", UIThemeConstants.ButtonGreen, acceptButtonLabel, acceptIconSprite);
+        rejectButton = CreateButton(buttonRow.transform, "RejectButton", UIThemeConstants.ButtonRed, rejectButtonLabel, rejectIconSprite);
+
+        UIButtonEnhancer.EnhanceButton(acceptButton);
+        UIButtonEnhancer.EnhanceButton(rejectButton);
 
         return panel;
     }
@@ -243,13 +319,18 @@ public class PhoneMissionUI : MonoBehaviour
         return text;
     }
 
-    private Button CreateButton(Transform parent, string objectName, Color color, string label)
+    private Button CreateButton(Transform parent, string objectName, Color color, string label, Sprite iconSprite)
     {
         GameObject buttonObject = new GameObject(objectName, typeof(RectTransform), typeof(Image), typeof(Button), typeof(LayoutElement));
         buttonObject.transform.SetParent(parent, false);
 
         Image buttonImage = buttonObject.GetComponent<Image>();
         buttonImage.color = color;
+        if (buttonBackgroundSprite != null)
+        {
+            buttonImage.sprite = buttonBackgroundSprite;
+            buttonImage.type = Image.Type.Sliced;
+        }
 
         Button button = buttonObject.GetComponent<Button>();
         ColorBlock colors = button.colors;
@@ -285,17 +366,81 @@ public class PhoneMissionUI : MonoBehaviour
             text.font = TMP_Settings.defaultFontAsset;
         }
 
+        if (iconSprite != null)
+        {
+            GameObject iconObject = new GameObject("Icon", typeof(RectTransform), typeof(Image));
+            iconObject.transform.SetParent(buttonObject.transform, false);
+            RectTransform iconRect = iconObject.GetComponent<RectTransform>();
+            iconRect.anchorMin = new Vector2(0f, 0.5f);
+            iconRect.anchorMax = new Vector2(0f, 0.5f);
+            iconRect.pivot = new Vector2(0f, 0.5f);
+            iconRect.anchoredPosition = new Vector2(10f, 0f);
+            iconRect.sizeDelta = new Vector2(22f, 22f);
+
+            Image iconImage = iconObject.GetComponent<Image>();
+            iconImage.sprite = iconSprite;
+            iconImage.color = Color.white;
+            iconImage.preserveAspect = true;
+        }
+
         return button;
     }
 
-    private void EnsureEventSystem()
+    private void ResolveSkinSprites()
     {
-        if (EventSystem.current != null)
+        if (!useKenneySkin)
         {
             return;
         }
 
-        GameObject eventSystemObject = new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
-        eventSystemObject.transform.SetParent(null, false);
+        panelBackgroundSprite ??= RuntimeUiSkinLoader.LoadSprite(
+            "UI/Kenney/panel_bg",
+            "Assets/kenney_ui-pack/PNG/Grey/Double/button_rectangle_depth_flat.png");
+
+        buttonBackgroundSprite ??= RuntimeUiSkinLoader.LoadSprite(
+            "UI/Kenney/button_bg",
+            "Assets/kenney_ui-pack/PNG/Grey/Default/button_rectangle_depth_flat.png");
+
+        acceptIconSprite ??= RuntimeUiSkinLoader.LoadSprite(
+            "UI/Kenney/icon_accept",
+            "Assets/kenney_ui-pack/PNG/Green/Default/icon_checkmark.png");
+
+        rejectIconSprite ??= RuntimeUiSkinLoader.LoadSprite(
+            "UI/Kenney/icon_reject",
+            "Assets/kenney_ui-pack/PNG/Red/Default/icon_cross.png");
+    }
+
+    private void EnsureEventSystem()
+    {
+        EventSystem eventSystem = EventSystem.current;
+        if (eventSystem == null)
+        {
+            eventSystem = FindFirstObjectByType<EventSystem>();
+        }
+
+        if (eventSystem == null)
+        {
+            GameObject eventSystemObject = new GameObject("EventSystem", typeof(EventSystem));
+            eventSystemObject.transform.SetParent(null, false);
+            eventSystem = eventSystemObject.GetComponent<EventSystem>();
+        }
+
+#if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
+        if (eventSystem.GetComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>() == null)
+        {
+            eventSystem.gameObject.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
+        }
+
+        StandaloneInputModule standalone = eventSystem.GetComponent<StandaloneInputModule>();
+        if (standalone != null)
+        {
+            Destroy(standalone);
+        }
+#else
+        if (eventSystem.GetComponent<StandaloneInputModule>() == null)
+        {
+            eventSystem.gameObject.AddComponent<StandaloneInputModule>();
+        }
+#endif
     }
 }

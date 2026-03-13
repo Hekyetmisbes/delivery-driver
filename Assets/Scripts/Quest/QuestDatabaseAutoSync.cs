@@ -7,8 +7,8 @@ namespace DeliveryDriver.Quest
     {
         private static QuestDatabaseAutoSync instance;
 
-        [SerializeField] private string playerId = "local-player";
-        [SerializeField] private string playerDisplayName = "Local Player";
+        [SerializeField] private string playerId = QuestDatabaseService.DefaultPlayerId;
+        [SerializeField] private string playerDisplayName = QuestDatabaseService.DefaultPlayerDisplayName;
         [SerializeField] private bool verboseLogs = false;
 
         private QuestManager manager;
@@ -117,6 +117,22 @@ namespace DeliveryDriver.Quest
             }
 
             QuestDatabaseService.Instance.SaveQuestInstance(playerId, quest);
+            int fuelRebate = DriverProgressionSystem.Instance != null
+                ? DriverProgressionSystem.Instance.CalculateFuelEfficiencyRebate(quest)
+                : 0;
+            int totalAward = Mathf.Max(0, QuestManager.Instance != null ? QuestManager.Instance.LastCompletionReward : quest.CalculateFinalReward()) + Mathf.Max(0, fuelRebate);
+            int balanceAfter = PlayerProgressionManager.Instance != null
+                ? PlayerProgressionManager.Instance.CurrentMoney
+                : QuestDatabaseService.Instance.GetPlayerBalance(playerId, 0);
+
+            if (totalAward > 0)
+            {
+                string description = fuelRebate > 0
+                    ? $"{quest.QuestName} completed (+fuel rebate ${fuelRebate})"
+                    : $"{quest.QuestName} completed";
+                QuestDatabaseService.Instance.InsertWalletTransaction(playerId, quest.QuestID, "QUEST_REWARD", totalAward, balanceAfter, description);
+            }
+
             QuestDatabaseService.Instance.InsertQuestEvent(
                 quest.QuestID,
                 playerId,
@@ -134,6 +150,22 @@ namespace DeliveryDriver.Quest
             }
 
             QuestDatabaseService.Instance.SaveQuestInstance(playerId, quest);
+            int penaltyAmount = QuestManager.Instance != null ? QuestManager.Instance.LastFailurePenalty : 0;
+            int balanceAfter = PlayerProgressionManager.Instance != null
+                ? PlayerProgressionManager.Instance.CurrentMoney
+                : QuestDatabaseService.Instance.GetPlayerBalance(playerId, 0);
+
+            if (penaltyAmount > 0)
+            {
+                QuestDatabaseService.Instance.InsertWalletTransaction(
+                    playerId,
+                    quest.QuestID,
+                    "PENALTY",
+                    -penaltyAmount,
+                    balanceAfter,
+                    $"{quest.QuestName} failed");
+            }
+
             QuestDatabaseService.Instance.InsertQuestEvent(
                 quest.QuestID,
                 playerId,

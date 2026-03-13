@@ -83,6 +83,11 @@ namespace TrafficSystem
 
         private void Start()
         {
+#if !UNITY_EDITOR && !DEVELOPMENT_BUILD
+            showDebugInfo = false;
+            logRecoveryEvents = false;
+#endif
+
             lastPosition = transform.position;
             nextCheckTime = Time.time + checkInterval;
             boundaryCenter = transform.position;
@@ -453,26 +458,6 @@ namespace TrafficSystem
             }
         }
 
-        private void OnGUI()
-        {
-            if (!showDebugInfo) return;
-            if (IsRecoveryDisabled()) return;
-
-            // Draw debug info above vehicle in world space
-            Vector3 screenPos = Camera.main.WorldToScreenPoint(transform.position + Vector3.up * 3f);
-            if (screenPos.z > 0)
-            {
-                var roadInfo = GetRoadDistanceInfo();
-                float distance = roadInfo.horizontalDistance;
-                string status = (roadInfo.horizontalDistance > offRoadThreshold || roadInfo.verticalDistance > verticalOffRoadThreshold) ? "OFF-ROAD" : "OK";
-                Color textColor = status == "OFF-ROAD" ? Color.red : Color.green;
-
-                GUI.color = textColor;
-                GUI.Label(new Rect(screenPos.x - 50, Screen.height - screenPos.y - 20, 100, 40),
-                    $"{status}\nH {roadInfo.horizontalDistance:F1}m\nV {roadInfo.verticalDistance:F1}m\nRec: {recoveryCount}");
-            }
-        }
-
         /// <summary>
         /// Public method to force recovery (can be called externally)
         /// </summary>
@@ -485,6 +470,12 @@ namespace TrafficSystem
         /// Get recovery statistics
         /// </summary>
         public int GetRecoveryCount() => recoveryCount;
+
+        public void ConfigureForRuntime(bool enableDebug)
+        {
+            showDebugInfo = enableDebug;
+            logRecoveryEvents = enableDebug;
+        }
 
         public void SetRecoveryDisabled(bool disabled)
         {

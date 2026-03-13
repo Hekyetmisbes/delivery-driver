@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine.Profiling;
 
 /// <summary>
@@ -46,16 +47,22 @@ public class MemoryProfiler : MonoBehaviour
     public bool leakDetected = false;
     public float leakRateMBPerMin = 0f;
 
-    private List<MemorySnapshot> snapshotHistory = new List<MemorySnapshot>();
+    private readonly List<MemorySnapshot> snapshotHistory = new List<MemorySnapshot>();
     private float nextSnapshotTime = 0f;
     private long lastGCMemory = 0;
     private float lastGCAllocationKB = 0f;
     private bool overlayVisible = false;
 
+    // Cached GUI resources to avoid per-frame allocations in OnGUI.
+    private GUIStyle overlayBoxStyle;
+    private Texture2D overlayBackgroundTexture;
+    private readonly StringBuilder overlayTextBuilder = new StringBuilder(512);
+
     private void Start()
     {
         TakeSnapshot();
         overlayVisible = showMemoryOverlay;
+        EnsureOverlayStyle();
     }
 
     private void Update()
@@ -183,40 +190,31 @@ public class MemoryProfiler : MonoBehaviour
     {
         if (!overlayVisible) return;
 
-        GUIStyle boxStyle = new GUIStyle(GUI.skin.box);
-        boxStyle.normal.background = MakeTexture(2, 2, new Color(0f, 0f, 0f, 0.7f));
-        boxStyle.normal.textColor = Color.white;
-        boxStyle.fontSize = 12;
-        boxStyle.alignment = TextAnchor.UpperLeft;
-        boxStyle.padding = new RectOffset(10, 10, 10, 10);
-
-        string info = "=== MEMORY PROFILE ===\n";
-        info += $"Managed: {currentManagedMB} MB\n";
-        info += $"Native: {currentNativeMB} MB\n";
-        info += $"Total: {Profiler.GetTotalReservedMemoryLong() / 1048576} MB\n";
-        info += $"GC Heap: {Profiler.GetMonoUsedSizeLong() / 1048576} / {Profiler.GetMonoHeapSizeLong() / 1048576} MB\n";
-        info += $"GPU: {Profiler.GetAllocatedMemoryForGraphicsDriver() / 1048576} MB\n";
-        info += "\n";
-        info += $"Frame GC Alloc: {lastGCAllocationKB:F1} KB\n";
-        info += $"Snapshots: {snapshotHistory.Count} / {maxSnapshotHistory}\n";
-        info += "\n";
+        EnsureOverlayStyle();
+        overlayTextBuilder.Length = 0;
+        overlayTextBuilder.AppendLine("=== MEMORY PROFILE ===");
+        overlayTextBuilder.AppendLine($"Managed: {currentManagedMB} MB");
+        overlayTextBuilder.AppendLine($"Native: {currentNativeMB} MB");
+        overlayTextBuilder.AppendLine($"Total: {Profiler.GetTotalReservedMemoryLong() / 1048576} MB");
+        overlayTextBuilder.AppendLine($"GC Heap: {Profiler.GetMonoUsedSizeLong() / 1048576} / {Profiler.GetMonoHeapSizeLong() / 1048576} MB");
+        overlayTextBuilder.AppendLine($"GPU: {Profiler.GetAllocatedMemoryForGraphicsDriver() / 1048576} MB");
+        overlayTextBuilder.AppendLine();
+        overlayTextBuilder.AppendLine($"Frame GC Alloc: {lastGCAllocationKB:F1} KB");
+        overlayTextBuilder.AppendLine($"Snapshots: {snapshotHistory.Count} / {maxSnapshotHistory}");
+        overlayTextBuilder.AppendLine();
 
         if (leakDetected)
         {
-            info += $"⚠️ LEAK DETECTED!\n";
-            info += $"Growth: {leakRateMBPerMin:F2} MB/min\n";
-        }
-        else
-        {
-            info += $"Growth: {leakRateMBPerMin:F2} MB/min\n";
+            overlayTextBuilder.AppendLine("LEAK DETECTED!");
         }
 
-        info += "\n";
-        info += $"[{toggleKey}] Toggle | [F4] GC | [F5] Export";
+        overlayTextBuilder.AppendLine($"Growth: {leakRateMBPerMin:F2} MB/min");
+        overlayTextBuilder.AppendLine();
+        overlayTextBuilder.Append($"[{toggleKey}] Toggle | [F4] GC | [F5] Export");
 
         float width = 300f;
         float height = 280f;
-        GUI.Box(new Rect(Screen.width - width - 10, 10, width, height), info, boxStyle);
+        GUI.Box(new Rect(Screen.width - width - 10, 10, width, height), overlayTextBuilder.ToString(), overlayBoxStyle);
 
         // Handle hotkeys
         if (Event.current.type == EventType.KeyDown)
@@ -232,17 +230,43 @@ public class MemoryProfiler : MonoBehaviour
         }
     }
 
-    private Texture2D MakeTexture(int width, int height, Color color)
+    private void EnsureOverlayStyle()
+    {
+        if (overlayBoxStyle != null)
+        {
+            return;
+        }
+
+        overlayBoxStyle = new GUIStyle(GUI.skin.box);
+        overlayBackgroundTexture = CreateTexture(2, 2, new Color(0f, 0f, 0f, 0.7f));
+        overlayBoxStyle.normal.background = overlayBackgroundTexture;
+        overlayBoxStyle.normal.textColor = Color.white;
+        overlayBoxStyle.fontSize = 12;
+        overlayBoxStyle.alignment = TextAnchor.UpperLeft;
+        overlayBoxStyle.padding = new RectOffset(10, 10, 10, 10);
+    }
+
+    private static Texture2D CreateTexture(int width, int height, Color color)
     {
         Color[] pixels = new Color[width * height];
         for (int i = 0; i < pixels.Length; i++)
         {
             pixels[i] = color;
         }
-        Texture2D texture = new Texture2D(width, height);
+
+        Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
         texture.SetPixels(pixels);
         texture.Apply();
         return texture;
+    }
+
+    private void OnDestroy()
+    {
+        if (overlayBackgroundTexture != null)
+        {
+            Destroy(overlayBackgroundTexture);
+            overlayBackgroundTexture = null;
+        }
     }
 
     // Draw memory graph
@@ -290,7 +314,7 @@ public static class Drawing
         }
 
         Vector2 d = end - start;
-        float a = Mathf.Rad2Deg * Mathf.Atan(d.y / d.x);
+        float a = Mathf.Rad2Deg * Mathf.Atan2(d.y, d.x);
         if (d.x < 0) a += 180f;
 
         Color savedColor = GUI.color;

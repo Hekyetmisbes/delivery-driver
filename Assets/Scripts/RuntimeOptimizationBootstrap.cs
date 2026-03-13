@@ -43,7 +43,21 @@ public class RuntimeOptimizationBootstrap : MonoBehaviour
 
     private void EnsureOptimizationManagers()
     {
-        EnsureManager<PerformanceOptimizationManager>("PerformanceOptimizationManager");
+        // PerformanceOptimizationManager removed - TrafficSimulationOptimizer handles all NPC throttling
+
+        // Disable heavyweight runtime profilers by default in gameplay scenes.
+        MemoryProfiler memoryProfiler = FindAnyObjectByType<MemoryProfiler>();
+        if (memoryProfiler != null)
+        {
+            memoryProfiler.enableMonitoring = false;
+            memoryProfiler.showMemoryOverlay = false;
+        }
+
+        PerformanceRegressionDetector regressionDetector = FindAnyObjectByType<PerformanceRegressionDetector>();
+        if (regressionDetector != null)
+        {
+            regressionDetector.enableAutoDetection = false;
+        }
 
         WorldChunkManager chunkManager = FindAnyObjectByType<WorldChunkManager>();
         if (chunkManager != null)
@@ -53,7 +67,7 @@ public class RuntimeOptimizationBootstrap : MonoBehaviour
             chunkManager.updateInterval = 0.35f;
             chunkManager.maxChunkUpdatesPerFrame = 12;
             chunkManager.enableHardRadiusCulling = true;
-            chunkManager.cullStaticRenderersOnly = true;
+            chunkManager.cullStaticRenderersOnly = false;
         }
 
         TrafficSimulationOptimizer trafficOptimizer = FindAnyObjectByType<TrafficSimulationOptimizer>();
@@ -62,6 +76,13 @@ public class RuntimeOptimizationBootstrap : MonoBehaviour
             trafficOptimizer.showPerformanceStats = false;
             trafficOptimizer.autoFindPlayer = true;
         }
+
+        // Create unified optimization controller (persists across scenes)
+        if (UnifiedOptimizationController.Instance == null)
+        {
+            GameObject controllerObj = new GameObject("UnifiedOptimizationController");
+            controllerObj.AddComponent<UnifiedOptimizationController>();
+        }
     }
 
     private void StartPhaseTwoSystems()
@@ -69,13 +90,21 @@ public class RuntimeOptimizationBootstrap : MonoBehaviour
         RoadGraphBuilder roadGraphBuilder = FindAnyObjectByType<RoadGraphBuilder>();
         if (roadGraphBuilder != null)
         {
-            roadGraphBuilder.BeginBuildWithDelay(phaseTwoDelaySeconds);
+            // Avoid rebuilding if RoadGraphBuilder already built or has its own deferred build pending.
+            if (!roadGraphBuilder.HasBuiltRoadGraph && !roadGraphBuilder.HasPendingBuild)
+            {
+                roadGraphBuilder.BeginBuildWithDelay(phaseTwoDelaySeconds);
+            }
         }
 
         NpcSpawner npcSpawner = FindAnyObjectByType<NpcSpawner>();
         if (npcSpawner != null)
         {
-            npcSpawner.SpawnNpcsDeferred(phaseTwoDelaySeconds + npcExtraDelaySeconds);
+            // Avoid double spawning when NpcSpawner already started spawning on scene Start.
+            if (!npcSpawner.HasPendingOrActiveSpawn)
+            {
+                npcSpawner.SpawnNpcsDeferred(phaseTwoDelaySeconds + npcExtraDelaySeconds);
+            }
         }
     }
 

@@ -1,6 +1,5 @@
 using UnityEngine;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace DeliveryDriver.Optimization
 {
@@ -43,7 +42,7 @@ namespace DeliveryDriver.Optimization
         public int maxChunkUpdatesPerFrame = 16;
 
         [Header("Debug")]
-        public bool showDebugInfo = true;
+        public bool showDebugInfo = false;
         public bool drawGizmos = true;
 
         [Header("Hard Radius Culling")]
@@ -57,7 +56,7 @@ namespace DeliveryDriver.Optimization
         public float rendererCullingPadding = 8f;
 
         [Tooltip("How often to refresh dynamic renderer/NPC caches")]
-        public float cacheRefreshInterval = 0.5f;
+        public float cacheRefreshInterval = 30f;
 
         // Internal state
         private Dictionary<Vector2Int, WorldChunk> chunks = new Dictionary<Vector2Int, WorldChunk>();
@@ -68,6 +67,19 @@ namespace DeliveryDriver.Optimization
         private readonly Dictionary<Renderer, bool> rendererVisibilityState = new Dictionary<Renderer, bool>();
         private readonly List<TrafficSystem.NpcCarAgent> npcAgents = new List<TrafficSystem.NpcCarAgent>();
         private readonly Dictionary<TrafficSystem.NpcCarAgent, Renderer[]> npcRendererCache = new Dictionary<TrafficSystem.NpcCarAgent, Renderer[]>();
+        private readonly Dictionary<TrafficSystem.NpcCarAgent, bool> npcVisibilityState = new Dictionary<TrafficSystem.NpcCarAgent, bool>();
+        private readonly HashSet<Transform> chunkRootSet = new HashSet<Transform>();
+        private readonly List<ChunkQueueEntry> chunkQueueBuffer = new List<ChunkQueueEntry>();
+        private Camera cachedMainCamera;
+        private GUIStyle debugHeaderStyle;
+        private Renderer[] cachedSceneRenderers;
+
+        private struct ChunkQueueEntry
+        {
+            public WorldChunk chunk;
+            public float sqrDistance;
+            public bool prioritizeUnload;
+        }
 
         // Statistics
         private int chunksInNearRing;
@@ -81,6 +93,8 @@ namespace DeliveryDriver.Optimization
 
         private void InitializeChunkManager()
         {
+            cachedMainCamera = Camera.main;
+
             // Auto-find player if needed
             if (playerTransform == null && autoFindPlayer)
             {
@@ -225,6 +239,14 @@ namespace DeliveryDriver.Optimization
                 float dz = npcPos.z - playerPos.z;
                 bool npcVisible = dx * dx + dz * dz <= npcRadiusSqr;
 
+                // Skip if visibility hasn't changed - avoids expensive renderer.enabled writes
+                if (npcVisibilityState.TryGetValue(npc, out bool currentVisible) && currentVisible == npcVisible)
+                {
+                    continue;
+                }
+
+                npcVisibilityState[npc] = npcVisible;
+
                 if (!npcRendererCache.TryGetValue(npc, out Renderer[] npcRenderers) || npcRenderers == null)
                 {
                     npcRenderers = npc.GetComponentsInChildren<Renderer>(true);
@@ -250,52 +272,100 @@ namespace DeliveryDriver.Optimization
 
             lastCacheRefreshTime = Time.time;
 
+            // Preserve previous visibility states to avoid redundant renderer.enabled writes
+            // that trigger expensive editor MaterialEditor::ApplyMaterialProperty calls
+            var prevRendererStates = new Dictionary<Renderer, bool>(rendererVisibilityState);
+            var prevNpcStates = new Dictionary<TrafficSystem.NpcCarAgent, bool>(npcVisibilityState);
+
             hardCulledRenderers.Clear();
             rendererVisibilityState.Clear();
             npcAgents.Clear();
             npcRendererCache.Clear();
+            npcVisibilityState.Clear();
+            chunkRootSet.Clear();
 
-            var chunkArray = chunks.Values.ToArray();
-            Renderer[] sceneRenderers = FindObjectsByType<Renderer>(FindObjectsSortMode.None);
-            for (int i = 0; i < sceneRenderers.Length; i++)
+            foreach (WorldChunk chunk in chunks.Values)
             {
-                Renderer renderer = sceneRenderers[i];
+                if (chunk != null)
+                {
+                    chunkRootSet.Add(chunk.transform);
+                }
+            }
+
+            // On first scan, use FindObjectsByType and cache; subsequent refreshes
+            // only clean up destroyed renderers to avoid massive allocation.
+            if (cachedSceneRenderers == null || force)
+            {
+                cachedSceneRenderers = FindObjectsByType<Renderer>(FindObjectsSortMode.None);
+            }
+
+            for (int i = 0; i < cachedSceneRenderers.Length; i++)
+            {
+                Renderer renderer = cachedSceneRenderers[i];
                 if (renderer == null || !renderer.gameObject.activeInHierarchy) continue;
                 if (renderer.transform == playerTransform || renderer.transform.IsChildOf(transform)) continue;
                 if (playerTransform != null && renderer.transform.IsChildOf(playerTransform)) continue;
-                if (Camera.main != null && renderer.transform.IsChildOf(Camera.main.transform)) continue;
+                if (cachedMainCamera != null && renderer.transform.IsChildOf(cachedMainCamera.transform)) continue;
                 if (renderer is ParticleSystemRenderer) continue;
                 if (cullStaticRenderersOnly && !renderer.gameObject.isStatic) continue;
 
-                bool belongsToChunkObject = false;
-                for (int c = 0; c < chunkArray.Length; c++)
-                {
-                    WorldChunk chunk = chunkArray[c];
-                    if (chunk != null && renderer.transform.IsChildOf(chunk.transform))
-                    {
-                        belongsToChunkObject = true;
-                        break;
-                    }
-                }
-
-                if (belongsToChunkObject)
+                if (IsRendererManagedByChunk(renderer.transform))
                 {
                     continue;
                 }
 
                 hardCulledRenderers.Add(renderer);
-                rendererVisibilityState[renderer] = renderer.enabled;
+                // Restore previous visibility state if known, avoiding a full re-toggle
+                if (prevRendererStates.TryGetValue(renderer, out bool prevVisible))
+                {
+                    rendererVisibilityState[renderer] = prevVisible;
+                }
+                else
+                {
+                    rendererVisibilityState[renderer] = renderer.enabled;
+                }
             }
 
-            TrafficSystem.NpcCarAgent[] foundNpcs = FindObjectsByType<TrafficSystem.NpcCarAgent>(FindObjectsSortMode.None);
-            for (int i = 0; i < foundNpcs.Length; i++)
+            // Use TrafficCommunicationSystem to get NPCs instead of FindObjectsByType
+            if (TrafficSystem.TrafficCommunicationSystem.Instance != null)
             {
-                TrafficSystem.NpcCarAgent npc = foundNpcs[i];
+                TrafficSystem.TrafficCommunicationSystem.Instance.GetAllVehicles(npcAgents);
+            }
+            else
+            {
+                // Fallback only if TrafficCommunicationSystem not ready yet
+                var foundNpcs = FindObjectsByType<TrafficSystem.NpcCarAgent>(FindObjectsSortMode.None);
+                npcAgents.AddRange(foundNpcs);
+            }
+
+            for (int i = 0; i < npcAgents.Count; i++)
+            {
+                TrafficSystem.NpcCarAgent npc = npcAgents[i];
                 if (npc == null) continue;
 
-                npcAgents.Add(npc);
                 npcRendererCache[npc] = npc.GetComponentsInChildren<Renderer>(true);
+                // Restore previous NPC visibility state
+                if (prevNpcStates.TryGetValue(npc, out bool prevNpcVisible))
+                {
+                    npcVisibilityState[npc] = prevNpcVisible;
+                }
             }
+        }
+
+        private bool IsRendererManagedByChunk(Transform transformToCheck)
+        {
+            Transform current = transformToCheck;
+            while (current != null)
+            {
+                if (chunkRootSet.Contains(current))
+                {
+                    return true;
+                }
+
+                current = current.parent;
+            }
+
+            return false;
         }
 
         private static bool IsRendererWithinRadius(Renderer renderer, Vector2 playerXZ, float radiusSqr)
@@ -310,23 +380,43 @@ namespace DeliveryDriver.Optimization
         private void BuildChunkUpdateQueue(Vector3 playerPos)
         {
             chunksToUpdate.Clear();
+            chunkQueueBuffer.Clear();
             chunksInNearRing = 0;
             chunksInMidRing = 0;
             chunksInFarRing = 0;
             float proxyDistanceLimit = GetProxyDistanceLimit();
+            float proxyDistanceLimitSqr = proxyDistanceLimit * proxyDistanceLimit;
 
-            // Prioritize chunks that must be culled first, then process nearby chunks.
-            var sortedChunks = chunks.Values
-                .OrderByDescending(chunk =>
-                {
-                    float distance = Vector3.Distance(playerPos, chunk.GetWorldCenter());
-                    return distance > proxyDistanceLimit && chunk.currentState != WorldChunk.ChunkState.Unloaded;
-                })
-                .ThenBy(chunk => Vector3.Distance(playerPos, chunk.GetWorldCenter()));
-
-            foreach (var chunk in sortedChunks)
+            foreach (WorldChunk chunk in chunks.Values)
             {
-                chunksToUpdate.Enqueue(chunk);
+                if (chunk == null) continue;
+
+                Vector3 center = chunk.GetWorldCenter();
+                float dx = center.x - playerPos.x;
+                float dz = center.z - playerPos.z;
+                float sqrDistance = dx * dx + dz * dz;
+
+                chunkQueueBuffer.Add(new ChunkQueueEntry
+                {
+                    chunk = chunk,
+                    sqrDistance = sqrDistance,
+                    prioritizeUnload = sqrDistance > proxyDistanceLimitSqr && chunk.currentState != WorldChunk.ChunkState.Unloaded
+                });
+            }
+
+            chunkQueueBuffer.Sort((a, b) =>
+            {
+                if (a.prioritizeUnload != b.prioritizeUnload)
+                {
+                    return a.prioritizeUnload ? -1 : 1;
+                }
+
+                return a.sqrDistance.CompareTo(b.sqrDistance);
+            });
+
+            for (int i = 0; i < chunkQueueBuffer.Count; i++)
+            {
+                chunksToUpdate.Enqueue(chunkQueueBuffer[i].chunk);
             }
         }
 
@@ -480,7 +570,12 @@ namespace DeliveryDriver.Optimization
             GUILayout.BeginArea(new Rect(10, 150, 300, 200));
             GUILayout.BeginVertical("box");
 
-            GUILayout.Label($"<b>World Chunk Manager</b>", new GUIStyle(GUI.skin.label) { richText = true });
+            if (debugHeaderStyle == null)
+            {
+                debugHeaderStyle = new GUIStyle(GUI.skin.label) { richText = true };
+            }
+
+            GUILayout.Label($"<b>World Chunk Manager</b>", debugHeaderStyle);
             GUILayout.Label($"Total Chunks: {chunks.Count}");
             GUILayout.Label($"Near Ring (Full): {chunksInNearRing}");
             GUILayout.Label($"Mid Ring (Proxy): {chunksInMidRing}");

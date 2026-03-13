@@ -39,12 +39,7 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            // Create main Canvas if needed
-            Canvas mainCanvas = FindAnyObjectByType<Canvas>();
-            if (mainCanvas == null)
-            {
-                mainCanvas = CreateMainCanvas();
-            }
+            Canvas mainCanvas = GetOrCreateQuestCanvas();
 
             // Create QuestUIManager GameObject
             GameObject uiManagerObj = new GameObject("QuestUIManager");
@@ -81,9 +76,16 @@ namespace DeliveryDriver.Quest.UI
         private Canvas CreateMainCanvas()
         {
             GameObject canvasObj = new GameObject("Quest UI Canvas");
+            RectTransform canvasRect = canvasObj.AddComponent<RectTransform>();
+            canvasRect.anchorMin = Vector2.zero;
+            canvasRect.anchorMax = Vector2.one;
+            canvasRect.offsetMin = Vector2.zero;
+            canvasRect.offsetMax = Vector2.zero;
+            canvasRect.localScale = Vector3.one;
+
             Canvas canvas = canvasObj.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 100;
+            canvas.sortingOrder = 160;
 
             CanvasScaler scaler = canvasObj.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -94,6 +96,49 @@ namespace DeliveryDriver.Quest.UI
 
             Debug.Log("[QuestUISetup] Created main canvas");
             return canvas;
+        }
+
+        private Canvas GetOrCreateQuestCanvas()
+        {
+            GameObject existing = GameObject.Find("Quest UI Canvas");
+            if (existing != null)
+            {
+                Canvas canvas = existing.GetComponent<Canvas>();
+                if (canvas != null)
+                {
+                    EnsureCanvasScaler(existing, canvas);
+                    return canvas;
+                }
+            }
+
+            return CreateMainCanvas();
+        }
+
+        private static void EnsureCanvasScaler(GameObject canvasObject, Canvas canvas)
+        {
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = Mathf.Max(canvas.sortingOrder, 160);
+
+            CanvasScaler scaler = canvasObject.GetComponent<CanvasScaler>();
+            if (scaler == null)
+            {
+                scaler = canvasObject.AddComponent<CanvasScaler>();
+            }
+
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920, 1080);
+            scaler.matchWidthOrHeight = 0.5f;
+
+            if (canvasObject.GetComponent<GraphicRaycaster>() == null)
+            {
+                canvasObject.AddComponent<GraphicRaycaster>();
+            }
+
+            RectTransform rect = canvasObject.GetComponent<RectTransform>();
+            if (rect != null)
+            {
+                rect.localScale = Vector3.one;
+            }
         }
 
         private QuestListUI CreateQuestListUI(Transform parent)
@@ -194,7 +239,7 @@ namespace DeliveryDriver.Quest.UI
             rectTransform.anchorMax = new Vector2(1, 1);
             rectTransform.pivot = new Vector2(1, 1);
             rectTransform.anchoredPosition = new Vector2(-20, -20);
-            rectTransform.sizeDelta = new Vector2(350, 200);
+            rectTransform.sizeDelta = new Vector2(520, 250);
 
             // Add background
             Image bgImage = activeQuestObj.AddComponent<Image>();
@@ -210,11 +255,11 @@ namespace DeliveryDriver.Quest.UI
             objectiveRect.anchorMax = new Vector2(1, 1);
             objectiveRect.pivot = new Vector2(0.5f, 1);
             objectiveRect.anchoredPosition = new Vector2(0, -10);
-            objectiveRect.sizeDelta = new Vector2(-20, 55);
+            objectiveRect.sizeDelta = new Vector2(-24, 90);
 
             TextMeshProUGUI objectiveText = objectiveObj.AddComponent<TextMeshProUGUI>();
             objectiveText.text = "Teslimat Görevi";
-            objectiveText.fontSize = 20;
+            objectiveText.fontSize = 26;
             objectiveText.fontStyle = FontStyles.Bold;
             objectiveText.alignment = TextAlignmentOptions.TopLeft;
             objectiveText.color = new Color(1f, 0.9f, 0.3f);
@@ -226,12 +271,12 @@ namespace DeliveryDriver.Quest.UI
             distRect.anchorMin = new Vector2(0, 1);
             distRect.anchorMax = new Vector2(1, 1);
             distRect.pivot = new Vector2(0.5f, 1);
-            distRect.anchoredPosition = new Vector2(0, -50);
-            distRect.sizeDelta = new Vector2(-20, 25);
+            distRect.anchoredPosition = new Vector2(0, -104);
+            distRect.sizeDelta = new Vector2(-24, 34);
 
             TextMeshProUGUI distText = distObj.AddComponent<TextMeshProUGUI>();
             distText.text = "--";
-            distText.fontSize = 18;
+            distText.fontSize = 20;
             distText.alignment = TextAlignmentOptions.TopLeft;
             distText.color = Color.white;
 
@@ -242,12 +287,12 @@ namespace DeliveryDriver.Quest.UI
             timerRect.anchorMin = new Vector2(0, 1);
             timerRect.anchorMax = new Vector2(1, 1);
             timerRect.pivot = new Vector2(0.5f, 1);
-            timerRect.anchoredPosition = new Vector2(0, -80);
-            timerRect.sizeDelta = new Vector2(-20, 25);
+            timerRect.anchoredPosition = new Vector2(0, -144);
+            timerRect.sizeDelta = new Vector2(-24, 32);
 
             TextMeshProUGUI timerText = timerObj.AddComponent<TextMeshProUGUI>();
             timerText.text = "00:00";
-            timerText.fontSize = 16;
+            timerText.fontSize = 20;
             timerText.alignment = TextAlignmentOptions.TopLeft;
             timerText.color = Color.white;
 
@@ -283,7 +328,8 @@ namespace DeliveryDriver.Quest.UI
             Image bgImage = completeObj.AddComponent<Image>();
             bgImage.color = new Color(0, 0, 0, 0.7f);
 
-            QuestCompleteUI questCompleteUI = completeObj.AddComponent<QuestCompleteUI>();
+            // NOTE: QuestCompleteUI component is added AFTER all children are created
+            // so that Awake -> EnsureReadableLayout() can find "ResultPanel" and child texts.
 
             // Create result panel (center)
             GameObject panelObj = new GameObject("ResultPanel");
@@ -380,7 +426,7 @@ namespace DeliveryDriver.Quest.UI
 
             // Add button navigation
             var navigation = continueButton.navigation;
-            navigation.mode = Navigation.Mode.None;
+            navigation.mode = UnityEngine.UI.Navigation.Mode.None;
             continueButton.navigation = navigation;
 
             GameObject buttonTextObj = new GameObject("Text");
@@ -396,6 +442,10 @@ namespace DeliveryDriver.Quest.UI
             buttonText.fontStyle = FontStyles.Bold;
             buttonText.alignment = TextAlignmentOptions.Center;
             buttonText.color = Color.white;
+
+            // Add QuestCompleteUI component AFTER all children exist
+            // so Awake -> EnsureReadableLayout() can find ResultPanel and text components
+            QuestCompleteUI questCompleteUI = completeObj.AddComponent<QuestCompleteUI>();
 
             // Wire references using reflection
             var rootPanelField = typeof(QuestCompleteUI).GetField("rootPanel",
@@ -417,6 +467,12 @@ namespace DeliveryDriver.Quest.UI
             statsTextField?.SetValue(questCompleteUI, statsText);
             rewardTextField?.SetValue(questCompleteUI, rewardText);
             continueButtonField?.SetValue(questCompleteUI, continueButton);
+
+            // Re-run EnsureReadableLayout now that reflection fields are set
+            // (Awake ran before reflection, so text fields were null at that point)
+            var ensureLayoutMethod = typeof(QuestCompleteUI).GetMethod("EnsureReadableLayout",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            ensureLayoutMethod?.Invoke(questCompleteUI, null);
 
             // Setup button click handler - CRITICAL: Must be done AFTER field is set
             continueButton.onClick.RemoveAllListeners(); // Clear any existing listeners

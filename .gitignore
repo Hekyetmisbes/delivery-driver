@@ -116,3 +116,6 @@ InitTestScene*.unity*
 
 # Unity auto-recovery files
 /[Aa]ssets/_Recovery/
+
+# Third-party asset pack demo scenes
+/[Aa]ssets/FreeButtonSet/Scenes/

@@ -276,7 +276,14 @@ namespace DeliveryDriver.Quest.UI
                 return true;
             }
 
-            return deliveryManager.ShouldShowObjectiveUI;
+            if (deliveryManager.HasObjectivePoint)
+            {
+                return true;
+            }
+
+            // Keep panel visible for active quests even if delivery flow flags
+            // momentarily desync during mission-offer transitions.
+            return quest.Status == QuestStatus.Active;
         }
 
         private void SyncActiveQuestVisibility(QuestData quest)

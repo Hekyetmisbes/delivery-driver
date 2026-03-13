@@ -20,6 +20,7 @@ namespace DeliveryDriver.Quest.UI
 
         [Header("Gameplay")]
         [SerializeField] private TMP_Dropdown questDifficultyDropdown;
+        [SerializeField] private TMP_Dropdown speedUnitDropdown;
 
         [Header("UI")]
         [SerializeField] private Slider uiScaleSlider;
@@ -103,6 +104,11 @@ namespace DeliveryDriver.Quest.UI
                 questDifficultyDropdown.onValueChanged.AddListener(OnDifficultyChanged);
             }
 
+            if (speedUnitDropdown != null)
+            {
+                speedUnitDropdown.onValueChanged.AddListener(OnSpeedUnitChanged);
+            }
+
             if (closeButton != null)
             {
                 closeButton.onClick.AddListener(HandleClose);
@@ -144,6 +150,11 @@ namespace DeliveryDriver.Quest.UI
             if (questDifficultyDropdown != null)
             {
                 questDifficultyDropdown.onValueChanged.RemoveListener(OnDifficultyChanged);
+            }
+
+            if (speedUnitDropdown != null)
+            {
+                speedUnitDropdown.onValueChanged.RemoveListener(OnSpeedUnitChanged);
             }
 
             if (closeButton != null)
@@ -202,6 +213,12 @@ namespace DeliveryDriver.Quest.UI
                 questDifficultyDropdown.value = (int)settings.DifficultyPreference;
             }
 
+            if (speedUnitDropdown != null)
+            {
+                EnsureSpeedUnitOptions();
+                speedUnitDropdown.value = (int)settings.SpeedUnitPreference;
+            }
+
             suppressCallbacks = false;
         }
 
@@ -217,6 +234,17 @@ namespace DeliveryDriver.Quest.UI
             questDifficultyDropdown.options.Add(new TMP_Dropdown.OptionData("Medium"));
             questDifficultyDropdown.options.Add(new TMP_Dropdown.OptionData("Hard"));
             questDifficultyDropdown.options.Add(new TMP_Dropdown.OptionData("Expert"));
+        }
+
+        private void EnsureSpeedUnitOptions()
+        {
+            if (speedUnitDropdown == null || speedUnitDropdown.options.Count > 0)
+            {
+                return;
+            }
+
+            speedUnitDropdown.options.Add(new TMP_Dropdown.OptionData("KMH"));
+            speedUnitDropdown.options.Add(new TMP_Dropdown.OptionData("MPH"));
         }
 
         private void OnMasterVolumeChanged(float value)
@@ -274,6 +302,19 @@ namespace DeliveryDriver.Quest.UI
             ApplyIfNeeded();
         }
 
+        private void OnSpeedUnitChanged(int value)
+        {
+            if (suppressCallbacks || settings == null)
+            {
+                return;
+            }
+
+            settings.SetSpeedUnitPreference(value == (int)SpeedUnitPreference.Mph
+                ? SpeedUnitPreference.Mph
+                : SpeedUnitPreference.Kmh);
+            ApplyIfNeeded();
+        }
+
         private void ApplyIfNeeded()
         {
             if (applyOnChange)
@@ -310,6 +351,7 @@ namespace DeliveryDriver.Quest.UI
             settings.SetSfxVolume(1f);
             settings.SetUiScale(1f);
             settings.SetQuestDifficultyPreference(QuestDifficultyPreference.MatchPlayerLevel);
+            settings.SetSpeedUnitPreference(SpeedUnitPreference.Kmh);
             ApplySettings();
             RefreshUI();
         }

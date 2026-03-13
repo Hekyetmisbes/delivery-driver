@@ -467,6 +467,12 @@ namespace DeliveryDriver.Quest
                 availableQuests.Add(quest);
             }
         }
+
+        public void SetPlayerVehicle(CarController controller)
+        {
+            playerController = controller;
+            playerTransform = controller != null ? controller.transform : null;
+        }
         
         /// <summary>
         /// Task 9.2: Generates a quest procedurally based on difficulty parameters.
@@ -1213,6 +1219,7 @@ namespace DeliveryDriver.Quest
             QuestLocation delivery = GetCurrentDeliveryLocation();
             SpawnQuestZone(delivery, QuestZoneType.Delivery);
             MarkQuestUiDirty();
+            TryNotifyQuestUpdated();
             Debug.Log($"[QuestManager] Cargo loaded! Deliver to {delivery?.LocationName ?? "destination"}.");
 
             // Task 10.4: Tutorial integration
@@ -1242,6 +1249,7 @@ namespace DeliveryDriver.Quest
                 currentQuest.CurrentDeliveryIndex++;
                 SpawnQuestZone(GetCurrentDeliveryLocation(), QuestZoneType.Delivery);
                 MarkQuestUiDirty();
+                TryNotifyQuestUpdated();
             }
             else
             {
