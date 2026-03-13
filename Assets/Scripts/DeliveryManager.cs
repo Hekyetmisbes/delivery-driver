@@ -14,14 +14,6 @@ public class DeliveryManager : MonoBehaviour
 {
     private const float SpawnReachabilityTransferDistance = 24f;
 
-    private enum DeliveryMissionType
-    {
-        Standard,
-        Timed,
-        Fragile,
-        MultiStop
-    }
-
     [Header("Prefabs")]
     [SerializeField] private GameObject boxPrefab;
     [SerializeField] private GameObject pickupIndicatorPrefab;
@@ -2006,7 +1998,7 @@ public class DeliveryManager : MonoBehaviour
         QuestManager.Instance.SetDebugInfiniteTime(false);
 #endif
 
-        QuestType questType = ToQuestType(missionType);
+        QuestType questType = DeliveryMissionRules.ToQuestType(missionType);
         QuestDifficulty difficulty = missionType switch
         {
             DeliveryMissionType.MultiStop => QuestDifficulty.Medium,
@@ -2023,8 +2015,8 @@ public class DeliveryManager : MonoBehaviour
             _ => 300f
         };
 
-        GetMissionRewardValues(missionType, currentMissionRewardMultiplier, out int baseReward, out int bonusReward);
-        string missionLabel = GetMissionLabel(missionType);
+        DeliveryMissionRules.GetMissionRewardValues(missionType, currentMissionRewardMultiplier, out int baseReward, out int bonusReward);
+        string missionLabel = DeliveryMissionRules.GetMissionLabel(missionType);
 
         string conditionLine = BuildMissionConditionSummary();
 
@@ -2179,7 +2171,7 @@ public class DeliveryManager : MonoBehaviour
 
         if (success && (QuestManager.Instance == null || currentDeliveryQuest == null))
         {
-            GetMissionRewardValues(currentMissionType, currentMissionRewardMultiplier, out int baseReward, out int bonusReward);
+            DeliveryMissionRules.GetMissionRewardValues(currentMissionType, currentMissionRewardMultiplier, out int baseReward, out int bonusReward);
             int fallbackReward = Mathf.Max(0, baseReward + bonusReward);
             if (fallbackReward > 0 && PlayerProgressionManager.Instance != null)
             {
@@ -2368,7 +2360,7 @@ public class DeliveryManager : MonoBehaviour
         hasPendingPhoneOffer = true;
 
         phoneMissionUI.ShowOffer(
-            GetMissionLabel(pendingMissionType),
+            DeliveryMissionRules.GetMissionLabel(pendingMissionType),
             BuildMissionOfferBody(pendingMissionType, pendingMissionRewardMultiplier, pendingRushHourBonus, pendingNightBonus, pendingRainRiskBonus),
             BuildMissionRewardPreview(pendingMissionType, pendingMissionRewardMultiplier));
     }
@@ -2436,43 +2428,29 @@ public class DeliveryManager : MonoBehaviour
         bool nightBonus,
         bool rainRiskBonus)
     {
-        string modeText = missionType switch
-        {
-            DeliveryMissionType.Timed => "Sureli teslimat. Hedefe hizli ulasman gerekiyor.",
-            DeliveryMissionType.Fragile => "Kirilgan kargo. Carpmalardan kacinarak tasimalisin.",
-            DeliveryMissionType.MultiStop => $"Cok durakli rota. Genelde {Mathf.Max(2, multiStopMinStops)}-{Mathf.Max(multiStopMinStops, multiStopMaxStops)} teslim noktasi olur.",
-            _ => "Standart paket teslimati."
-        };
-
-        string conditionSummary = BuildMissionConditionSummary(rewardMultiplier, rushHourBonus, nightBonus, rainRiskBonus);
-        return $"Yeni gorev teklifi\n{modeText}{conditionSummary}\nKabul edersen gorev olusacak.";
+        string body = DeliveryMissionRules.BuildMissionOfferBody(
+            missionType,
+            rewardMultiplier,
+            rushHourBonus,
+            nightBonus,
+            rainRiskBonus,
+            multiStopMinStops,
+            multiStopMaxStops);
+        return $"Yeni gorev teklifi\n{body}\nKabul edersen gorev olusacak.";
     }
 
     private string BuildMissionRewardPreview(DeliveryMissionType missionType, float rewardMultiplier)
     {
-        GetMissionRewardValues(missionType, rewardMultiplier, out int baseReward, out int bonusReward);
-        return $"Odul: ${baseReward} (+Bonus ${bonusReward})";
+        return DeliveryMissionRules.BuildMissionRewardPreview(missionType, rewardMultiplier);
     }
 
     private DeliveryMissionType PickMissionType()
     {
-        int standard = Mathf.Max(0, standardMissionWeight);
-        int timed = Mathf.Max(0, timedMissionWeight);
-        int fragile = Mathf.Max(0, fragileMissionWeight);
-        int multiStop = Mathf.Max(0, multiStopMissionWeight);
-        int totalWeight = standard + timed + fragile + multiStop;
-        if (totalWeight <= 0)
-        {
-            return DeliveryMissionType.Standard;
-        }
-
-        int roll = UnityEngine.Random.Range(0, totalWeight);
-        if (roll < standard) return DeliveryMissionType.Standard;
-        roll -= standard;
-        if (roll < timed) return DeliveryMissionType.Timed;
-        roll -= timed;
-        if (roll < fragile) return DeliveryMissionType.Fragile;
-        return DeliveryMissionType.MultiStop;
+        return DeliveryMissionRules.PickMissionType(
+            standardMissionWeight,
+            timedMissionWeight,
+            fragileMissionWeight,
+            multiStopMissionWeight);
     }
 
     private void EvaluateMissionConditions()
@@ -2486,27 +2464,14 @@ public class DeliveryManager : MonoBehaviour
         out bool nightBonus,
         out bool rainRiskBonus)
     {
-        int hour = DateTime.Now.Hour;
-        rushHourBonus = (hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 19);
-        nightBonus = hour >= 22 || hour <= 5;
-        rainRiskBonus = WeatherManager.Instance != null &&
-                        WeatherManager.Instance.GetCurrentWeather() == WeatherCondition.Rain;
-
-        rewardMultiplier = 1f;
-        if (rushHourBonus)
-        {
-            rewardMultiplier *= Mathf.Max(1f, rushHourRewardMultiplier);
-        }
-
-        if (nightBonus)
-        {
-            rewardMultiplier *= Mathf.Max(1f, nightRewardMultiplier);
-        }
-
-        if (rainRiskBonus)
-        {
-            rewardMultiplier *= Mathf.Max(1f, rainyRiskRewardMultiplier);
-        }
+        DeliveryMissionConditionEvaluation evaluation = DeliveryMissionRules.EvaluateMissionConditions(
+            rushHourRewardMultiplier,
+            nightRewardMultiplier,
+            rainyRiskRewardMultiplier);
+        rewardMultiplier = evaluation.RewardMultiplier;
+        rushHourBonus = evaluation.RushHourBonus;
+        nightBonus = evaluation.NightBonus;
+        rainRiskBonus = evaluation.RainRiskBonus;
     }
 
     private string BuildMissionConditionSummary()
@@ -2516,59 +2481,10 @@ public class DeliveryManager : MonoBehaviour
 
     private string BuildMissionConditionSummary(float rewardMultiplier, bool rushHourBonus, bool nightBonus, bool rainRiskBonus)
     {
-        List<string> tags = new List<string>();
-        if (rushHourBonus) tags.Add("Rush Hour");
-        if (nightBonus) tags.Add("Night");
-        if (rainRiskBonus) tags.Add("Rain Risk");
-
-        return tags.Count == 0
+        string summary = DeliveryMissionRules.BuildMissionConditionSummary(rewardMultiplier, rushHourBonus, nightBonus, rainRiskBonus);
+        return string.IsNullOrEmpty(summary)
             ? string.Empty
-            : $"\nConditions: {string.Join(", ", tags)} (x{Mathf.Max(1f, rewardMultiplier):F2} reward)";
-    }
-
-    private string GetMissionLabel(DeliveryMissionType missionType)
-    {
-        return missionType switch
-        {
-            DeliveryMissionType.Timed => "Timed Run",
-            DeliveryMissionType.Fragile => "Fragile Cargo",
-            DeliveryMissionType.MultiStop => "Multi-Stop Route",
-            _ => "Package Delivery"
-        };
-    }
-
-    private void GetMissionRewardValues(DeliveryMissionType missionType, float rewardMultiplier, out int baseReward, out int bonusReward)
-    {
-        int baseRaw = missionType switch
-        {
-            DeliveryMissionType.Timed => 150,
-            DeliveryMissionType.Fragile => 175,
-            DeliveryMissionType.MultiStop => 220,
-            _ => 100
-        };
-
-        int bonusRaw = missionType switch
-        {
-            DeliveryMissionType.Timed => 95,
-            DeliveryMissionType.Fragile => 110,
-            DeliveryMissionType.MultiStop => 140,
-            _ => 50
-        };
-
-        float safeMultiplier = Mathf.Max(1f, rewardMultiplier);
-        baseReward = Mathf.RoundToInt(baseRaw * safeMultiplier);
-        bonusReward = Mathf.RoundToInt(bonusRaw * safeMultiplier);
-    }
-
-    private QuestType ToQuestType(DeliveryMissionType missionType)
-    {
-        return missionType switch
-        {
-            DeliveryMissionType.Timed => QuestType.ExpressDelivery,
-            DeliveryMissionType.Fragile => QuestType.FragileDelivery,
-            DeliveryMissionType.MultiStop => QuestType.MultiStopDelivery,
-            _ => QuestType.StandardDelivery
-        };
+            : $"\nConditions: {summary}";
     }
 
     private string BuildDeliveryObjectiveDescription(int currentStopIndex)
