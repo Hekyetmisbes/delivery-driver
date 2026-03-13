@@ -1,5 +1,19 @@
 # Delivery Driver Full Script Refactor / Optimization Prompt
 
+## Progress Log
+
+- [x] Step 1 - Audited the prompt, architecture notes, and the current hotspot files. Focus selected for this pass: repeated player/service lookups, per-frame rebinding, and duplicate UI canvas creation in the navigation/minimap/player-vehicle path.
+- [x] Step 2 - Implemented the first optimization pass in `PlayerVehicleManager`, `NavigationService`, `MinimapCamera`, `CompassUI`, and `EdgeIndicator`. Added an authoritative active-vehicle event, replaced repeated rebinding lookups with cached references, throttled fallback resolution, and moved the legacy edge indicator away from always creating its own overlay canvas when the global UI canvas is available.
+- [x] Step 3 - Optimized `MinimapUI` so it no longer tries to create `NavigationService` from the UI layer, now listens for authoritative active-vehicle changes, and throttles player, navigation-service, and road-graph fallback discovery instead of repeating those searches every frame.
+- [x] Step 4 - Verified the edited C# files with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded with 0 errors and 5 pre-existing warnings outside the edited files (`LocalizationTable.cs` and `NpcCarAgent.cs`).
+- [x] Step 5 - Reduced `RoadGraphPathfinder` allocation churn by reusing candidate-search and A* working buffers instead of creating fresh list/dictionary/hashset/queue state on each path search.
+- [x] Step 6 - Reworked `NotificationQueue` and `TooltipUI` so they reuse the authoritative global UI hierarchy when available instead of always creating separate persistent overlay canvases.
+- [x] Step 7 - Removed dead `SettingsScene` and `CreditsScene` bootstrap branches from `MenuSceneBootstrap`, keeping runtime menu injection aligned with the actual build settings (`MainMenu` and `Game` only).
+- [x] Step 8 - Re-verified the expanded change set with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
+- [x] Step 9 - Replaced the company installer's editor-only prefab dependency with a runtime-loadable `Resources/Company/VehiclePrefabCatalog` asset and kept editor asset-path loading only as a fallback for development workflows.
+- [x] Step 10 - Isolated `MemoryProfiler`, `PerformanceRegressionDetector`, and `PerformanceBenchmark` behind editor/debug-build runtime gates so profiling and regression tooling no longer stays active in normal gameplay builds.
+- [x] Step 11 - Re-verified the newest company/diagnostics changes with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
+
 Rewrite, optimize, and reorganize all C# scripts under `Assets/Scripts/` in this Unity project. The goal is not to patch individual issues. The goal is to rebuild the scripting architecture so it is faster, cleaner, easier to maintain, easier to extend, and significantly more readable.
 
 ## Project context

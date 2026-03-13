@@ -14,6 +14,8 @@ using UnityEditor;
 /// </summary>
 public class PerformanceBenchmark : MonoBehaviour
 {
+    private static bool SupportsRuntimeDiagnostics => Application.isEditor || Debug.isDebugBuild;
+
     [System.Serializable]
     public class BenchmarkResult
     {
@@ -64,6 +66,12 @@ public class PerformanceBenchmark : MonoBehaviour
 
     private void Start()
     {
+        if (!SupportsRuntimeDiagnostics)
+        {
+            enabled = false;
+            return;
+        }
+
         if (waypoints.Count == 0)
         {
             SetupDefaultWaypoints();

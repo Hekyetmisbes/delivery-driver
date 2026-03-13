@@ -1,0 +1,16 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d52219da0c8a4981b1234b38d489ad91, type: 3}
+  m_Name: VehiclePrefabCatalog
+  m_EditorClassIdentifier: 
+  vanPrefab: {fileID: 100100000, guid: e187f908f99d7b240a8fa1717b4db832, type: 3}
+  truckPrefab: {fileID: 100100000, guid: 611d26ba9f60c1545b65bc3d9b2d52b2, type: 3}

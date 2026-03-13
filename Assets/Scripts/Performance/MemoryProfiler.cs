@@ -9,6 +9,8 @@ using UnityEngine.Profiling;
 /// </summary>
 public class MemoryProfiler : MonoBehaviour
 {
+    private static bool SupportsRuntimeDiagnostics => Application.isEditor || Debug.isDebugBuild;
+
     [System.Serializable]
     public class MemorySnapshot
     {
@@ -60,6 +62,14 @@ public class MemoryProfiler : MonoBehaviour
 
     private void Start()
     {
+        if (!SupportsRuntimeDiagnostics)
+        {
+            enableMonitoring = false;
+            showMemoryOverlay = false;
+            enabled = false;
+            return;
+        }
+
         TakeSnapshot();
         overlayVisible = showMemoryOverlay;
         EnsureOverlayStyle();

@@ -8,6 +8,8 @@ using System.IO;
 /// </summary>
 public class PerformanceRegressionDetector : MonoBehaviour
 {
+    private static bool SupportsRuntimeDiagnostics => Application.isEditor || Debug.isDebugBuild;
+
     [System.Serializable]
     public class PerformanceBaseline
     {
@@ -68,6 +70,14 @@ public class PerformanceRegressionDetector : MonoBehaviour
 
     private void Start()
     {
+        if (!SupportsRuntimeDiagnostics)
+        {
+            enableAutoDetection = false;
+            hasActiveAlerts = false;
+            enabled = false;
+            return;
+        }
+
         sessionStartTime = Time.time;
         initialMemory = GetCurrentMemoryMB();
         LoadBaselineFromPreviousBenchmark();
