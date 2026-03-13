@@ -178,6 +178,8 @@ namespace DeliveryDriver.Quest
         private string lastQuestId = string.Empty;
         private bool questUiDirty = true;
         private Coroutine startupInitCoroutine;
+        private QuestLocationAssignmentService questLocationAssignmentService;
+        private QuestZoneMarkerService questZoneMarkerService;
 
         public UnityEvent<QuestData> OnQuestStarted = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnQuestCompleted = new UnityEvent<QuestData>();
@@ -206,6 +208,32 @@ namespace DeliveryDriver.Quest
         public bool DebugDrawRouteEnabled => debugDrawRoute;
         public bool DebugDrawLabelsEnabled => debugDrawLabels;
 #endif
+
+        private QuestLocationAssignmentService GetLocationAssignmentService()
+        {
+            usedLocations ??= new List<Vector3>();
+            questLocationAssignmentService ??= new QuestLocationAssignmentService(
+                () => roadGraphBuilder,
+                () => pickupMarkerPrefab,
+                () => deliveryMarkerPrefab,
+                usedLocations,
+                locationCooldownDistance);
+
+            return questLocationAssignmentService;
+        }
+
+        private QuestZoneMarkerService GetZoneMarkerService()
+        {
+            activeZones ??= new List<QuestZone>();
+            questZoneMarkerService ??= new QuestZoneMarkerService(
+                () => questZonePrefab,
+                () => pickupMarkerPrefab,
+                () => deliveryMarkerPrefab,
+                activeZones,
+                SpawnMarkerParticles);
+
+            return questZoneMarkerService;
+        }
 
         private void Awake()
         {
@@ -458,7 +486,7 @@ namespace DeliveryDriver.Quest
 
                 // For template quests, we still need to assign locations.
                 quest.Status = QuestStatus.NotStarted;
-                if (!AssignQuestLocations(quest))
+                if (!GetLocationAssignmentService().AssignQuestLocations(quest))
                 {
                     Debug.LogError($"[QuestManager] Quest template '{quest.QuestName}' could not be assigned runtime locations. Fallback is disabled.");
                     continue;
@@ -521,8 +549,8 @@ namespace DeliveryDriver.Quest
             // Try multiple times to find locations matching the distance criteria
             for (int i = 0; i < 15; i++)
             {
-                pickup = GenerateRandomLocation("Pickup");
-                delivery = GenerateRandomLocation("Delivery");
+                pickup = GetLocationAssignmentService().GenerateRandomLocation("Pickup");
+                delivery = GetLocationAssignmentService().GenerateRandomLocation("Delivery");
                 
                 if (pickup == null || delivery == null) continue;
 
@@ -540,8 +568,8 @@ namespace DeliveryDriver.Quest
             // Fallback: If strict distance generation failed, just take whatever valid pair we can get
             if (pickup == null || delivery == null)
             {
-                pickup = GenerateRandomLocation("Pickup");
-                delivery = GenerateRandomLocation("Delivery");
+                pickup = GetLocationAssignmentService().GenerateRandomLocation("Pickup");
+                delivery = GetLocationAssignmentService().GenerateRandomLocation("Delivery");
                 
                 // Ensure they are at least somewhat valid (min distance check inside AreLocationsValid logic, 
                 // but we are bypassing AssignQuestLocations helper here, so we do manual check or just accept)
@@ -571,8 +599,7 @@ namespace DeliveryDriver.Quest
             };
             
             // Assign markers
-            if (quest.PickupLocation.VisualMarker == null) quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
-            foreach(var loc in quest.DeliveryLocations) if (loc.VisualMarker == null) loc.VisualMarker = deliveryMarkerPrefab;
+            GetLocationAssignmentService().EnsureQuestMarkersAssigned(quest);
 
             // 5. Calculate Stats
             float avgSpeed = 11f; // ~40 km/h in m/s
@@ -627,7 +654,7 @@ namespace DeliveryDriver.Quest
 
             if (quest.PickupLocation == null || quest.DeliveryLocations == null || quest.DeliveryLocations.Count == 0)
             {
-                AssignQuestLocations(quest);
+                GetLocationAssignmentService().AssignQuestLocations(quest);
             }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -639,8 +666,8 @@ namespace DeliveryDriver.Quest
 #endif
 
             quest.StartQuest();
-            ClearAllZones();
-            SpawnQuestZone(quest.PickupLocation, QuestZoneType.Pickup);
+            GetZoneMarkerService().ClearAllZones();
+            GetZoneMarkerService().SpawnQuestZone(quest.PickupLocation, QuestZoneType.Pickup);
 
             if (PlayerProgressionManager.Instance != null)
             {
@@ -680,8 +707,8 @@ namespace DeliveryDriver.Quest
                 currentQuest = null;
             }
 
-            CleanupQuestMarkers(quest);
-            ClearAllZones();
+            GetZoneMarkerService().CleanupQuestMarkers(quest);
+            GetZoneMarkerService().ClearAllZones();
 
             if (quest.IsRepeatable)
             {
@@ -754,8 +781,8 @@ namespace DeliveryDriver.Quest
             SwitchToExplorationMusic();
 
             OnQuestCompleted.Invoke(quest);
-            CleanupQuestMarkers(quest);
-            ClearAllZones();
+            GetZoneMarkerService().CleanupQuestMarkers(quest);
+            GetZoneMarkerService().ClearAllZones();
             GenerateAvailableQuests(1);
 
             // Trigger auto-save after quest completion
@@ -806,8 +833,8 @@ namespace DeliveryDriver.Quest
                 PlayerProgressionManager.Instance.RecordQuestFailure(quest);
             }
 
-            CleanupQuestMarkers(quest);
-            ClearAllZones();
+            GetZoneMarkerService().CleanupQuestMarkers(quest);
+            GetZoneMarkerService().ClearAllZones();
             PlayQuestClip(failureClip);
 
             // Task 10.1: Switch back to exploration music
@@ -830,205 +857,6 @@ namespace DeliveryDriver.Quest
             }
 
             currentQuest.Cargo.TakeDamage(amount);
-        }
-
-        private bool AssignQuestLocations(QuestData quest)
-        {
-            if (quest == null)
-            {
-                return false;
-            }
-
-            QuestLocation pickup = null;
-            QuestLocation delivery = null;
-
-            for (int attempt = 0; attempt < 10; attempt++)
-            {
-                pickup = GenerateRandomLocation("Pickup");
-                delivery = GenerateRandomLocation("Delivery");
-
-                if (AreLocationsValid(pickup, delivery, quest.Difficulty))
-                {
-                    break;
-                }
-            }
-
-            if (pickup == null || delivery == null)
-            {
-                Debug.LogWarning("[QuestManager] Failed to generate valid quest locations.");
-                return false;
-            }
-
-            quest.PickupLocation = pickup;
-            if (quest.PickupLocation != null && quest.PickupLocation.VisualMarker == null && pickupMarkerPrefab != null)
-            {
-                quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
-            }
-            quest.DeliveryLocations ??= new List<QuestLocation>();
-            quest.DeliveryLocations.Clear();
-
-            if (delivery != null)
-            {
-                if (delivery.VisualMarker == null && deliveryMarkerPrefab != null)
-                {
-                    delivery.VisualMarker = deliveryMarkerPrefab;
-                }
-                quest.DeliveryLocations.Add(delivery);
-            }
-
-            if (quest.QuestType == QuestType.MultiStopDelivery)
-            {
-                QuestLocation extraStop = GenerateRandomLocation("Delivery");
-                if (extraStop != null)
-                {
-                    if (extraStop.VisualMarker == null && deliveryMarkerPrefab != null)
-                    {
-                        extraStop.VisualMarker = deliveryMarkerPrefab;
-                    }
-                    quest.DeliveryLocations.Add(extraStop);
-                }
-            }
-
-            return true;
-        }
-
-        private QuestLocation GenerateRandomLocation(string prefix)
-        {
-            if (roadGraphBuilder == null || roadGraphBuilder.RoadGraph == null)
-            {
-                Debug.Log("[QuestManager] RoadGraphBuilder is not ready yet. Skipping quest location generation.");
-                return null;
-            }
-
-            // Task 9.1: Procedural Location Picker with validation and variety
-            int attempts = 0;
-            RoadSegment segment = null;
-            int waypointIndex = -1;
-            Vector3 candidatePosition = Vector3.zero;
-
-            while (attempts < 20)
-            {
-                attempts++;
-                
-                var result = roadGraphBuilder.RoadGraph.GetRandomWaypoint();
-                segment = result.Item1;
-                waypointIndex = result.Item2;
-
-                if (segment == null || segment.waypoints.Count == 0)
-                    continue;
-
-                candidatePosition = segment.waypoints[waypointIndex].position;
-
-                // Check 1: Cooldown/Used Locations
-                bool tooClose = false;
-                foreach (Vector3 used in usedLocations)
-                {
-                    Vector3 delta = candidatePosition - used;
-                    if (delta.sqrMagnitude < locationCooldownDistance * locationCooldownDistance)
-                    {
-                        tooClose = true;
-                        break;
-                    }
-                }
-                if (tooClose) continue;
-
-                // Check 2: Ground Validation (Raycast)
-                if (Physics.Raycast(candidatePosition + Vector3.up * 50f, Vector3.down, out RaycastHit hit, 100f))
-                {
-                    // Snap to ground if needed, though waypoints are usually correct
-                    // candidatePosition = hit.point; 
-                }
-                else
-                {
-                    // No ground found (void/floating)
-                    continue;
-                }
-
-                // If valid, accept
-                break;
-            }
-
-            if (segment == null) return null;
-
-            // Track usage
-            usedLocations.Add(candidatePosition);
-            if (usedLocations.Count > 20) usedLocations.RemoveAt(0);
-
-            // Determine Location Type (Mock)
-            string[] locationTypes;
-            if (segment.id % 4 == 0) locationTypes = new[] { "Industrial Park", "Factory", "Plant", "Refinery" }; // Industrial
-            else if (segment.id % 4 == 1) locationTypes = new[] { "Mall", "Plaza", "Store", "Market", "Shop" }; // Commercial
-            else if (segment.id % 4 == 2) locationTypes = new[] { "Residence", "Apartments", "Estate", "Manor" }; // Residential
-            else locationTypes = new[] { "Warehouse", "Depot", "Station", "Hub", "Terminal" }; // Logistics
-
-            string locationType = locationTypes[UnityEngine.Random.Range(0, locationTypes.Length)];
-            
-            // Generate Name
-            string[] directions = { "North", "South", "East", "West", "Central", "Upper", "Lower" };
-            string direction = directions[UnityEngine.Random.Range(0, directions.Length)];
-            string locationName = $"{direction} {locationType}";
-
-            float triggerRadius = UnityEngine.Random.Range(10f, 15f);
-
-            QuestLocation location = new QuestLocation(candidatePosition, locationName, triggerRadius)
-            {
-                RoadSegmentIndex = segment.id,
-                WaypointIndex = waypointIndex
-            };
-
-            return location;
-        }
-
-        private bool AreLocationsValid(QuestLocation pickup, QuestLocation delivery, QuestDifficulty difficulty)
-        {
-            if (pickup == null || delivery == null)
-            {
-                return false;
-            }
-
-            if (pickup.RoadSegmentIndex < 0 || delivery.RoadSegmentIndex < 0)
-            {
-                return false;
-            }
-
-            Vector3 delta = pickup.Position - delivery.Position;
-            float distanceSqr = delta.sqrMagnitude;
-            float minDistance = difficulty switch
-            {
-                QuestDifficulty.Easy => 500f,
-                QuestDifficulty.Medium => 1000f,
-                QuestDifficulty.Hard => 1500f,
-                QuestDifficulty.Expert => 2000f,
-                _ => 500f
-            };
-
-            return distanceSqr >= minDistance * minDistance;
-        }
-
-        private string GenerateLocationName()
-        {
-            string[] directions = { "North", "South", "East", "West", "Central" };
-            string[] locationTypes = { "Warehouse", "Depot", "Station", "Hub", "Terminal" };
-
-            string direction = directions[UnityEngine.Random.Range(0, directions.Length)];
-            string locationType = locationTypes[UnityEngine.Random.Range(0, locationTypes.Length)];
-
-            return $"{direction} {locationType}";
-        }
-
-        private void CleanupQuestMarkers(QuestData quest)
-        {
-            quest?.PickupLocation?.DestroyMarker();
-
-            if (quest?.DeliveryLocations == null)
-            {
-                return;
-            }
-
-            foreach (QuestLocation location in quest.DeliveryLocations)
-            {
-                location?.DestroyMarker();
-            }
         }
 
         private void CheckPickupProximity()
@@ -1069,88 +897,7 @@ namespace DeliveryDriver.Quest
 
         public QuestZone SpawnQuestZone(QuestLocation location, QuestZoneType type)
         {
-            if (location == null)
-            {
-                return null;
-            }
-
-            GameObject zoneObject = null;
-            if (questZonePrefab != null)
-            {
-                zoneObject = Instantiate(questZonePrefab, location.Position, Quaternion.identity);
-            }
-
-            if (zoneObject == null)
-            {
-                zoneObject = new GameObject("QuestZone");
-            }
-
-            zoneObject.transform.position = location.Position;
-
-            QuestZone zone = zoneObject.GetComponent<QuestZone>();
-            if (zone == null)
-            {
-                try
-                {
-                    zone = zoneObject.AddComponent<QuestZone>();
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"[QuestManager] Failed adding QuestZone component: {e.Message}");
-                }
-            }
-
-            if (zone == null)
-            {
-                Debug.LogError("[QuestManager] Failed to create QuestZone component.");
-                Destroy(zoneObject);
-                return null;
-            }
-
-            zone.Configure(location, type);
-
-            if (location.VisualMarker == null)
-            {
-                if (type == QuestZoneType.Pickup && pickupMarkerPrefab != null)
-                {
-                    location.VisualMarker = pickupMarkerPrefab;
-                }
-                else if (type == QuestZoneType.Delivery && deliveryMarkerPrefab != null)
-                {
-                    location.VisualMarker = deliveryMarkerPrefab;
-                }
-            }
-
-            Collider zoneCollider = zoneObject.GetComponent<Collider>();
-            if (zoneCollider == null)
-            {
-                zoneCollider = zoneObject.AddComponent<SphereCollider>();
-            }
-
-            if (zoneCollider is SphereCollider sphere)
-            {
-                sphere.isTrigger = true;
-                sphere.radius = Mathf.Max(0.1f, location.TriggerRadius);
-            }
-            else if (zoneCollider is BoxCollider box)
-            {
-                box.isTrigger = true;
-                float size = Mathf.Max(0.1f, location.TriggerRadius * 2f);
-                box.size = new Vector3(size, size, size);
-            }
-
-            zone.SetActive(true);
-
-            if (activeZones == null)
-            {
-                activeZones = new List<QuestZone>();
-            }
-            activeZones.Add(zone);
-
-            // Task 10.2: Spawn marker particles at quest zone
-            SpawnMarkerParticles(location.Position);
-
-            return zone;
+            return GetZoneMarkerService().SpawnQuestZone(location, type);
         }
 
         public void OnPlayerEnteredZone(QuestZone zone)
@@ -1172,21 +919,7 @@ namespace DeliveryDriver.Quest
 
         public void ClearAllZones()
         {
-            if (activeZones == null || activeZones.Count == 0)
-            {
-                return;
-            }
-
-            for (int i = activeZones.Count - 1; i >= 0; i--)
-            {
-                QuestZone zone = activeZones[i];
-                if (zone != null)
-                {
-                    Destroy(zone.gameObject);
-                }
-            }
-
-            activeZones.Clear();
+            GetZoneMarkerService().ClearAllZones();
         }
 
         private void OnCargoPickedUp()
@@ -1198,7 +931,7 @@ namespace DeliveryDriver.Quest
 
             currentQuest.HasPickedUpCargo = true;
             currentQuest.PickupLocation?.HideMarker();
-            ClearAllZones();
+            GetZoneMarkerService().ClearAllZones();
             PlayQuestClip(pickupClip);
 
             // Task 10.2: Play pickup particle effect
@@ -1217,7 +950,7 @@ namespace DeliveryDriver.Quest
             }
 
             QuestLocation delivery = GetCurrentDeliveryLocation();
-            SpawnQuestZone(delivery, QuestZoneType.Delivery);
+            GetZoneMarkerService().SpawnQuestZone(delivery, QuestZoneType.Delivery);
             MarkQuestUiDirty();
             TryNotifyQuestUpdated();
             Debug.Log($"[QuestManager] Cargo loaded! Deliver to {delivery?.LocationName ?? "destination"}.");
@@ -1242,12 +975,12 @@ namespace DeliveryDriver.Quest
                 currentDelivery.HideMarker();
             }
 
-            ClearAllZones();
+            GetZoneMarkerService().ClearAllZones();
 
             if (currentQuest.CurrentDeliveryIndex < currentQuest.DeliveryLocations.Count - 1)
             {
                 currentQuest.CurrentDeliveryIndex++;
-                SpawnQuestZone(GetCurrentDeliveryLocation(), QuestZoneType.Delivery);
+                GetZoneMarkerService().SpawnQuestZone(GetCurrentDeliveryLocation(), QuestZoneType.Delivery);
                 MarkQuestUiDirty();
                 TryNotifyQuestUpdated();
             }
@@ -1718,35 +1451,13 @@ namespace DeliveryDriver.Quest
                 currentQuest = activeQuests.Find(q => q.QuestID == data.CurrentQuestID);
             }
 
-            RestoreQuestMarkers();
+            GetZoneMarkerService().RestoreQuestMarkers(activeQuests, quest => GetCurrentDeliveryLocation(quest));
 
             if (currentQuest != null)
             {
                 OnQuestStarted.Invoke(currentQuest);
                 CacheQuestUiState(currentQuest);
                 OnQuestUpdated.Invoke(currentQuest);
-            }
-        }
-
-        private void RestoreQuestMarkers()
-        {
-            ClearAllZones();
-            foreach (QuestData quest in activeQuests)
-            {
-                if (quest == null)
-                {
-                    continue;
-                }
-
-                if (!quest.HasPickedUpCargo)
-                {
-                    SpawnQuestZone(quest.PickupLocation, QuestZoneType.Pickup);
-                }
-                else
-                {
-                    QuestLocation delivery = GetCurrentDeliveryLocation(quest);
-                    SpawnQuestZone(delivery, QuestZoneType.Delivery);
-                }
             }
         }
 
@@ -2239,7 +1950,7 @@ namespace DeliveryDriver.Quest
             }
 
             // Generate pickup location
-            QuestLocation pickup = GenerateRandomLocation("Pickup");
+            QuestLocation pickup = GetLocationAssignmentService().GenerateRandomLocation("Pickup");
             if (pickup == null)
             {
                 Debug.LogWarning("[QuestManager] Failed to generate pickup location for multi-stop quest.");
@@ -2250,13 +1961,9 @@ namespace DeliveryDriver.Quest
             List<QuestLocation> deliveryLocations = new List<QuestLocation>();
             for (int i = 0; i < stopCount; i++)
             {
-                QuestLocation delivery = GenerateRandomLocation($"Delivery {i + 1}");
+                QuestLocation delivery = GetLocationAssignmentService().GenerateRandomLocation($"Delivery {i + 1}");
                 if (delivery != null)
                 {
-                    if (delivery.VisualMarker == null && deliveryMarkerPrefab != null)
-                    {
-                        delivery.VisualMarker = deliveryMarkerPrefab;
-                    }
                     deliveryLocations.Add(delivery);
                 }
             }
@@ -2298,7 +2005,7 @@ namespace DeliveryDriver.Quest
             };
 
             // Assign markers
-            if (quest.PickupLocation.VisualMarker == null) quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
+            GetLocationAssignmentService().EnsureQuestMarkersAssigned(quest);
 
             // Calculate time and rewards scaled for multi-stop
             float avgSpeed = 11f; // ~40 km/h in m/s
@@ -2434,8 +2141,8 @@ namespace DeliveryDriver.Quest
 
             for (int i = 0; i < 15; i++)
             {
-                pickup = GenerateRandomLocation("Express Pickup");
-                delivery = GenerateRandomLocation("Express Delivery");
+                pickup = GetLocationAssignmentService().GenerateRandomLocation("Express Pickup");
+                delivery = GetLocationAssignmentService().GenerateRandomLocation("Express Delivery");
 
                 if (pickup == null || delivery == null) continue;
 
@@ -2470,8 +2177,7 @@ namespace DeliveryDriver.Quest
             };
 
             // Assign markers
-            if (quest.PickupLocation.VisualMarker == null) quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
-            if (delivery.VisualMarker == null) delivery.VisualMarker = deliveryMarkerPrefab;
+            GetLocationAssignmentService().EnsureQuestMarkersAssigned(quest);
 
             // Time limit = 0.6x normal (very tight)
             float avgSpeed = 11f; // ~40 km/h in m/s
@@ -2539,8 +2245,8 @@ namespace DeliveryDriver.Quest
 
             for (int i = 0; i < 15; i++)
             {
-                pickup = GenerateRandomLocation("Fragile Pickup");
-                delivery = GenerateRandomLocation("Fragile Delivery");
+                pickup = GetLocationAssignmentService().GenerateRandomLocation("Fragile Pickup");
+                delivery = GetLocationAssignmentService().GenerateRandomLocation("Fragile Delivery");
 
                 if (pickup == null || delivery == null) continue;
 
@@ -2575,8 +2281,7 @@ namespace DeliveryDriver.Quest
             };
 
             // Assign markers
-            if (quest.PickupLocation.VisualMarker == null) quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
-            if (delivery.VisualMarker == null) delivery.VisualMarker = deliveryMarkerPrefab;
+            GetLocationAssignmentService().EnsureQuestMarkersAssigned(quest);
 
             // Slightly longer time limit (player must drive carefully)
             float avgSpeed = 11f; // ~40 km/h in m/s
@@ -2629,8 +2334,8 @@ namespace DeliveryDriver.Quest
 
             for (int i = 0; i < 15; i++)
             {
-                pickup = GenerateRandomLocation("Trial Start");
-                delivery = GenerateRandomLocation("Trial Finish");
+                pickup = GetLocationAssignmentService().GenerateRandomLocation("Trial Start");
+                delivery = GetLocationAssignmentService().GenerateRandomLocation("Trial Finish");
 
                 if (pickup == null || delivery == null) continue;
 
@@ -2665,8 +2370,7 @@ namespace DeliveryDriver.Quest
             };
 
             // Assign markers
-            if (quest.PickupLocation.VisualMarker == null) quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
-            if (delivery.VisualMarker == null) delivery.VisualMarker = deliveryMarkerPrefab;
+            GetLocationAssignmentService().EnsureQuestMarkersAssigned(quest);
 
             // Very short time limit (0.5x normal)
             float avgSpeed = 11f; // ~40 km/h in m/s
@@ -2801,7 +2505,7 @@ namespace DeliveryDriver.Quest
             }
 
             // Assign locations
-            bool assigned = AssignQuestLocations(quest);
+            bool assigned = GetLocationAssignmentService().AssignQuestLocations(quest);
             if (!assigned)
             {
                 Debug.LogWarning("[QuestManager] Failed to assign locations for daily challenge");

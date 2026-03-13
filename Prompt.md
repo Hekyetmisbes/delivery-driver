@@ -1,6 +1,6 @@
 # Delivery Driver Full Script Refactor / Optimization Prompt
 
-## Progress Log
+## Completed Steps
 
 - [x] Step 1 - Audited the prompt, architecture notes, and the current hotspot files. Focus selected for this pass: repeated player/service lookups, per-frame rebinding, and duplicate UI canvas creation in the navigation/minimap/player-vehicle path.
 - [x] Step 2 - Implemented the first optimization pass in `PlayerVehicleManager`, `NavigationService`, `MinimapCamera`, `CompassUI`, and `EdgeIndicator`. Added an authoritative active-vehicle event, replaced repeated rebinding lookups with cached references, throttled fallback resolution, and moved the legacy edge indicator away from always creating its own overlay canvas when the global UI canvas is available.
@@ -23,6 +23,79 @@
 - [x] Step 19 - Re-verified the `DeliveryManager` quest/phone flow refactor with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
 - [x] Step 20 - Split `QuestManager` reward/penalty, streak, failure-penalty, and payout-award logic into `QuestRewardService`, leaving `QuestManager` to coordinate quest state while delegating reward math and progression payout application.
 - [x] Step 21 - Re-verified the `QuestManager` reward/penalty refactor with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
+- [x] Step 22 - Extracted quest location assignment into `QuestLocationAssignmentService` and marker/zone lifecycle ownership into `QuestZoneMarkerService`, leaving `QuestManager` responsible for quest orchestration while delegating location generation, marker cleanup, zone spawning, and marker restoration.
+
+## Planned Next Steps
+
+```xml
+<planned_next_steps>
+  <step id="23" status="planned" area="QuestManager">
+    <title>Extract Quest Save and Restore Flow</title>
+    <summary>Move save-data conversion and marker/state restoration into a save-facing helper so QuestManager no longer owns raw serialization plumbing directly.</summary>
+    <targets>
+      <file>Assets/Scripts/Quest/QuestManager.cs</file>
+    </targets>
+    <candidate_methods>
+      <method>GetSaveData</method>
+      <method>LoadSaveData</method>
+      <method>ConvertQuestList</method>
+      <method>ConvertQuestRecords</method>
+    </candidate_methods>
+    <goal>Reduce persistence coupling inside QuestManager.</goal>
+  </step>
+  <step id="24" status="planned" area="QuestManager">
+    <title>Extract Quest Audio and Particle Flow</title>
+    <summary>Move music switching, SFX playback, particle pooling, and effect triggering into focused helpers or services.</summary>
+    <targets>
+      <file>Assets/Scripts/Quest/QuestManager.cs</file>
+    </targets>
+    <candidate_methods>
+      <method>PlayQuestClip</method>
+      <method>PlayTimeWarning</method>
+      <method>SwitchToDeliveryMusic</method>
+      <method>SwitchToExplorationMusic</method>
+      <method>CrossfadeMusic</method>
+      <method>InitializeParticlePool</method>
+      <method>PlayParticleEffect</method>
+      <method>ReturnParticleToPool</method>
+      <method>SpawnMarkerParticles</method>
+    </candidate_methods>
+    <goal>Isolate presentation effects from core quest rules.</goal>
+  </step>
+  <step id="25" status="planned" area="CameraFollow">
+    <title>Split CameraFollow Responsibilities</title>
+    <summary>Separate gameplay follow camera logic from minimap camera, reverse camera, and cached minimap surface generation.</summary>
+    <targets>
+      <file>Assets/Scripts/CameraFollow.cs</file>
+    </targets>
+    <goal>Reduce one of the largest remaining mixed-responsibility runtime classes.</goal>
+  </step>
+  <step id="26" status="planned" area="PauseMenuUI">
+    <title>Split Pause Menu Runtime UI Builder</title>
+    <summary>Break PauseMenuUI into view construction, state handling, and settings action coordination layers.</summary>
+    <targets>
+      <file>Assets/Scripts/Quest/UI/PauseMenuUI.cs</file>
+    </targets>
+    <goal>Reduce UI construction/control coupling and lower duplicate event-system or canvas risk.</goal>
+  </step>
+  <step id="27" status="planned" area="NpcCarAgent">
+    <title>Begin NpcCarAgent Responsibility Extraction</title>
+    <summary>Start isolating path following, obstacle avoidance, recovery, and vehicle-visual concerns into smaller traffic modules.</summary>
+    <targets>
+      <file>Assets/Scripts/NpcCarAgent.cs</file>
+    </targets>
+    <goal>Reduce the largest remaining gameplay monolith incrementally without breaking traffic behavior.</goal>
+  </step>
+  <step id="28" status="planned" area="Structure">
+    <title>Prepare Namespace and Folder Migration Plan</title>
+    <summary>After major runtime monoliths are reduced further, define a concrete move plan for folder ownership, namespace normalization, and later asmdef cleanup.</summary>
+    <targets>
+      <file>Assets/Scripts/</file>
+    </targets>
+    <goal>Stage structural migration after behavior-heavy refactors are safer.</goal>
+  </step>
+</planned_next_steps>
+```
 
 Rewrite, optimize, and reorganize all C# scripts under `Assets/Scripts/` in this Unity project. The goal is not to patch individual issues. The goal is to rebuild the scripting architecture so it is faster, cleaner, easier to maintain, easier to extend, and significantly more readable.
 
