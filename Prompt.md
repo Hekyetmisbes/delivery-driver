@@ -28,19 +28,12 @@
 - [x] Step 24 - Extracted quest audio/music presentation into `QuestAudioPresentationService` and particle pooling/effect triggering into `QuestParticleEffectService`, so `QuestManager` now delegates warning SFX, music crossfades, level-up presentation, pooled impact effects, and quest-zone marker particles to dedicated presentation helpers.
 - [x] Step 25 - Split `CameraFollow` by extracting gameplay rig binding/FOV/offset logic into `CameraFollowGameplayRig`, external reverse/minimap controller bootstrap into `CameraFollowExternalControllerCoordinator`, and cached minimap surface generation into `CameraFollowMiniMapSurfaceService`, leaving `CameraFollow` centered on target orchestration instead of owning all camera subsystems directly.
 - [x] Step 26 - Split `PauseMenuUI` by extracting runtime panel construction into `PauseMenuRuntimeViewBuilder` and settings refresh/callback coordination into `PauseMenuSettingsCoordinator`, leaving `PauseMenuUI` focused on pause-state orchestration, scene actions, and runtime rebuild handling.
+- [x] Step 27 - Began `NpcCarAgent` responsibility extraction by moving wheel-visual resolution and wheel pose syncing into `NpcCarWheelVisualService`, reducing the traffic monolith through a low-risk vehicle-visual module while preserving driving and obstacle behavior.
 
 ## Planned Next Steps
 
 ```xml
 <planned_next_steps>
-  <step id="27" status="planned" area="NpcCarAgent">
-    <title>Begin NpcCarAgent Responsibility Extraction</title>
-    <summary>Start isolating path following, obstacle avoidance, recovery, and vehicle-visual concerns into smaller traffic modules.</summary>
-    <targets>
-      <file>Assets/Scripts/NpcCarAgent.cs</file>
-    </targets>
-    <goal>Reduce the largest remaining gameplay monolith incrementally without breaking traffic behavior.</goal>
-  </step>
   <step id="28" status="planned" area="Structure">
     <title>Prepare Namespace and Folder Migration Plan</title>
     <summary>After major runtime monoliths are reduced further, define a concrete move plan for folder ownership, namespace normalization, and later asmdef cleanup.</summary>
