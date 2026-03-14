@@ -27,19 +27,12 @@
 - [x] Step 23 - Extracted quest save/load conversion and restore orchestration into `QuestSaveRestoreService`, so `QuestManager` now delegates save-data building, record-to-runtime conversion, current-quest resolution, and load-time marker/UI restoration callbacks instead of owning raw serialization plumbing directly.
 - [x] Step 24 - Extracted quest audio/music presentation into `QuestAudioPresentationService` and particle pooling/effect triggering into `QuestParticleEffectService`, so `QuestManager` now delegates warning SFX, music crossfades, level-up presentation, pooled impact effects, and quest-zone marker particles to dedicated presentation helpers.
 - [x] Step 25 - Split `CameraFollow` by extracting gameplay rig binding/FOV/offset logic into `CameraFollowGameplayRig`, external reverse/minimap controller bootstrap into `CameraFollowExternalControllerCoordinator`, and cached minimap surface generation into `CameraFollowMiniMapSurfaceService`, leaving `CameraFollow` centered on target orchestration instead of owning all camera subsystems directly.
+- [x] Step 26 - Split `PauseMenuUI` by extracting runtime panel construction into `PauseMenuRuntimeViewBuilder` and settings refresh/callback coordination into `PauseMenuSettingsCoordinator`, leaving `PauseMenuUI` focused on pause-state orchestration, scene actions, and runtime rebuild handling.
 
 ## Planned Next Steps
 
 ```xml
 <planned_next_steps>
-  <step id="26" status="planned" area="PauseMenuUI">
-    <title>Split Pause Menu Runtime UI Builder</title>
-    <summary>Break PauseMenuUI into view construction, state handling, and settings action coordination layers.</summary>
-    <targets>
-      <file>Assets/Scripts/Quest/UI/PauseMenuUI.cs</file>
-    </targets>
-    <goal>Reduce UI construction/control coupling and lower duplicate event-system or canvas risk.</goal>
-  </step>
   <step id="27" status="planned" area="NpcCarAgent">
     <title>Begin NpcCarAgent Responsibility Extraction</title>
     <summary>Start isolating path following, obstacle avoidance, recovery, and vehicle-visual concerns into smaller traffic modules.</summary>
