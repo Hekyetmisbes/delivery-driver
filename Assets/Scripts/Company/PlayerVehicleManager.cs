@@ -88,39 +88,38 @@ namespace DeliveryDriver.Company
 
         public void SetVehiclePrefabs(GameObject vanVehiclePrefab, GameObject truckVehiclePrefab)
         {
-            vanPrefab = vanVehiclePrefab;
-            truckPrefab = truckVehiclePrefab;
+            vanPrefab = ValidateVehiclePrefab(vanVehiclePrefab, "Van");
+            truckPrefab = ValidateVehiclePrefab(truckVehiclePrefab, "Truck");
             prefabsConfigured = vanPrefab != null && truckPrefab != null;
-
-            if (vanPrefab == null)
-            {
-                Debug.LogError("[PlayerVehicleManager] Van prefab reference is missing.");
-            }
-
-            if (truckPrefab == null)
-            {
-                Debug.LogError("[PlayerVehicleManager] Truck prefab reference is missing.");
-            }
-
-            if (!prefabsConfigured)
-            {
-                return;
-            }
-
-            if (vanPrefab.GetComponent<CarController>() == null)
-            {
-                Debug.LogError($"[PlayerVehicleManager] Van prefab '{vanPrefab.name}' is missing CarController.");
-                prefabsConfigured = false;
-            }
-
-            if (truckPrefab.GetComponent<CarController>() == null)
-            {
-                Debug.LogError($"[PlayerVehicleManager] Truck prefab '{truckPrefab.name}' is missing CarController.");
-                prefabsConfigured = false;
-            }
 
             SynchronizeSceneVehicleState();
             EnsureRuntimeVehicleReady();
+        }
+
+        private static GameObject ValidateVehiclePrefab(GameObject prefab, string label)
+        {
+            if (prefab == null)
+            {
+                Debug.LogError($"[PlayerVehicleManager] {label} prefab reference is missing.");
+                return null;
+            }
+
+            try
+            {
+                CarController controller = prefab.GetComponent<CarController>();
+                if (controller == null)
+                {
+                    Debug.LogError($"[PlayerVehicleManager] {label} prefab '{prefab.name}' is missing CarController.");
+                    return null;
+                }
+
+                return prefab;
+            }
+            catch (MissingReferenceException)
+            {
+                Debug.LogError($"[PlayerVehicleManager] {label} prefab reference points to a missing asset. Reassign the prefab in VehiclePrefabCatalog.");
+                return null;
+            }
         }
 
         public bool ApplyVehicleType(VehicleType vehicleType)
