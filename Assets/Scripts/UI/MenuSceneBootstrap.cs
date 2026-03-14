@@ -3,6 +3,8 @@ using UnityEngine.SceneManagement;
 
 public static class MenuSceneBootstrap
 {
+    private const string MainMenuSceneName = "MainMenu";
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     private static void Initialize()
     {
@@ -12,21 +14,9 @@ public static class MenuSceneBootstrap
 
     private static void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
     {
-        if (scene.name == "MainMenu")
+        if (scene.name == MainMenuSceneName)
         {
             EnsureComponent<MainMenuRuntimeUI>("MainMenuRuntimeUI");
-            return;
-        }
-
-        if (scene.name == "SettingsScene")
-        {
-            EnsureComponent<SettingsSceneRuntimeUI>("SettingsSceneRuntimeUI");
-            return;
-        }
-
-        if (scene.name == "CreditsScene")
-        {
-            EnsureComponent<CreditsSceneRuntimeUI>("CreditsSceneRuntimeUI");
         }
     }
 

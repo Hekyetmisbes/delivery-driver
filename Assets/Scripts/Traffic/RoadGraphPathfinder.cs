@@ -5,6 +5,63 @@ namespace TrafficSystem
 {
     public static class RoadGraphPathfinder
     {
+        private sealed class SearchBuffers
+        {
+            public readonly List<WaypointCandidate> candidateBuffer = new List<WaypointCandidate>(CandidateWaypointLimit + 4);
+            public readonly List<long> startCandidateKeys = new List<long>(CandidateWaypointLimit);
+            public readonly List<long> endCandidateKeys = new List<long>(CandidateWaypointLimit);
+            public readonly Dictionary<long, float> gScore = new Dictionary<long, float>(256);
+            public readonly Dictionary<long, long> prev = new Dictionary<long, long>(256);
+            public readonly HashSet<long> closed = new HashSet<long>();
+            public readonly SortedList<float, Queue<long>> priorityQueue = new SortedList<float, Queue<long>>();
+            public readonly Stack<Queue<long>> queuePool = new Stack<Queue<long>>();
+            public readonly List<long> pathKeys = new List<long>(256);
+
+            public void PrepareCandidateBuffer(List<long> resultKeys)
+            {
+                candidateBuffer.Clear();
+                resultKeys.Clear();
+            }
+
+            public void PreparePathSearch()
+            {
+                gScore.Clear();
+                prev.Clear();
+                closed.Clear();
+                pathKeys.Clear();
+
+                for (int i = 0; i < priorityQueue.Count; i++)
+                {
+                    ReturnQueue(priorityQueue.Values[i]);
+                }
+
+                priorityQueue.Clear();
+            }
+
+            public Queue<long> RentQueue()
+            {
+                if (queuePool.Count == 0)
+                {
+                    return new Queue<long>(4);
+                }
+
+                Queue<long> queue = queuePool.Pop();
+                queue.Clear();
+                return queue;
+            }
+
+            public void ReturnQueue(Queue<long> queue)
+            {
+                if (queue == null)
+                {
+                    return;
+                }
+
+                queue.Clear();
+                queuePool.Push(queue);
+            }
+        }
+
         public readonly struct PathSearchDiagnostics
         {
             public PathSearchDiagnostics(
@@ -67,6 +124,7 @@ namespace TrafficSystem
         private const float MaxTransferHeightDelta = 2.5f;
         private const int TransferEndpointWindow = 2;
         private const int CandidateWaypointLimit = 4;
+        private static readonly SearchBuffers SharedBuffers = new SearchBuffers();
 
         public static List<Vector3> FindPath(
             RoadGraph graph,
@@ -115,18 +173,25 @@ namespace TrafficSystem
                 projectedEndSegment.waypoints.Count - 1);
 
             float waypointSearchRadius = Mathf.Max(6f, transferMaxDistance * 1.5f);
-            List<long> startCandidates = CollectPreferredWaypointKeys(
+            SearchBuffers buffers = SharedBuffers;
+            List<long> startCandidates = buffers.startCandidateKeys;
+            List<long> endCandidates = buffers.endCandidateKeys;
+            CollectPreferredWaypointKeys(
                 idx,
                 projectedStart,
                 desiredTravelDirection,
                 waypointSearchRadius,
-                RoadGraphSpatialIndex.PackKey(projectedStartSegment.id, projectedStartFallbackIndex));
-            List<long> endCandidates = CollectPreferredWaypointKeys(
+                RoadGraphSpatialIndex.PackKey(projectedStartSegment.id, projectedStartFallbackIndex),
+                buffers,
+                startCandidates);
+            CollectPreferredWaypointKeys(
                 idx,
                 projectedEnd,
                 desiredTravelDirection,
                 waypointSearchRadius,
-                RoadGraphSpatialIndex.PackKey(projectedEndSegment.id, projectedEndFallbackIndex));
+                RoadGraphSpatialIndex.PackKey(projectedEndSegment.id, projectedEndFallbackIndex),
+                buffers,
+                endCandidates);
 
             if (startCandidates.Count == 0 || endCandidates.Count == 0)
             {
@@ -150,6 +215,7 @@ namespace TrafficSystem
                             transferMaxDistanceSqr,
                             spatialCellSize,
                             heuristicCellSize,
+                            buffers,
                             out List<Vector3> candidatePath,
                             out float candidateCost))
                     {
@@ -212,14 +278,17 @@ namespace TrafficSystem
             return true;
         }
 
-        private static List<long> CollectPreferredWaypointKeys(
+        private static void CollectPreferredWaypointKeys(
             RoadGraphSpatialIndex idx,
             Vector3 targetPosition,
             Vector3 desiredTravelDirection,
             float searchRadius,
-            long fallbackKey)
+            long fallbackKey,
+            SearchBuffers buffers,
+            List<long> keys)
         {
-            List<WaypointCandidate> candidates = new List<WaypointCandidate>(CandidateWaypointLimit + 1);
+            buffers.PrepareCandidateBuffer(keys);
+            List<WaypointCandidate> candidates = buffers.candidateBuffer;
             float searchRadiusSqr = searchRadius * searchRadius;
             int gridRadius = Mathf.CeilToInt(searchRadius / idx.cellSize) + 1;
             Vector2Int centerCell = RoadGraphSpatialIndex.ToGridCell(targetPosition, idx.cellSize);
@@ -264,7 +333,6 @@ namespace TrafficSystem
             }
 
             candidates.Sort((a, b) => a.Score.CompareTo(b.Score));
-            List<long> keys = new List<long>(Mathf.Min(CandidateWaypointLimit, candidates.Count));
             for (int i = 0; i < candidates.Count && keys.Count < CandidateWaypointLimit; i++)
             {
                 if (!ContainsKey(keys, candidates[i].Key))
@@ -277,8 +345,6 @@ namespace TrafficSystem
             {
                 keys.Add(fallbackKey);
             }
-
-            return keys;
         }
 
         private static bool TryFindPathBetweenKeys(
@@ -292,6 +358,7 @@ namespace TrafficSystem
             float transferMaxDistanceSqr,
             float spatialCellSize,
             float heuristicCellSize,
+            SearchBuffers buffers,
             out List<Vector3> path,
             out float pathCost)
         {
@@ -311,19 +378,21 @@ namespace TrafficSystem
                 return path != null && path.Count >= 2;
             }
 
-            var gScore = new Dictionary<long, float>();
-            var prev = new Dictionary<long, long>();
-            var closed = new HashSet<long>();
-            var pq = new SortedList<float, Queue<long>>();
+            buffers.PreparePathSearch();
+            Dictionary<long, float> gScore = buffers.gScore;
+            Dictionary<long, long> prev = buffers.prev;
+            HashSet<long> closed = buffers.closed;
+            SortedList<float, Queue<long>> pq = buffers.priorityQueue;
 
             void Enqueue(long key, float cost)
             {
-                if (!pq.ContainsKey(cost))
+                if (!pq.TryGetValue(cost, out Queue<long> queue))
                 {
-                    pq[cost] = new Queue<long>();
+                    queue = buffers.RentQueue();
+                    pq[cost] = queue;
                 }
 
-                pq[cost].Enqueue(key);
+                queue.Enqueue(key);
             }
 
             long Dequeue()
@@ -334,6 +403,7 @@ namespace TrafficSystem
                 if (queue.Count == 0)
                 {
                     pq.Remove(first);
+                    buffers.ReturnQueue(queue);
                 }
 
                 return key;
@@ -494,7 +564,7 @@ namespace TrafficSystem
                 return false;
             }
 
-            List<long> pathKeys = new List<long>();
+            List<long> pathKeys = buffers.pathKeys;
             long cur = endKey;
             while (cur != startKey)
             {
@@ -724,7 +794,8 @@ namespace TrafficSystem
             RoadSegment segment, int fromIdx, int toIdx,
             Vector3 startWorld, Vector3 endWorld)
         {
-            var path = new List<Vector3>();
+            int estimatedWaypointCount = Mathf.Abs(toIdx - fromIdx) + 3;
+            var path = new List<Vector3>(estimatedWaypointCount);
             path.Add(startWorld);
 
             int step = fromIdx <= toIdx ? 1 : -1;

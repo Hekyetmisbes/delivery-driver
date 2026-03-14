@@ -1,5 +1,222 @@
 # Delivery Driver Full Script Refactor / Optimization Prompt
 
+## Completed Steps
+
+- [x] Step 1 - Audited the prompt, architecture notes, and the current hotspot files. Focus selected for this pass: repeated player/service lookups, per-frame rebinding, and duplicate UI canvas creation in the navigation/minimap/player-vehicle path.
+- [x] Step 2 - Implemented the first optimization pass in `PlayerVehicleManager`, `NavigationService`, `MinimapCamera`, `CompassUI`, and `EdgeIndicator`. Added an authoritative active-vehicle event, replaced repeated rebinding lookups with cached references, throttled fallback resolution, and moved the legacy edge indicator away from always creating its own overlay canvas when the global UI canvas is available.
+- [x] Step 3 - Optimized `MinimapUI` so it no longer tries to create `NavigationService` from the UI layer, now listens for authoritative active-vehicle changes, and throttles player, navigation-service, and road-graph fallback discovery instead of repeating those searches every frame.
+- [x] Step 4 - Verified the edited C# files with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded with 0 errors and 5 pre-existing warnings outside the edited files (`LocalizationTable.cs` and `NpcCarAgent.cs`).
+- [x] Step 5 - Reduced `RoadGraphPathfinder` allocation churn by reusing candidate-search and A* working buffers instead of creating fresh list/dictionary/hashset/queue state on each path search.
+- [x] Step 6 - Reworked `NotificationQueue` and `TooltipUI` so they reuse the authoritative global UI hierarchy when available instead of always creating separate persistent overlay canvases.
+- [x] Step 7 - Removed dead `SettingsScene` and `CreditsScene` bootstrap branches from `MenuSceneBootstrap`, keeping runtime menu injection aligned with the actual build settings (`MainMenu` and `Game` only).
+- [x] Step 8 - Re-verified the expanded change set with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
+- [x] Step 9 - Replaced the company installer's editor-only prefab dependency with a runtime-loadable `Resources/Company/VehiclePrefabCatalog` asset and kept editor asset-path loading only as a fallback for development workflows.
+- [x] Step 10 - Isolated `MemoryProfiler`, `PerformanceRegressionDetector`, and `PerformanceBenchmark` behind editor/debug-build runtime gates so profiling and regression tooling no longer stays active in normal gameplay builds.
+- [x] Step 11 - Re-verified the newest company/diagnostics changes with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
+- [x] Step 12 - Split `RoadGraphBuilder` responsibilities by extracting graph connection construction into `RoadGraphConnectionBuilder` and mesh/centerline waypoint sampling into `RoadGraphMeshSampler`, leaving `RoadGraphBuilder` as the orchestration layer for graph assembly.
+- [x] Step 13 - Re-verified the `RoadGraphBuilder` refactor with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
+- [x] Step 14 - Split `DeliveryManager` mission-type, condition, reward, quest-type, and offer-text decision logic into `DeliveryMissionRules`, reducing the manager's bottom-of-file decision block and keeping `DeliveryManager` focused more on mission orchestration.
+- [x] Step 15 - Re-verified the `DeliveryManager` mission-rules refactor with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
+- [x] Step 16 - Split `DeliveryManager` spawn/environment validation and neighborhood/building/road collider decision logic into `DeliverySpawnEnvironment`, keeping `DeliveryManager` as the flow owner while centralizing physics/layer-based spawn rules in one helper.
+- [x] Step 17 - Re-verified the `DeliveryManager` spawn/environment refactor with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
+- [x] Step 18 - Split `DeliveryManager` quest lifecycle creation/update/completion logic into `DeliveryQuestFlow` and phone mission UI binding/presentation logic into `DeliveryPhoneMissionFlow`, leaving `DeliveryManager` primarily responsible for high-level delivery state orchestration.
+- [x] Step 19 - Re-verified the `DeliveryManager` quest/phone flow refactor with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
+- [x] Step 20 - Split `QuestManager` reward/penalty, streak, failure-penalty, and payout-award logic into `QuestRewardService`, leaving `QuestManager` to coordinate quest state while delegating reward math and progression payout application.
+- [x] Step 21 - Re-verified the `QuestManager` reward/penalty refactor with `dotnet build Assembly-CSharp.csproj -nologo`. Result: build succeeded again with 0 errors and the same 5 pre-existing warnings in `LocalizationTable.cs` and `NpcCarAgent.cs`.
+- [x] Step 22 - Extracted quest location assignment into `QuestLocationAssignmentService` and marker/zone lifecycle ownership into `QuestZoneMarkerService`, leaving `QuestManager` responsible for quest orchestration while delegating location generation, marker cleanup, zone spawning, and marker restoration.
+- [x] Step 23 - Extracted quest save/load conversion and restore orchestration into `QuestSaveRestoreService`, so `QuestManager` now delegates save-data building, record-to-runtime conversion, current-quest resolution, and load-time marker/UI restoration callbacks instead of owning raw serialization plumbing directly.
+- [x] Step 24 - Extracted quest audio/music presentation into `QuestAudioPresentationService` and particle pooling/effect triggering into `QuestParticleEffectService`, so `QuestManager` now delegates warning SFX, music crossfades, level-up presentation, pooled impact effects, and quest-zone marker particles to dedicated presentation helpers.
+- [x] Step 25 - Split `CameraFollow` by extracting gameplay rig binding/FOV/offset logic into `CameraFollowGameplayRig`, external reverse/minimap controller bootstrap into `CameraFollowExternalControllerCoordinator`, and cached minimap surface generation into `CameraFollowMiniMapSurfaceService`, leaving `CameraFollow` centered on target orchestration instead of owning all camera subsystems directly.
+- [x] Step 26 - Split `PauseMenuUI` by extracting runtime panel construction into `PauseMenuRuntimeViewBuilder` and settings refresh/callback coordination into `PauseMenuSettingsCoordinator`, leaving `PauseMenuUI` focused on pause-state orchestration, scene actions, and runtime rebuild handling.
+- [x] Step 27 - Began `NpcCarAgent` responsibility extraction by moving wheel-visual resolution and wheel pose syncing into `NpcCarWheelVisualService`, reducing the traffic monolith through a low-risk vehicle-visual module while preserving driving and obstacle behavior.
+- [x] Step 28 - Prepared the concrete structural migration plan for folder ownership, namespace normalization, and future asmdef splitting, using the current repository layout and refactor results to define staged, low-risk moves instead of mixing structural churn into behavior-heavy refactors.
+
+## Structure Migration Plan
+
+### Current verified structural pressure
+
+- `Assets/Scripts/GameScripts.asmdef` is still the only asmdef under `Assets/Scripts/`, and its `rootNamespace` is empty.
+- Domain folders already exist for `Company`, `Navigation`, `Neighborhood`, `Performance`, `Quest`, `UI`, and `Vehicle`, but many high-value runtime files still live at `Assets/Scripts/` root.
+- Root-level files are currently mixing at least five ownership types:
+  - delivery flow
+  - camera/follow/minimap/reverse camera support
+  - traffic and road graph systems
+  - gameplay vehicle/HUD scripts
+  - optimization/bootstrap utilities
+- Namespace discipline is improved but still inconsistent:
+  - `TrafficSystem` remains separate from `DeliveryDriver.*`
+  - several important root scripts still have no namespace
+  - some UI scripts under `Assets/Scripts/Quest/UI/` still use `DeliveryDriver.Quest` instead of `DeliveryDriver.Quest.UI`
+
+### Target folder ownership
+
+Use this as the destination map for later file moves.
+
+- `Assets/Scripts/Delivery/`
+  - `DeliveryManager`
+  - `DeliveryMissionRules`
+  - `DeliveryQuestFlow`
+  - `DeliveryPhoneMissionFlow`
+  - `DeliverySpawnEnvironment`
+  - `DeliveryUI`
+  - `DeliveryUiSpriteHelper`
+  - `PhoneMissionUI`
+  - `DeliveryBox`
+  - `DeliveryIndicator`
+
+- `Assets/Scripts/Camera/`
+  - `CameraFollow`
+  - `CameraFollowGameplayRig`
+  - `CameraFollowExternalControllerCoordinator`
+  - `CameraFollowMiniMapSurfaceService`
+  - `ReverseCameraHUD`
+
+- `Assets/Scripts/Traffic/`
+  - `NpcCarAgent`
+  - `NpcCarWheelVisualService`
+  - `NpcRecovery`
+  - `NpcSpawner`
+  - `DrivingPersonality`
+  - `TurnSignalController`
+  - `TrafficCommunicationSystem`
+  - `VehicleTrajectoryPredictor`
+  - `WeatherManager`
+  - `RoadGraphBuilder`
+  - `RoadGraphConnectionBuilder`
+  - `RoadGraphMeshSampler`
+  - `RoadGraphPathfinder`
+  - `RoadGraphTypes`
+
+- `Assets/Scripts/Gameplay/Vehicle/`
+  - `CarController`
+
+- `Assets/Scripts/Gameplay/HUD/`
+  - `SpeedometerUI`
+
+- `Assets/Scripts/Optimization/`
+  - `AdvancedObjectPool`
+  - `OptimizationProfile`
+  - `PerformanceOptimizationManager`
+  - `RuntimeOptimizationBootstrap`
+  - `UnifiedOptimizationController`
+  - `WorldChunk`
+  - `WorldChunkManager`
+  - `HLODGroup`
+  - `HLODProxy`
+
+- `Assets/Scripts/Navigation/Minimap/`
+  - `MinimapRoadTextureBuilder`
+  - `MinimapShaderHelper`
+
+- `Assets/Scripts/UI/Runtime/`
+  - `MainMenuRuntimeUI`
+  - `MenuSceneBootstrap`
+  - `CreditsSceneRuntimeUI`
+  - `SettingsSceneRuntimeUI`
+  - `RuntimeUiSkinLoader`
+  - `GlobalUiCoordinator`
+
+### Target namespaces
+
+Apply namespace normalization only after the folder moves are stable.
+
+- `DeliveryDriver.Delivery`
+  - all delivery flow and delivery UI scripts currently at root
+
+- `DeliveryDriver.Camera`
+  - camera orchestration and reverse-camera helper scripts
+
+- `DeliveryDriver.Traffic`
+  - replace the current `TrafficSystem` namespace over time
+  - road graph, NPC traffic, weather, signaling, and trajectory helpers should converge here
+
+- `DeliveryDriver.Gameplay.Vehicle`
+  - `CarController`
+
+- `DeliveryDriver.Gameplay.Hud`
+  - `SpeedometerUI`
+
+- `DeliveryDriver.Optimization`
+  - keep and reinforce for optimization/runtime-performance files
+
+- `DeliveryDriver.UI`
+  - runtime-global UI infrastructure and scene runtime UI builders
+
+- `DeliveryDriver.Quest.UI`
+  - normalize remaining quest UI files that still use `DeliveryDriver.Quest`
+
+### Safe migration order
+
+This is the staged order to minimize regressions and merge pain.
+
+1. Move leaf helper files first without changing behavior.
+   - Examples: `DeliveryMissionRules`, `DeliveryQuestFlow`, `CameraFollowGameplayRig`, `CameraFollowMiniMapSurfaceService`, `NpcCarWheelVisualService`.
+
+2. Move root-level files into ownership folders while preserving existing namespaces temporarily.
+   - This reduces file chaos before touching compiler identity.
+
+3. Normalize namespaces one domain at a time.
+   - Recommended order: `Delivery`, `Camera`, `Optimization`, `Traffic`, then remaining `Quest.UI` mismatches.
+
+4. Add asmdefs only after domain boundaries are stable.
+   - Otherwise every move will also become an assembly dependency migration.
+
+5. Update scene/bootstrap references only after folder and namespace moves are complete for that domain.
+   - This avoids mixing file identity churn with runtime behavior churn.
+
+### First asmdef split plan
+
+Do not execute until the above folder and namespace passes are done.
+
+- `DeliveryDriver.Delivery.asmdef`
+  - depends on `DeliveryDriver.Quest`, `DeliveryDriver.UI`, `DeliveryDriver.Navigation`, `DeliveryDriver.Company`
+
+- `DeliveryDriver.Camera.asmdef`
+  - depends on `DeliveryDriver.Vehicle`, `DeliveryDriver.Quest.UI`, `Unity.Cinemachine`
+
+- `DeliveryDriver.Traffic.asmdef`
+  - depends on `DeliveryDriver.City`, `DeliveryDriver.Optimization`
+
+- `DeliveryDriver.Navigation.asmdef`
+  - depends on `DeliveryDriver.Quest`, `DeliveryDriver.UI`, `DeliveryDriver.City`
+
+- `DeliveryDriver.UI.asmdef`
+  - depends on `DeliveryDriver.Quest`, `Unity.TextMeshPro`, `Unity.InputSystem`
+
+- `DeliveryDriver.Optimization.asmdef`
+  - should remain low-level and avoid depending on gameplay/UI assemblies
+
+- `DeliveryDriver.Core.asmdef` or `DeliveryDriver.Vehicle.asmdef`
+  - evaluate only after `CarController` and shared vehicle-facing types stop living at root
+
+### Files to defer until after structural groundwork
+
+Do not move these in the first structural pass unless required by a broader feature branch.
+
+- `GlobalUiCoordinator`
+- `SceneTransitionManager`
+- `MainMenuRuntimeUI`
+- `MenuSceneBootstrap`
+- `SaveManager`
+- `QuestDatabaseBootstrap`
+- `GameSceneCompanyPageInstaller`
+- `CompanyPageUI`
+- `PlayerVehicleManager`
+- `DeliveryManager`
+- `QuestManager`
+- `NpcCarAgent`
+
+These remain high-churn runtime orchestrators, and moving them too early would combine behavioral risk with identity churn.
+
+### Completion criteria for a future structural branch
+
+- no gameplay/runtime scripts remain at `Assets/Scripts/` root unless they are true shared primitives
+- all moved files use namespaces matching their folder ownership
+- `TrafficSystem` is retired in favor of `DeliveryDriver.Traffic`
+- `Quest` UI files consistently use `DeliveryDriver.Quest.UI`
+- asmdefs are introduced with explicit dependency direction and without circular references
+- scene and bootstrap flows still compile and run after namespace/file moves
+
 Rewrite, optimize, and reorganize all C# scripts under `Assets/Scripts/` in this Unity project. The goal is not to patch individual issues. The goal is to rebuild the scripting architecture so it is faster, cleaner, easier to maintain, easier to extend, and significantly more readable.
 
 ## Project context

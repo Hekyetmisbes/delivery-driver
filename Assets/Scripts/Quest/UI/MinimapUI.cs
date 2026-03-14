@@ -111,6 +111,9 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private float routeRefreshDistance = 2f;
         [SerializeField] private float roadRefreshDistance = 4f;
         [SerializeField] private float baseRoadLineWidth = 4.2f;
+        [SerializeField] private float navigationBindRetryInterval = 0.5f;
+        [SerializeField] private float playerResolveRetryInterval = 0.5f;
+        [SerializeField] private float roadGraphResolveRetryInterval = 1f;
 
         private GameObject currentPickupMarker;
         private List<GameObject> currentDeliveryMarkers = new List<GameObject>();
@@ -133,7 +136,11 @@ namespace DeliveryDriver.Quest.UI
         private bool hasRoadBounds;
         private bool roadOverlayReady;
         private float nextRoadAttemptTime;
+        private float nextNavigationBindTime;
+        private float nextPlayerResolveTime;
+        private float nextRoadGraphResolveTime;
         private RoadGraphBuilder roadGraphBuilder;
+        private PlayerVehicleManager cachedVehicleManager;
         private Vector3 mapCenter;
         private RouteResult currentRoute = RouteResult.Unavailable;
         private Vector3 lastRouteCenter = new Vector3(float.NaN, float.NaN, float.NaN);
@@ -196,6 +203,7 @@ namespace DeliveryDriver.Quest.UI
             ResolvePlayerTransform(true);
             TryInitializeMinimapRuntime(true);
             TryBindNavigationService();
+            PlayerVehicleManager.ActiveVehicleChanged += HandleActiveVehicleChanged;
         }
 
         private void OnDisable()
@@ -205,6 +213,7 @@ namespace DeliveryDriver.Quest.UI
 
         private void OnDestroy()
         {
+            PlayerVehicleManager.ActiveVehicleChanged -= HandleActiveVehicleChanged;
             UnbindNavigationService();
         }
 
@@ -225,7 +234,10 @@ namespace DeliveryDriver.Quest.UI
 
             RefreshCurrentZoomFromSources();
 
-            ResolvePlayerTransform();
+            if (!IsUsablePlayerTransform(playerTransform))
+            {
+                ResolvePlayerTransform();
+            }
 
             bool wasReady = minimapRuntimeReady;
             if (TryInitializeMinimapRuntime(false) && (!wasReady || navigationStateDirty))
@@ -242,7 +254,10 @@ namespace DeliveryDriver.Quest.UI
                 EnsurePlayerMarker();
             }
 
-            TryBindNavigationService();
+            if (subscribedNavigationService == null && Time.unscaledTime >= nextNavigationBindTime)
+            {
+                TryBindNavigationService();
+            }
             UpdateRoadOverlayState();
             UpdateResponsiveLayout();
 
@@ -287,6 +302,10 @@ namespace DeliveryDriver.Quest.UI
             roadOverlayReady = false;
             hasRoadBounds = false;
             nextRoadAttemptTime = 0f;
+            nextNavigationBindTime = 0f;
+            nextPlayerResolveTime = 0f;
+            nextRoadGraphResolveTime = 0f;
+            cachedVehicleManager = null;
             worldRoadPolylines.Clear();
             localRoadPolylines.Clear();
             lastRoadCenter = new Vector3(float.NaN, float.NaN, float.NaN);
@@ -313,7 +332,7 @@ namespace DeliveryDriver.Quest.UI
 
         private void TryBindNavigationService()
         {
-            NavigationService navigationService = NavigationService.Instance ?? NavigationService.EnsureInstance();
+            NavigationService navigationService = NavigationService.Instance;
             if (navigationService == null)
             {
                 if (!loggedMissingNavigationService)
@@ -322,6 +341,7 @@ namespace DeliveryDriver.Quest.UI
                     loggedMissingNavigationService = true;
                 }
 
+                nextNavigationBindTime = Time.unscaledTime + Mathf.Max(0.1f, navigationBindRetryInterval);
                 return;
             }
 
@@ -1564,15 +1584,16 @@ namespace DeliveryDriver.Quest.UI
             Transform resolvedPlayerTransform = null;
             if (!forceRefresh && IsUsablePlayerTransform(playerTransform))
             {
-                if (!TryResolveAuthoritativePlayerTransform(out Transform authoritativePlayerTransform) ||
-                    authoritativePlayerTransform == playerTransform)
-                {
-                    return;
-                }
-
-                resolvedPlayerTransform = authoritativePlayerTransform;
+                return;
             }
-            else if (!TryResolveAuthoritativePlayerTransform(out resolvedPlayerTransform))
+
+            if (!forceRefresh && Time.unscaledTime < nextPlayerResolveTime)
+            {
+                return;
+            }
+
+            nextPlayerResolveTime = Time.unscaledTime + Mathf.Max(0.1f, playerResolveRetryInterval);
+            if (!TryResolveAuthoritativePlayerTransform(out resolvedPlayerTransform))
             {
                 if (!loggedMissingPlayerTransform)
                 {
@@ -1610,9 +1631,10 @@ namespace DeliveryDriver.Quest.UI
 
         private bool TryResolveRoadGraph(out RoadGraph graph)
         {
-            if (roadGraphBuilder == null)
+            if (roadGraphBuilder == null && Time.unscaledTime >= nextRoadGraphResolveTime)
             {
                 roadGraphBuilder = FindFirstObjectByType<RoadGraphBuilder>();
+                nextRoadGraphResolveTime = Time.unscaledTime + Mathf.Max(0.25f, roadGraphResolveRetryInterval);
             }
 
             if (roadGraphBuilder == null)
@@ -1781,6 +1803,7 @@ namespace DeliveryDriver.Quest.UI
         public void SetPlayerTransform(Transform player)
         {
             playerTransform = player;
+            nextPlayerResolveTime = 0f;
             TryInitializeMinimapRuntime(false);
             if (minimapCamera != null)
             {
@@ -1798,6 +1821,21 @@ namespace DeliveryDriver.Quest.UI
                 pooledPlayerMarker.SetVisible(player != null);
                 SetMarkerAnchoredPosition(pooledPlayerMarker, Vector2.zero, true);
             }
+        }
+
+        private PlayerVehicleManager TryGetVehicleManager()
+        {
+            if (cachedVehicleManager == null)
+            {
+                cachedVehicleManager = PlayerVehicleManager.Instance ?? FindFirstObjectByType<PlayerVehicleManager>();
+            }
+
+            return cachedVehicleManager;
+        }
+
+        private void HandleActiveVehicleChanged(CarController controller)
+        {
+            SetPlayerTransform(controller != null ? controller.transform : null);
         }
 
         private void ApplyFixedZoom()
@@ -1872,7 +1910,7 @@ namespace DeliveryDriver.Quest.UI
                 return true;
             }
 
-            PlayerVehicleManager vehicleManager = FindFirstObjectByType<PlayerVehicleManager>();
+            PlayerVehicleManager vehicleManager = TryGetVehicleManager();
             if (vehicleManager != null &&
                 vehicleManager.ActiveVehicleController != null &&
                 IsUsablePlayerTransform(vehicleManager.ActiveVehicleController.transform))

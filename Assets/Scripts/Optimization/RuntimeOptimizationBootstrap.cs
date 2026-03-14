@@ -11,6 +11,7 @@ public class RuntimeOptimizationBootstrap : MonoBehaviour
 {
     [SerializeField] private float phaseTwoDelaySeconds = 2f;
     [SerializeField] private float npcExtraDelaySeconds = 1f;
+    private static bool SupportsRuntimeDiagnostics => Application.isEditor || Debug.isDebugBuild;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void BootstrapAfterSceneLoad()
@@ -45,18 +46,21 @@ public class RuntimeOptimizationBootstrap : MonoBehaviour
     {
         // PerformanceOptimizationManager removed - TrafficSimulationOptimizer handles all NPC throttling
 
-        // Disable heavyweight runtime profilers by default in gameplay scenes.
-        MemoryProfiler memoryProfiler = FindAnyObjectByType<MemoryProfiler>();
-        if (memoryProfiler != null)
+        // Keep diagnostics dormant in normal gameplay builds unless explicitly running a debug/editor build.
+        if (SupportsRuntimeDiagnostics)
         {
-            memoryProfiler.enableMonitoring = false;
-            memoryProfiler.showMemoryOverlay = false;
-        }
+            MemoryProfiler memoryProfiler = FindAnyObjectByType<MemoryProfiler>();
+            if (memoryProfiler != null)
+            {
+                memoryProfiler.enableMonitoring = false;
+                memoryProfiler.showMemoryOverlay = false;
+            }
 
-        PerformanceRegressionDetector regressionDetector = FindAnyObjectByType<PerformanceRegressionDetector>();
-        if (regressionDetector != null)
-        {
-            regressionDetector.enableAutoDetection = false;
+            PerformanceRegressionDetector regressionDetector = FindAnyObjectByType<PerformanceRegressionDetector>();
+            if (regressionDetector != null)
+            {
+                regressionDetector.enableAutoDetection = false;
+            }
         }
 
         WorldChunkManager chunkManager = FindAnyObjectByType<WorldChunkManager>();

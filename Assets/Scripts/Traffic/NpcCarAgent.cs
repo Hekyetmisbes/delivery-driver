@@ -277,6 +277,7 @@ namespace TrafficSystem
 
         // Priority 1: Turn Signal System
         private TurnSignalController turnSignalController;
+        private NpcCarWheelVisualService wheelVisualService;
 
         private float nextReacquireTime = 0f;
 
@@ -392,6 +393,7 @@ namespace TrafficSystem
             npcId = nextNpcId++;
 
             rb = GetComponent<Rigidbody>();
+            wheelVisualService = new NpcCarWheelVisualService(autoSetupWheelVisuals, autoCreateWheelVisualsIfMissing);
             cachedWeight = rb.mass * Mathf.Abs(Physics.gravity.y);
             SetupRigidbody();
             AutoFixWheelAssignments();
@@ -847,7 +849,15 @@ namespace TrafficSystem
 
         private void LateUpdate()
         {
-            UpdateWheelVisuals();
+            wheelVisualService?.UpdateWheelVisuals(
+                frontLeftCollider,
+                frontLeftWheelVisual,
+                frontRightCollider,
+                frontRightWheelVisual,
+                rearLeftCollider,
+                rearLeftWheelVisual,
+                rearRightCollider,
+                rearRightWheelVisual);
         }
 
         /// <summary>
@@ -3151,12 +3161,25 @@ namespace TrafficSystem
 
         private void SetupWheelVisuals()
         {
-            if (!autoSetupWheelVisuals) return;
+            if (wheelVisualService == null)
+            {
+                return;
+            }
 
-            frontLeftWheelVisual = GetWheelVisualTransform(frontLeftCollider, frontLeftWheelVisual);
-            frontRightWheelVisual = GetWheelVisualTransform(frontRightCollider, frontRightWheelVisual);
-            rearLeftWheelVisual = GetWheelVisualTransform(rearLeftCollider, rearLeftWheelVisual);
-            rearRightWheelVisual = GetWheelVisualTransform(rearRightCollider, rearRightWheelVisual);
+            NpcCarWheelVisualSet wheelVisuals = wheelVisualService.ResolveWheelVisuals(
+                frontLeftCollider,
+                frontLeftWheelVisual,
+                frontRightCollider,
+                frontRightWheelVisual,
+                rearLeftCollider,
+                rearLeftWheelVisual,
+                rearRightCollider,
+                rearRightWheelVisual);
+
+            frontLeftWheelVisual = wheelVisuals.FrontLeft;
+            frontRightWheelVisual = wheelVisuals.FrontRight;
+            rearLeftWheelVisual = wheelVisuals.RearLeft;
+            rearRightWheelVisual = wheelVisuals.RearRight;
         }
 
         /// <summary>
@@ -3169,64 +3192,6 @@ namespace TrafficSystem
             {
                 turnSignalController = gameObject.AddComponent<TurnSignalController>();
             }
-        }
-
-        private Transform GetWheelVisualTransform(WheelCollider wheel, Transform currentVisual)
-        {
-            if (currentVisual != null) return currentVisual;
-            if (wheel == null) return null;
-
-            Transform wheelRoot = wheel.transform;
-
-            // Prefer a child mesh (so we don't rotate the collider transform)
-            for (int i = 0; i < wheelRoot.childCount; i++)
-            {
-                Transform child = wheelRoot.GetChild(i);
-                if (child.GetComponent<MeshRenderer>() != null)
-                    return child;
-            }
-
-            // If collider shares the mesh, create a visual proxy child at runtime
-            if (autoCreateWheelVisualsIfMissing)
-            {
-                MeshRenderer renderer = wheelRoot.GetComponent<MeshRenderer>();
-                MeshFilter filter = wheelRoot.GetComponent<MeshFilter>();
-                if (renderer != null && filter != null && filter.sharedMesh != null)
-                {
-                    GameObject visual = new GameObject("WheelVisual");
-                    visual.transform.SetParent(wheelRoot, false);
-                    visual.transform.localPosition = Vector3.zero;
-                    visual.transform.localRotation = Quaternion.identity;
-                    visual.transform.localScale = Vector3.one;
-
-                    MeshFilter visualFilter = visual.AddComponent<MeshFilter>();
-                    MeshRenderer visualRenderer = visual.AddComponent<MeshRenderer>();
-                    visualFilter.sharedMesh = filter.sharedMesh;
-                    visualRenderer.sharedMaterials = renderer.sharedMaterials;
-
-                    renderer.enabled = false;
-                    return visual.transform;
-                }
-            }
-
-            return null;
-        }
-
-        private void UpdateWheelVisuals()
-        {
-            UpdateSingleWheelVisual(frontLeftCollider, frontLeftWheelVisual);
-            UpdateSingleWheelVisual(frontRightCollider, frontRightWheelVisual);
-            UpdateSingleWheelVisual(rearLeftCollider, rearLeftWheelVisual);
-            UpdateSingleWheelVisual(rearRightCollider, rearRightWheelVisual);
-        }
-
-        private void UpdateSingleWheelVisual(WheelCollider wheelCollider, Transform wheelVisual)
-        {
-            if (wheelCollider == null || wheelVisual == null) return;
-
-            wheelCollider.GetWorldPose(out Vector3 pos, out Quaternion rot);
-            wheelVisual.position = pos;
-            wheelVisual.rotation = rot;
         }
 
         /// <summary>

@@ -11,6 +11,7 @@ namespace DeliveryDriver.Company
     public class GameSceneCompanyPageInstaller : MonoBehaviour
     {
         private const string GameSceneName = "Game";
+        private const string VehicleCatalogResourcePath = "Company/VehiclePrefabCatalog";
         private const string VanPrefabAssetPath = "Assets/Prefabs/Vehicle/Minivan.prefab";
         private const string TruckPrefabAssetPath = "Assets/Prefabs/Vehicle/LorryCargo.prefab";
         private static bool sceneHookRegistered;
@@ -93,16 +94,22 @@ namespace DeliveryDriver.Company
 
         private static GameObject LoadVehiclePrefab(string assetPath, string label)
         {
+            VehiclePrefabCatalog catalog = Resources.Load<VehiclePrefabCatalog>(VehicleCatalogResourcePath);
+            if (catalog != null && catalog.TryGetPrefab(label, out GameObject catalogPrefab))
+            {
+                return catalogPrefab;
+            }
+
 #if UNITY_EDITOR
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
             if (prefab == null)
             {
-                Debug.LogError($"[GameSceneCompanyPageInstaller] {label} prefab load failed at path '{assetPath}'.");
+                Debug.LogError($"[GameSceneCompanyPageInstaller] {label} prefab load failed. No runtime catalog entry was found at Resources/{VehicleCatalogResourcePath} and editor asset lookup also failed at '{assetPath}'.");
             }
 
             return prefab;
 #else
-            Debug.LogError($"[GameSceneCompanyPageInstaller] {label} prefab reference missing. Asset path loading is only available in the Unity Editor for '{assetPath}'.");
+            Debug.LogError($"[GameSceneCompanyPageInstaller] {label} prefab reference missing. Expected a runtime-loadable catalog at Resources/{VehicleCatalogResourcePath}.");
             return null;
 #endif
         }

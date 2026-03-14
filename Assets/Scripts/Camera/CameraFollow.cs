@@ -1,7 +1,5 @@
-using System.Collections;
 using UnityEngine;
 using System.Collections.Generic;
-using TrafficSystem;
 using DeliveryDriver.Quest.UI;
 using DeliveryDriver.Vehicle;
 using Unity.Cinemachine;
@@ -145,11 +143,6 @@ public class CameraFollow : MonoBehaviour
     private GameObject miniMapPlayerMarker;
     private Material miniMapPlayerMarkerMaterial;
     private int cachedMiniMapMarkerLayer = int.MinValue;
-    private Texture2D cachedMiniMapTexture;
-    private GameObject cachedMiniMapSurface;
-    private Material cachedMiniMapSurfaceMaterial;
-    private Coroutine cachedMiniMapBuildRoutine;
-    private RoadGraphBuilder cachedMiniMapRoadGraphBuilder;
     private Camera reverseCamHUD;
     private bool reverseCamShowing;
     private float reverseCamFadeAlpha;
@@ -158,21 +151,19 @@ public class CameraFollow : MonoBehaviour
     private float currentZoomOffset;
     private VehicleCameraAnchors vehicleCameraAnchors;
     private CinemachineBrain cinemachineBrain;
-    private CinemachineCamera gameplayCamera;
-    private CinemachineFollow cinemachineFollow;
-    private CinemachineRotationComposer rotationComposer;
-    private ReverseCameraHUD reverseCameraController;
-    private MinimapCamera minimapCameraController;
-    private float currentGameplayFov;
-    private bool warnedMissingGameplayCamera;
+    private CameraFollowGameplayRig gameplayRig;
+    private CameraFollowExternalControllerCoordinator externalControllerCoordinator;
+    private CameraFollowMiniMapSurfaceService miniMapSurfaceService;
 
     void Awake()
     {
         mainCamera = GetComponent<Camera>();
         cinemachineBrain = GetComponent<CinemachineBrain>();
-        currentGameplayFov = baseFov;
+        gameplayRig = new CameraFollowGameplayRig(mainCamera, baseFov);
+        externalControllerCoordinator = new CameraFollowExternalControllerCoordinator();
+        miniMapSurfaceService = new CameraFollowMiniMapSurfaceService();
 
-        ResolveGameplayRig();
+        gameplayRig.ResolveRig();
         EnsureExternalCameraControllers();
     }
 
@@ -200,31 +191,23 @@ public class CameraFollow : MonoBehaviour
         carController = binding.CarController;
         vehicleCameraAnchors = binding.CameraAnchors;
 
-        ResolveGameplayRig();
+        gameplayRig.ResolveRig();
         EnsureExternalCameraControllers();
 
         if (target == null)
         {
-            if (cinemachineBrain != null)
-            {
-                cinemachineBrain.WorldUpOverride = null;
-            }
-
-            reverseCameraController?.SetTarget(null);
-            minimapCameraController?.SetPlayer(null);
+            gameplayRig.ClearTarget(cinemachineBrain);
+            externalControllerCoordinator.ClearTargets();
             return;
         }
 
-        currentZoomOffset = 0f;
-        currentGameplayFov = ResolveCurrentLensFov();
+        gameplayRig.ResetRuntimeFov(gameplayRig.ResolveCurrentLensFov(baseFov));
 
         BindGameplayRig();
-        reverseCameraController?.SetGameplayCamera(mainCamera);
-        reverseCameraController?.SetTarget(target);
-        minimapCameraController?.SetPlayer(target);
-        ApplyCinemachineRigSettings(true);
+        externalControllerCoordinator.ApplyTarget(mainCamera, target);
+        gameplayRig.Update(target, targetRb, carController, BuildGameplaySettings(), 0f);
 
-        Debug.Log($"[CameraFollow] Target updated: target={target.name}, targetRb={targetRb != null}, carController={carController != null}, cinemachine={gameplayCamera != null}");
+        Debug.Log($"[CameraFollow] Target updated: target={target.name}, targetRb={targetRb != null}, carController={carController != null}, cinemachine={gameplayRig.HasGameplayCamera}");
     }
 
     void LateUpdate()
@@ -235,22 +218,7 @@ public class CameraFollow : MonoBehaviour
             return;
         }
 
-        UpdateSpeedFov(Time.deltaTime);
-        UpdateCinemachineFollowOffset(Time.deltaTime);
-        ApplyCinemachineRigSettings(false);
-    }
-
-    void UpdateSpeedFov(float deltaTime)
-    {
-        float desiredFov = baseFov;
-        if (enableSpeedFov && targetRb != null)
-        {
-            float speedKmh = targetRb.linearVelocity.magnitude * 3.6f;
-            float t = fovMaxSpeedKmh > 1f ? Mathf.Clamp01(speedKmh / fovMaxSpeedKmh) : 0f;
-            desiredFov = Mathf.Lerp(baseFov, maxSpeedFov, t);
-        }
-
-        currentGameplayFov = Mathf.Lerp(currentGameplayFov, desiredFov, Mathf.Max(0.01f, fovLerpSpeed) * deltaTime);
+        gameplayRig.Update(target, targetRb, carController, BuildGameplaySettings(), Time.deltaTime);
     }
 
     void TryResolveTarget()
@@ -262,193 +230,54 @@ public class CameraFollow : MonoBehaviour
         }
     }
 
-    void ResolveGameplayRig()
-    {
-        if (mainCamera == null)
-        {
-            mainCamera = GetComponent<Camera>();
-        }
-
-        if (cinemachineBrain == null)
-        {
-            cinemachineBrain = GetComponent<CinemachineBrain>();
-        }
-
-        if (gameplayCamera == null)
-        {
-            gameplayCamera = FindFirstObjectByType<CinemachineCamera>();
-        }
-
-        cinemachineFollow = gameplayCamera != null ? gameplayCamera.GetComponent<CinemachineFollow>() : null;
-        rotationComposer = gameplayCamera != null ? gameplayCamera.GetComponent<CinemachineRotationComposer>() : null;
-
-        if (gameplayCamera == null && !warnedMissingGameplayCamera)
-        {
-            warnedMissingGameplayCamera = true;
-            Debug.LogWarning("[CameraFollow] No CinemachineCamera found. Main gameplay follow will stay unbound.");
-        }
-    }
-
     void EnsureExternalCameraControllers()
     {
-        int minimapMarkerLayer = ResolveMiniMapMarkerLayer();
-        if (mainCamera != null && minimapMarkerLayer >= 0)
-        {
-            mainCamera.cullingMask &= ~(1 << minimapMarkerLayer);
-        }
-
-        if (enableReverseCamera)
-        {
-            if (reverseCameraController == null)
-            {
-                reverseCameraController = FindFirstObjectByType<ReverseCameraHUD>();
-            }
-
-            if (reverseCameraController == null)
-            {
-                reverseCameraController = GetComponent<ReverseCameraHUD>();
-                if (reverseCameraController == null)
-                {
-                    reverseCameraController = gameObject.AddComponent<ReverseCameraHUD>();
-                }
-            }
-
-            reverseCameraController.Configure(
+        externalControllerCoordinator.EnsureControllers(
+            mainCamera,
+            gameObject,
+            target,
+            new CameraFollowExternalControllerSettings(
+                ResolveMiniMapMarkerLayer(),
+                enableReverseCamera,
                 reverseCamOffset,
                 reverseCamEuler,
                 reverseCamFov,
                 new Rect(reverseCamVpX, reverseCamVpY, reverseCamVpW, reverseCamVpH),
-                -0.1f,
                 reverseCamStationaryThreshold,
                 reverseCamBorderColor,
                 reverseCamBorderWidth,
                 reverseCamFramePadding,
                 reverseCamFadeSpeed,
-                reverseCamGradientHeight);
-            reverseCameraController.SetGameplayCamera(mainCamera);
-        }
-
-        if (!enableMiniMap)
-        {
-            return;
-        }
-
-        if (minimapCameraController == null)
-        {
-            minimapCameraController = FindFirstObjectByType<MinimapCamera>();
-        }
-
-        if (minimapCameraController == null)
-        {
-            GameObject miniMapCameraObject = new GameObject("MinimapCamera");
-            miniMapCameraObject.AddComponent<Camera>();
-            minimapCameraController = miniMapCameraObject.AddComponent<MinimapCamera>();
-        }
-
-        MinimapUI minimapUi = MinimapUI.EnsureSceneInstance();
-        bool useStandaloneOverlay = minimapUi == null;
-        minimapCameraController.ConfigureRuntime(
-            miniMapHeight,
-            miniMapOrthoSize,
-            miniMapRotateWithTarget,
-            allowMiniMapToggleKey,
-            useStandaloneOverlay,
-            miniMapViewportSize,
-            miniMapViewportMargin,
-            miniMapCullingMask,
-            miniMapBackgroundColor);
-
-        if (minimapUi != null && target != null)
-        {
-            minimapUi.SetPlayerTransform(target);
-        }
+                reverseCamGradientHeight,
+                enableMiniMap,
+                miniMapHeight,
+                miniMapOrthoSize,
+                miniMapRotateWithTarget,
+                allowMiniMapToggleKey,
+                miniMapViewportSize,
+                miniMapViewportMargin,
+                miniMapCullingMask,
+                miniMapBackgroundColor));
     }
 
     void BindGameplayRig()
     {
-        if (gameplayCamera != null)
-        {
-            gameplayCamera.Target.TrackingTarget = target;
-            gameplayCamera.Target.LookAtTarget = null;
-            gameplayCamera.Target.CustomLookAtTarget = false;
-            gameplayCamera.CancelDamping(true);
-        }
-
-        if (cinemachineBrain != null)
-        {
-            cinemachineBrain.WorldUpOverride = target;
-        }
+        gameplayRig.BindTarget(target, cinemachineBrain);
     }
 
-    void UpdateCinemachineFollowOffset(float deltaTime)
+    CameraFollowGameplayRigSettings BuildGameplaySettings()
     {
-        if (cinemachineFollow == null || target == null)
-        {
-            return;
-        }
-
-        float desiredZoomOffset = 0f;
-        if (targetRb != null)
-        {
-            float localVelZ = target.InverseTransformDirection(targetRb.linearVelocity).z;
-            bool isReversing = (carController != null && carController.IsReverseInputActive) || localVelZ < -0.3f;
-            if (!isReversing)
-            {
-                float forwardKmh = Mathf.Max(0f, localVelZ * 3.6f);
-                float zoomT = Mathf.Clamp01(forwardKmh / Mathf.Max(1f, forwardZoomOutSpeedKmh));
-                desiredZoomOffset = -zoomT * forwardZoomOutExtra;
-            }
-        }
-
-        currentZoomOffset = Mathf.Lerp(currentZoomOffset, desiredZoomOffset, Mathf.Max(0.01f, dynamicZoomLerpSpeed) * deltaTime);
-    }
-
-    void ApplyCinemachineRigSettings(bool snap)
-    {
-        if (cinemachineFollow != null)
-        {
-            Vector3 desiredOffset = new Vector3(offset.x, offset.y, offset.z + currentZoomOffset);
-            if ((cinemachineFollow.FollowOffset - desiredOffset).sqrMagnitude > 0.0001f)
-            {
-                cinemachineFollow.FollowOffset = desiredOffset;
-            }
-        }
-
-        if (rotationComposer != null)
-        {
-            rotationComposer.TargetOffset = lookAtTargetOffset;
-        }
-
-        if (gameplayCamera != null)
-        {
-            LensSettings lens = gameplayCamera.Lens;
-            lens.FieldOfView = currentGameplayFov;
-            gameplayCamera.Lens = lens;
-
-            if (snap)
-            {
-                gameplayCamera.CancelDamping(true);
-            }
-        }
-        else if (mainCamera != null)
-        {
-            mainCamera.fieldOfView = currentGameplayFov;
-        }
-    }
-
-    float ResolveCurrentLensFov()
-    {
-        if (gameplayCamera != null)
-        {
-            return gameplayCamera.Lens.FieldOfView;
-        }
-
-        if (mainCamera != null)
-        {
-            return mainCamera.fieldOfView;
-        }
-
-        return baseFov;
+        return new CameraFollowGameplayRigSettings(
+            offset,
+            lookAtTargetOffset,
+            enableSpeedFov,
+            baseFov,
+            maxSpeedFov,
+            fovMaxSpeedKmh,
+            fovLerpSpeed,
+            forwardZoomOutExtra,
+            forwardZoomOutSpeedKmh,
+            dynamicZoomLerpSpeed);
     }
 
     void HandleCameraMovement(float deltaTime)
@@ -779,7 +608,7 @@ public class CameraFollow : MonoBehaviour
 
         miniMapCamera.gameObject.SetActive(true);
 
-        if (useCachedMiniMapSurface && cachedMiniMapSurface == null)
+        if (useCachedMiniMapSurface && (miniMapSurfaceService == null || !miniMapSurfaceService.HasSurface))
         {
             RequestCachedMiniMapSurfaceBuild();
         }
@@ -939,7 +768,7 @@ public class CameraFollow : MonoBehaviour
     int GetMiniMapRuntimeCullingMask()
     {
         int markerLayer = ResolveMiniMapMarkerLayer();
-        if (useCachedMiniMapSurface && cachedMiniMapSurface != null && markerLayer >= 0)
+        if (useCachedMiniMapSurface && miniMapSurfaceService != null && miniMapSurfaceService.HasSurface && markerLayer >= 0)
         {
             return 1 << markerLayer;
         }
@@ -957,244 +786,41 @@ public class CameraFollow : MonoBehaviour
         return miniMapCullingMask;
     }
 
-    void BuildCachedMiniMapSurface()
-    {
-        if (cachedMiniMapSurface != null)
-        {
-            return;
-        }
-
-        Bounds bounds;
-        if (!TryGetMiniMapWorldBounds(out bounds))
-        {
-            return;
-        }
-
-        Texture2D roadTexture = BuildProceduralMiniMapTexture(bounds);
-        if (roadTexture == null)
-        {
-            return;
-        }
-
-        cachedMiniMapTexture = roadTexture;
-
-        cachedMiniMapSurface = GameObject.CreatePrimitive(PrimitiveType.Quad);
-        cachedMiniMapSurface.name = "MiniMapCachedSurface";
-
-        int markerLayer = ResolveMiniMapMarkerLayer();
-        if (markerLayer >= 0)
-        {
-            cachedMiniMapSurface.layer = markerLayer;
-        }
-
-        if (miniMapCamera != null)
-        {
-            cachedMiniMapSurface.transform.SetParent(miniMapCamera.transform, false);
-            cachedMiniMapSurface.transform.localPosition = new Vector3(0f, 0f, 100f);
-            cachedMiniMapSurface.transform.localRotation = Quaternion.identity;
-            cachedMiniMapSurface.transform.localScale = Vector3.one;
-        }
-        else
-        {
-            cachedMiniMapSurface.transform.localPosition = new Vector3(0f, 0f, 100f);
-            cachedMiniMapSurface.transform.localRotation = Quaternion.identity;
-            cachedMiniMapSurface.transform.localScale = Vector3.one;
-        }
-
-        Collider cachedSurfaceCollider = cachedMiniMapSurface.GetComponent<Collider>();
-        if (cachedSurfaceCollider != null)
-        {
-            Destroy(cachedSurfaceCollider);
-        }
-
-        MeshRenderer renderer = cachedMiniMapSurface.GetComponent<MeshRenderer>();
-        cachedMiniMapSurfaceMaterial = CreateCachedMiniMapMaterial(cachedMiniMapTexture, renderer);
-        if (renderer != null && cachedMiniMapSurfaceMaterial != null)
-        {
-            renderer.sharedMaterial = cachedMiniMapSurfaceMaterial;
-            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            renderer.receiveShadows = false;
-            renderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
-            renderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
-        }
-
-        UpdateCachedMiniMapSurface(targetRb != null ? targetRb.position + Vector3.up * miniMapHeight : target.position + Vector3.up * miniMapHeight);
-    }
-
     void RequestCachedMiniMapSurfaceBuild()
     {
-        if (cachedMiniMapSurface != null || cachedMiniMapBuildRoutine != null)
-        {
-            return;
-        }
-
-        cachedMiniMapBuildRoutine = StartCoroutine(BuildCachedMiniMapSurfaceWhenReady());
+        miniMapSurfaceService?.RequestBuild(
+            this,
+            miniMapCamera,
+            miniMapBounds,
+            hasMiniMapRuntimeBounds,
+            miniMapRuntimeBounds,
+            ResolveMiniMapMarkerLayer(),
+            BuildMiniMapSurfaceSettings(),
+            targetRb != null ? targetRb.position + Vector3.up * miniMapHeight : target.position + Vector3.up * miniMapHeight);
     }
 
-    IEnumerator BuildCachedMiniMapSurfaceWhenReady()
+    CameraFollowMiniMapSurfaceSettings BuildMiniMapSurfaceSettings()
     {
-        int warmupFrames = Mathf.Max(1, cachedMiniMapWarmupFrames);
-        for (int i = 0; i < warmupFrames; i++)
-        {
-            yield return null;
-        }
-
-        yield return new WaitForEndOfFrame();
-        BuildCachedMiniMapSurface();
-        cachedMiniMapBuildRoutine = null;
-    }
-
-    Texture2D BuildProceduralMiniMapTexture(Bounds bounds)
-    {
-        if (!TryResolveMiniMapRoadGraph(out RoadGraph graph))
-        {
-            return null;
-        }
-
-        return MinimapRoadTextureBuilder.Build(
-            graph,
-            bounds,
+        return new CameraFollowMiniMapSurfaceSettings(
+            useCachedMiniMapSurface,
             cachedMiniMapResolution,
+            cachedMiniMapWarmupFrames,
             miniMapBackgroundColor,
             cachedMiniMapRoadColor,
             cachedMiniMapRoadOutlineColor,
-            cachedMiniMapRoadWidthPixels);
-    }
-
-    bool TryResolveMiniMapRoadGraph(out RoadGraph graph)
-    {
-        if (cachedMiniMapRoadGraphBuilder == null)
-        {
-            cachedMiniMapRoadGraphBuilder = FindFirstObjectByType<RoadGraphBuilder>();
-        }
-
-        if (cachedMiniMapRoadGraphBuilder == null)
-        {
-            graph = null;
-            return false;
-        }
-
-        if (!cachedMiniMapRoadGraphBuilder.HasBuiltRoadGraph)
-        {
-            if (!cachedMiniMapRoadGraphBuilder.HasPendingBuild)
-            {
-                cachedMiniMapRoadGraphBuilder.BeginBuildWithDelay(0f);
-            }
-
-            graph = null;
-            return false;
-        }
-
-        graph = cachedMiniMapRoadGraphBuilder.RoadGraph;
-        return graph != null && graph.roadSegments != null && graph.roadSegments.Count > 0;
-    }
-
-    Material CreateCachedMiniMapMaterial(Texture mapTexture, MeshRenderer fallbackRenderer)
-    {
-        Shader shader = Shader.Find("Unlit/Texture");
-        if (shader == null)
-        {
-            shader = Shader.Find("Universal Render Pipeline/Unlit");
-        }
-        if (shader == null)
-        {
-            shader = Shader.Find("Sprites/Default");
-        }
-        if (shader == null)
-        {
-            if (fallbackRenderer == null || fallbackRenderer.sharedMaterial == null)
-            {
-                return null;
-            }
-
-            shader = fallbackRenderer.sharedMaterial.shader;
-        }
-
-        Material material = new Material(shader);
-        material.color = Color.white;
-        if (material.HasProperty("_BaseMap"))
-        {
-            material.SetTexture("_BaseMap", mapTexture);
-        }
-        if (material.HasProperty("_MainTex"))
-        {
-            material.SetTexture("_MainTex", mapTexture);
-        }
-        material.mainTexture = mapTexture;
-        material.mainTextureScale = Vector2.one;
-        material.mainTextureOffset = Vector2.zero;
-        if (material.HasProperty("_Cull"))
-        {
-            material.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
-        }
-        return material;
+            cachedMiniMapRoadWidthPixels,
+            miniMapHeight);
     }
 
     void UpdateCachedMiniMapSurface(Vector3 mapPosition)
     {
-        if (!useCachedMiniMapSurface || cachedMiniMapSurface == null || cachedMiniMapSurfaceMaterial == null || miniMapCamera == null)
-        {
-            return;
-        }
-
-        if (!TryGetMiniMapWorldBounds(out Bounds bounds))
-        {
-            return;
-        }
-
-        Transform surfaceTransform = cachedMiniMapSurface.transform;
-        if (surfaceTransform.parent != miniMapCamera.transform)
-        {
-            surfaceTransform.SetParent(miniMapCamera.transform, false);
-        }
-
-        float visibleWorldHeight = miniMapCamera.orthographicSize * 2f;
-        float visibleWorldWidth = visibleWorldHeight * miniMapCamera.aspect;
-        surfaceTransform.localPosition = new Vector3(0f, 0f, 100f);
-        surfaceTransform.localRotation = Quaternion.identity;
-        surfaceTransform.localScale = new Vector3(visibleWorldWidth, visibleWorldHeight, 1f);
-
-        float widthFraction = bounds.size.x > 0.01f ? Mathf.Clamp01(visibleWorldWidth / bounds.size.x) : 1f;
-        float heightFraction = bounds.size.z > 0.01f ? Mathf.Clamp01(visibleWorldHeight / bounds.size.z) : 1f;
-        float centerU = bounds.size.x > 0.01f ? Mathf.InverseLerp(bounds.min.x, bounds.max.x, mapPosition.x) : 0.5f;
-        float centerV = bounds.size.z > 0.01f ? Mathf.InverseLerp(bounds.min.z, bounds.max.z, mapPosition.z) : 0.5f;
-
-        float offsetU = Mathf.Clamp(centerU - widthFraction * 0.5f, 0f, Mathf.Max(0f, 1f - widthFraction));
-        float offsetV = Mathf.Clamp(centerV - heightFraction * 0.5f, 0f, Mathf.Max(0f, 1f - heightFraction));
-        Vector2 textureScale = new Vector2(widthFraction, heightFraction);
-        Vector2 textureOffset = new Vector2(offsetU, offsetV);
-
-        cachedMiniMapSurfaceMaterial.mainTextureScale = textureScale;
-        cachedMiniMapSurfaceMaterial.mainTextureOffset = textureOffset;
-
-        if (cachedMiniMapSurfaceMaterial.HasProperty("_BaseMap"))
-        {
-            cachedMiniMapSurfaceMaterial.SetTextureScale("_BaseMap", textureScale);
-            cachedMiniMapSurfaceMaterial.SetTextureOffset("_BaseMap", textureOffset);
-        }
-        if (cachedMiniMapSurfaceMaterial.HasProperty("_MainTex"))
-        {
-            cachedMiniMapSurfaceMaterial.SetTextureScale("_MainTex", textureScale);
-            cachedMiniMapSurfaceMaterial.SetTextureOffset("_MainTex", textureOffset);
-        }
-    }
-
-    bool TryGetMiniMapWorldBounds(out Bounds bounds)
-    {
-        if (miniMapBounds != null)
-        {
-            bounds = miniMapBounds.bounds;
-            return true;
-        }
-
-        if (hasMiniMapRuntimeBounds)
-        {
-            bounds = miniMapRuntimeBounds;
-            return true;
-        }
-
-        bounds = default;
-        return false;
+        miniMapSurfaceService?.UpdateSurface(
+            miniMapCamera,
+            miniMapBounds,
+            hasMiniMapRuntimeBounds,
+            miniMapRuntimeBounds,
+            useCachedMiniMapSurface,
+            mapPosition);
     }
 
     void OnGUI()
@@ -1299,10 +925,7 @@ public class CameraFollow : MonoBehaviour
     void OnDestroy()
     {
         RemoveMiniMapPlayerMarker();
-        if (cachedMiniMapSurface != null) Destroy(cachedMiniMapSurface);
-        if (cachedMiniMapSurfaceMaterial != null) Destroy(cachedMiniMapSurfaceMaterial);
-        if (cachedMiniMapTexture != null) Destroy(cachedMiniMapTexture);
-        if (cachedMiniMapBuildRoutine != null) StopCoroutine(cachedMiniMapBuildRoutine);
+        miniMapSurfaceService?.Cleanup(this);
         if (reverseCamHUD != null) Destroy(reverseCamHUD.gameObject);
         if (reverseCamWhiteTex != null) Destroy(reverseCamWhiteTex);
     }

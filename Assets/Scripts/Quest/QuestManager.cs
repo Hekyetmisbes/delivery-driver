@@ -70,8 +70,6 @@ namespace DeliveryDriver.Quest
         [SerializeField] private AudioClip deliveryMusicClip;
         [SerializeField] private float timeWarningThreshold = 30f;
         [SerializeField] private float musicCrossfadeDuration = 2f;
-        private bool timeWarningPlayed = false;
-        private bool isCrossfading = false;
 
         [Header("Cargo Visuals")]
         [SerializeField] private CargoVisual cargoVisual;
@@ -83,7 +81,6 @@ namespace DeliveryDriver.Quest
         [SerializeField] private GameObject damageEffectPrefab;
         [SerializeField] private GameObject levelUpEffectPrefab;
         [SerializeField] private int particlePoolSize = 10;
-        private Queue<GameObject> particlePool = new Queue<GameObject>();
 
         [Header("Fragile Cargo Damage")]
         [SerializeField] private float collisionDamageThreshold = 10000f;
@@ -178,6 +175,10 @@ namespace DeliveryDriver.Quest
         private string lastQuestId = string.Empty;
         private bool questUiDirty = true;
         private Coroutine startupInitCoroutine;
+        private QuestLocationAssignmentService questLocationAssignmentService;
+        private QuestZoneMarkerService questZoneMarkerService;
+        private QuestAudioPresentationService questAudioPresentationService;
+        private QuestParticleEffectService questParticleEffectService;
 
         public UnityEvent<QuestData> OnQuestStarted = new UnityEvent<QuestData>();
         public UnityEvent<QuestData> OnQuestCompleted = new UnityEvent<QuestData>();
@@ -206,6 +207,66 @@ namespace DeliveryDriver.Quest
         public bool DebugDrawRouteEnabled => debugDrawRoute;
         public bool DebugDrawLabelsEnabled => debugDrawLabels;
 #endif
+
+        private QuestLocationAssignmentService GetLocationAssignmentService()
+        {
+            usedLocations ??= new List<Vector3>();
+            questLocationAssignmentService ??= new QuestLocationAssignmentService(
+                () => roadGraphBuilder,
+                () => pickupMarkerPrefab,
+                () => deliveryMarkerPrefab,
+                usedLocations,
+                locationCooldownDistance);
+
+            return questLocationAssignmentService;
+        }
+
+        private QuestZoneMarkerService GetZoneMarkerService()
+        {
+            activeZones ??= new List<QuestZone>();
+            questZoneMarkerService ??= new QuestZoneMarkerService(
+                () => questZonePrefab,
+                () => pickupMarkerPrefab,
+                () => deliveryMarkerPrefab,
+                activeZones,
+                position => GetParticleEffectService().SpawnMarkerParticles(position));
+
+            return questZoneMarkerService;
+        }
+
+        private QuestAudioPresentationService GetAudioPresentationService()
+        {
+            questAudioPresentationService ??= new QuestAudioPresentationService(
+                questSfxSource,
+                musicSource,
+                timeWarningClip,
+                levelUpClip,
+                explorationMusicClip,
+                deliveryMusicClip,
+                timeWarningThreshold,
+                musicCrossfadeDuration);
+
+            return questAudioPresentationService;
+        }
+
+        private QuestParticleEffectService GetParticleEffectService()
+        {
+            questParticleEffectService ??= new QuestParticleEffectService(
+                this,
+                questMarkerParticlePrefab,
+                pickupEffectPrefab,
+                deliveryEffectPrefab,
+                damageEffectPrefab,
+                levelUpEffectPrefab,
+                particlePoolSize);
+
+            return questParticleEffectService;
+        }
+
+        private Coroutine StartManagedCoroutine(IEnumerator routine)
+        {
+            return StartCoroutine(routine);
+        }
 
         private void Awake()
         {
@@ -268,7 +329,7 @@ namespace DeliveryDriver.Quest
         private void Start()
         {
             // Task 10.2: Initialize particle pool
-            InitializeParticlePool();
+            GetParticleEffectService().InitializeParticlePool();
 
             if (markerPool != null)
             {
@@ -277,12 +338,7 @@ namespace DeliveryDriver.Quest
             }
 
             // Task 10.1: Start exploration music
-            if (musicSource != null && explorationMusicClip != null)
-            {
-                musicSource.clip = explorationMusicClip;
-                musicSource.loop = true;
-                musicSource.Play();
-            }
+            GetAudioPresentationService().InitializeExplorationMusic();
 
             // Delay quest generation until road graph is built to avoid startup warnings.
             startupInitCoroutine = StartCoroutine(InitializeQuestStateWhenReady());
@@ -375,14 +431,13 @@ namespace DeliveryDriver.Quest
 
             // Task 10.1: Time Warning Audio
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (!debugInfiniteTime && currentQuest.TimeRemaining < timeWarningThreshold && !timeWarningPlayed)
-#else
-            if (currentQuest.TimeRemaining < timeWarningThreshold && !timeWarningPlayed)
-#endif
+            if (!debugInfiniteTime)
             {
-                PlayTimeWarning();
-                timeWarningPlayed = true;
+                GetAudioPresentationService().TryPlayTimeWarning(currentQuest.TimeRemaining);
             }
+#else
+            GetAudioPresentationService().TryPlayTimeWarning(currentQuest.TimeRemaining);
+#endif
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (!debugInfiniteTime && currentQuest.IsTimeExpired())
@@ -458,7 +513,7 @@ namespace DeliveryDriver.Quest
 
                 // For template quests, we still need to assign locations.
                 quest.Status = QuestStatus.NotStarted;
-                if (!AssignQuestLocations(quest))
+                if (!GetLocationAssignmentService().AssignQuestLocations(quest))
                 {
                     Debug.LogError($"[QuestManager] Quest template '{quest.QuestName}' could not be assigned runtime locations. Fallback is disabled.");
                     continue;
@@ -521,8 +576,8 @@ namespace DeliveryDriver.Quest
             // Try multiple times to find locations matching the distance criteria
             for (int i = 0; i < 15; i++)
             {
-                pickup = GenerateRandomLocation("Pickup");
-                delivery = GenerateRandomLocation("Delivery");
+                pickup = GetLocationAssignmentService().GenerateRandomLocation("Pickup");
+                delivery = GetLocationAssignmentService().GenerateRandomLocation("Delivery");
                 
                 if (pickup == null || delivery == null) continue;
 
@@ -540,8 +595,8 @@ namespace DeliveryDriver.Quest
             // Fallback: If strict distance generation failed, just take whatever valid pair we can get
             if (pickup == null || delivery == null)
             {
-                pickup = GenerateRandomLocation("Pickup");
-                delivery = GenerateRandomLocation("Delivery");
+                pickup = GetLocationAssignmentService().GenerateRandomLocation("Pickup");
+                delivery = GetLocationAssignmentService().GenerateRandomLocation("Delivery");
                 
                 // Ensure they are at least somewhat valid (min distance check inside AreLocationsValid logic, 
                 // but we are bypassing AssignQuestLocations helper here, so we do manual check or just accept)
@@ -571,8 +626,7 @@ namespace DeliveryDriver.Quest
             };
             
             // Assign markers
-            if (quest.PickupLocation.VisualMarker == null) quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
-            foreach(var loc in quest.DeliveryLocations) if (loc.VisualMarker == null) loc.VisualMarker = deliveryMarkerPrefab;
+            GetLocationAssignmentService().EnsureQuestMarkersAssigned(quest);
 
             // 5. Calculate Stats
             float avgSpeed = 11f; // ~40 km/h in m/s
@@ -627,7 +681,7 @@ namespace DeliveryDriver.Quest
 
             if (quest.PickupLocation == null || quest.DeliveryLocations == null || quest.DeliveryLocations.Count == 0)
             {
-                AssignQuestLocations(quest);
+                GetLocationAssignmentService().AssignQuestLocations(quest);
             }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -639,8 +693,8 @@ namespace DeliveryDriver.Quest
 #endif
 
             quest.StartQuest();
-            ClearAllZones();
-            SpawnQuestZone(quest.PickupLocation, QuestZoneType.Pickup);
+            GetZoneMarkerService().ClearAllZones();
+            GetZoneMarkerService().SpawnQuestZone(quest.PickupLocation, QuestZoneType.Pickup);
 
             if (PlayerProgressionManager.Instance != null)
             {
@@ -648,11 +702,11 @@ namespace DeliveryDriver.Quest
             }
 
             // Task 10.1: Play quest accepted sound and switch music
-            PlayQuestClip(questAcceptedClip);
-            SwitchToDeliveryMusic();
+            GetAudioPresentationService().PlayQuestClip(questAcceptedClip);
+            GetAudioPresentationService().SwitchToDeliveryMusic(StartManagedCoroutine);
 
             // Reset time warning flag
-            timeWarningPlayed = false;
+            GetAudioPresentationService().ResetTimeWarning();
             MarkQuestUiDirty();
 
             OnQuestStarted.Invoke(quest);
@@ -680,8 +734,8 @@ namespace DeliveryDriver.Quest
                 currentQuest = null;
             }
 
-            CleanupQuestMarkers(quest);
-            ClearAllZones();
+            GetZoneMarkerService().CleanupQuestMarkers(quest);
+            GetZoneMarkerService().ClearAllZones();
 
             if (quest.IsRepeatable)
             {
@@ -742,20 +796,20 @@ namespace DeliveryDriver.Quest
             Debug.Log($"[QuestManager] Quest completed with {quest.Rating} rank! Reward={finalReward}, Penalty={payout.TotalPenalty}, Streak={consecutiveSuccesses} ({streakMultiplier:F2}x)");
 
             // Task 10.1: Play success sound
-            PlayQuestClip(deliveryClip);
+            GetAudioPresentationService().PlayQuestClip(deliveryClip);
 
             // Task 10.2: Play delivery particle effect
             if (playerTransform != null)
             {
-                PlayParticleEffect(deliveryEffectPrefab, playerTransform.position);
+                GetParticleEffectService().PlayParticleEffect(deliveryEffectPrefab, playerTransform.position);
             }
 
             // Task 10.1: Switch back to exploration music
-            SwitchToExplorationMusic();
+            GetAudioPresentationService().SwitchToExplorationMusic(StartManagedCoroutine);
 
             OnQuestCompleted.Invoke(quest);
-            CleanupQuestMarkers(quest);
-            ClearAllZones();
+            GetZoneMarkerService().CleanupQuestMarkers(quest);
+            GetZoneMarkerService().ClearAllZones();
             GenerateAvailableQuests(1);
 
             // Trigger auto-save after quest completion
@@ -806,12 +860,12 @@ namespace DeliveryDriver.Quest
                 PlayerProgressionManager.Instance.RecordQuestFailure(quest);
             }
 
-            CleanupQuestMarkers(quest);
-            ClearAllZones();
-            PlayQuestClip(failureClip);
+            GetZoneMarkerService().CleanupQuestMarkers(quest);
+            GetZoneMarkerService().ClearAllZones();
+            GetAudioPresentationService().PlayQuestClip(failureClip);
 
             // Task 10.1: Switch back to exploration music
-            SwitchToExplorationMusic();
+            GetAudioPresentationService().SwitchToExplorationMusic(StartManagedCoroutine);
 
             GenerateAvailableQuests(1);
         }
@@ -830,205 +884,6 @@ namespace DeliveryDriver.Quest
             }
 
             currentQuest.Cargo.TakeDamage(amount);
-        }
-
-        private bool AssignQuestLocations(QuestData quest)
-        {
-            if (quest == null)
-            {
-                return false;
-            }
-
-            QuestLocation pickup = null;
-            QuestLocation delivery = null;
-
-            for (int attempt = 0; attempt < 10; attempt++)
-            {
-                pickup = GenerateRandomLocation("Pickup");
-                delivery = GenerateRandomLocation("Delivery");
-
-                if (AreLocationsValid(pickup, delivery, quest.Difficulty))
-                {
-                    break;
-                }
-            }
-
-            if (pickup == null || delivery == null)
-            {
-                Debug.LogWarning("[QuestManager] Failed to generate valid quest locations.");
-                return false;
-            }
-
-            quest.PickupLocation = pickup;
-            if (quest.PickupLocation != null && quest.PickupLocation.VisualMarker == null && pickupMarkerPrefab != null)
-            {
-                quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
-            }
-            quest.DeliveryLocations ??= new List<QuestLocation>();
-            quest.DeliveryLocations.Clear();
-
-            if (delivery != null)
-            {
-                if (delivery.VisualMarker == null && deliveryMarkerPrefab != null)
-                {
-                    delivery.VisualMarker = deliveryMarkerPrefab;
-                }
-                quest.DeliveryLocations.Add(delivery);
-            }
-
-            if (quest.QuestType == QuestType.MultiStopDelivery)
-            {
-                QuestLocation extraStop = GenerateRandomLocation("Delivery");
-                if (extraStop != null)
-                {
-                    if (extraStop.VisualMarker == null && deliveryMarkerPrefab != null)
-                    {
-                        extraStop.VisualMarker = deliveryMarkerPrefab;
-                    }
-                    quest.DeliveryLocations.Add(extraStop);
-                }
-            }
-
-            return true;
-        }
-
-        private QuestLocation GenerateRandomLocation(string prefix)
-        {
-            if (roadGraphBuilder == null || roadGraphBuilder.RoadGraph == null)
-            {
-                Debug.Log("[QuestManager] RoadGraphBuilder is not ready yet. Skipping quest location generation.");
-                return null;
-            }
-
-            // Task 9.1: Procedural Location Picker with validation and variety
-            int attempts = 0;
-            RoadSegment segment = null;
-            int waypointIndex = -1;
-            Vector3 candidatePosition = Vector3.zero;
-
-            while (attempts < 20)
-            {
-                attempts++;
-                
-                var result = roadGraphBuilder.RoadGraph.GetRandomWaypoint();
-                segment = result.Item1;
-                waypointIndex = result.Item2;
-
-                if (segment == null || segment.waypoints.Count == 0)
-                    continue;
-
-                candidatePosition = segment.waypoints[waypointIndex].position;
-
-                // Check 1: Cooldown/Used Locations
-                bool tooClose = false;
-                foreach (Vector3 used in usedLocations)
-                {
-                    Vector3 delta = candidatePosition - used;
-                    if (delta.sqrMagnitude < locationCooldownDistance * locationCooldownDistance)
-                    {
-                        tooClose = true;
-                        break;
-                    }
-                }
-                if (tooClose) continue;
-
-                // Check 2: Ground Validation (Raycast)
-                if (Physics.Raycast(candidatePosition + Vector3.up * 50f, Vector3.down, out RaycastHit hit, 100f))
-                {
-                    // Snap to ground if needed, though waypoints are usually correct
-                    // candidatePosition = hit.point; 
-                }
-                else
-                {
-                    // No ground found (void/floating)
-                    continue;
-                }
-
-                // If valid, accept
-                break;
-            }
-
-            if (segment == null) return null;
-
-            // Track usage
-            usedLocations.Add(candidatePosition);
-            if (usedLocations.Count > 20) usedLocations.RemoveAt(0);
-
-            // Determine Location Type (Mock)
-            string[] locationTypes;
-            if (segment.id % 4 == 0) locationTypes = new[] { "Industrial Park", "Factory", "Plant", "Refinery" }; // Industrial
-            else if (segment.id % 4 == 1) locationTypes = new[] { "Mall", "Plaza", "Store", "Market", "Shop" }; // Commercial
-            else if (segment.id % 4 == 2) locationTypes = new[] { "Residence", "Apartments", "Estate", "Manor" }; // Residential
-            else locationTypes = new[] { "Warehouse", "Depot", "Station", "Hub", "Terminal" }; // Logistics
-
-            string locationType = locationTypes[UnityEngine.Random.Range(0, locationTypes.Length)];
-            
-            // Generate Name
-            string[] directions = { "North", "South", "East", "West", "Central", "Upper", "Lower" };
-            string direction = directions[UnityEngine.Random.Range(0, directions.Length)];
-            string locationName = $"{direction} {locationType}";
-
-            float triggerRadius = UnityEngine.Random.Range(10f, 15f);
-
-            QuestLocation location = new QuestLocation(candidatePosition, locationName, triggerRadius)
-            {
-                RoadSegmentIndex = segment.id,
-                WaypointIndex = waypointIndex
-            };
-
-            return location;
-        }
-
-        private bool AreLocationsValid(QuestLocation pickup, QuestLocation delivery, QuestDifficulty difficulty)
-        {
-            if (pickup == null || delivery == null)
-            {
-                return false;
-            }
-
-            if (pickup.RoadSegmentIndex < 0 || delivery.RoadSegmentIndex < 0)
-            {
-                return false;
-            }
-
-            Vector3 delta = pickup.Position - delivery.Position;
-            float distanceSqr = delta.sqrMagnitude;
-            float minDistance = difficulty switch
-            {
-                QuestDifficulty.Easy => 500f,
-                QuestDifficulty.Medium => 1000f,
-                QuestDifficulty.Hard => 1500f,
-                QuestDifficulty.Expert => 2000f,
-                _ => 500f
-            };
-
-            return distanceSqr >= minDistance * minDistance;
-        }
-
-        private string GenerateLocationName()
-        {
-            string[] directions = { "North", "South", "East", "West", "Central" };
-            string[] locationTypes = { "Warehouse", "Depot", "Station", "Hub", "Terminal" };
-
-            string direction = directions[UnityEngine.Random.Range(0, directions.Length)];
-            string locationType = locationTypes[UnityEngine.Random.Range(0, locationTypes.Length)];
-
-            return $"{direction} {locationType}";
-        }
-
-        private void CleanupQuestMarkers(QuestData quest)
-        {
-            quest?.PickupLocation?.DestroyMarker();
-
-            if (quest?.DeliveryLocations == null)
-            {
-                return;
-            }
-
-            foreach (QuestLocation location in quest.DeliveryLocations)
-            {
-                location?.DestroyMarker();
-            }
         }
 
         private void CheckPickupProximity()
@@ -1069,88 +924,7 @@ namespace DeliveryDriver.Quest
 
         public QuestZone SpawnQuestZone(QuestLocation location, QuestZoneType type)
         {
-            if (location == null)
-            {
-                return null;
-            }
-
-            GameObject zoneObject = null;
-            if (questZonePrefab != null)
-            {
-                zoneObject = Instantiate(questZonePrefab, location.Position, Quaternion.identity);
-            }
-
-            if (zoneObject == null)
-            {
-                zoneObject = new GameObject("QuestZone");
-            }
-
-            zoneObject.transform.position = location.Position;
-
-            QuestZone zone = zoneObject.GetComponent<QuestZone>();
-            if (zone == null)
-            {
-                try
-                {
-                    zone = zoneObject.AddComponent<QuestZone>();
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"[QuestManager] Failed adding QuestZone component: {e.Message}");
-                }
-            }
-
-            if (zone == null)
-            {
-                Debug.LogError("[QuestManager] Failed to create QuestZone component.");
-                Destroy(zoneObject);
-                return null;
-            }
-
-            zone.Configure(location, type);
-
-            if (location.VisualMarker == null)
-            {
-                if (type == QuestZoneType.Pickup && pickupMarkerPrefab != null)
-                {
-                    location.VisualMarker = pickupMarkerPrefab;
-                }
-                else if (type == QuestZoneType.Delivery && deliveryMarkerPrefab != null)
-                {
-                    location.VisualMarker = deliveryMarkerPrefab;
-                }
-            }
-
-            Collider zoneCollider = zoneObject.GetComponent<Collider>();
-            if (zoneCollider == null)
-            {
-                zoneCollider = zoneObject.AddComponent<SphereCollider>();
-            }
-
-            if (zoneCollider is SphereCollider sphere)
-            {
-                sphere.isTrigger = true;
-                sphere.radius = Mathf.Max(0.1f, location.TriggerRadius);
-            }
-            else if (zoneCollider is BoxCollider box)
-            {
-                box.isTrigger = true;
-                float size = Mathf.Max(0.1f, location.TriggerRadius * 2f);
-                box.size = new Vector3(size, size, size);
-            }
-
-            zone.SetActive(true);
-
-            if (activeZones == null)
-            {
-                activeZones = new List<QuestZone>();
-            }
-            activeZones.Add(zone);
-
-            // Task 10.2: Spawn marker particles at quest zone
-            SpawnMarkerParticles(location.Position);
-
-            return zone;
+            return GetZoneMarkerService().SpawnQuestZone(location, type);
         }
 
         public void OnPlayerEnteredZone(QuestZone zone)
@@ -1172,21 +946,7 @@ namespace DeliveryDriver.Quest
 
         public void ClearAllZones()
         {
-            if (activeZones == null || activeZones.Count == 0)
-            {
-                return;
-            }
-
-            for (int i = activeZones.Count - 1; i >= 0; i--)
-            {
-                QuestZone zone = activeZones[i];
-                if (zone != null)
-                {
-                    Destroy(zone.gameObject);
-                }
-            }
-
-            activeZones.Clear();
+            GetZoneMarkerService().ClearAllZones();
         }
 
         private void OnCargoPickedUp()
@@ -1198,13 +958,13 @@ namespace DeliveryDriver.Quest
 
             currentQuest.HasPickedUpCargo = true;
             currentQuest.PickupLocation?.HideMarker();
-            ClearAllZones();
-            PlayQuestClip(pickupClip);
+            GetZoneMarkerService().ClearAllZones();
+            GetAudioPresentationService().PlayQuestClip(pickupClip);
 
             // Task 10.2: Play pickup particle effect
             if (playerTransform != null)
             {
-                PlayParticleEffect(pickupEffectPrefab, playerTransform.position);
+                GetParticleEffectService().PlayParticleEffect(pickupEffectPrefab, playerTransform.position);
             }
 
             TryApplyCargoWeight(currentQuest.Cargo);
@@ -1217,7 +977,7 @@ namespace DeliveryDriver.Quest
             }
 
             QuestLocation delivery = GetCurrentDeliveryLocation();
-            SpawnQuestZone(delivery, QuestZoneType.Delivery);
+            GetZoneMarkerService().SpawnQuestZone(delivery, QuestZoneType.Delivery);
             MarkQuestUiDirty();
             TryNotifyQuestUpdated();
             Debug.Log($"[QuestManager] Cargo loaded! Deliver to {delivery?.LocationName ?? "destination"}.");
@@ -1242,12 +1002,12 @@ namespace DeliveryDriver.Quest
                 currentDelivery.HideMarker();
             }
 
-            ClearAllZones();
+            GetZoneMarkerService().ClearAllZones();
 
             if (currentQuest.CurrentDeliveryIndex < currentQuest.DeliveryLocations.Count - 1)
             {
                 currentQuest.CurrentDeliveryIndex++;
-                SpawnQuestZone(GetCurrentDeliveryLocation(), QuestZoneType.Delivery);
+                GetZoneMarkerService().SpawnQuestZone(GetCurrentDeliveryLocation(), QuestZoneType.Delivery);
                 MarkQuestUiDirty();
                 TryNotifyQuestUpdated();
             }
@@ -1255,7 +1015,7 @@ namespace DeliveryDriver.Quest
             {
                 TryRemoveCargoWeight();
                 cargoVisual?.DetachCargo();
-                PlayQuestClip(deliveryClip);
+                GetAudioPresentationService().PlayQuestClip(deliveryClip);
 
                 // Task 10.4: Tutorial integration
                 if (TutorialManager.Instance != null)
@@ -1276,7 +1036,7 @@ namespace DeliveryDriver.Quest
 
             TryRemoveCargoWeight();
             cargoVisual?.DetachCargo();
-            PlayQuestClip(destroyedClip);
+            GetAudioPresentationService().PlayQuestClip(destroyedClip);
             FailQuest(currentQuest, "Cargo destroyed");
         }
 
@@ -1335,12 +1095,12 @@ namespace DeliveryDriver.Quest
                 }
                 currentQuest.Cargo.TakeDamage(damage);
                 cargoVisual?.PlayDamageEffect();
-                PlayQuestClip(damageClip);
+                GetAudioPresentationService().PlayQuestClip(damageClip);
 
                 // Task 10.2: Play damage particle effect
                 if (playerTransform != null)
                 {
-                    PlayParticleEffect(damageEffectPrefab, playerTransform.position);
+                    GetParticleEffectService().PlayParticleEffect(damageEffectPrefab, playerTransform.position);
                 }
 
                 if (currentQuest.Cargo.IsDestroyed())
@@ -1584,16 +1344,6 @@ namespace DeliveryDriver.Quest
         }
 #endif
 
-        private void PlayQuestClip(AudioClip clip)
-        {
-            if (questSfxSource == null || clip == null)
-            {
-                return;
-            }
-
-            questSfxSource.PlayOneShot(clip);
-        }
-
         private void TryApplyCargoWeight(CargoData cargo)
         {
             if (playerController == null || cargo == null)
@@ -1689,65 +1439,30 @@ namespace DeliveryDriver.Quest
 
         public QuestSaveData GetSaveData()
         {
-            QuestSaveData data = new QuestSaveData
-            {
-                ActiveQuests = ConvertQuestList(activeQuests),
-                AvailableQuests = ConvertQuestList(availableQuests),
-                CompletedQuests = ConvertQuestList(completedQuests),
-                CurrentQuestID = currentQuest?.QuestID
-            };
-
-            return data;
+            return QuestSaveRestoreService.BuildSaveData(activeQuests, availableQuests, completedQuests, currentQuest);
         }
 
         public void LoadSaveData(QuestSaveData data)
         {
-            if (data == null)
+            if (!QuestSaveRestoreService.TryRestoreSaveData(data, out QuestSaveRestoreState restoredState))
             {
-                Debug.LogWarning("[QuestManager] LoadSaveData called with null data.");
                 return;
             }
 
-            activeQuests = ConvertQuestRecords(data.ActiveQuests);
-            availableQuests = ConvertQuestRecords(data.AvailableQuests);
-            completedQuests = ConvertQuestRecords(data.CompletedQuests);
+            activeQuests = restoredState.ActiveQuests;
+            availableQuests = restoredState.AvailableQuests;
+            completedQuests = restoredState.CompletedQuests;
+            currentQuest = restoredState.CurrentQuest;
 
-            currentQuest = null;
-            if (!string.IsNullOrWhiteSpace(data.CurrentQuestID))
-            {
-                currentQuest = activeQuests.Find(q => q.QuestID == data.CurrentQuestID);
-            }
-
-            RestoreQuestMarkers();
-
-            if (currentQuest != null)
-            {
-                OnQuestStarted.Invoke(currentQuest);
-                CacheQuestUiState(currentQuest);
-                OnQuestUpdated.Invoke(currentQuest);
-            }
-        }
-
-        private void RestoreQuestMarkers()
-        {
-            ClearAllZones();
-            foreach (QuestData quest in activeQuests)
-            {
-                if (quest == null)
+            QuestSaveRestoreService.RestoreLoadedQuestState(
+                restoredState,
+                quests => GetZoneMarkerService().RestoreQuestMarkers(quests, quest => GetCurrentDeliveryLocation(quest)),
+                quest =>
                 {
-                    continue;
-                }
-
-                if (!quest.HasPickedUpCargo)
-                {
-                    SpawnQuestZone(quest.PickupLocation, QuestZoneType.Pickup);
-                }
-                else
-                {
-                    QuestLocation delivery = GetCurrentDeliveryLocation(quest);
-                    SpawnQuestZone(delivery, QuestZoneType.Delivery);
-                }
-            }
+                    OnQuestStarted.Invoke(quest);
+                    CacheQuestUiState(quest);
+                    OnQuestUpdated.Invoke(quest);
+                });
         }
 
         private QuestLocation GetCurrentDeliveryLocation(QuestData quest)
@@ -1761,565 +1476,99 @@ namespace DeliveryDriver.Quest
             return quest.DeliveryLocations[index];
         }
 
-        private List<QuestSaveData.QuestRecord> ConvertQuestList(List<QuestData> quests)
-        {
-            List<QuestSaveData.QuestRecord> records = new List<QuestSaveData.QuestRecord>();
-            if (quests == null)
-            {
-                return records;
-            }
-
-            foreach (QuestData quest in quests)
-            {
-                if (quest == null)
-                {
-                    continue;
-                }
-
-                records.Add(QuestSaveData.QuestRecord.FromQuestData(quest));
-            }
-
-            return records;
-        }
-
-        private List<QuestData> ConvertQuestRecords(List<QuestSaveData.QuestRecord> records)
-        {
-            List<QuestData> quests = new List<QuestData>();
-            if (records == null)
-            {
-                return quests;
-            }
-
-            foreach (QuestSaveData.QuestRecord record in records)
-            {
-                if (record == null)
-                {
-                    continue;
-                }
-
-                quests.Add(record.ToQuestData());
-            }
-
-            return quests;
-        }
-
         public RewardPenaltyBreakdown GetQuestRewardPreview(QuestData quest)
         {
-            return CalculateRewardPenaltyBreakdown(quest, CalculateStreakMultiplier(consecutiveSuccesses + 1), false);
+            return QuestRewardService.GetQuestRewardPreview(quest, consecutiveSuccesses, BuildRewardConfig());
         }
 
         private RewardPenaltyBreakdown CalculateRewardPenaltyBreakdown(QuestData quest, float appliedStreakMultiplier, bool useRuntimePenalties)
         {
-            RewardPenaltyBreakdown breakdown = new RewardPenaltyBreakdown
-            {
-                TimePressureMultiplier = 1f,
-                CargoDifficultyMultiplier = 1f,
-                NeighborhoodRiskMultiplier = 1f,
-                StreakMultiplier = Mathf.Max(1f, appliedStreakMultiplier)
-            };
-
-            if (quest == null)
-            {
-                return breakdown;
-            }
-
-            float routeDistance = GetQuestRouteDistance(quest);
-            float rewardPerMeter = questSystemSettings != null ? questSystemSettings.BaseRewardPerMeter : 0.1f;
-            breakdown.DistanceReward = Mathf.RoundToInt(routeDistance * rewardPerMeter);
-
-            breakdown.TimePressureMultiplier = CalculateTimePressureMultiplier(routeDistance, quest.TimeLimit);
-            breakdown.CargoDifficultyMultiplier = CalculateCargoDifficultyMultiplier(quest.Cargo);
-            breakdown.NeighborhoodRiskMultiplier = CalculateNeighborhoodRiskMultiplier(quest);
-
-            int staticDifficultyBonus = questSystemSettings != null ? questSystemSettings.GetDifficultyBonus(quest.Difficulty) : 0;
-            float grossFloat = (breakdown.DistanceReward + staticDifficultyBonus) *
-                               breakdown.TimePressureMultiplier *
-                               breakdown.CargoDifficultyMultiplier *
-                               breakdown.NeighborhoodRiskMultiplier;
-            breakdown.GrossReward = Mathf.Max(0, Mathf.RoundToInt(grossFloat));
-
-            breakdown.SpeedBonus = CalculateSpeedBonus(quest, useRuntimePenalties);
-            breakdown.DriftBonus = CalculateDriftBonus(quest, useRuntimePenalties);
-
-            breakdown.CollisionPenalty = CalculateCollisionPenalty(quest, useRuntimePenalties);
-            breakdown.HardBrakePenalty = CalculateHardBrakePenalty(quest, useRuntimePenalties);
-            breakdown.DelayPenalty = CalculateDelayPenalty(quest, breakdown.GrossReward, useRuntimePenalties);
-            breakdown.CargoDamagePenalty = CalculateCargoDamagePenalty(quest, useRuntimePenalties);
-            breakdown.TotalPenalty = breakdown.CollisionPenalty + breakdown.HardBrakePenalty + breakdown.DelayPenalty + breakdown.CargoDamagePenalty;
-
-            int grossWithSpeed = breakdown.GrossReward + breakdown.SpeedBonus + breakdown.DriftBonus;
-            int streakAdjusted = Mathf.RoundToInt(grossWithSpeed * breakdown.StreakMultiplier);
-            breakdown.FinalReward = Mathf.Max(0, streakAdjusted - breakdown.TotalPenalty);
-
-            breakdown.FailurePenalty = CalculateFailurePenalty(quest, LastFailureReason);
-            return breakdown;
+            return QuestRewardService.CalculateRewardPenaltyBreakdown(
+                quest,
+                appliedStreakMultiplier,
+                useRuntimePenalties,
+                LastFailureReason,
+                BuildRewardConfig());
         }
 
         private float CalculateStreakMultiplier(int successCountAfterCompletion)
         {
-            int bonusCount = Mathf.Max(0, successCountAfterCompletion - 1);
-            return Mathf.Min(1.0f + (bonusCount * streakMultiplierIncrement), maxStreakMultiplier);
-        }
-
-        private float GetQuestRouteDistance(QuestData quest)
-        {
-            if (quest == null)
-            {
-                return 0f;
-            }
-
-            float routeDistance = quest.GetOptimalRouteDistance();
-            if (routeDistance > 0f)
-            {
-                return routeDistance;
-            }
-
-            if (quest.PickupLocation == null || quest.DeliveryLocations == null || quest.DeliveryLocations.Count == 0)
-            {
-                return 0f;
-            }
-
-            float totalDistance = 0f;
-            Vector3 start = quest.PickupLocation.Position;
-            for (int i = 0; i < quest.DeliveryLocations.Count; i++)
-            {
-                QuestLocation stop = quest.DeliveryLocations[i];
-                if (stop == null)
-                {
-                    continue;
-                }
-
-                totalDistance += Vector3.Distance(start, stop.Position);
-                start = stop.Position;
-            }
-
-            return totalDistance;
-        }
-
-        private float CalculateTimePressureMultiplier(float routeDistance, float timeLimit)
-        {
-            if (routeDistance <= 0f || timeLimit <= 0f)
-            {
-                return 1f;
-            }
-
-            float baselineTime = routeDistance / Mathf.Max(1f, payoutAverageSpeedMetersPerSecond);
-            float pressureRatio = baselineTime / Mathf.Max(1f, timeLimit);
-            float normalized = Mathf.InverseLerp(0.45f, 1.15f, pressureRatio);
-            return Mathf.Lerp(minTimePressureMultiplier, maxTimePressureMultiplier, Mathf.Clamp01(normalized));
-        }
-
-        private float CalculateCargoDifficultyMultiplier(CargoData cargo)
-        {
-            if (cargo == null)
-            {
-                return 1f;
-            }
-
-            float multiplier = 1f;
-            if (cargo.IsFragile)
-            {
-                multiplier += fragileCargoDifficultyBonus;
-            }
-
-            if (cargo.Weight > heavyCargoWeightStartKg)
-            {
-                float extraWeight = cargo.Weight - heavyCargoWeightStartKg;
-                float weightFactor = Mathf.Clamp01(extraWeight / Mathf.Max(1f, heavyCargoWeightStartKg));
-                multiplier += heavyCargoWeightMaxBonus * weightFactor;
-            }
-
-            return Mathf.Clamp(multiplier, 1f, 1.8f);
-        }
-
-        private float CalculateNeighborhoodRiskMultiplier(QuestData quest)
-        {
-            if (quest == null)
-            {
-                return 1f;
-            }
-
-            float multiplier = quest.Difficulty switch
-            {
-                QuestDifficulty.Medium => mediumRiskMultiplier,
-                QuestDifficulty.Hard => hardRiskMultiplier,
-                QuestDifficulty.Expert => expertRiskMultiplier,
-                _ => 1f
-            };
-
-            multiplier += quest.QuestType switch
-            {
-                QuestType.ExpressDelivery => expressRiskBonus,
-                QuestType.FragileDelivery => fragileRiskBonus,
-                QuestType.MultiStopDelivery => multiStopRiskBonus,
-                _ => 0f
-            };
-
-            return Mathf.Clamp(multiplier, 1f, 2f);
-        }
-
-        private int CalculateSpeedBonus(QuestData quest, bool useRuntimeState)
-        {
-            if (quest == null)
-            {
-                return 0;
-            }
-
-            float completionPercent = 0.55f;
-            if (useRuntimeState && quest.TimeLimit > 0f)
-            {
-                completionPercent = Mathf.Clamp01(quest.TimeRemaining / quest.TimeLimit);
-            }
-
-            if (completionPercent < quest.BonusTimeThreshold)
-            {
-                return 0;
-            }
-
-            float bonusMultiplier = completionPercent >= 0.75f ? 1.5f : 1.0f;
-            int configuredBonus = quest.BonusReward > 0 ? quest.BonusReward : Mathf.RoundToInt(quest.BaseReward * 0.5f);
-            return Mathf.RoundToInt(configuredBonus * bonusMultiplier);
-        }
-
-        private int CalculateDriftBonus(QuestData quest, bool useRuntimeState)
-        {
-            if (!enableDriftBonus || quest == null || !useRuntimeState)
-            {
-                return 0;
-            }
-
-            int driftPoints = Mathf.Max(0, quest.DriftScorePoints);
-            if (driftPoints <= 0)
-            {
-                return 0;
-            }
-
-            int stepPoints = Mathf.Max(1, driftPointsPerRewardStep);
-            int steps = driftPoints / stepPoints;
-            int bonus = steps * Mathf.Max(0, driftRewardStepAmount);
-            return Mathf.Clamp(bonus, 0, Mathf.Max(0, maxDriftBonusReward));
-        }
-
-        private int CalculateCollisionPenalty(QuestData quest, bool useRuntimeState)
-        {
-            int totalCollisions = 0;
-            int npcCollisions = 0;
-
-            if (quest != null && useRuntimeState)
-            {
-                totalCollisions = Mathf.Max(0, quest.CollisionCount);
-                npcCollisions = Mathf.Clamp(quest.NpcCollisionCount, 0, totalCollisions);
-            }
-
-            int nonNpcCollisions = Mathf.Max(0, totalCollisions - npcCollisions);
-            int penalty = SumProgressivePenalty(nonNpcCollisions, collisionPenaltyBase, collisionPenaltyStep);
-            penalty += SumProgressivePenalty(npcCollisions, npcCollisionPenaltyBase, npcCollisionPenaltyStep);
-            return penalty;
-        }
-
-        private int CalculateHardBrakePenalty(QuestData quest, bool useRuntimeState)
-        {
-            int hardBrakes = 0;
-            if (quest != null && useRuntimeState)
-            {
-                hardBrakes = Mathf.Max(0, quest.HardBrakeCount);
-            }
-
-            int penalty = SumProgressivePenalty(hardBrakes, hardBrakePenaltyBase, hardBrakePenaltyStep);
-            if (DriverProgressionSystem.Instance != null)
-            {
-                penalty = Mathf.RoundToInt(penalty * DriverProgressionSystem.Instance.GetRoutePenaltyMultiplier());
-            }
-
-            return penalty;
-        }
-
-        private int CalculateDelayPenalty(QuestData quest, int grossReward, bool useRuntimeState)
-        {
-            if (quest == null)
-            {
-                return 0;
-            }
-
-            int maxDelayPenalty = Mathf.RoundToInt(grossReward * Mathf.Clamp01(delayPenaltyMaxRatio));
-            if (!useRuntimeState)
-            {
-                return maxDelayPenalty;
-            }
-
-            if (quest.TimeLimit <= 0f)
-            {
-                return 0;
-            }
-
-            float remainingRatio = Mathf.Clamp01(quest.TimeRemaining / quest.TimeLimit);
-            if (remainingRatio >= delayPenaltyStartsAtRemainingRatio)
-            {
-                return 0;
-            }
-
-            float missingRatio = (delayPenaltyStartsAtRemainingRatio - remainingRatio) / Mathf.Max(0.01f, delayPenaltyStartsAtRemainingRatio);
-            int penalty = Mathf.RoundToInt(maxDelayPenalty * Mathf.Clamp01(missingRatio));
-            if (DriverProgressionSystem.Instance != null)
-            {
-                penalty = Mathf.RoundToInt(penalty * DriverProgressionSystem.Instance.GetRoutePenaltyMultiplier());
-            }
-
-            return penalty;
-        }
-
-        private int CalculateCargoDamagePenalty(QuestData quest, bool useRuntimeState)
-        {
-            if (quest?.Cargo == null || !quest.Cargo.IsFragile)
-            {
-                return 0;
-            }
-
-            if (!useRuntimeState)
-            {
-                return Mathf.RoundToInt(100f * cargoDamagePenaltyPerPercent);
-            }
-
-            float damagedPercent = Mathf.Clamp(100f - quest.Cargo.CargoHealth, 0f, 100f);
-            return Mathf.RoundToInt(damagedPercent * cargoDamagePenaltyPerPercent);
-        }
-
-        private int SumProgressivePenalty(int count, int basePenalty, int stepPenalty)
-        {
-            int total = 0;
-            for (int i = 0; i < count; i++)
-            {
-                total += basePenalty + (i * stepPenalty);
-            }
-
-            return total;
+            return QuestRewardService.CalculateStreakMultiplier(successCountAfterCompletion, BuildRewardConfig());
         }
 
         private int CalculateFailurePenalty(QuestData quest, string reason)
         {
-            if (quest == null)
-            {
-                return 0;
-            }
-
-            int failurePenalty = 0;
-            if (!string.IsNullOrWhiteSpace(reason))
-            {
-                if (reason.IndexOf("Time", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    failurePenalty += timeExpiredFailurePenalty;
-                }
-                else if (reason.IndexOf("Cargo", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    failurePenalty += cargoDestroyedFailurePenalty;
-                }
-            }
-
-            failurePenalty += CalculateCollisionPenalty(quest, true);
-            failurePenalty += CalculateCargoDamagePenalty(quest, true);
-            return Mathf.Max(0, failurePenalty);
+            return QuestRewardService.CalculateFailurePenalty(quest, reason, BuildRewardConfig());
         }
 
         private void TryApplyFailurePenalty(int amount)
         {
-            if (amount <= 0)
-            {
-                return;
-            }
-
-            if (PlayerProgressionManager.Instance != null)
-            {
-                PlayerProgressionManager.Instance.SpendMoney(amount);
-                return;
-            }
-
-            Type progressionType = Type.GetType("PlayerProgressionManager");
-            if (progressionType == null)
-            {
-                return;
-            }
-
-            UnityEngine.Object manager = FindAnyObjectByType(progressionType);
-            if (manager == null)
-            {
-                return;
-            }
-
-            foreach (string methodName in new[] { "SpendMoney", "RemoveCurrency", "DeductMoney" })
-            {
-                var method = progressionType.GetMethod(methodName, new[] { typeof(int) });
-                if (method != null)
-                {
-                    method.Invoke(manager, new object[] { amount });
-                    return;
-                }
-            }
+            QuestRewardService.TryApplyFailurePenalty(amount);
         }
 
         private void TryAwardRewards(QuestData quest, int reward)
         {
-            if (quest == null)
-            {
-                return;
-            }
+            QuestRewardService.TryAwardRewards(quest, reward);
+        }
 
-            // Try to use PlayerProgressionManager directly via singleton
-            if (PlayerProgressionManager.Instance != null)
-            {
-                int fuelRebate = DriverProgressionSystem.Instance != null
-                    ? DriverProgressionSystem.Instance.CalculateFuelEfficiencyRebate(quest)
-                    : 0;
-                int totalMoneyAward = reward + Mathf.Max(0, fuelRebate);
+        private int CalculateCollisionPenalty(QuestData quest, bool useRuntimeState)
+        {
+            return QuestRewardService.CalculateCollisionPenalty(quest, useRuntimeState, BuildRewardConfig());
+        }
 
-                PlayerProgressionManager.Instance.AwardMoney(totalMoneyAward);
-                PlayerProgressionManager.Instance.AwardXP(quest.XPReward);
-                PlayerProgressionManager.Instance.IncrementQuestsCompleted();
-                PlayerProgressionManager.Instance.AddDistanceTraveled(quest.TotalDistanceTraveled);
-                return;
-            }
+        private int CalculateHardBrakePenalty(QuestData quest, bool useRuntimeState)
+        {
+            return QuestRewardService.CalculateHardBrakePenalty(quest, useRuntimeState, BuildRewardConfig());
+        }
 
-            // Fallback to reflection for backwards compatibility
-            Type progressionType = Type.GetType("PlayerProgressionManager");
-            if (progressionType == null)
-            {
-                Debug.Log($"[QuestManager] Reward granted: {reward} currency, {quest.XPReward} XP.");
-                return;
-            }
+        private int CalculateDriftBonus(QuestData quest, bool useRuntimeState)
+        {
+            return QuestRewardService.CalculateDriftBonus(quest, useRuntimeState, BuildRewardConfig());
+        }
 
-            UnityEngine.Object manager = FindAnyObjectByType(progressionType);
-            if (manager == null)
-            {
-                Debug.Log($"[QuestManager] Reward granted: {reward} currency, {quest.XPReward} XP.");
-                return;
-            }
-
-            bool invoked = false;
-            foreach (string methodName in new[] { "AddCurrency", "AddMoney", "AddCash" })
-            {
-                var method = progressionType.GetMethod(methodName, new[] { typeof(int) });
-                if (method != null)
-                {
-                    method.Invoke(manager, new object[] { reward });
-                    invoked = true;
-                    break;
-                }
-            }
-
-            foreach (string methodName in new[] { "AddXP", "AddExperience" })
-            {
-                var method = progressionType.GetMethod(methodName, new[] { typeof(int) });
-                if (method != null)
-                {
-                    method.Invoke(manager, new object[] { quest.XPReward });
-                    invoked = true;
-                    break;
-                }
-            }
-
-            if (!invoked)
-            {
-                Debug.Log($"[QuestManager] Reward granted: {reward} currency, {quest.XPReward} XP.");
-            }
+        private QuestRewardConfig BuildRewardConfig()
+        {
+            return new QuestRewardConfig(
+                questSystemSettings,
+                payoutAverageSpeedMetersPerSecond,
+                minTimePressureMultiplier,
+                maxTimePressureMultiplier,
+                fragileCargoDifficultyBonus,
+                heavyCargoWeightStartKg,
+                heavyCargoWeightMaxBonus,
+                mediumRiskMultiplier,
+                hardRiskMultiplier,
+                expertRiskMultiplier,
+                expressRiskBonus,
+                fragileRiskBonus,
+                multiStopRiskBonus,
+                collisionPenaltyBase,
+                collisionPenaltyStep,
+                npcCollisionPenaltyBase,
+                npcCollisionPenaltyStep,
+                hardBrakePenaltyBase,
+                hardBrakePenaltyStep,
+                delayPenaltyStartsAtRemainingRatio,
+                delayPenaltyMaxRatio,
+                cargoDamagePenaltyPerPercent,
+                timeExpiredFailurePenalty,
+                cargoDestroyedFailurePenalty,
+                enableDriftBonus,
+                driftPointsPerRewardStep,
+                driftRewardStepAmount,
+                maxDriftBonusReward,
+                streakMultiplierIncrement,
+                maxStreakMultiplier);
         }
 
         #region Task 10.1: Audio & Music System
-
-        /// <summary>
-        /// Task 10.1: Plays the time warning sound effect
-        /// </summary>
-        private void PlayTimeWarning()
-        {
-            if (questSfxSource != null && timeWarningClip != null)
-            {
-                questSfxSource.PlayOneShot(timeWarningClip);
-                Debug.Log("[QuestManager] Time warning! Less than 30 seconds remaining!");
-            }
-        }
-
-        /// <summary>
-        /// Task 10.1: Switches background music to delivery mode (intense)
-        /// </summary>
-        private void SwitchToDeliveryMusic()
-        {
-            if (musicSource == null || deliveryMusicClip == null)
-            {
-                return;
-            }
-
-            if (musicSource.clip == deliveryMusicClip)
-            {
-                return; // Already playing delivery music
-            }
-
-            StartCoroutine(CrossfadeMusic(deliveryMusicClip));
-        }
-
-        /// <summary>
-        /// Task 10.1: Switches background music to exploration mode (calm)
-        /// </summary>
-        private void SwitchToExplorationMusic()
-        {
-            if (musicSource == null || explorationMusicClip == null)
-            {
-                return;
-            }
-
-            if (musicSource.clip == explorationMusicClip)
-            {
-                return; // Already playing exploration music
-            }
-
-            StartCoroutine(CrossfadeMusic(explorationMusicClip));
-        }
-
-        /// <summary>
-        /// Task 10.1: Crossfades between music tracks smoothly
-        /// </summary>
-        private System.Collections.IEnumerator CrossfadeMusic(AudioClip newClip)
-        {
-            if (isCrossfading)
-            {
-                yield break; // Don't interrupt existing crossfade
-            }
-
-            isCrossfading = true;
-            float startVolume = musicSource.volume;
-
-            // Fade out current music
-            float elapsed = 0f;
-            while (elapsed < musicCrossfadeDuration / 2f)
-            {
-                elapsed += Time.deltaTime;
-                musicSource.volume = Mathf.Lerp(startVolume, 0f, elapsed / (musicCrossfadeDuration / 2f));
-                yield return null;
-            }
-
-            // Switch clip
-            musicSource.clip = newClip;
-            musicSource.Play();
-
-            // Fade in new music
-            elapsed = 0f;
-            while (elapsed < musicCrossfadeDuration / 2f)
-            {
-                elapsed += Time.deltaTime;
-                musicSource.volume = Mathf.Lerp(0f, startVolume, elapsed / (musicCrossfadeDuration / 2f));
-                yield return null;
-            }
-
-            musicSource.volume = startVolume;
-            isCrossfading = false;
-        }
 
         /// <summary>
         /// Task 10.1: Plays a level up sound effect (can be called from PlayerProgressionManager)
         /// </summary>
         public void PlayLevelUpSound()
         {
-            if (questSfxSource != null && levelUpClip != null)
-            {
-                questSfxSource.PlayOneShot(levelUpClip);
-            }
+            GetAudioPresentationService().PlayLevelUpSound();
         }
 
         /// <summary>
@@ -2327,10 +1576,7 @@ namespace DeliveryDriver.Quest
         /// </summary>
         public void SetMusicVolume(float volume)
         {
-            if (musicSource != null)
-            {
-                musicSource.volume = Mathf.Clamp01(volume);
-            }
+            GetAudioPresentationService().SetMusicVolume(volume);
         }
 
         /// <summary>
@@ -2338,10 +1584,7 @@ namespace DeliveryDriver.Quest
         /// </summary>
         public void SetSFXVolume(float volume)
         {
-            if (questSfxSource != null)
-            {
-                questSfxSource.volume = Mathf.Clamp01(volume);
-            }
+            GetAudioPresentationService().SetSfxVolume(volume);
         }
 
         #endregion
@@ -2349,115 +1592,11 @@ namespace DeliveryDriver.Quest
         #region Task 10.2: Particle Effects System
 
         /// <summary>
-        /// Task 10.2: Initializes the particle effect object pool
-        /// </summary>
-        private void InitializeParticlePool()
-        {
-            particlePool.Clear();
-
-            // Pre-instantiate particle effects for pooling
-            GameObject[] prefabs = { pickupEffectPrefab, deliveryEffectPrefab, damageEffectPrefab, levelUpEffectPrefab };
-
-            foreach (GameObject prefab in prefabs)
-            {
-                if (prefab == null) continue;
-
-                for (int i = 0; i < particlePoolSize / prefabs.Length; i++)
-                {
-                    GameObject particle = Instantiate(prefab);
-                    particle.SetActive(false);
-                    particlePool.Enqueue(particle);
-                }
-            }
-
-            Debug.Log($"[QuestManager] Particle pool initialized with {particlePool.Count} objects.");
-        }
-
-        /// <summary>
-        /// Task 10.2: Plays a particle effect at the specified position
-        /// </summary>
-        private void PlayParticleEffect(GameObject effectPrefab, Vector3 position)
-        {
-            if (effectPrefab == null)
-            {
-                return;
-            }
-
-            GameObject effect = null;
-
-            // Try to get from pool first
-            if (particlePool.Count > 0)
-            {
-                effect = particlePool.Dequeue();
-            }
-
-            // If pool is empty, instantiate new one
-            if (effect == null)
-            {
-                effect = Instantiate(effectPrefab, position, Quaternion.identity);
-            }
-            else
-            {
-                effect.transform.position = position;
-                effect.transform.rotation = Quaternion.identity;
-                effect.SetActive(true);
-            }
-
-            // Get particle system and play
-            ParticleSystem ps = effect.GetComponent<ParticleSystem>();
-            if (ps != null)
-            {
-                ps.Play();
-
-                // Return to pool after particle duration
-                float duration = ps.main.duration + ps.main.startLifetime.constantMax;
-                StartCoroutine(ReturnParticleToPool(effect, duration));
-            }
-            else
-            {
-                // If no particle system, just destroy after 5 seconds
-                StartCoroutine(ReturnParticleToPool(effect, 5f));
-            }
-        }
-
-        /// <summary>
-        /// Task 10.2: Returns a particle effect to the pool after duration
-        /// </summary>
-        private System.Collections.IEnumerator ReturnParticleToPool(GameObject particle, float delay)
-        {
-            yield return new UnityEngine.WaitForSeconds(delay);
-
-            if (particle != null)
-            {
-                particle.SetActive(false);
-                particlePool.Enqueue(particle);
-            }
-        }
-
-        /// <summary>
         /// Task 10.2: Plays a level up particle effect (can be called from PlayerProgressionManager)
         /// </summary>
         public void PlayLevelUpEffect(Vector3 position)
         {
-            PlayParticleEffect(levelUpEffectPrefab, position);
-        }
-
-        /// <summary>
-        /// Task 10.2: Spawns marker particles at quest zone locations
-        /// </summary>
-        private void SpawnMarkerParticles(Vector3 position)
-        {
-            if (questMarkerParticlePrefab == null)
-            {
-                return;
-            }
-
-            GameObject markerParticle = Instantiate(questMarkerParticlePrefab, position, Quaternion.identity);
-            ParticleSystem ps = markerParticle.GetComponent<ParticleSystem>();
-            if (ps != null)
-            {
-                ps.Play();
-            }
+            GetParticleEffectService().PlayLevelUpEffect(position);
         }
 
         #endregion
@@ -2573,7 +1712,7 @@ namespace DeliveryDriver.Quest
             }
 
             // Generate pickup location
-            QuestLocation pickup = GenerateRandomLocation("Pickup");
+            QuestLocation pickup = GetLocationAssignmentService().GenerateRandomLocation("Pickup");
             if (pickup == null)
             {
                 Debug.LogWarning("[QuestManager] Failed to generate pickup location for multi-stop quest.");
@@ -2584,13 +1723,9 @@ namespace DeliveryDriver.Quest
             List<QuestLocation> deliveryLocations = new List<QuestLocation>();
             for (int i = 0; i < stopCount; i++)
             {
-                QuestLocation delivery = GenerateRandomLocation($"Delivery {i + 1}");
+                QuestLocation delivery = GetLocationAssignmentService().GenerateRandomLocation($"Delivery {i + 1}");
                 if (delivery != null)
                 {
-                    if (delivery.VisualMarker == null && deliveryMarkerPrefab != null)
-                    {
-                        delivery.VisualMarker = deliveryMarkerPrefab;
-                    }
                     deliveryLocations.Add(delivery);
                 }
             }
@@ -2632,7 +1767,7 @@ namespace DeliveryDriver.Quest
             };
 
             // Assign markers
-            if (quest.PickupLocation.VisualMarker == null) quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
+            GetLocationAssignmentService().EnsureQuestMarkersAssigned(quest);
 
             // Calculate time and rewards scaled for multi-stop
             float avgSpeed = 11f; // ~40 km/h in m/s
@@ -2768,8 +1903,8 @@ namespace DeliveryDriver.Quest
 
             for (int i = 0; i < 15; i++)
             {
-                pickup = GenerateRandomLocation("Express Pickup");
-                delivery = GenerateRandomLocation("Express Delivery");
+                pickup = GetLocationAssignmentService().GenerateRandomLocation("Express Pickup");
+                delivery = GetLocationAssignmentService().GenerateRandomLocation("Express Delivery");
 
                 if (pickup == null || delivery == null) continue;
 
@@ -2804,8 +1939,7 @@ namespace DeliveryDriver.Quest
             };
 
             // Assign markers
-            if (quest.PickupLocation.VisualMarker == null) quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
-            if (delivery.VisualMarker == null) delivery.VisualMarker = deliveryMarkerPrefab;
+            GetLocationAssignmentService().EnsureQuestMarkersAssigned(quest);
 
             // Time limit = 0.6x normal (very tight)
             float avgSpeed = 11f; // ~40 km/h in m/s
@@ -2873,8 +2007,8 @@ namespace DeliveryDriver.Quest
 
             for (int i = 0; i < 15; i++)
             {
-                pickup = GenerateRandomLocation("Fragile Pickup");
-                delivery = GenerateRandomLocation("Fragile Delivery");
+                pickup = GetLocationAssignmentService().GenerateRandomLocation("Fragile Pickup");
+                delivery = GetLocationAssignmentService().GenerateRandomLocation("Fragile Delivery");
 
                 if (pickup == null || delivery == null) continue;
 
@@ -2909,8 +2043,7 @@ namespace DeliveryDriver.Quest
             };
 
             // Assign markers
-            if (quest.PickupLocation.VisualMarker == null) quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
-            if (delivery.VisualMarker == null) delivery.VisualMarker = deliveryMarkerPrefab;
+            GetLocationAssignmentService().EnsureQuestMarkersAssigned(quest);
 
             // Slightly longer time limit (player must drive carefully)
             float avgSpeed = 11f; // ~40 km/h in m/s
@@ -2963,8 +2096,8 @@ namespace DeliveryDriver.Quest
 
             for (int i = 0; i < 15; i++)
             {
-                pickup = GenerateRandomLocation("Trial Start");
-                delivery = GenerateRandomLocation("Trial Finish");
+                pickup = GetLocationAssignmentService().GenerateRandomLocation("Trial Start");
+                delivery = GetLocationAssignmentService().GenerateRandomLocation("Trial Finish");
 
                 if (pickup == null || delivery == null) continue;
 
@@ -2999,8 +2132,7 @@ namespace DeliveryDriver.Quest
             };
 
             // Assign markers
-            if (quest.PickupLocation.VisualMarker == null) quest.PickupLocation.VisualMarker = pickupMarkerPrefab;
-            if (delivery.VisualMarker == null) delivery.VisualMarker = deliveryMarkerPrefab;
+            GetLocationAssignmentService().EnsureQuestMarkersAssigned(quest);
 
             // Very short time limit (0.5x normal)
             float avgSpeed = 11f; // ~40 km/h in m/s
@@ -3135,7 +2267,7 @@ namespace DeliveryDriver.Quest
             }
 
             // Assign locations
-            bool assigned = AssignQuestLocations(quest);
+            bool assigned = GetLocationAssignmentService().AssignQuestLocations(quest);
             if (!assigned)
             {
                 Debug.LogWarning("[QuestManager] Failed to assign locations for daily challenge");
