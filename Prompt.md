@@ -29,21 +29,193 @@
 - [x] Step 25 - Split `CameraFollow` by extracting gameplay rig binding/FOV/offset logic into `CameraFollowGameplayRig`, external reverse/minimap controller bootstrap into `CameraFollowExternalControllerCoordinator`, and cached minimap surface generation into `CameraFollowMiniMapSurfaceService`, leaving `CameraFollow` centered on target orchestration instead of owning all camera subsystems directly.
 - [x] Step 26 - Split `PauseMenuUI` by extracting runtime panel construction into `PauseMenuRuntimeViewBuilder` and settings refresh/callback coordination into `PauseMenuSettingsCoordinator`, leaving `PauseMenuUI` focused on pause-state orchestration, scene actions, and runtime rebuild handling.
 - [x] Step 27 - Began `NpcCarAgent` responsibility extraction by moving wheel-visual resolution and wheel pose syncing into `NpcCarWheelVisualService`, reducing the traffic monolith through a low-risk vehicle-visual module while preserving driving and obstacle behavior.
+- [x] Step 28 - Prepared the concrete structural migration plan for folder ownership, namespace normalization, and future asmdef splitting, using the current repository layout and refactor results to define staged, low-risk moves instead of mixing structural churn into behavior-heavy refactors.
 
-## Planned Next Steps
+## Structure Migration Plan
 
-```xml
-<planned_next_steps>
-  <step id="28" status="planned" area="Structure">
-    <title>Prepare Namespace and Folder Migration Plan</title>
-    <summary>After major runtime monoliths are reduced further, define a concrete move plan for folder ownership, namespace normalization, and later asmdef cleanup.</summary>
-    <targets>
-      <file>Assets/Scripts/</file>
-    </targets>
-    <goal>Stage structural migration after behavior-heavy refactors are safer.</goal>
-  </step>
-</planned_next_steps>
-```
+### Current verified structural pressure
+
+- `Assets/Scripts/GameScripts.asmdef` is still the only asmdef under `Assets/Scripts/`, and its `rootNamespace` is empty.
+- Domain folders already exist for `Company`, `Navigation`, `Neighborhood`, `Performance`, `Quest`, `UI`, and `Vehicle`, but many high-value runtime files still live at `Assets/Scripts/` root.
+- Root-level files are currently mixing at least five ownership types:
+  - delivery flow
+  - camera/follow/minimap/reverse camera support
+  - traffic and road graph systems
+  - gameplay vehicle/HUD scripts
+  - optimization/bootstrap utilities
+- Namespace discipline is improved but still inconsistent:
+  - `TrafficSystem` remains separate from `DeliveryDriver.*`
+  - several important root scripts still have no namespace
+  - some UI scripts under `Assets/Scripts/Quest/UI/` still use `DeliveryDriver.Quest` instead of `DeliveryDriver.Quest.UI`
+
+### Target folder ownership
+
+Use this as the destination map for later file moves.
+
+- `Assets/Scripts/Delivery/`
+  - `DeliveryManager`
+  - `DeliveryMissionRules`
+  - `DeliveryQuestFlow`
+  - `DeliveryPhoneMissionFlow`
+  - `DeliverySpawnEnvironment`
+  - `DeliveryUI`
+  - `DeliveryUiSpriteHelper`
+  - `PhoneMissionUI`
+  - `DeliveryBox`
+  - `DeliveryIndicator`
+
+- `Assets/Scripts/Camera/`
+  - `CameraFollow`
+  - `CameraFollowGameplayRig`
+  - `CameraFollowExternalControllerCoordinator`
+  - `CameraFollowMiniMapSurfaceService`
+  - `ReverseCameraHUD`
+
+- `Assets/Scripts/Traffic/`
+  - `NpcCarAgent`
+  - `NpcCarWheelVisualService`
+  - `NpcRecovery`
+  - `NpcSpawner`
+  - `DrivingPersonality`
+  - `TurnSignalController`
+  - `TrafficCommunicationSystem`
+  - `VehicleTrajectoryPredictor`
+  - `WeatherManager`
+  - `RoadGraphBuilder`
+  - `RoadGraphConnectionBuilder`
+  - `RoadGraphMeshSampler`
+  - `RoadGraphPathfinder`
+  - `RoadGraphTypes`
+
+- `Assets/Scripts/Gameplay/Vehicle/`
+  - `CarController`
+
+- `Assets/Scripts/Gameplay/HUD/`
+  - `SpeedometerUI`
+
+- `Assets/Scripts/Optimization/`
+  - `AdvancedObjectPool`
+  - `OptimizationProfile`
+  - `PerformanceOptimizationManager`
+  - `RuntimeOptimizationBootstrap`
+  - `UnifiedOptimizationController`
+  - `WorldChunk`
+  - `WorldChunkManager`
+  - `HLODGroup`
+  - `HLODProxy`
+
+- `Assets/Scripts/Navigation/Minimap/`
+  - `MinimapRoadTextureBuilder`
+  - `MinimapShaderHelper`
+
+- `Assets/Scripts/UI/Runtime/`
+  - `MainMenuRuntimeUI`
+  - `MenuSceneBootstrap`
+  - `CreditsSceneRuntimeUI`
+  - `SettingsSceneRuntimeUI`
+  - `RuntimeUiSkinLoader`
+  - `GlobalUiCoordinator`
+
+### Target namespaces
+
+Apply namespace normalization only after the folder moves are stable.
+
+- `DeliveryDriver.Delivery`
+  - all delivery flow and delivery UI scripts currently at root
+
+- `DeliveryDriver.Camera`
+  - camera orchestration and reverse-camera helper scripts
+
+- `DeliveryDriver.Traffic`
+  - replace the current `TrafficSystem` namespace over time
+  - road graph, NPC traffic, weather, signaling, and trajectory helpers should converge here
+
+- `DeliveryDriver.Gameplay.Vehicle`
+  - `CarController`
+
+- `DeliveryDriver.Gameplay.Hud`
+  - `SpeedometerUI`
+
+- `DeliveryDriver.Optimization`
+  - keep and reinforce for optimization/runtime-performance files
+
+- `DeliveryDriver.UI`
+  - runtime-global UI infrastructure and scene runtime UI builders
+
+- `DeliveryDriver.Quest.UI`
+  - normalize remaining quest UI files that still use `DeliveryDriver.Quest`
+
+### Safe migration order
+
+This is the staged order to minimize regressions and merge pain.
+
+1. Move leaf helper files first without changing behavior.
+   - Examples: `DeliveryMissionRules`, `DeliveryQuestFlow`, `CameraFollowGameplayRig`, `CameraFollowMiniMapSurfaceService`, `NpcCarWheelVisualService`.
+
+2. Move root-level files into ownership folders while preserving existing namespaces temporarily.
+   - This reduces file chaos before touching compiler identity.
+
+3. Normalize namespaces one domain at a time.
+   - Recommended order: `Delivery`, `Camera`, `Optimization`, `Traffic`, then remaining `Quest.UI` mismatches.
+
+4. Add asmdefs only after domain boundaries are stable.
+   - Otherwise every move will also become an assembly dependency migration.
+
+5. Update scene/bootstrap references only after folder and namespace moves are complete for that domain.
+   - This avoids mixing file identity churn with runtime behavior churn.
+
+### First asmdef split plan
+
+Do not execute until the above folder and namespace passes are done.
+
+- `DeliveryDriver.Delivery.asmdef`
+  - depends on `DeliveryDriver.Quest`, `DeliveryDriver.UI`, `DeliveryDriver.Navigation`, `DeliveryDriver.Company`
+
+- `DeliveryDriver.Camera.asmdef`
+  - depends on `DeliveryDriver.Vehicle`, `DeliveryDriver.Quest.UI`, `Unity.Cinemachine`
+
+- `DeliveryDriver.Traffic.asmdef`
+  - depends on `DeliveryDriver.City`, `DeliveryDriver.Optimization`
+
+- `DeliveryDriver.Navigation.asmdef`
+  - depends on `DeliveryDriver.Quest`, `DeliveryDriver.UI`, `DeliveryDriver.City`
+
+- `DeliveryDriver.UI.asmdef`
+  - depends on `DeliveryDriver.Quest`, `Unity.TextMeshPro`, `Unity.InputSystem`
+
+- `DeliveryDriver.Optimization.asmdef`
+  - should remain low-level and avoid depending on gameplay/UI assemblies
+
+- `DeliveryDriver.Core.asmdef` or `DeliveryDriver.Vehicle.asmdef`
+  - evaluate only after `CarController` and shared vehicle-facing types stop living at root
+
+### Files to defer until after structural groundwork
+
+Do not move these in the first structural pass unless required by a broader feature branch.
+
+- `GlobalUiCoordinator`
+- `SceneTransitionManager`
+- `MainMenuRuntimeUI`
+- `MenuSceneBootstrap`
+- `SaveManager`
+- `QuestDatabaseBootstrap`
+- `GameSceneCompanyPageInstaller`
+- `CompanyPageUI`
+- `PlayerVehicleManager`
+- `DeliveryManager`
+- `QuestManager`
+- `NpcCarAgent`
+
+These remain high-churn runtime orchestrators, and moving them too early would combine behavioral risk with identity churn.
+
+### Completion criteria for a future structural branch
+
+- no gameplay/runtime scripts remain at `Assets/Scripts/` root unless they are true shared primitives
+- all moved files use namespaces matching their folder ownership
+- `TrafficSystem` is retired in favor of `DeliveryDriver.Traffic`
+- `Quest` UI files consistently use `DeliveryDriver.Quest.UI`
+- asmdefs are introduced with explicit dependency direction and without circular references
+- scene and bootstrap flows still compile and run after namespace/file moves
 
 Rewrite, optimize, and reorganize all C# scripts under `Assets/Scripts/` in this Unity project. The goal is not to patch individual issues. The goal is to rebuild the scripting architecture so it is faster, cleaner, easier to maintain, easier to extend, and significantly more readable.
 
