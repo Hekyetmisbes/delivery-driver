@@ -161,6 +161,19 @@ namespace DeliveryDriver.Quest.UI
                     return false;
                 }
 
+                if (!mesh.isReadable)
+                {
+                    if (!loggedMissingPrefabResource)
+                    {
+                        Debug.LogWarning(
+                            $"[MinimapSpriteRegistry] Mesh data for '{prefab.name}' is not readable at runtime. " +
+                            "Enable Read/Write on the source model import settings or fall back to atlas/runtime arrow sprite.");
+                        loggedMissingPrefabResource = true;
+                    }
+
+                    return false;
+                }
+
                 Vector2[] uv = mesh.uv;
                 if (uv == null || uv.Length == 0)
                 {
