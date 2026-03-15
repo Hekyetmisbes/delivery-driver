@@ -5,7 +5,6 @@ namespace DeliveryDriver.Quest.UI
     [CreateAssetMenu(fileName = "MinimapSpriteRegistry", menuName = "Delivery Driver/UI/Minimap Sprite Registry")]
     public class MinimapSpriteRegistry : ScriptableObject
     {
-        private const string PlayerArrowPrefabResourcePath = "Minimap/Arrow_3D_Icon_01";
         [SerializeField] private bool useAtlasPlayerArrow;
         [SerializeField] private Texture2D atlasTexture;
         [SerializeField] private Rect playerArrowRect = new Rect(288f, 162f, 16f, 16f);
@@ -14,20 +13,12 @@ namespace DeliveryDriver.Quest.UI
 
         private Sprite cachedPlayerArrowSprite;
         private bool loggedMissingAtlas;
-        private bool loggedMissingPrefabResource;
         private static Sprite fallbackPlayerArrowSprite;
-        private static bool loggedFallbackUsage;
 
         public Sprite GetPlayerArrowSprite()
         {
             if (cachedPlayerArrowSprite != null)
             {
-                return cachedPlayerArrowSprite;
-            }
-
-            if (TryCreateSpriteFromPrefab(out Sprite prefabSprite))
-            {
-                cachedPlayerArrowSprite = prefabSprite;
                 return cachedPlayerArrowSprite;
             }
 
@@ -72,7 +63,7 @@ namespace DeliveryDriver.Quest.UI
                 return fallbackPlayerArrowSprite;
             }
 
-            const int size = 32;
+            const int size = 64;
             Texture2D texture = new Texture2D(size, size, TextureFormat.ARGB32, false, true);
             texture.name = "RuntimeMinimapPlayerArrow";
             texture.wrapMode = TextureWrapMode.Clamp;
@@ -92,15 +83,23 @@ namespace DeliveryDriver.Quest.UI
                 {
                     float normalizedX = (x + 0.5f) / size;
                     float normalizedY = (y + 0.5f) / size;
+                    float centeredX = Mathf.Abs(normalizedX - 0.5f);
                     bool isArrowHead =
-                        normalizedY >= 0.42f &&
-                        Mathf.Abs(normalizedX - 0.5f) <= (normalizedY - 0.42f) * 1.12f;
-                    bool isArrowStem =
-                        normalizedY >= 0.12f &&
-                        normalizedY < 0.50f &&
-                        Mathf.Abs(normalizedX - 0.5f) <= 0.09f;
+                        normalizedY >= 0.52f &&
+                        centeredX <= (normalizedY - 0.52f) * 0.95f;
+                    bool isShoulder =
+                        normalizedY >= 0.44f &&
+                        normalizedY < 0.52f &&
+                        centeredX <= Mathf.Lerp(0.07f, 0.16f, (normalizedY - 0.44f) / 0.08f);
+                    bool isStem =
+                        normalizedY >= 0.16f &&
+                        normalizedY < 0.44f &&
+                        centeredX <= 0.07f;
+                    bool isTailCut =
+                        normalizedY < 0.28f &&
+                        centeredX < 0.03f;
 
-                    if (isArrowHead || isArrowStem)
+                    if ((isArrowHead || isShoulder || isStem) && !isTailCut)
                     {
                         pixels[(y * size) + x] = fill;
                     }
@@ -119,108 +118,7 @@ namespace DeliveryDriver.Quest.UI
                 SpriteMeshType.FullRect);
             fallbackPlayerArrowSprite.name = "RuntimeMinimapPlayerArrow";
 
-            if (!loggedFallbackUsage)
-            {
-                Debug.LogWarning("[MinimapSpriteRegistry] Using runtime-generated fallback player arrow sprite.");
-                loggedFallbackUsage = true;
-            }
-
             return fallbackPlayerArrowSprite;
-        }
-
-        private bool TryCreateSpriteFromPrefab(out Sprite sprite)
-        {
-            sprite = null;
-            GameObject prefab = Resources.Load<GameObject>(PlayerArrowPrefabResourcePath);
-            if (ReferenceEquals(prefab, null))
-            {
-                if (!loggedMissingPrefabResource)
-                {
-                    Debug.LogWarning($"[MinimapSpriteRegistry] Missing prefab resource at Resources/{PlayerArrowPrefabResourcePath}. Falling back to atlas/runtime arrow sprite.");
-                    loggedMissingPrefabResource = true;
-                }
-
-                return false;
-            }
-
-            try
-            {
-                if (!prefab)
-                {
-                    return false;
-                }
-
-                MeshFilter meshFilter = prefab.GetComponentInChildren<MeshFilter>(true);
-                Renderer renderer = prefab.GetComponentInChildren<Renderer>(true);
-                Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
-                Texture2D texture = renderer != null && renderer.sharedMaterial != null
-                    ? renderer.sharedMaterial.mainTexture as Texture2D
-                    : null;
-                if (mesh == null || texture == null)
-                {
-                    return false;
-                }
-
-                if (!mesh.isReadable)
-                {
-                    if (!loggedMissingPrefabResource)
-                    {
-                        Debug.LogWarning(
-                            $"[MinimapSpriteRegistry] Mesh data for '{prefab.name}' is not readable at runtime. " +
-                            "Enable Read/Write on the source model import settings or fall back to atlas/runtime arrow sprite.");
-                        loggedMissingPrefabResource = true;
-                    }
-
-                    return false;
-                }
-
-                Vector2[] uv = mesh.uv;
-                if (uv == null || uv.Length == 0)
-                {
-                    return false;
-                }
-
-                Vector2 min = new Vector2(float.MaxValue, float.MaxValue);
-                Vector2 max = new Vector2(float.MinValue, float.MinValue);
-                for (int i = 0; i < uv.Length; i++)
-                {
-                    min = Vector2.Min(min, uv[i]);
-                    max = Vector2.Max(max, uv[i]);
-                }
-
-                min = Vector2.Max(Vector2.zero, min);
-                max = Vector2.Min(Vector2.one, max);
-                float width = (max.x - min.x) * texture.width;
-                float height = (max.y - min.y) * texture.height;
-                if (width <= 1f || height <= 1f)
-                {
-                    return false;
-                }
-
-                Rect rect = new Rect(
-                    min.x * texture.width,
-                    min.y * texture.height,
-                    width,
-                    height);
-                sprite = Sprite.Create(texture, rect, playerArrowPivot, pixelsPerUnit, 0u, SpriteMeshType.FullRect);
-                if (sprite != null)
-                {
-                    sprite.name = $"{prefab.name}_Sprite";
-                }
-
-                loggedMissingPrefabResource = false;
-                return sprite != null;
-            }
-            catch (MissingReferenceException)
-            {
-                if (!loggedMissingPrefabResource)
-                {
-                    Debug.LogWarning($"[MinimapSpriteRegistry] Prefab resource '{PlayerArrowPrefabResourcePath}' could not be resolved cleanly. Falling back to atlas/runtime arrow sprite.");
-                    loggedMissingPrefabResource = true;
-                }
-
-                return false;
-            }
         }
 
         private static bool IsValidSpriteRect(Texture2D atlas, Rect rect)
