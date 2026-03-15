@@ -959,6 +959,38 @@ namespace DeliveryDriver.Quest
             GetZoneMarkerService().ClearAllZones();
         }
 
+        public bool CommitExternalPickup(QuestData quest, string deliveryObjectiveDescription = null)
+        {
+            if (quest == null || quest.Status != QuestStatus.Active)
+            {
+                return false;
+            }
+
+            if (!ReferenceEquals(currentQuest, quest))
+            {
+                if (!activeQuests.Contains(quest))
+                {
+                    return false;
+                }
+
+                currentQuest = quest;
+            }
+
+            if (quest.HasPickedUpCargo || quest.DeliveryLocations == null || quest.DeliveryLocations.Count == 0)
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(deliveryObjectiveDescription))
+            {
+                quest.QuestDescription = deliveryObjectiveDescription;
+            }
+
+            quest.CurrentDeliveryIndex = 0;
+            OnCargoPickedUp();
+            return true;
+        }
+
         private void OnCargoPickedUp()
         {
             if (currentQuest == null || currentQuest.HasPickedUpCargo)

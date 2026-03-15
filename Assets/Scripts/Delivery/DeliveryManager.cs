@@ -653,6 +653,27 @@ public class DeliveryManager : MonoBehaviour
             return;
         }
 
+        // Cache pickup and delivery targets before the player reaches the box.
+        currentPickupPoint = spawnPos;
+        currentPickupNeighborhoodName = ResolveNeighborhoodName(currentPickupPoint);
+        currentDeliveryPoint = Vector3.zero;
+        currentDeliveryNeighborhoodName = "";
+        currentDeliveryStops.Clear();
+        currentDeliveryStopNeighborhoods.Clear();
+        currentDeliveryStopIndex = 0;
+        lastObservedQuestDeliveryIndex = -1;
+        isDeliveryActive = false;
+
+        if (!PrepareDeliveryRoute(currentPickupPoint))
+        {
+            Debug.LogError("[DeliveryManager] Could not prepare delivery route for spawned box.");
+            if (requirePhoneMissionAccept)
+            {
+                ScheduleMissionOffer(nextOfferDelayAfterFailure);
+            }
+            return;
+        }
+
         // Spawn box with slight rotation variation
         Quaternion rotation = Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0);
         GameObject boxObj = Instantiate(boxPrefab, spawnPos, rotation);
@@ -709,20 +730,11 @@ public class DeliveryManager : MonoBehaviour
             currentPickupIndicator.transform.SetParent(currentBox.transform);
         }
 
-        // Store pickup point
-        currentPickupPoint = spawnPos;
-        currentPickupNeighborhoodName = ResolveNeighborhoodName(currentPickupPoint);
-        currentDeliveryNeighborhoodName = "";
-        currentDeliveryStops.Clear();
-        currentDeliveryStopNeighborhoods.Clear();
-        currentDeliveryStopIndex = 0;
-        lastObservedQuestDeliveryIndex = -1;
-        isDeliveryActive = false;
-
         // Create quest in quest system
         if (useQuestSystem)
         {
             CreateDeliveryQuest(spawnPos, currentMissionType);
+            UpdateQuestWithDelivery(currentDeliveryStops, currentDeliveryStopNeighborhoods);
         }
 
         if (showDebugInfo)
@@ -772,7 +784,6 @@ public class DeliveryManager : MonoBehaviour
     {
         if (box != currentBox) return;
 
-        BuildDeliveryStops(box.transform.position);
         if (currentDeliveryStops.Count == 0)
         {
             HandleDeliveryFailure("No valid delivery location");
@@ -782,6 +793,20 @@ public class DeliveryManager : MonoBehaviour
         currentDeliveryStopIndex = 0;
         currentDeliveryPoint = currentDeliveryStops[currentDeliveryStopIndex];
         currentDeliveryNeighborhoodName = currentDeliveryStopNeighborhoods[currentDeliveryStopIndex];
+
+        if (useQuestSystem && currentDeliveryQuest != null)
+        {
+            bool pickupCommitted = QuestManager.Instance != null &&
+                                   QuestManager.Instance.CommitExternalPickup(currentDeliveryQuest, BuildDeliveryObjectiveDescription(0));
+            if (!pickupCommitted)
+            {
+                HandleDeliveryFailure("Quest pickup handoff failed");
+                return;
+            }
+
+            lastObservedQuestDeliveryIndex = 0;
+        }
+
         isDeliveryActive = true;
 
         // Spawn delivery indicator
@@ -798,12 +823,6 @@ public class DeliveryManager : MonoBehaviour
         // Create ghost box preview at delivery location
         CreateDeliveryPreview();
 
-        // Update quest with delivery location
-        if (useQuestSystem)
-        {
-            UpdateQuestWithDelivery(currentDeliveryStops, currentDeliveryStopNeighborhoods);
-        }
-
         // Notify UI
         if (deliveryUI != null)
         {
@@ -817,6 +836,12 @@ public class DeliveryManager : MonoBehaviour
         }
 
         NavigationService.EnsureInstance()?.SetObjective(new NavigationObjective(ObjectiveType.Delivery, currentDeliveryPoint, currentDeliveryStopIndex, currentDeliveryStops.Count));
+    }
+
+    private bool PrepareDeliveryRoute(Vector3 pickupPoint)
+    {
+        BuildDeliveryStops(pickupPoint);
+        return currentDeliveryStops.Count > 0;
     }
 
     /// <summary>
@@ -1503,7 +1528,7 @@ public class DeliveryManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Update quest with delivery location
+    /// Populate the quest's delivery targets before the physical pickup occurs.
     /// </summary>
     private void UpdateQuestWithDelivery(List<Vector3> deliveryStops, List<string> deliveryNeighborhoods)
     {
@@ -1515,8 +1540,7 @@ public class DeliveryManager : MonoBehaviour
             deliveryIndicatorPrefab,
             deliveryRadius,
             showDebugInfo,
-            BuildDeliveryObjectiveDescription(0));
-        lastObservedQuestDeliveryIndex = 0;
+            null);
     }
 
     /// <summary>

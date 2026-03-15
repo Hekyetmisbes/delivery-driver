@@ -133,11 +133,11 @@ internal static class DeliveryQuestFlow
             quest.DeliveryLocations.Add(deliveryLocation);
         }
 
-        quest.QuestDescription = firstObjectiveDescription;
-        quest.Status = QuestStatus.Active;
-        quest.HasPickedUpCargo = true;
         quest.CurrentDeliveryIndex = 0;
-        QuestManager.Instance?.OnQuestUpdated?.Invoke(quest);
+        if (!string.IsNullOrWhiteSpace(firstObjectiveDescription))
+        {
+            quest.QuestDescription = firstObjectiveDescription;
+        }
 
         if (showDebugInfo)
         {
