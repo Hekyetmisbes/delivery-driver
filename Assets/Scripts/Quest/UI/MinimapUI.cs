@@ -507,6 +507,7 @@ namespace DeliveryDriver.Quest.UI
                 panelImage.sprite = GetSolidSprite();
                 panelImage.color = new Color(panelColor.r, panelColor.g, panelColor.b, panelAlpha);
                 panelImage.raycastTarget = false;
+                panelImage.enabled = false;
             }
 
             Outline outline = minimapContainer != null ? minimapContainer.GetComponent<Outline>() : null;
@@ -520,6 +521,7 @@ namespace DeliveryDriver.Quest.UI
                 outline.effectColor = panelOutlineColor;
                 outline.effectDistance = new Vector2(1f, -1f);
                 outline.useGraphicAlpha = false;
+                outline.enabled = false;
             }
 
             Shadow shadow = minimapContainer != null ? minimapContainer.GetComponent<Shadow>() : null;
@@ -533,6 +535,7 @@ namespace DeliveryDriver.Quest.UI
                 shadow.effectColor = panelShadowColor;
                 shadow.effectDistance = new Vector2(3f, -3f);
                 shadow.useGraphicAlpha = false;
+                shadow.enabled = false;
             }
 
             if (spriteRegistry == null)
@@ -912,7 +915,7 @@ namespace DeliveryDriver.Quest.UI
             Transform viewport = minimapContainer.Find("Viewport");
             if (viewport == null)
             {
-                GameObject viewportObject = new GameObject("Viewport", typeof(RectTransform), typeof(Image), typeof(Mask), typeof(RectMask2D));
+                GameObject viewportObject = new GameObject("Viewport", typeof(RectTransform), typeof(Image), typeof(Mask));
                 viewport = viewportObject.transform;
                 viewport.SetParent(minimapContainer, false);
             }
@@ -937,6 +940,13 @@ namespace DeliveryDriver.Quest.UI
 
             viewportMask.showMaskGraphic = true;
 
+            RectMask2D rectMask = viewport.GetComponent<RectMask2D>();
+            if (rectMask != null)
+            {
+                rectMask.enabled = false;
+                Destroy(rectMask);
+            }
+
             Outline viewportOutline = viewport.GetComponent<Outline>();
             if (viewportOutline == null)
             {
@@ -946,6 +956,7 @@ namespace DeliveryDriver.Quest.UI
             viewportOutline.effectColor = new Color(panelOutlineColor.r, panelOutlineColor.g, panelOutlineColor.b, 0.22f);
             viewportOutline.effectDistance = new Vector2(1f, -1f);
             viewportOutline.useGraphicAlpha = false;
+            viewportOutline.enabled = false;
 
             if (minimapImage == null)
             {
