@@ -60,7 +60,8 @@ internal static class DeliveryQuestFlow
             BaseReward = baseReward,
             BonusReward = bonusReward,
             PickupLocation = new QuestLocation(pickupPos, $"Pickup: {FormatCoordinates(pickupPos)}", deliveryRadius),
-            DeliveryLocations = new List<QuestLocation>()
+            DeliveryLocations = new List<QuestLocation>(),
+            PickupAuthority = QuestPickupAuthority.PhysicalBox
         };
 
         if (quest.PickupLocation != null)

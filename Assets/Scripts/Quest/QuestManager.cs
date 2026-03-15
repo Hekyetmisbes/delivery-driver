@@ -893,6 +893,11 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
+            if (!ShouldQuestHandlePickup(currentQuest))
+            {
+                return;
+            }
+
             if (!currentQuest.PickupLocation.IsPlayerInRange(playerTransform))
             {
                 return;
@@ -936,6 +941,11 @@ namespace DeliveryDriver.Quest
 
             if (zone.ZoneType == QuestZoneType.Pickup)
             {
+                if (!ShouldQuestHandlePickup(currentQuest))
+                {
+                    return;
+                }
+
                 OnCargoPickedUp();
             }
             else if (zone.ZoneType == QuestZoneType.Delivery)
@@ -1387,6 +1397,11 @@ namespace DeliveryDriver.Quest
 
             int index = Mathf.Clamp(currentQuest.CurrentDeliveryIndex, 0, currentQuest.DeliveryLocations.Count - 1);
             return currentQuest.DeliveryLocations[index];
+        }
+
+        private static bool ShouldQuestHandlePickup(QuestData quest)
+        {
+            return quest != null && quest.PickupAuthority != QuestPickupAuthority.PhysicalBox;
         }
 
         private void MarkQuestUiDirty()

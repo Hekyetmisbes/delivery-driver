@@ -89,6 +89,22 @@ namespace DeliveryDriver.Quest
     }
 
     /// <summary>
+    /// Defines which system is allowed to complete the pickup step.
+    /// </summary>
+    public enum QuestPickupAuthority
+    {
+        /// <summary>
+        /// QuestManager proximity/zone checks can complete pickup.
+        /// </summary>
+        Proximity,
+
+        /// <summary>
+        /// A physical world object must explicitly hand off pickup completion.
+        /// </summary>
+        PhysicalBox
+    }
+
+    /// <summary>
     /// Defines the performance rating for a completed quest
     /// </summary>
     public enum PerformanceRating
