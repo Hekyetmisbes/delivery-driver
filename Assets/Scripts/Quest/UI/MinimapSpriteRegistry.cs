@@ -5,7 +5,7 @@ namespace DeliveryDriver.Quest.UI
     [CreateAssetMenu(fileName = "MinimapSpriteRegistry", menuName = "Delivery Driver/UI/Minimap Sprite Registry")]
     public class MinimapSpriteRegistry : ScriptableObject
     {
-        [SerializeField] private GameObject playerArrowPrefab;
+        private const string PlayerArrowPrefabResourcePath = "Minimap/Arrow_3D_Icon_01";
         [SerializeField] private bool useAtlasPlayerArrow;
         [SerializeField] private Texture2D atlasTexture;
         [SerializeField] private Rect playerArrowRect = new Rect(288f, 162f, 16f, 16f);
@@ -14,7 +14,7 @@ namespace DeliveryDriver.Quest.UI
 
         private Sprite cachedPlayerArrowSprite;
         private bool loggedMissingAtlas;
-        private bool loggedMissingPrefab;
+        private bool loggedMissingPrefabResource;
         private static Sprite fallbackPlayerArrowSprite;
         private static bool loggedFallbackUsage;
 
@@ -131,9 +131,15 @@ namespace DeliveryDriver.Quest.UI
         private bool TryCreateSpriteFromPrefab(out Sprite sprite)
         {
             sprite = null;
-            GameObject prefab = playerArrowPrefab;
+            GameObject prefab = Resources.Load<GameObject>(PlayerArrowPrefabResourcePath);
             if (ReferenceEquals(prefab, null))
             {
+                if (!loggedMissingPrefabResource)
+                {
+                    Debug.LogWarning($"[MinimapSpriteRegistry] Missing prefab resource at Resources/{PlayerArrowPrefabResourcePath}. Falling back to atlas/runtime arrow sprite.");
+                    loggedMissingPrefabResource = true;
+                }
+
                 return false;
             }
 
@@ -189,18 +195,17 @@ namespace DeliveryDriver.Quest.UI
                     sprite.name = $"{prefab.name}_Sprite";
                 }
 
-                loggedMissingPrefab = false;
+                loggedMissingPrefabResource = false;
                 return sprite != null;
             }
             catch (MissingReferenceException)
             {
-                if (!loggedMissingPrefab)
+                if (!loggedMissingPrefabResource)
                 {
-                    Debug.LogWarning("[MinimapSpriteRegistry] playerArrowPrefab reference is missing. Falling back to atlas/runtime arrow sprite.");
-                    loggedMissingPrefab = true;
+                    Debug.LogWarning($"[MinimapSpriteRegistry] Prefab resource '{PlayerArrowPrefabResourcePath}' could not be resolved cleanly. Falling back to atlas/runtime arrow sprite.");
+                    loggedMissingPrefabResource = true;
                 }
 
-                playerArrowPrefab = null;
                 return false;
             }
         }

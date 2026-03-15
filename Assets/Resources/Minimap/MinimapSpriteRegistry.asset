@@ -12,7 +12,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0c47fe0d51614878867ee00df120b5e6, type: 3}
   m_Name: MinimapSpriteRegistry
   m_EditorClassIdentifier: 
-  playerArrowPrefab: {fileID: 100100000, guid: 3747f4197f58149518ec66a3a9522e06, type: 3}
   atlasTexture: {fileID: 2800000, guid: c9df26c71735cd84d893bf0fecc066ac, type: 3}
   playerArrowRect:
     serializedVersion: 2
