@@ -87,7 +87,7 @@ public static class MinimapRoadTextureBuilder
         int roadWidthPixels)
     {
         int requestedSize = Mathf.Clamp(resolution, 256, 4096);
-        int size = ResolveTextureSize(graph, requestedSize);
+        int size = ResolveTextureSize(graph, requestedSize, worldBounds);
         Texture2D texture = new Texture2D(size, size, TextureFormat.RGBA32, false, false);
         texture.name = "ProceduralMinimapTexture";
         texture.wrapMode = TextureWrapMode.Clamp;
@@ -163,9 +163,15 @@ public static class MinimapRoadTextureBuilder
         return texture;
     }
 
-    private static int ResolveTextureSize(RoadGraph graph, int requestedSize)
+    private static int ResolveTextureSize(RoadGraph graph, int requestedSize, Bounds worldBounds)
     {
         if (graph == null || graph.roadSegments == null)
+        {
+            return requestedSize;
+        }
+
+        float maxWorldSpan = Mathf.Max(worldBounds.size.x, worldBounds.size.z);
+        if (maxWorldSpan > 0.01f && maxWorldSpan <= 600f)
         {
             return requestedSize;
         }
