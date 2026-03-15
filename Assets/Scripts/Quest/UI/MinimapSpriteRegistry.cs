@@ -5,6 +5,7 @@ namespace DeliveryDriver.Quest.UI
     [CreateAssetMenu(fileName = "MinimapSpriteRegistry", menuName = "Delivery Driver/UI/Minimap Sprite Registry")]
     public class MinimapSpriteRegistry : ScriptableObject
     {
+        [SerializeField] private Texture2D playerArrowTexture;
         [SerializeField] private bool useAtlasPlayerArrow;
         [SerializeField] private Texture2D atlasTexture;
         [SerializeField] private Rect playerArrowRect = new Rect(288f, 162f, 16f, 16f);
@@ -19,6 +20,19 @@ namespace DeliveryDriver.Quest.UI
         {
             if (cachedPlayerArrowSprite != null)
             {
+                return cachedPlayerArrowSprite;
+            }
+
+            if (playerArrowTexture != null)
+            {
+                cachedPlayerArrowSprite = Sprite.Create(
+                    playerArrowTexture,
+                    new Rect(0f, 0f, playerArrowTexture.width, playerArrowTexture.height),
+                    playerArrowPivot,
+                    pixelsPerUnit,
+                    0u,
+                    SpriteMeshType.FullRect);
+                cachedPlayerArrowSprite.name = "MinimapPlayerArrow";
                 return cachedPlayerArrowSprite;
             }
 
