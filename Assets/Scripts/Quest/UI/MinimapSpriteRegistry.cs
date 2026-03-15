@@ -14,6 +14,7 @@ namespace DeliveryDriver.Quest.UI
 
         private Sprite cachedPlayerArrowSprite;
         private bool loggedMissingAtlas;
+        private bool loggedMissingPrefab;
         private static Sprite fallbackPlayerArrowSprite;
         private static bool loggedFallbackUsage;
 
@@ -130,57 +131,78 @@ namespace DeliveryDriver.Quest.UI
         private bool TryCreateSpriteFromPrefab(out Sprite sprite)
         {
             sprite = null;
-            if (playerArrowPrefab == null)
+            GameObject prefab = playerArrowPrefab;
+            if (ReferenceEquals(prefab, null))
             {
                 return false;
             }
 
-            MeshFilter meshFilter = playerArrowPrefab.GetComponentInChildren<MeshFilter>(true);
-            Renderer renderer = playerArrowPrefab.GetComponentInChildren<Renderer>(true);
-            Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
-            Texture2D texture = renderer != null && renderer.sharedMaterial != null
-                ? renderer.sharedMaterial.mainTexture as Texture2D
-                : null;
-            if (mesh == null || texture == null)
+            try
             {
+                if (!prefab)
+                {
+                    return false;
+                }
+
+                MeshFilter meshFilter = prefab.GetComponentInChildren<MeshFilter>(true);
+                Renderer renderer = prefab.GetComponentInChildren<Renderer>(true);
+                Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
+                Texture2D texture = renderer != null && renderer.sharedMaterial != null
+                    ? renderer.sharedMaterial.mainTexture as Texture2D
+                    : null;
+                if (mesh == null || texture == null)
+                {
+                    return false;
+                }
+
+                Vector2[] uv = mesh.uv;
+                if (uv == null || uv.Length == 0)
+                {
+                    return false;
+                }
+
+                Vector2 min = new Vector2(float.MaxValue, float.MaxValue);
+                Vector2 max = new Vector2(float.MinValue, float.MinValue);
+                for (int i = 0; i < uv.Length; i++)
+                {
+                    min = Vector2.Min(min, uv[i]);
+                    max = Vector2.Max(max, uv[i]);
+                }
+
+                min = Vector2.Max(Vector2.zero, min);
+                max = Vector2.Min(Vector2.one, max);
+                float width = (max.x - min.x) * texture.width;
+                float height = (max.y - min.y) * texture.height;
+                if (width <= 1f || height <= 1f)
+                {
+                    return false;
+                }
+
+                Rect rect = new Rect(
+                    min.x * texture.width,
+                    min.y * texture.height,
+                    width,
+                    height);
+                sprite = Sprite.Create(texture, rect, playerArrowPivot, pixelsPerUnit, 0u, SpriteMeshType.FullRect);
+                if (sprite != null)
+                {
+                    sprite.name = $"{prefab.name}_Sprite";
+                }
+
+                loggedMissingPrefab = false;
+                return sprite != null;
+            }
+            catch (MissingReferenceException)
+            {
+                if (!loggedMissingPrefab)
+                {
+                    Debug.LogWarning("[MinimapSpriteRegistry] playerArrowPrefab reference is missing. Falling back to atlas/runtime arrow sprite.");
+                    loggedMissingPrefab = true;
+                }
+
+                playerArrowPrefab = null;
                 return false;
             }
-
-            Vector2[] uv = mesh.uv;
-            if (uv == null || uv.Length == 0)
-            {
-                return false;
-            }
-
-            Vector2 min = new Vector2(float.MaxValue, float.MaxValue);
-            Vector2 max = new Vector2(float.MinValue, float.MinValue);
-            for (int i = 0; i < uv.Length; i++)
-            {
-                min = Vector2.Min(min, uv[i]);
-                max = Vector2.Max(max, uv[i]);
-            }
-
-            min = Vector2.Max(Vector2.zero, min);
-            max = Vector2.Min(Vector2.one, max);
-            float width = (max.x - min.x) * texture.width;
-            float height = (max.y - min.y) * texture.height;
-            if (width <= 1f || height <= 1f)
-            {
-                return false;
-            }
-
-            Rect rect = new Rect(
-                min.x * texture.width,
-                min.y * texture.height,
-                width,
-                height);
-            sprite = Sprite.Create(texture, rect, playerArrowPivot, pixelsPerUnit, 0u, SpriteMeshType.FullRect);
-            if (sprite != null)
-            {
-                sprite.name = $"{playerArrowPrefab.name}_Sprite";
-            }
-
-            return sprite != null;
         }
 
         private static bool IsValidSpriteRect(Texture2D atlas, Rect rect)
