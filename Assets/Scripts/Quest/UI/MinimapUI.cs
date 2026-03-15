@@ -598,7 +598,7 @@ namespace DeliveryDriver.Quest.UI
                 roadGraphic.SetOutlineColor(roadOutlineColor);
                 roadGraphic.SetLineWidth(baseRoadLineWidth);
                 roadGraphic.raycastTarget = false;
-                roadGraphic.enabled = false;
+                roadGraphic.enabled = true;
                 roadGraphic.transform.SetAsFirstSibling();
             }
 
@@ -1588,12 +1588,22 @@ namespace DeliveryDriver.Quest.UI
                     loggedEmptyLocalRoadPolylines = true;
                 }
 
+                if (minimapImage != null && roadOverlayTexture != null)
+                {
+                    minimapImage.color = new Color(1f, 1f, 1f, mapAlpha);
+                }
+
                 roadGraphic?.Clear();
             }
             else
             {
                 loggedEmptyLocalRoadPolylines = false;
                 roadGraphic?.SetPolylines(localRoadPolylines);
+                if (minimapImage != null)
+                {
+                    // Keep the texture path only as a silent fallback behind crisp vector roads.
+                    minimapImage.color = new Color(1f, 1f, 1f, 0f);
+                }
             }
             lastRoadCenter = mapCenter;
             lastRoadZoom = currentZoom;
