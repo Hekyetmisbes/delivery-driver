@@ -149,6 +149,7 @@ namespace DeliveryDriver.Quest.UI
         private bool routeDirty = true;
         private readonly List<List<Vector3>> worldRoadPolylines = new List<List<Vector3>>();
         private readonly List<List<Vector2>> localRoadPolylines = new List<List<Vector2>>();
+        private Texture2D roadOverlayTexture;
         private Vector3 lastRoadCenter = new Vector3(float.NaN, float.NaN, float.NaN);
         private float lastRoadZoom = -1f;
         private float lastRouteHeading = float.NaN;
@@ -215,6 +216,12 @@ namespace DeliveryDriver.Quest.UI
         {
             PlayerVehicleManager.ActiveVehicleChanged -= HandleActiveVehicleChanged;
             UnbindNavigationService();
+
+            if (roadOverlayTexture != null)
+            {
+                Destroy(roadOverlayTexture);
+                roadOverlayTexture = null;
+            }
         }
 
         private void Update()
@@ -591,6 +598,7 @@ namespace DeliveryDriver.Quest.UI
                 roadGraphic.SetOutlineColor(roadOutlineColor);
                 roadGraphic.SetLineWidth(baseRoadLineWidth);
                 roadGraphic.raycastTarget = false;
+                roadGraphic.enabled = false;
                 roadGraphic.transform.SetAsFirstSibling();
             }
 
@@ -1450,6 +1458,12 @@ namespace DeliveryDriver.Quest.UI
                     {
                         roadGraphic.Clear();
                     }
+
+                    if (minimapImage != null)
+                    {
+                        minimapImage.texture = null;
+                        minimapImage.color = new Color(1f, 1f, 1f, 0f);
+                    }
                 }
 
                 nextRoadAttemptTime = Time.unscaledTime + Mathf.Max(0.2f, roadRetryInterval);
@@ -1494,6 +1508,7 @@ namespace DeliveryDriver.Quest.UI
             lastRoadGraphSegmentCount = graph.roadSegments.Count;
             lastRoadCenter = new Vector3(float.NaN, float.NaN, float.NaN);
             lastRoadZoom = -1f;
+            RebuildRoadOverlayTexture(graph);
             routeDirty = true;
         }
 
@@ -1528,6 +1543,7 @@ namespace DeliveryDriver.Quest.UI
             }
 
             Rect rect = GetMinimapViewportRect();
+            UpdateRoadTextureUv(rect);
             float clipExpansion = 1f + Mathf.Max(0.02f, edgePaddingNormalized);
             localRoadPolylines.Clear();
             for (int lineIndex = 0; lineIndex < worldRoadPolylines.Count; lineIndex++)
@@ -1556,9 +1572,13 @@ namespace DeliveryDriver.Quest.UI
                 }
             }
 
-            roadGraphic.color = new Color(roadColor.r, roadColor.g, roadColor.b, mapAlpha);
-            roadGraphic.SetOutlineColor(roadOutlineColor);
-            roadGraphic.SetLineWidth(GetResolvedRoadLineWidth(rect));
+            if (roadGraphic != null)
+            {
+                roadGraphic.color = new Color(roadColor.r, roadColor.g, roadColor.b, mapAlpha);
+                roadGraphic.SetOutlineColor(roadOutlineColor);
+                roadGraphic.SetLineWidth(GetResolvedRoadLineWidth(rect));
+            }
+
             if (localRoadPolylines.Count == 0)
             {
                 if (!loggedEmptyLocalRoadPolylines)
@@ -1568,16 +1588,70 @@ namespace DeliveryDriver.Quest.UI
                     loggedEmptyLocalRoadPolylines = true;
                 }
 
-                roadGraphic.Clear();
+                roadGraphic?.Clear();
             }
             else
             {
                 loggedEmptyLocalRoadPolylines = false;
-                roadGraphic.SetPolylines(localRoadPolylines);
+                roadGraphic?.SetPolylines(localRoadPolylines);
             }
             lastRoadCenter = mapCenter;
             lastRoadZoom = currentZoom;
             lastRoadHeading = GetMapHeadingDegrees();
+        }
+
+        private void RebuildRoadOverlayTexture(RoadGraph graph)
+        {
+            if (minimapImage == null || graph == null || !hasRoadBounds)
+            {
+                return;
+            }
+
+            if (roadOverlayTexture != null)
+            {
+                Destroy(roadOverlayTexture);
+                roadOverlayTexture = null;
+            }
+
+            int resolution = graph.roadSegments != null && graph.roadSegments.Count > 900 ? 768 : 1024;
+            int roadWidthPixels = Mathf.Max(3, Mathf.RoundToInt(baseRoadLineWidth * 1.75f));
+            roadOverlayTexture = MinimapRoadTextureBuilder.Build(
+                graph,
+                roadBounds,
+                resolution,
+                new Color(0f, 0f, 0f, 0f),
+                new Color(roadColor.r, roadColor.g, roadColor.b, 1f),
+                new Color(roadOutlineColor.r, roadOutlineColor.g, roadOutlineColor.b, 1f),
+                roadWidthPixels);
+
+            minimapImage.texture = roadOverlayTexture;
+            minimapImage.color = new Color(1f, 1f, 1f, mapAlpha);
+            minimapImage.uvRect = new Rect(0f, 0f, 1f, 1f);
+            minimapImage.rectTransform.localRotation = Quaternion.identity;
+        }
+
+        private void UpdateRoadTextureUv(Rect rect)
+        {
+            if (minimapImage == null || roadOverlayTexture == null || !hasRoadBounds)
+            {
+                return;
+            }
+
+            float visibleHeight = currentZoom * 2f;
+            float visibleWidth = visibleHeight * (rect.width / Mathf.Max(1f, rect.height));
+            float normalizedWidth = Mathf.Clamp01(visibleWidth / Mathf.Max(0.01f, roadBounds.size.x));
+            float normalizedHeight = Mathf.Clamp01(visibleHeight / Mathf.Max(0.01f, roadBounds.size.z));
+            float centerU = Mathf.InverseLerp(roadBounds.min.x, roadBounds.max.x, mapCenter.x);
+            float centerV = Mathf.InverseLerp(roadBounds.min.z, roadBounds.max.z, mapCenter.z);
+
+            Rect uvRect = new Rect(
+                Mathf.Clamp(centerU - normalizedWidth * 0.5f, 0f, Mathf.Max(0f, 1f - normalizedWidth)),
+                Mathf.Clamp(centerV - normalizedHeight * 0.5f, 0f, Mathf.Max(0f, 1f - normalizedHeight)),
+                normalizedWidth,
+                normalizedHeight);
+            minimapImage.uvRect = uvRect;
+            minimapImage.color = new Color(1f, 1f, 1f, mapAlpha);
+            minimapImage.rectTransform.localRotation = Quaternion.Euler(0f, 0f, alignMapToPlayerHeading && playerTransform != null ? -playerTransform.eulerAngles.y : 0f);
         }
 
         private float GetMapHeadingDegrees()
