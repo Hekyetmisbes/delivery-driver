@@ -35,8 +35,6 @@ namespace DeliveryDriver.Optimization
         public LayerCullingEntry[] layerCullingDistances = new LayerCullingEntry[]
         {
             new LayerCullingEntry { layerName = "Water", distance = 500f },
-            new LayerCullingEntry { layerName = "MiniMapBuilding", distance = 0f },
-            new LayerCullingEntry { layerName = "MiniMapMarker", distance = 0f },
         };
 
         [Header("Physics")]

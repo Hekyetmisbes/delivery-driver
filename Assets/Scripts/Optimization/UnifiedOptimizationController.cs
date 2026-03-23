@@ -219,11 +219,7 @@ namespace DeliveryDriver.Optimization
             }
             else
             {
-                // Default layer keeps farClipPlane (terrain + ground are on Default)
-                // Only cull minimap layers that shouldn't render on main camera
                 SetLayerCull(distances, "Water", 500f);
-                SetLayerCull(distances, "MiniMapBuilding", 0f);
-                SetLayerCull(distances, "MiniMapMarker", 0f);
             }
 
             mainCamera.layerCullDistances = distances;

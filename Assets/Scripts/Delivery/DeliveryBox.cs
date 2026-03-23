@@ -222,7 +222,7 @@ public class DeliveryBox : MonoBehaviour
 
         // Create glowing material
         MeshRenderer indicatorRenderer = indicator.GetComponent<MeshRenderer>();
-        Material indicatorMat = MinimapShaderHelper.CreateColorMaterial(Color.green, indicatorRenderer);
+        Material indicatorMat = RuntimeColorMaterialHelper.CreateColorMaterial(Color.green, indicatorRenderer);
         if (indicatorMat != null && indicatorRenderer != null)
         {
             indicatorRenderer.material = indicatorMat;

@@ -43,10 +43,8 @@ namespace DeliveryDriver.Company
         private bool prefabsConfigured;
         private CameraFollow cachedCameraFollow;
         private ReverseCameraHUD cachedReverseCameraHud;
-        private MinimapCamera cachedMinimapCamera;
         private DeliveryManager cachedDeliveryManager;
         private DeliveryUI cachedDeliveryUi;
-        private MinimapUI cachedMinimapUi;
         private CompassUI cachedCompassUi;
         private NavigationService cachedNavigationService;
 
@@ -337,9 +335,6 @@ namespace DeliveryDriver.Company
             {
                 ReverseCameraHUD reverseCameraHud = GetReverseCameraHud();
                 reverseCameraHud?.SetTarget(controller.transform);
-
-                MinimapCamera minimapCamera = GetMinimapCamera();
-                minimapCamera?.SetPlayer(controller.transform);
             }
 
             QuestManager.Instance?.SetPlayerVehicle(controller);
@@ -356,12 +351,6 @@ namespace DeliveryDriver.Company
             if (deliveryUI != null)
             {
                 deliveryUI.SetPlayerTransform(controller.transform);
-            }
-
-            MinimapUI minimapUi = GetMinimapUi();
-            if (minimapUi != null)
-            {
-                minimapUi.SetPlayerTransform(controller.transform);
             }
 
             CompassUI compassUi = GetCompassUi();
@@ -662,16 +651,6 @@ namespace DeliveryDriver.Company
             return cachedReverseCameraHud;
         }
 
-        private MinimapCamera GetMinimapCamera()
-        {
-            if (cachedMinimapCamera == null)
-            {
-                cachedMinimapCamera = FindFirstObjectByType<MinimapCamera>();
-            }
-
-            return cachedMinimapCamera;
-        }
-
         private DeliveryManager GetDeliveryManager()
         {
             if (cachedDeliveryManager == null)
@@ -690,16 +669,6 @@ namespace DeliveryDriver.Company
             }
 
             return cachedDeliveryUi;
-        }
-
-        private MinimapUI GetMinimapUi()
-        {
-            if (cachedMinimapUi == null)
-            {
-                cachedMinimapUi = MinimapUI.EnsureSceneInstance();
-            }
-
-            return cachedMinimapUi;
         }
 
         private CompassUI GetCompassUi()
