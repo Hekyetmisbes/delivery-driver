@@ -4,7 +4,7 @@ using UnityEngine.UI;
 
 namespace DeliveryDriver.Quest.UI
 {
-    public class MinimapRoadGraphic : Graphic
+    public class MinimapRoadGraphic : MaskableGraphic
     {
         [SerializeField] private float lineWidth = 3.5f;
         [SerializeField] private bool showOutline = true;
@@ -18,6 +18,8 @@ namespace DeliveryDriver.Quest.UI
 
         private readonly List<List<Vector2>> sourcePolylines = new List<List<Vector2>>();
         private readonly List<List<Vector2>> drawablePolylines = new List<List<Vector2>>();
+        private bool loggedPopulateMesh;
+        private bool loggedSetPolylines;
 
         public void SetPolylines(List<List<Vector2>> polylines)
         {
@@ -37,6 +39,19 @@ namespace DeliveryDriver.Quest.UI
             }
 
             RebuildDrawablePolylines();
+
+            if (!loggedSetPolylines)
+            {
+                loggedSetPolylines = true;
+                int totalSrcPts = 0;
+                for (int i = 0; i < sourcePolylines.Count; i++)
+                    totalSrcPts += sourcePolylines[i].Count;
+                Debug.Log($"[MinimapRoadGraphic] SetPolylines: source={sourcePolylines.Count}, " +
+                          $"totalSrcPts={totalSrcPts}, drawable={drawablePolylines.Count}, " +
+                          $"enabled={enabled}, gameObject.active={gameObject.activeInHierarchy}, " +
+                          $"canvas={canvas != null}, canvasRenderer={canvasRenderer != null}");
+            }
+
             SetVerticesDirty();
         }
 
@@ -62,6 +77,21 @@ namespace DeliveryDriver.Quest.UI
         protected override void OnPopulateMesh(VertexHelper vh)
         {
             vh.Clear();
+
+            if (!loggedPopulateMesh && drawablePolylines.Count > 0)
+            {
+                loggedPopulateMesh = true;
+                int totalPts = 0;
+                for (int i = 0; i < drawablePolylines.Count; i++)
+                    totalPts += drawablePolylines[i].Count;
+                Vector2 samplePos = drawablePolylines[0].Count > 0 ? drawablePolylines[0][0] : Vector2.zero;
+                Debug.Log($"[MinimapRoadGraphic] OnPopulateMesh: drawablePolylines={drawablePolylines.Count}, " +
+                          $"totalPoints={totalPts}, lineWidth={lineWidth:F1}, " +
+                          $"color={color}, rectSize={rectTransform.rect.width:F0}x{rectTransform.rect.height:F0}, " +
+                          $"sampleVertex={samplePos}, maskable={maskable}, " +
+                          $"canvasRenderer.cull={canvasRenderer.cull}");
+            }
+
             if (drawablePolylines.Count == 0)
             {
                 return;

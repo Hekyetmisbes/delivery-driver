@@ -3,6 +3,7 @@ using UnityEngine.UI;
 using System.Collections.Generic;
 using DeliveryDriver.Navigation;
 using DeliveryDriver.Company;
+using DeliveryDriver.UI;
 using TMPro;
 using TrafficSystem;
 using UnityEngine.SceneManagement;
@@ -14,6 +15,10 @@ namespace DeliveryDriver.Quest.UI
 {
     public class MinimapUI : MonoBehaviour
     {
+        // ────────────────────────────────────────────────────────────────────
+        // Nested types
+        // ────────────────────────────────────────────────────────────────────
+
         private sealed class MarkerView
         {
             public RectTransform Root;
@@ -25,49 +30,37 @@ namespace DeliveryDriver.Quest.UI
             public void SetVisible(bool visible)
             {
                 if (Root != null && Root.gameObject.activeSelf != visible)
-                {
                     Root.gameObject.SetActive(visible);
-                }
-
                 if (Shadow != null && Shadow.gameObject.activeSelf != visible)
-                {
                     Shadow.gameObject.SetActive(visible);
-                }
             }
         }
+
+        // ────────────────────────────────────────────────────────────────────
+        // Constants
+        // ────────────────────────────────────────────────────────────────────
 
         private const string RuntimeRootName = "MinimapUI";
         private const string QuestCanvasName = "Quest UI Canvas";
         private const string SpriteRegistryResourcePath = "Minimap/MinimapSpriteRegistry";
-        private const float MinAllowedZoom = 12f;
-        private const float MaxAllowedZoom = 220f;
+        private const float MinZoom = 12f;
+        private const float MaxZoom = 220f;
+        private const float RetryInterval = 0.5f;
+        private const float RoadRetryInterval = 1f;
         private static readonly Vector2 ObjectiveMarkerShadowOffset = new Vector2(3f, -3f);
         private static readonly Vector2 PlayerMarkerShadowOffset = new Vector2(2f, -2f);
+
+        // ────────────────────────────────────────────────────────────────────
+        // Static sprite caches
+        // ────────────────────────────────────────────────────────────────────
+
         private static Sprite circleMaskSprite;
         private static Texture2D circleMaskTexture;
         private static Sprite solidSprite;
 
-        [Header("UI References")]
-        [SerializeField] private RawImage minimapImage;
-        [SerializeField] private RectTransform minimapContainer;
-        [SerializeField] private Transform markerContainer;
-
-        [Header("Camera")]
-        [SerializeField] private MinimapCamera minimapCamera;
-        [SerializeField] private Camera cameraComponent;
-
-        [Header("Markers")]
-        [SerializeField] private GameObject pickupMarkerPrefab;
-        [SerializeField] private GameObject deliveryMarkerPrefab;
-        [SerializeField] private GameObject playerMarkerPrefab;
-
-        [Header("Route Preview")]
-        [SerializeField] private bool showRoutePreview = true;
-        [SerializeField] private Color routeLineColor = new Color(1f, 0.81f, 0.34f, 0.96f);
-        [SerializeField] private Color fallbackRouteLineColor = new Color(1f, 0.88f, 0.56f, 0.72f);
-        [SerializeField] private float routeLineWidth = 4.8f;
-        [SerializeField] private RouteLineGraphic routeLine;
-        [SerializeField] private MinimapRoadGraphic roadGraphic;
+        // ────────────────────────────────────────────────────────────────────
+        // Inspector fields
+        // ────────────────────────────────────────────────────────────────────
 
         [Header("Settings")]
         [SerializeField] private bool showMinimap = true;
@@ -78,17 +71,24 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private float responsiveReferenceShortSide = 1080f;
         [SerializeField] private float framePadding = 6f;
         [SerializeField] private float viewportPadding = 12f;
-        [SerializeField, Range(0.0f, 0.30f)] private float panelAlpha = 0.10f;
+        [SerializeField, Range(0f, 0.3f)] private float panelAlpha = 0.10f;
         [SerializeField, Range(0.78f, 1f)] private float mapAlpha = 0.96f;
+
+        [Header("Colors")]
         [SerializeField] private Color panelColor = new Color(0.02f, 0.03f, 0.05f, 1f);
         [SerializeField] private Color panelOutlineColor = new Color(0.80f, 0.88f, 0.96f, 0.76f);
-        [SerializeField] private Color panelShadowColor = new Color(0f, 0f, 0f, 0.22f);
         [SerializeField] private Color mapBackgroundColor = new Color(0.17f, 0.21f, 0.24f, 0.96f);
         [SerializeField] private Color frameColor = new Color(0.10f, 0.12f, 0.15f, 0.94f);
 
         [Header("Scale")]
         [SerializeField] private float fixedZoom = 126f;
         [SerializeField] private bool alignMapToPlayerHeading = true;
+
+        [Header("Route Preview")]
+        [SerializeField] private bool showRoutePreview = true;
+        [SerializeField] private Color routeLineColor = new Color(1f, 0.81f, 0.34f, 0.96f);
+        [SerializeField] private Color fallbackRouteLineColor = new Color(1f, 0.88f, 0.56f, 0.72f);
+        [SerializeField] private float routeLineWidth = 4.8f;
 
         [Header("Marker Style")]
         [SerializeField] private Color pickupMarkerColor = new Color(0.25f, 0.77f, 1f, 1f);
@@ -107,68 +107,90 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private Color roadColor = new Color(0.77f, 0.82f, 0.88f, 1f);
         [SerializeField] private Color roadOutlineColor = new Color(0.09f, 0.12f, 0.16f, 0.96f);
         [SerializeField] private float roadBoundsPadding = 40f;
-        [SerializeField] private float roadRetryInterval = 1f;
+        [SerializeField] private float baseRoadLineWidth = 4.2f;
         [SerializeField] private float routeRefreshDistance = 2f;
         [SerializeField] private float roadRefreshDistance = 4f;
-        [SerializeField] private float baseRoadLineWidth = 4.2f;
-        [SerializeField] private float navigationBindRetryInterval = 0.5f;
-        [SerializeField] private float playerResolveRetryInterval = 0.5f;
-        [SerializeField] private float roadGraphResolveRetryInterval = 1f;
 
-        private GameObject currentPickupMarker;
-        private List<GameObject> currentDeliveryMarkers = new List<GameObject>();
-        private Vector3 currentObjectiveWorldPosition;
-        private bool hasObjectiveWorldPosition;
-        private GameObject playerMarker;
-        private Transform playerTransform;
-        private float currentZoom;
-        private NavigationService subscribedNavigationService;
-        private readonly List<Vector2> routeLocalPoints = new List<Vector2>();
+        // ────────────────────────────────────────────────────────────────────
+        // Runtime state
+        // ────────────────────────────────────────────────────────────────────
+
+        // UI hierarchy
+        private RectTransform minimapContainer;
+        private RectTransform viewportRect;
+        private RectTransform viewportFrameRect;
+        private RawImage roadOverlayImage;
+        private MinimapRoadGraphic roadGraphic;
+        private RouteLineGraphic routeLine;
+        private Transform markerContainer;
         private CanvasGroup minimapCanvasGroup;
-        private NavigationObjective currentObjective = NavigationObjective.Empty;
-        private bool minimapRuntimeReady;
-        private bool navigationStateDirty;
-        private MarkerView pooledPickupMarker;
-        private MarkerView pooledDeliveryMarker;
-        private MarkerView pooledPlayerMarker;
-        private MinimapSpriteRegistry spriteRegistry;
-        private Bounds roadBounds;
-        private bool hasRoadBounds;
-        private bool roadOverlayReady;
-        private float nextRoadAttemptTime;
-        private float nextNavigationBindTime;
-        private float nextPlayerResolveTime;
-        private float nextRoadGraphResolveTime;
-        private RoadGraphBuilder roadGraphBuilder;
+
+        // Camera
+        private MinimapCamera minimapCamera;
+        private Camera cameraComponent;
+
+        // Player
+        private Transform playerTransform;
         private PlayerVehicleManager cachedVehicleManager;
-        private Vector3 mapCenter;
+
+        // Navigation
+        private NavigationService subscribedNavService;
+        private NavigationObjective currentObjective = NavigationObjective.Empty;
         private RouteResult currentRoute = RouteResult.Unavailable;
-        private Vector3 lastRouteCenter = new Vector3(float.NaN, float.NaN, float.NaN);
-        private float lastRouteZoom = -1f;
-        private Vector2 lastScreenSize = Vector2.negativeInfinity;
-        private bool routeDirty = true;
+
+        // Markers
+        private MarkerView pickupMarker;
+        private MarkerView deliveryMarker;
+        private MarkerView playerMarkerView;
+        private MinimapSpriteRegistry spriteRegistry;
+
+        // Road overlay
+        private RoadGraphBuilder roadGraphBuilder;
+        private RoadGraph cachedRoadGraph;
         private readonly List<List<Vector3>> worldRoadPolylines = new List<List<Vector3>>();
         private readonly List<List<Vector2>> localRoadPolylines = new List<List<Vector2>>();
         private Texture2D roadOverlayTexture;
-        private Vector3 lastRoadTextureCenter = new Vector3(float.NaN, float.NaN, float.NaN);
-        private float lastRoadTextureZoom = -1f;
-        private float lastRoadTextureHeading = float.NaN;
-        private Vector3 lastRoadCenter = new Vector3(float.NaN, float.NaN, float.NaN);
-        private float lastRoadZoom = -1f;
-        private float lastRouteHeading = float.NaN;
-        private float lastRoadHeading = float.NaN;
-        private RoadGraph lastRoadGraphSource;
+        private Bounds roadBounds;
+        private bool hasRoadBounds;
+        private bool roadOverlayReady;
+
+        // Route
+        private readonly List<Vector2> routeLocalPoints = new List<Vector2>();
+
+        // Zoom
+        private float currentZoom;
+
+        // Map state
+        private Vector3 mapCenter;
+
+        // Dirty tracking (simplified)
+        private Vector3 lastUpdatePosition = new Vector3(float.NaN, float.NaN, float.NaN);
+        private float lastUpdateZoom = -1f;
+        private float lastUpdateHeading = float.NaN;
+        private bool routeDirty = true;
+        private bool roadsDirty = true;
         private int lastRoadGraphSegmentCount = -1;
-        private RectTransform viewportRect;
-        private RectTransform viewportFrameRect;
-        private bool loggedMissingNavigationService;
-        private bool loggedMissingSpriteRegistry;
-        private bool loggedMissingRoadGraphBuilder;
-        private bool loggedMissingRoadPolylines;
-        private bool loggedMissingRoadGraph;
-        private bool loggedMissingPlayerArrowSprite;
-        private bool loggedMissingPlayerTransform;
-        private bool loggedEmptyLocalRoadPolylines;
+        private Vector2 lastScreenSize = Vector2.negativeInfinity;
+
+        // Retry timers
+        private float nextPlayerResolveTime;
+        private float nextNavBindTime;
+        private float nextRoadResolveTime;
+
+        // Initialization
+        private bool initialized;
+
+        // Logging (one-shot)
+        private bool loggedNoNavService;
+        private bool loggedNoPlayer;
+        private bool loggedNoRoadGraph;
+        private bool loggedNavBound;
+        private bool loggedRoadOverlayReady;
+        private bool loggedSmallViewportRect;
+
+        // ────────────────────────────────────────────────────────────────────
+        // Public API
+        // ────────────────────────────────────────────────────────────────────
 
         public MinimapCamera CameraController => minimapCamera;
 
@@ -177,48 +199,83 @@ namespace DeliveryDriver.Quest.UI
             MinimapUI existing = FindFirstObjectByType<MinimapUI>(FindObjectsInactive.Include);
             if (existing != null)
             {
-                existing.TryInitializeMinimapRuntime(true);
+                existing.Initialize();
                 return existing;
             }
 
             Transform parent = ResolvePreferredParent();
             GameObject root = new GameObject(RuntimeRootName, typeof(RectTransform));
             if (parent != null)
-            {
                 root.transform.SetParent(parent, false);
-            }
 
             return root.AddComponent<MinimapUI>();
         }
 
+        public void SetPlayerTransform(Transform player)
+        {
+            playerTransform = player;
+            nextPlayerResolveTime = 0f;
+            loggedNoPlayer = player == null;
+
+            if (minimapCamera != null)
+                minimapCamera.SetPlayer(player);
+
+            if (playerMarkerView != null)
+            {
+                playerMarkerView.SetVisible(player != null);
+                SetMarkerAnchoredPosition(playerMarkerView, Vector2.zero, true);
+            }
+
+            MarkAllDirty();
+        }
+
+        public void SetMinimapVisible(bool visible)
+        {
+            showMinimap = visible;
+
+            if (minimapCanvasGroup != null)
+            {
+                minimapCanvasGroup.alpha = visible ? 1f : 0f;
+                minimapCanvasGroup.interactable = false;
+                minimapCanvasGroup.blocksRaycasts = false;
+            }
+
+            if (minimapCamera != null)
+                minimapCamera.SetVisible(visible);
+            else if (cameraComponent != null)
+                cameraComponent.enabled = visible;
+        }
+
+        public void ToggleMinimap()
+        {
+            SetMinimapVisible(!showMinimap);
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // Lifecycle
+        // ────────────────────────────────────────────────────────────────────
+
         private void Awake()
         {
-            ApplyFixedZoom();
-            TryInitializeMinimapRuntime(true);
+            currentZoom = Mathf.Clamp(fixedZoom, MinZoom, MaxZoom);
+            Initialize();
         }
 
         private void OnEnable()
         {
             SceneManager.sceneLoaded += OnSceneLoaded;
-        }
-
-        private void Start()
-        {
-            ResolvePlayerTransform(true);
-            TryInitializeMinimapRuntime(true);
-            TryBindNavigationService();
             PlayerVehicleManager.ActiveVehicleChanged += HandleActiveVehicleChanged;
         }
 
         private void OnDisable()
         {
             SceneManager.sceneLoaded -= OnSceneLoaded;
+            PlayerVehicleManager.ActiveVehicleChanged -= HandleActiveVehicleChanged;
         }
 
         private void OnDestroy()
         {
-            PlayerVehicleManager.ActiveVehicleChanged -= HandleActiveVehicleChanged;
-            UnbindNavigationService();
+            UnbindNavigation();
 
             if (roadOverlayTexture != null)
             {
@@ -227,1230 +284,632 @@ namespace DeliveryDriver.Quest.UI
             }
         }
 
+        private void Start()
+        {
+            ResolvePlayer(true);
+            Initialize();
+            BindNavigation();
+        }
+
         private void Update()
         {
-#if ENABLE_INPUT_SYSTEM
-            bool mPressed = Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame;
-#if ENABLE_LEGACY_INPUT_MANAGER
-            mPressed = mPressed || Input.GetKeyDown(KeyCode.M);
-#endif
-#else
-            bool mPressed = Input.GetKeyDown(KeyCode.M);
-#endif
-            if (mPressed)
-            {
-                ToggleMinimap();
-            }
+            HandleToggleInput();
+            SyncZoom();
 
-            RefreshCurrentZoomFromSources();
+            if (!IsUsableTransform(playerTransform))
+                ResolvePlayer();
 
-            if (!IsUsablePlayerTransform(playerTransform))
-            {
-                ResolvePlayerTransform();
-            }
+            if (!initialized)
+                Initialize();
 
-            bool wasReady = minimapRuntimeReady;
-            if (TryInitializeMinimapRuntime(false) && (!wasReady || navigationStateDirty))
-            {
-                navigationStateDirty = false;
-                if (subscribedNavigationService != null)
-                {
-                    SyncNavigationState();
-                }
-            }
+            if (playerMarkerView == null && markerContainer != null)
+                CreatePlayerMarker();
 
-            if (pooledPlayerMarker == null && markerContainer != null)
-            {
-                EnsurePlayerMarker();
-            }
+            if (subscribedNavService == null && Time.unscaledTime >= nextNavBindTime)
+                BindNavigation();
 
-            if (subscribedNavigationService == null && Time.unscaledTime >= nextNavigationBindTime)
-            {
-                TryBindNavigationService();
-            }
-            UpdateRoadOverlayState();
+            ResolveRoads();
             UpdateResponsiveLayout();
 
             if (playerTransform == null)
             {
-                if (pooledPlayerMarker != null)
-                {
-                    pooledPlayerMarker.SetVisible(false);
-                }
-
-                SetPooledObjectiveMarkersVisible(false);
-                ClearRoutePreview();
+                playerMarkerView?.SetVisible(false);
+                SetObjectiveMarkersVisible(false);
+                ClearRoute();
                 return;
             }
 
-            if (pooledPlayerMarker != null)
-            {
-                pooledPlayerMarker.SetVisible(true);
-            }
+            playerMarkerView?.SetVisible(true);
+            mapCenter = playerTransform.position;
 
-            UpdateMapCenter();
-            UpdateRoadOverlayUv();
-
-            if (pooledPlayerMarker != null)
-            {
-                UpdatePlayerMarkerRotation();
-            }
-
-            UpdateObjectiveMarkerPosition();
-            if (currentRoute != null && currentRoute.IsRenderable)
-            {
-                RefreshRoutePreviewIfNeeded();
-            }
+            UpdateRoadOverlay();
+            UpdatePlayerMarkerRotation();
+            UpdateObjectiveMarkerPositions();
+            UpdateRoutePreview();
             UpdateMarkerPulse();
         }
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
+            // Reset all scene-dependent state
             roadGraphBuilder = null;
-            lastRoadGraphSource = null;
-            lastRoadGraphSegmentCount = -1;
+            cachedRoadGraph = null;
             roadOverlayReady = false;
             hasRoadBounds = false;
-            nextRoadAttemptTime = 0f;
-            nextNavigationBindTime = 0f;
-            nextPlayerResolveTime = 0f;
-            nextRoadGraphResolveTime = 0f;
+            lastRoadGraphSegmentCount = -1;
             cachedVehicleManager = null;
             worldRoadPolylines.Clear();
             localRoadPolylines.Clear();
-            lastRoadCenter = new Vector3(float.NaN, float.NaN, float.NaN);
-            lastRoadTextureCenter = new Vector3(float.NaN, float.NaN, float.NaN);
-            lastRouteCenter = new Vector3(float.NaN, float.NaN, float.NaN);
-            lastRoadZoom = -1f;
-            lastRouteZoom = -1f;
-            lastRoadHeading = float.NaN;
-            lastRouteHeading = float.NaN;
-            lastRoadTextureZoom = -1f;
-            lastRoadTextureHeading = float.NaN;
-            routeDirty = true;
-            navigationStateDirty = true;
-            loggedMissingPlayerTransform = false;
+            nextRoadResolveTime = 0f;
+            nextNavBindTime = 0f;
+            nextPlayerResolveTime = 0f;
+            loggedNoPlayer = false;
+            loggedNoNavService = false;
+            loggedNoRoadGraph = false;
+            loggedNavBound = false;
+            loggedRoadOverlayReady = false;
+            loggedSmallViewportRect = false;
+            loggedRoadOverlayUpdate = false;
 
-            if (roadGraphic != null)
-            {
-                roadGraphic.Clear();
-            }
-
+            roadGraphic?.Clear();
+            MarkAllDirty();
             ResolveCameraReferences();
-            RefreshCurrentZoomFromSources();
-            ResolvePlayerTransform(true);
-            TryInitializeMinimapRuntime(true);
-            TryBindNavigationService();
+            SyncZoom();
+            ResolvePlayer(true);
+            Initialize();
+            BindNavigation();
         }
 
-        private void TryBindNavigationService()
-        {
-            NavigationService navigationService = NavigationService.Instance;
-            if (navigationService == null)
-            {
-                if (!loggedMissingNavigationService)
-                {
-                    Debug.LogError("[MinimapUI] NavigationService bulunamadi. Minimap authoritative navigation verisine baglanamiyor.");
-                    loggedMissingNavigationService = true;
-                }
+        // ────────────────────────────────────────────────────────────────────
+        // Initialization & UI hierarchy
+        // ────────────────────────────────────────────────────────────────────
 
-                nextNavigationBindTime = Time.unscaledTime + Mathf.Max(0.1f, navigationBindRetryInterval);
-                return;
-            }
-
-            loggedMissingNavigationService = false;
-            if (subscribedNavigationService == navigationService)
-            {
-                return;
-            }
-
-            UnbindNavigationService();
-
-            subscribedNavigationService = navigationService;
-            subscribedNavigationService.OnObjectiveChanged += HandleObjectiveChanged;
-            subscribedNavigationService.OnRouteChanged += HandleRouteChanged;
-            subscribedNavigationService.OnNavigationCleared += HandleNavigationCleared;
-
-            SyncNavigationState();
-        }
-
-        private void UnbindNavigationService()
-        {
-            if (subscribedNavigationService == null)
-            {
-                return;
-            }
-
-            subscribedNavigationService.OnObjectiveChanged -= HandleObjectiveChanged;
-            subscribedNavigationService.OnRouteChanged -= HandleRouteChanged;
-            subscribedNavigationService.OnNavigationCleared -= HandleNavigationCleared;
-            subscribedNavigationService = null;
-        }
-
-        private void SyncNavigationState()
-        {
-            if (subscribedNavigationService == null)
-            {
-                return;
-            }
-
-            NavigationObjective objective = subscribedNavigationService.CurrentObjective;
-            if (objective.IsValid)
-            {
-                HandleObjectiveChanged(objective);
-            }
-            else
-            {
-                HandleNavigationCleared();
-            }
-
-            HandleRouteChanged(subscribedNavigationService.CurrentRoute);
-        }
-
-        private void HandleObjectiveChanged(NavigationObjective objective)
-        {
-            currentObjective = objective;
-            routeDirty = true;
-
-            if (!objective.IsValid)
-            {
-                hasObjectiveWorldPosition = false;
-                SetPooledObjectiveMarkersVisible(false);
-                return;
-            }
-
-            currentObjectiveWorldPosition = objective.WorldPosition;
-            hasObjectiveWorldPosition = true;
-            navigationStateDirty = !TryInitializeMinimapRuntime(false);
-            if (navigationStateDirty)
-            {
-                return;
-            }
-
-            RefreshObjectiveMarkers();
-        }
-
-        private void HandleRouteChanged(RouteResult route)
-        {
-            currentRoute = route ?? RouteResult.Unavailable;
-            routeDirty = true;
-
-            if (!TryInitializeMinimapRuntime(false) || !showRoutePreview || routeLine == null || minimapContainer == null)
-            {
-                navigationStateDirty = true;
-                return;
-            }
-
-            if (currentRoute == null || !currentRoute.IsRenderable)
-            {
-                ClearRoutePreview();
-                return;
-            }
-
-            Rect rect = GetMinimapViewportRect();
-            PopulateRouteLocalPoints(currentRoute.Points, rect);
-
-            if (routeLocalPoints.Count < 2)
-            {
-                navigationStateDirty = true;
-                ClearRoutePreview();
-                return;
-            }
-
-            Color resolvedRouteColor = currentRoute.IsFallback ? fallbackRouteLineColor : routeLineColor;
-            if (currentRoute.IsStale)
-            {
-                resolvedRouteColor.a *= 0.68f;
-            }
-
-            routeLine.color = resolvedRouteColor;
-            routeLine.SetLineWidth(currentRoute.IsFallback ? Mathf.Max(3.8f, routeLineWidth - 0.6f) : routeLineWidth);
-            routeLine.SetPoints(routeLocalPoints);
-            lastRouteCenter = mapCenter;
-            lastRouteZoom = currentZoom;
-            lastRouteHeading = GetMapHeadingDegrees();
-            routeDirty = false;
-        }
-
-        private void HandleNavigationCleared()
-        {
-            currentObjective = NavigationObjective.Empty;
-            currentRoute = RouteResult.Unavailable;
-            routeDirty = true;
-            SetPooledObjectiveMarkersVisible(false);
-            hasObjectiveWorldPosition = false;
-            ClearRoutePreview();
-        }
-
-        private void SetupMinimap()
+        private void Initialize()
         {
             ResolveCameraReferences();
-            RefreshCurrentZoomFromSources();
-            if (!EnsureUiHierarchy())
-            {
+
+            minimapContainer = GetComponent<RectTransform>();
+            if (minimapContainer == null)
                 return;
-            }
 
-            if (minimapContainer != null)
-            {
-                minimapContainer.anchorMin = new Vector2(0f, 0f);
-                minimapContainer.anchorMax = new Vector2(0f, 0f);
-                minimapContainer.pivot = new Vector2(0f, 0f);
-                minimapContainer.anchoredPosition = new Vector2(Mathf.Abs(anchorOffset.x), Mathf.Abs(anchorOffset.y));
-                minimapContainer.sizeDelta = minimapSize;
-            }
+            // Reparent if needed
+            Transform preferredParent = ResolvePreferredParent();
+            if (preferredParent != null && minimapContainer.parent != preferredParent)
+                minimapContainer.SetParent(preferredParent, false);
 
-            if (minimapCanvasGroup == null && minimapContainer != null)
-            {
-                minimapCanvasGroup = minimapContainer.GetComponent<CanvasGroup>();
-                if (minimapCanvasGroup == null)
-                {
-                    minimapCanvasGroup = minimapContainer.gameObject.AddComponent<CanvasGroup>();
-                }
-            }
+            // Anchor to bottom-left
+            minimapContainer.anchorMin = Vector2.zero;
+            minimapContainer.anchorMax = Vector2.zero;
+            minimapContainer.pivot = Vector2.zero;
+            minimapContainer.anchoredPosition = new Vector2(Mathf.Abs(anchorOffset.x), Mathf.Abs(anchorOffset.y));
+            minimapContainer.sizeDelta = minimapSize;
 
-            Image panelImage = minimapContainer != null ? minimapContainer.GetComponent<Image>() : null;
-            if (panelImage == null && minimapContainer != null)
-            {
+            // CanvasGroup for visibility
+            minimapCanvasGroup = minimapContainer.GetComponent<CanvasGroup>();
+            if (minimapCanvasGroup == null)
+                minimapCanvasGroup = minimapContainer.gameObject.AddComponent<CanvasGroup>();
+
+            // Panel background (disabled, keeps inspector-configurable styling)
+            Image panelImage = minimapContainer.GetComponent<Image>();
+            if (panelImage == null)
                 panelImage = minimapContainer.gameObject.AddComponent<Image>();
-            }
+            panelImage.sprite = GetSolidSprite();
+            panelImage.color = new Color(panelColor.r, panelColor.g, panelColor.b, panelAlpha);
+            panelImage.raycastTarget = false;
+            panelImage.enabled = false;
 
-            if (panelImage != null)
-            {
-                panelImage.sprite = GetSolidSprite();
-                panelImage.color = new Color(panelColor.r, panelColor.g, panelColor.b, panelAlpha);
-                panelImage.raycastTarget = false;
-                panelImage.enabled = false;
-            }
+            Outline panelOutline = minimapContainer.GetComponent<Outline>();
+            if (panelOutline == null)
+                panelOutline = minimapContainer.gameObject.AddComponent<Outline>();
+            panelOutline.effectColor = panelOutlineColor;
+            panelOutline.effectDistance = new Vector2(1f, -1f);
+            panelOutline.useGraphicAlpha = false;
+            panelOutline.enabled = false;
 
-            Outline outline = minimapContainer != null ? minimapContainer.GetComponent<Outline>() : null;
-            if (outline == null && minimapContainer != null)
-            {
-                outline = minimapContainer.gameObject.AddComponent<Outline>();
-            }
+            // Build hierarchy
+            BuildViewportFrame();
+            BuildViewport();
+            BuildRoadOverlayImage();
+            BuildRoadGraphic();
+            BuildRoutePreview();
+            BuildMarkerContainer();
 
-            if (outline != null)
-            {
-                outline.effectColor = panelOutlineColor;
-                outline.effectDistance = new Vector2(1f, -1f);
-                outline.useGraphicAlpha = false;
-                outline.enabled = false;
-            }
+            // Order
+            viewportFrameRect.SetAsFirstSibling();
+            viewportRect.transform.SetAsLastSibling();
 
-            Shadow shadow = minimapContainer != null ? minimapContainer.GetComponent<Shadow>() : null;
-            if (shadow == null && minimapContainer != null)
-            {
-                shadow = minimapContainer.gameObject.AddComponent<Shadow>();
-            }
-
-            if (shadow != null)
-            {
-                shadow.effectColor = panelShadowColor;
-                shadow.effectDistance = new Vector2(3f, -3f);
-                shadow.useGraphicAlpha = false;
-                shadow.enabled = false;
-            }
-
+            // Sprite registry
             if (spriteRegistry == null)
-            {
                 spriteRegistry = Resources.Load<MinimapSpriteRegistry>(SpriteRegistryResourcePath);
-                if (spriteRegistry == null && !loggedMissingSpriteRegistry)
-                {
-                    Debug.LogWarning($"[MinimapUI] Missing sprite registry resource at Resources/{SpriteRegistryResourcePath}. A runtime fallback player arrow sprite will be used.");
-                    loggedMissingSpriteRegistry = true;
-                }
-                else if (spriteRegistry != null)
-                {
-                    loggedMissingSpriteRegistry = false;
-                }
-            }
-            else
-            {
-                loggedMissingSpriteRegistry = false;
-            }
 
-            if (minimapImage != null)
-            {
-                minimapImage.texture = null;
-                minimapImage.color = new Color(1f, 1f, 1f, 0f);
-                minimapImage.raycastTarget = false;
-            }
-
-            Transform viewport = minimapContainer != null ? minimapContainer.Find("Viewport") : null;
-            if (viewport != null)
-            {
-                if (roadGraphic == null)
-                {
-                    Transform existingRoadGraphic = viewport.Find("RoadNetwork");
-                    if (existingRoadGraphic != null)
-                    {
-                        roadGraphic = existingRoadGraphic.GetComponent<MinimapRoadGraphic>();
-                    }
-                }
-
-                if (roadGraphic == null)
-                {
-                    GameObject roadGraphicObject = new GameObject("RoadNetwork");
-                    roadGraphicObject.transform.SetParent(viewport, false);
-                    roadGraphic = roadGraphicObject.AddComponent<MinimapRoadGraphic>();
-                }
-
-                RectTransform roadGraphicRect = roadGraphic.rectTransform;
-                roadGraphicRect.anchorMin = Vector2.zero;
-                roadGraphicRect.anchorMax = Vector2.one;
-                roadGraphicRect.offsetMin = Vector2.zero;
-                roadGraphicRect.offsetMax = Vector2.zero;
-                roadGraphic.color = roadColor;
-                roadGraphic.SetOutlineColor(roadOutlineColor);
-                roadGraphic.SetLineWidth(baseRoadLineWidth);
-                roadGraphic.raycastTarget = false;
-                roadGraphic.enabled = true;
-                roadGraphic.transform.SetAsFirstSibling();
-            }
-
+            // Camera
             if (minimapCamera != null)
             {
                 minimapCamera.SetUseStandaloneOverlay(false);
                 minimapCamera.SetVisible(showMinimap);
             }
 
-            SetupRoutePreview();
-            EnsureMarkerContainerOrder();
-            EnsurePlayerMarker();
+            // Force layout so viewportRect.rect has valid dimensions
+            // on the same frame (Canvas layout normally runs after Update).
+            Canvas.ForceUpdateCanvases();
+
+            // Player marker
+            CreatePlayerMarker();
             ApplyMarkerSizing();
             SetMinimapVisible(showMinimap);
+
+            initialized = true;
         }
 
-        private void SetupRoutePreview()
+        private void BuildViewportFrame()
         {
-            if (!showRoutePreview || minimapContainer == null)
+            Transform existing = minimapContainer.Find("ViewportFrame");
+            if (existing == null)
             {
-                return;
+                GameObject go = new GameObject("ViewportFrame", typeof(RectTransform), typeof(Image));
+                go.transform.SetParent(minimapContainer, false);
+                existing = go.transform;
             }
 
-            Transform viewport = minimapContainer.Find("Viewport");
-            Transform routeParent = viewport != null ? viewport : minimapContainer;
+            viewportFrameRect = existing as RectTransform;
+            viewportFrameRect.anchorMin = Vector2.zero;
+            viewportFrameRect.anchorMax = Vector2.one;
+            viewportFrameRect.offsetMin = new Vector2(framePadding, framePadding);
+            viewportFrameRect.offsetMax = new Vector2(-framePadding, -framePadding);
+
+            Image img = existing.GetComponent<Image>();
+            img.sprite = GetCircleMaskSprite();
+            img.color = frameColor;
+            img.raycastTarget = false;
+        }
+
+        private void BuildViewport()
+        {
+            Transform existing = minimapContainer.Find("Viewport");
+            if (existing == null)
+            {
+                GameObject go = new GameObject("Viewport", typeof(RectTransform), typeof(Image), typeof(Mask));
+                go.transform.SetParent(minimapContainer, false);
+                existing = go.transform;
+            }
+
+            viewportRect = existing as RectTransform;
+            viewportRect.anchorMin = Vector2.zero;
+            viewportRect.anchorMax = Vector2.one;
+            viewportRect.offsetMin = new Vector2(viewportPadding, viewportPadding);
+            viewportRect.offsetMax = new Vector2(-viewportPadding, -viewportPadding);
+
+            Image viewportImage = existing.GetComponent<Image>();
+            viewportImage.sprite = GetCircleMaskSprite();
+            viewportImage.color = new Color(mapBackgroundColor.r, mapBackgroundColor.g, mapBackgroundColor.b, mapAlpha);
+            viewportImage.raycastTarget = false;
+            viewportImage.type = Image.Type.Simple;
+
+            Mask mask = existing.GetComponent<Mask>();
+            if (mask == null)
+                mask = existing.gameObject.AddComponent<Mask>();
+            mask.showMaskGraphic = true;
+
+            // Remove RectMask2D if present (conflicts with Mask)
+            RectMask2D rectMask = existing.GetComponent<RectMask2D>();
+            if (rectMask != null)
+            {
+                rectMask.enabled = false;
+                Destroy(rectMask);
+            }
+        }
+
+        private void BuildRoadOverlayImage()
+        {
+            if (viewportRect == null) return;
+
+            Transform existing = viewportRect.Find("RoadOverlay");
+            if (existing == null)
+            {
+                GameObject go = new GameObject("RoadOverlay", typeof(RectTransform), typeof(RawImage));
+                go.transform.SetParent(viewportRect, false);
+                existing = go.transform;
+            }
+
+            roadOverlayImage = existing.GetComponent<RawImage>();
+            RectTransform rt = roadOverlayImage.rectTransform;
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+            roadOverlayImage.texture = null;
+            roadOverlayImage.color = new Color(1f, 1f, 1f, 0f);
+            roadOverlayImage.raycastTarget = false;
+        }
+
+        private void BuildRoadGraphic()
+        {
+            if (viewportRect == null) return;
+
+            if (roadGraphic == null)
+            {
+                Transform existing = viewportRect.Find("RoadNetwork");
+                if (existing != null)
+                    roadGraphic = existing.GetComponent<MinimapRoadGraphic>();
+            }
+
+            if (roadGraphic == null)
+            {
+                GameObject go = new GameObject("RoadNetwork", typeof(RectTransform), typeof(CanvasRenderer));
+                go.transform.SetParent(viewportRect, false);
+                roadGraphic = go.AddComponent<MinimapRoadGraphic>();
+            }
+
+            RectTransform rt = roadGraphic.rectTransform;
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+            roadGraphic.color = roadColor;
+            roadGraphic.SetOutlineColor(roadOutlineColor);
+            roadGraphic.SetLineWidth(baseRoadLineWidth);
+            roadGraphic.raycastTarget = false;
+            roadGraphic.enabled = true;
+            roadGraphic.transform.SetAsFirstSibling();
+        }
+
+        private void BuildRoutePreview()
+        {
+            if (!showRoutePreview || viewportRect == null) return;
 
             if (routeLine == null)
             {
-                Transform existingRoute = routeParent.Find("RoutePreview");
-                if (existingRoute != null)
-                {
-                    routeLine = existingRoute.GetComponent<RouteLineGraphic>();
-                }
+                Transform existing = viewportRect.Find("RoutePreview");
+                if (existing != null)
+                    routeLine = existing.GetComponent<RouteLineGraphic>();
             }
 
             if (routeLine == null)
             {
-                GameObject routeObject = new GameObject("RoutePreview");
-                routeObject.transform.SetParent(routeParent, false);
-                routeLine = routeObject.AddComponent<RouteLineGraphic>();
+                GameObject go = new GameObject("RoutePreview", typeof(RectTransform), typeof(CanvasRenderer));
+                go.transform.SetParent(viewportRect, false);
+                routeLine = go.AddComponent<RouteLineGraphic>();
             }
-            else if (routeLine.transform.parent != routeParent)
+            else if (routeLine.transform.parent != viewportRect)
             {
-                routeLine.transform.SetParent(routeParent, false);
+                routeLine.transform.SetParent(viewportRect, false);
             }
 
             routeLine.color = routeLineColor;
             routeLine.raycastTarget = false;
             routeLine.SetLineWidth(routeLineWidth);
 
-            RectTransform rectTransform = routeLine.rectTransform;
-            rectTransform.anchorMin = Vector2.zero;
-            rectTransform.anchorMax = Vector2.one;
-            rectTransform.offsetMin = Vector2.zero;
-            rectTransform.offsetMax = Vector2.zero;
-            rectTransform.SetAsLastSibling();
+            RectTransform rt = routeLine.rectTransform;
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+            rt.SetAsLastSibling();
         }
 
-        private void ShowPickupMarker(Vector3 worldPosition)
+        private void BuildMarkerContainer()
         {
-            if (!EnsureUiHierarchy() || markerContainer == null)
-            {
-                return;
-            }
-
-            if (pooledPickupMarker == null)
-            {
-                pooledPickupMarker = CreatePooledMarker("PickupMarker", "P", pickupMarkerColor, markerSize, true);
-            }
-
-            pooledPickupMarker.Icon.color = pickupMarkerColor;
-            pooledPickupMarker.Label.text = "P";
-            pooledPickupMarker.SetVisible(true);
-            UpdateMarkerPosition(pooledPickupMarker, worldPosition);
-        }
-
-        private void ShowDeliveryMarker(Vector3 worldPosition, int deliveryIndex)
-        {
-            if (!EnsureUiHierarchy() || markerContainer == null)
-            {
-                return;
-            }
-
-            if (pooledDeliveryMarker == null)
-            {
-                pooledDeliveryMarker = CreatePooledMarker("DeliveryMarker", "D", deliveryMarkerColor, markerSize, false);
-            }
-
-            pooledDeliveryMarker.Icon.color = deliveryMarkerColor;
-            pooledDeliveryMarker.Label.text = deliveryIndex > 0 ? deliveryIndex.ToString() : "D";
-            pooledDeliveryMarker.SetVisible(true);
-            UpdateMarkerPosition(pooledDeliveryMarker, worldPosition);
-        }
-
-        private void ClearAllMarkers()
-        {
-            if (pooledPickupMarker != null)
-            {
-                pooledPickupMarker.SetVisible(false);
-            }
-
-            if (pooledDeliveryMarker != null)
-            {
-                pooledDeliveryMarker.SetVisible(false);
-            }
-        }
-
-        private void UpdatePlayerMarkerRotation()
-        {
-            if (pooledPlayerMarker == null || playerTransform == null)
-            {
-                return;
-            }
-
-            float yRotation = alignMapToPlayerHeading ? 0f : -playerTransform.eulerAngles.y;
-            pooledPlayerMarker.Root.localRotation = Quaternion.Euler(0f, 0f, yRotation);
-            if (pooledPlayerMarker.Shadow != null)
-            {
-                pooledPlayerMarker.Shadow.localRotation = pooledPlayerMarker.Root.localRotation;
-            }
-        }
-
-        private void SetMarkerAnchoredPosition(MarkerView marker, Vector2 anchoredPosition, bool isPlayerMarker)
-        {
-            if (marker == null)
-            {
-                return;
-            }
-
-            if (marker.Root != null)
-            {
-                marker.Root.anchoredPosition = anchoredPosition;
-            }
-
-            if (marker.Shadow != null)
-            {
-                Vector2 shadowOffset = isPlayerMarker ? PlayerMarkerShadowOffset : ObjectiveMarkerShadowOffset;
-                marker.Shadow.anchoredPosition = anchoredPosition + shadowOffset;
-            }
-        }
-
-        private void UpdateObjectiveMarkerPosition()
-        {
-            if (!TryInitializeMinimapRuntime() || minimapContainer == null || !hasObjectiveWorldPosition)
-            {
-                return;
-            }
-
-            if (pooledPickupMarker != null && pooledPickupMarker.Root.gameObject.activeSelf)
-            {
-                UpdateMarkerPosition(pooledPickupMarker, currentObjectiveWorldPosition);
-            }
-
-            if (pooledDeliveryMarker != null && pooledDeliveryMarker.Root.gameObject.activeSelf)
-            {
-                UpdateMarkerPosition(pooledDeliveryMarker, currentObjectiveWorldPosition);
-            }
-        }
-
-        private void UpdateMarkerPosition(MarkerView marker, Vector3 worldPosition)
-        {
-            if (marker == null || marker.Root == null || minimapContainer == null)
-            {
-                return;
-            }
-
-            if (!TryConvertWorldToMinimapLocal(worldPosition, GetMinimapViewportRect(), clampObjectivesToEdge, out Vector2 local))
-            {
-                marker.SetVisible(false);
-                return;
-            }
-
-            marker.SetVisible(true);
-            SetMarkerAnchoredPosition(marker, local, false);
-        }
-
-        private MarkerView CreatePooledMarker(string name, string labelText, Color color, float size, bool diamondAccent)
-        {
-            MarkerView marker = new MarkerView();
-
-            marker.Shadow = new GameObject($"{name}Shadow", typeof(RectTransform), typeof(Image)).GetComponent<RectTransform>();
-            marker.Shadow.SetParent(markerContainer, false);
-            marker.Shadow.anchorMin = new Vector2(0.5f, 0.5f);
-            marker.Shadow.anchorMax = new Vector2(0.5f, 0.5f);
-            marker.Shadow.pivot = new Vector2(0.5f, 0.5f);
-            marker.Shadow.sizeDelta = Vector2.one * (size + 6f);
-            Image shadowImage = marker.Shadow.GetComponent<Image>();
-            shadowImage.sprite = GetSolidSprite();
-            shadowImage.color = new Color(0f, 0f, 0f, 0.30f);
-            shadowImage.raycastTarget = false;
-
-            marker.Root = new GameObject(name, typeof(RectTransform), typeof(Image)).GetComponent<RectTransform>();
-            marker.Root.SetParent(markerContainer, false);
-            marker.Root.anchorMin = new Vector2(0.5f, 0.5f);
-            marker.Root.anchorMax = new Vector2(0.5f, 0.5f);
-            marker.Root.pivot = new Vector2(0.5f, 0.5f);
-            marker.Root.sizeDelta = Vector2.one * (size + 2f);
-            Image rootImage = marker.Root.GetComponent<Image>();
-            rootImage.sprite = GetSolidSprite();
-            rootImage.color = markerFrameColor;
-            rootImage.raycastTarget = false;
-
-            RectTransform iconRect = new GameObject("Icon", typeof(RectTransform), typeof(Image)).GetComponent<RectTransform>();
-            iconRect.SetParent(marker.Root, false);
-            iconRect.anchorMin = new Vector2(0.5f, 0.5f);
-            iconRect.anchorMax = new Vector2(0.5f, 0.5f);
-            iconRect.pivot = new Vector2(0.5f, 0.5f);
-            iconRect.sizeDelta = Vector2.one * Mathf.Max(12f, size * 0.68f);
-            iconRect.localRotation = diamondAccent ? Quaternion.Euler(0f, 0f, 45f) : Quaternion.identity;
-            marker.Icon = iconRect.GetComponent<Image>();
-            marker.Icon.sprite = diamondAccent ? GetCircleMaskSprite() : GetSolidSprite();
-            marker.Icon.color = color;
-            marker.Icon.raycastTarget = false;
-
-            RectTransform labelRect = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI)).GetComponent<RectTransform>();
-            labelRect.SetParent(marker.Root, false);
-            labelRect.anchorMin = Vector2.zero;
-            labelRect.anchorMax = Vector2.one;
-            labelRect.offsetMin = Vector2.zero;
-            labelRect.offsetMax = Vector2.zero;
-            marker.Label = labelRect.GetComponent<TextMeshProUGUI>();
-            marker.Label.text = labelText;
-            marker.Label.alignment = TextAlignmentOptions.Center;
-            marker.Label.fontSize = 11f;
-            marker.Label.fontStyle = FontStyles.Bold;
-            marker.Label.color = Color.white;
-            marker.Label.outlineWidth = 0.16f;
-            marker.Label.outlineColor = new Color(0f, 0f, 0f, 0.95f);
-            marker.Label.raycastTarget = false;
-            if (TMP_Settings.defaultFontAsset != null)
-            {
-                marker.Label.font = TMP_Settings.defaultFontAsset;
-            }
-
-            marker.BaseScale = Vector3.one;
-            marker.SetVisible(false);
-            return marker;
-        }
-
-        private void SetPooledObjectiveMarkersVisible(bool visible)
-        {
-            if (pooledPickupMarker != null)
-            {
-                pooledPickupMarker.SetVisible(visible && currentObjective.Type == ObjectiveType.Pickup);
-            }
-
-            if (pooledDeliveryMarker != null)
-            {
-                pooledDeliveryMarker.SetVisible(visible && currentObjective.Type == ObjectiveType.Delivery);
-            }
-        }
-
-        private bool TryInitializeMinimapRuntime(bool forceReparent = false)
-        {
-            ResolveCameraReferences();
-            RectTransform rootRect = transform as RectTransform;
-            if (forceReparent && rootRect != null)
-            {
-                Transform preferredParent = ResolvePreferredParent();
-                if (preferredParent != null && rootRect.parent != preferredParent)
-                {
-                    rootRect.SetParent(preferredParent, false);
-                }
-            }
-
-            bool ready = EnsureUiHierarchy() && minimapImage != null;
-            if (!ready)
-            {
-                minimapRuntimeReady = false;
-                return false;
-            }
-
-            bool needsSetup =
-                !minimapRuntimeReady ||
-                routeLine == null ||
-                markerContainer == null;
-
-            if (needsSetup)
-            {
-                SetupMinimap();
-                EnsurePlayerMarker();
-                EnsureMarkerContainerOrder();
-            }
-
-            minimapRuntimeReady =
-                minimapImage != null &&
-                markerContainer != null;
-            return minimapRuntimeReady;
-        }
-
-        private bool EnsureUiHierarchy()
-        {
-            if (minimapContainer == null)
-            {
-                minimapContainer = GetComponent<RectTransform>();
-            }
-
-            if (minimapContainer == null)
-            {
-                return false;
-            }
-
-            Transform frame = minimapContainer.Find("ViewportFrame");
-            if (frame == null)
-            {
-                GameObject frameObject = new GameObject("ViewportFrame", typeof(RectTransform), typeof(Image));
-                frame = frameObject.transform;
-                frame.SetParent(minimapContainer, false);
-            }
-
-            viewportFrameRect = frame as RectTransform;
-            viewportFrameRect.anchorMin = Vector2.zero;
-            viewportFrameRect.anchorMax = Vector2.one;
-            viewportFrameRect.offsetMin = new Vector2(framePadding, framePadding);
-            viewportFrameRect.offsetMax = new Vector2(-framePadding, -framePadding);
-
-            Image frameImage = frame.GetComponent<Image>();
-            frameImage.sprite = GetCircleMaskSprite();
-            frameImage.color = frameColor;
-            frameImage.raycastTarget = false;
-
-            Transform viewport = minimapContainer.Find("Viewport");
-            if (viewport == null)
-            {
-                GameObject viewportObject = new GameObject("Viewport", typeof(RectTransform), typeof(Image), typeof(Mask));
-                viewport = viewportObject.transform;
-                viewport.SetParent(minimapContainer, false);
-            }
-
-            viewportRect = viewport as RectTransform;
-            viewportRect.anchorMin = Vector2.zero;
-            viewportRect.anchorMax = Vector2.one;
-            viewportRect.offsetMin = new Vector2(viewportPadding, viewportPadding);
-            viewportRect.offsetMax = new Vector2(-viewportPadding, -viewportPadding);
-
-            Image viewportImage = viewport.GetComponent<Image>();
-            viewportImage.sprite = GetCircleMaskSprite();
-            viewportImage.color = new Color(mapBackgroundColor.r, mapBackgroundColor.g, mapBackgroundColor.b, mapAlpha);
-            viewportImage.raycastTarget = false;
-            viewportImage.type = Image.Type.Simple;
-
-            Mask viewportMask = viewport.GetComponent<Mask>();
-            if (viewportMask == null)
-            {
-                viewportMask = viewport.gameObject.AddComponent<Mask>();
-            }
-
-            viewportMask.showMaskGraphic = true;
-
-            RectMask2D rectMask = viewport.GetComponent<RectMask2D>();
-            if (rectMask != null)
-            {
-                rectMask.enabled = false;
-                Destroy(rectMask);
-            }
-
-            Outline viewportOutline = viewport.GetComponent<Outline>();
-            if (viewportOutline == null)
-            {
-                viewportOutline = viewport.gameObject.AddComponent<Outline>();
-            }
-
-            viewportOutline.effectColor = new Color(panelOutlineColor.r, panelOutlineColor.g, panelOutlineColor.b, 0.22f);
-            viewportOutline.effectDistance = new Vector2(1f, -1f);
-            viewportOutline.useGraphicAlpha = false;
-            viewportOutline.enabled = false;
-
-            if (minimapImage == null)
-            {
-                Transform existingRoad = viewport.Find("RoadOverlay");
-                if (existingRoad != null)
-                {
-                    minimapImage = existingRoad.GetComponent<RawImage>();
-                }
-            }
-
-            if (minimapImage == null)
-            {
-                GameObject roadObject = new GameObject("RoadOverlay", typeof(RectTransform), typeof(RawImage));
-                roadObject.transform.SetParent(viewport, false);
-                minimapImage = roadObject.GetComponent<RawImage>();
-            }
-
-            RectTransform roadRect = minimapImage.rectTransform;
-            roadRect.anchorMin = Vector2.zero;
-            roadRect.anchorMax = Vector2.one;
-            roadRect.offsetMin = Vector2.zero;
-            roadRect.offsetMax = Vector2.zero;
-            minimapImage.raycastTarget = false;
+            if (viewportRect == null) return;
 
             if (markerContainer == null)
             {
-                Transform existingMarkerContainer = viewport.Find("MarkerContainer");
-                if (existingMarkerContainer == null)
+                Transform existing = viewportRect.Find("MarkerContainer");
+                if (existing == null)
                 {
-                    GameObject markerContainerObject = new GameObject("MarkerContainer", typeof(RectTransform));
-                    existingMarkerContainer = markerContainerObject.transform;
-                    existingMarkerContainer.SetParent(viewport, false);
+                    GameObject go = new GameObject("MarkerContainer", typeof(RectTransform));
+                    go.transform.SetParent(viewportRect, false);
+                    existing = go.transform;
                 }
-
-                markerContainer = existingMarkerContainer;
+                markerContainer = existing;
             }
-            else if (markerContainer.parent != viewport)
+            else if (markerContainer.parent != viewportRect)
             {
-                markerContainer.SetParent(viewport, false);
+                markerContainer.SetParent(viewportRect, false);
             }
 
-            RectTransform markerRect = markerContainer as RectTransform;
-            if (markerRect != null)
+            RectTransform rt = markerContainer as RectTransform;
+            if (rt != null)
             {
-                markerRect.anchorMin = Vector2.zero;
-                markerRect.anchorMax = Vector2.one;
-                markerRect.offsetMin = Vector2.zero;
-                markerRect.offsetMax = Vector2.zero;
-                markerRect.pivot = new Vector2(0.5f, 0.5f);
+                rt.anchorMin = Vector2.zero;
+                rt.anchorMax = Vector2.one;
+                rt.offsetMin = Vector2.zero;
+                rt.offsetMax = Vector2.zero;
+                rt.pivot = new Vector2(0.5f, 0.5f);
             }
 
-            frame.SetAsFirstSibling();
-            viewport.SetAsLastSibling();
-
-            return true;
+            // Ensure markers render above routes
+            if (routeLine != null) routeLine.transform.SetAsLastSibling();
+            markerContainer.SetAsLastSibling();
         }
 
-        private void EnsurePlayerMarker()
+        // ────────────────────────────────────────────────────────────────────
+        // Navigation binding
+        // ────────────────────────────────────────────────────────────────────
+
+        private void BindNavigation()
         {
-            if (markerContainer == null || pooledPlayerMarker != null)
+            NavigationService navService = NavigationService.EnsureInstance();
+            if (navService == null)
             {
+                if (!loggedNoNavService)
+                {
+                    Debug.LogWarning("[MinimapUI] NavigationService olusturulamadi.");
+                    loggedNoNavService = true;
+                }
+                nextNavBindTime = Time.unscaledTime + RetryInterval;
                 return;
             }
 
-            Sprite arrowSprite = spriteRegistry != null
-                ? spriteRegistry.GetPlayerArrowSprite()
-                : MinimapSpriteRegistry.GetFallbackPlayerArrowSprite();
+            loggedNoNavService = false;
+            if (subscribedNavService == navService)
+                return;
 
-            if (arrowSprite == null)
+            UnbindNavigation();
+
+            subscribedNavService = navService;
+            subscribedNavService.OnObjectiveChanged += OnObjectiveChanged;
+            subscribedNavService.OnRouteChanged += OnRouteChanged;
+            subscribedNavService.OnNavigationCleared += OnNavigationCleared;
+
+            if (!loggedNavBound)
             {
-                if (spriteRegistry == null && !loggedMissingSpriteRegistry)
-                {
-                    Debug.LogError("[MinimapUI] Missing MinimapSpriteRegistry resource and fallback player arrow sprite creation failed.");
-                    loggedMissingSpriteRegistry = true;
-                }
-                if (!loggedMissingPlayerArrowSprite)
-                {
-                    Debug.LogError("[MinimapUI] Player arrow sprite could not be created, even after fallback generation.");
-                    loggedMissingPlayerArrowSprite = true;
-                }
+                Debug.Log("[MinimapUI] NavigationService basariyla baglandi.");
+                loggedNavBound = true;
+            }
 
+            SyncNavigationState();
+        }
+
+        private void UnbindNavigation()
+        {
+            if (subscribedNavService == null) return;
+
+            subscribedNavService.OnObjectiveChanged -= OnObjectiveChanged;
+            subscribedNavService.OnRouteChanged -= OnRouteChanged;
+            subscribedNavService.OnNavigationCleared -= OnNavigationCleared;
+            subscribedNavService = null;
+        }
+
+        private void SyncNavigationState()
+        {
+            if (subscribedNavService == null) return;
+
+            NavigationObjective objective = subscribedNavService.CurrentObjective;
+            if (objective.IsValid)
+                OnObjectiveChanged(objective);
+            else
+                OnNavigationCleared();
+
+            OnRouteChanged(subscribedNavService.CurrentRoute);
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // Navigation event handlers
+        // ────────────────────────────────────────────────────────────────────
+
+        private void OnObjectiveChanged(NavigationObjective objective)
+        {
+            currentObjective = objective;
+            routeDirty = true;
+
+            if (!objective.IsValid)
+            {
+                SetObjectiveMarkersVisible(false);
                 return;
             }
 
-            if (spriteRegistry == null && !loggedMissingSpriteRegistry)
-            {
-                Debug.LogWarning("[MinimapUI] MinimapSpriteRegistry resource is missing. Using runtime fallback player arrow sprite.");
-                loggedMissingSpriteRegistry = true;
-            }
-            else if (spriteRegistry != null)
-            {
-                loggedMissingSpriteRegistry = false;
-            }
-            loggedMissingPlayerArrowSprite = false;
-
-            pooledPlayerMarker = new MarkerView();
-            pooledPlayerMarker.Shadow = new GameObject("PlayerMarkerShadow", typeof(RectTransform), typeof(Image)).GetComponent<RectTransform>();
-            pooledPlayerMarker.Shadow.SetParent(markerContainer, false);
-            pooledPlayerMarker.Shadow.anchorMin = new Vector2(0.5f, 0.5f);
-            pooledPlayerMarker.Shadow.anchorMax = new Vector2(0.5f, 0.5f);
-            pooledPlayerMarker.Shadow.pivot = new Vector2(0.5f, 0.5f);
-            pooledPlayerMarker.Shadow.sizeDelta = Vector2.one * playerMarkerSize;
-            Image shadowImage = pooledPlayerMarker.Shadow.GetComponent<Image>();
-            shadowImage.sprite = arrowSprite;
-            shadowImage.preserveAspect = true;
-            shadowImage.color = new Color(0f, 0f, 0f, 0.40f);
-            shadowImage.raycastTarget = false;
-
-            pooledPlayerMarker.Root = new GameObject("PlayerMarker", typeof(RectTransform), typeof(Image)).GetComponent<RectTransform>();
-            pooledPlayerMarker.Root.SetParent(markerContainer, false);
-            pooledPlayerMarker.Root.anchorMin = new Vector2(0.5f, 0.5f);
-            pooledPlayerMarker.Root.anchorMax = new Vector2(0.5f, 0.5f);
-            pooledPlayerMarker.Root.pivot = new Vector2(0.5f, 0.5f);
-            pooledPlayerMarker.Root.sizeDelta = Vector2.one * playerMarkerSize;
-            Image plateImage = pooledPlayerMarker.Root.GetComponent<Image>();
-            plateImage.sprite = GetCircleMaskSprite();
-            plateImage.color = new Color(0.06f, 0.08f, 0.11f, 0.88f);
-            plateImage.raycastTarget = false;
-
-            RectTransform arrowRect = new GameObject("Arrow", typeof(RectTransform), typeof(Image)).GetComponent<RectTransform>();
-            arrowRect.SetParent(pooledPlayerMarker.Root, false);
-            arrowRect.anchorMin = new Vector2(0.5f, 0.5f);
-            arrowRect.anchorMax = new Vector2(0.5f, 0.5f);
-            arrowRect.pivot = new Vector2(0.5f, 0.5f);
-            arrowRect.sizeDelta = Vector2.one * Mathf.Max(18f, playerMarkerSize - 6f);
-            pooledPlayerMarker.Icon = arrowRect.GetComponent<Image>();
-            pooledPlayerMarker.Icon.sprite = arrowSprite;
-            pooledPlayerMarker.Icon.preserveAspect = true;
-            pooledPlayerMarker.Icon.color = playerMarkerColor;
-            pooledPlayerMarker.Icon.raycastTarget = false;
-            pooledPlayerMarker.BaseScale = Vector3.one;
-            SetMarkerAnchoredPosition(pooledPlayerMarker, Vector2.zero, true);
-            pooledPlayerMarker.Root.SetAsLastSibling();
-            ApplyPlayerMarkerSizing(GetResolvedPlayerMarkerSize());
+            if (!initialized) return;
+            RefreshObjectiveMarkers();
         }
 
-        private void EnsureMarkerContainerOrder()
+        private void OnRouteChanged(RouteResult route)
         {
-            if (routeLine != null)
-            {
-                routeLine.transform.SetAsLastSibling();
-            }
-
-            if (markerContainer != null)
-            {
-                markerContainer.SetAsLastSibling();
-            }
+            currentRoute = route ?? RouteResult.Unavailable;
+            routeDirty = true;
         }
 
-        private void RefreshObjectiveMarkers()
+        private void OnNavigationCleared()
         {
-            ClearAllMarkers();
+            currentObjective = NavigationObjective.Empty;
+            currentRoute = RouteResult.Unavailable;
+            routeDirty = true;
+            SetObjectiveMarkersVisible(false);
+            ClearRoute();
+        }
 
-            if (!currentObjective.IsValid)
+        // ────────────────────────────────────────────────────────────────────
+        // Player resolution
+        // ────────────────────────────────────────────────────────────────────
+
+        private void ResolvePlayer(bool force = false)
+        {
+            if (!force && IsUsableTransform(playerTransform))
+                return;
+
+            if (!force && Time.unscaledTime < nextPlayerResolveTime)
+                return;
+
+            nextPlayerResolveTime = Time.unscaledTime + RetryInterval;
+
+            if (!TryResolvePlayer(out Transform resolved))
             {
+                if (!loggedNoPlayer)
+                {
+                    Debug.LogWarning("[MinimapUI] Oyuncu transform'u bulunamadi, bekleniyor.");
+                    loggedNoPlayer = true;
+                }
+                playerTransform = null;
+                minimapCamera?.SetPlayer(null);
                 return;
             }
 
-            if (currentObjective.Type == ObjectiveType.Pickup)
-            {
-                ShowPickupMarker(currentObjective.WorldPosition);
-            }
-            else if (currentObjective.Type == ObjectiveType.Delivery)
-            {
-                ShowDeliveryMarker(currentObjective.WorldPosition, currentObjective.DeliveryIndex);
-            }
-        }
-
-        private void MoveMarkerAboveRoute(GameObject markerObject)
-        {
-            if (markerObject == null)
-            {
+            loggedNoPlayer = false;
+            if (playerTransform == resolved && !force)
                 return;
-            }
 
-            markerObject.transform.SetAsLastSibling();
-            if (markerContainer != null)
-            {
-                markerContainer.SetAsLastSibling();
-            }
+            playerTransform = resolved;
+            minimapCamera?.SetPlayer(playerTransform);
+            MarkAllDirty();
         }
 
-        private void PopulateRouteLocalPoints(IReadOnlyList<Vector3> worldPoints, Rect rect)
+        private bool TryResolvePlayer(out Transform player)
         {
-            routeLocalPoints.Clear();
-            if (worldPoints == null || worldPoints.Count < 2)
+            player = null;
+
+            // 1. QuestManager
+            if (QuestManager.Instance != null && IsUsableTransform(QuestManager.Instance.PlayerTransform))
             {
-                return;
+                player = QuestManager.Instance.PlayerTransform;
+                return true;
             }
 
-            bool enteredViewport = false;
-            float clipExpansion = 1f + Mathf.Max(0.04f, routeViewportExpansion * 0.25f);
-            for (int i = 1; i < worldPoints.Count; i++)
+            // 2. PlayerVehicleManager
+            PlayerVehicleManager vm = GetVehicleManager();
+            if (vm != null && vm.ActiveVehicleController != null &&
+                IsUsableTransform(vm.ActiveVehicleController.transform))
             {
-                Vector2 previousLocal = ConvertWorldToMinimapLocal(worldPoints[i - 1], rect);
-                Vector2 currentLocal = ConvertWorldToMinimapLocal(worldPoints[i], rect);
-                if (!TryClipLineToExpandedRect(previousLocal, currentLocal, rect, clipExpansion, out Vector2 clippedStart, out Vector2 clippedEnd))
+                player = vm.ActiveVehicleController.transform;
+                return true;
+            }
+
+            // 3. Player tag
+            GameObject tagged = GameObject.FindGameObjectWithTag("Player");
+            if (tagged != null && IsUsableTransform(tagged.transform))
+            {
+                player = tagged.transform;
+                return true;
+            }
+
+            // 4. Any CarController
+            CarController[] controllers = FindObjectsByType<CarController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            Transform inactiveFallback = null;
+            for (int i = 0; i < controllers.Length; i++)
+            {
+                if (controllers[i] == null) continue;
+                if (IsUsableTransform(controllers[i].transform))
                 {
-                    if (enteredViewport)
-                    {
-                        break;
-                    }
-
-                    continue;
-                }
-
-                if (!enteredViewport)
-                {
-                    AddRoutePoint(clippedStart);
-                    enteredViewport = true;
-                }
-
-                AddRoutePoint(clippedEnd);
-            }
-        }
-
-        private void AddRoutePoint(Vector2 point)
-        {
-            if (routeLocalPoints.Count > 0)
-            {
-                Vector2 previous = routeLocalPoints[routeLocalPoints.Count - 1];
-                if ((previous - point).sqrMagnitude <= 0.25f)
-                {
-                    routeLocalPoints[routeLocalPoints.Count - 1] = point;
-                    return;
-                }
-            }
-
-            routeLocalPoints.Add(point);
-        }
-
-        private Vector2 ClampLocalPointToRect(Vector2 local, Rect rect)
-        {
-            float paddingX = Mathf.Max(10f, rect.width * edgePaddingNormalized);
-            float paddingY = Mathf.Max(10f, rect.height * edgePaddingNormalized);
-            return new Vector2(
-                Mathf.Clamp(local.x, -rect.width * 0.5f + paddingX, rect.width * 0.5f - paddingX),
-                Mathf.Clamp(local.y, -rect.height * 0.5f + paddingY, rect.height * 0.5f - paddingY));
-        }
-
-        private bool TryConvertWorldToMinimapLocal(Vector3 worldPosition, Rect rect, bool clampToEdge, out Vector2 local)
-        {
-            local = ConvertWorldToMinimapLocal(worldPosition, rect);
-            if (rect.width <= 0.01f || rect.height <= 0.01f)
-            {
-                return false;
-            }
-
-            if (clampToEdge)
-            {
-                local = ClampLocalPointToRect(local, rect);
-            }
-            else if (Mathf.Abs(local.x) > rect.width * 0.65f || Mathf.Abs(local.y) > rect.height * 0.65f)
-            {
-                return false;
-            }
-
-            return true;
-        }
-
-        private Vector2 ConvertWorldToMinimapLocal(Vector3 worldPosition, Rect rect)
-        {
-            if (rect.width <= 0.01f || rect.height <= 0.01f)
-            {
-                return Vector2.zero;
-            }
-
-            float visibleHeight = currentZoom * 2f;
-            float visibleWidth = visibleHeight * (rect.width / Mathf.Max(1f, rect.height));
-            Vector3 delta = worldPosition - mapCenter;
-            if (alignMapToPlayerHeading && playerTransform != null)
-            {
-                delta = Quaternion.Euler(0f, -playerTransform.eulerAngles.y, 0f) * delta;
-            }
-
-            return new Vector2(
-                (delta.x / visibleWidth) * rect.width,
-                (delta.z / visibleHeight) * rect.height);
-        }
-
-        private static void AddRoadPoint(List<Vector2> points, Vector2 point)
-        {
-            if (points == null)
-            {
-                return;
-            }
-
-            if (points.Count > 0)
-            {
-                Vector2 previous = points[points.Count - 1];
-                if ((previous - point).sqrMagnitude <= 0.25f)
-                {
-                    points[points.Count - 1] = point;
-                    return;
-                }
-            }
-
-            points.Add(point);
-        }
-
-        private static bool TryClipLineToExpandedRect(
-            Vector2 start,
-            Vector2 end,
-            Rect rect,
-            float expansionFactor,
-            out Vector2 clippedStart,
-            out Vector2 clippedEnd)
-        {
-            float halfWidth = rect.width * 0.5f * Mathf.Max(1f, expansionFactor);
-            float halfHeight = rect.height * 0.5f * Mathf.Max(1f, expansionFactor);
-            float minX = -halfWidth;
-            float maxX = halfWidth;
-            float minY = -halfHeight;
-            float maxY = halfHeight;
-
-            clippedStart = start;
-            clippedEnd = end;
-
-            int startCode = ComputeOutCode(clippedStart, minX, maxX, minY, maxY);
-            int endCode = ComputeOutCode(clippedEnd, minX, maxX, minY, maxY);
-
-            while (true)
-            {
-                if ((startCode | endCode) == 0)
-                {
+                    player = controllers[i].transform;
                     return true;
                 }
-
-                if ((startCode & endCode) != 0)
-                {
-                    return false;
-                }
-
-                int outCode = startCode != 0 ? startCode : endCode;
-                float x = 0f;
-                float y = 0f;
-
-                if ((outCode & 8) != 0)
-                {
-                    x = clippedStart.x + ((clippedEnd.x - clippedStart.x) * (maxY - clippedStart.y) / (clippedEnd.y - clippedStart.y));
-                    y = maxY;
-                }
-                else if ((outCode & 4) != 0)
-                {
-                    x = clippedStart.x + ((clippedEnd.x - clippedStart.x) * (minY - clippedStart.y) / (clippedEnd.y - clippedStart.y));
-                    y = minY;
-                }
-                else if ((outCode & 2) != 0)
-                {
-                    y = clippedStart.y + ((clippedEnd.y - clippedStart.y) * (maxX - clippedStart.x) / (clippedEnd.x - clippedStart.x));
-                    x = maxX;
-                }
-                else if ((outCode & 1) != 0)
-                {
-                    y = clippedStart.y + ((clippedEnd.y - clippedStart.y) * (minX - clippedStart.x) / (clippedEnd.x - clippedStart.x));
-                    x = minX;
-                }
-
-                if (outCode == startCode)
-                {
-                    clippedStart = new Vector2(x, y);
-                    startCode = ComputeOutCode(clippedStart, minX, maxX, minY, maxY);
-                }
-                else
-                {
-                    clippedEnd = new Vector2(x, y);
-                    endCode = ComputeOutCode(clippedEnd, minX, maxX, minY, maxY);
-                }
+                if (inactiveFallback == null)
+                    inactiveFallback = controllers[i].transform;
             }
+
+            player = inactiveFallback;
+            return player != null;
         }
 
-        private static int ComputeOutCode(Vector2 point, float minX, float maxX, float minY, float maxY)
+        private void HandleActiveVehicleChanged(CarController controller)
         {
-            int code = 0;
-            if (point.x < minX)
-            {
-                code |= 1;
-            }
-            else if (point.x > maxX)
-            {
-                code |= 2;
-            }
-
-            if (point.y < minY)
-            {
-                code |= 4;
-            }
-            else if (point.y > maxY)
-            {
-                code |= 8;
-            }
-
-            return code;
+            SetPlayerTransform(controller != null ? controller.transform : null);
         }
 
-        private void ClearRoutePreview()
+        private PlayerVehicleManager GetVehicleManager()
         {
-            if (routeLine != null)
-            {
-                routeLine.Clear();
-            }
+            if (cachedVehicleManager == null)
+                cachedVehicleManager = PlayerVehicleManager.Instance ?? FindFirstObjectByType<PlayerVehicleManager>();
+            return cachedVehicleManager;
         }
 
-        private void RefreshRoutePreviewIfNeeded()
+        // ────────────────────────────────────────────────────────────────────
+        // Camera & zoom
+        // ────────────────────────────────────────────────────────────────────
+
+        private void ResolveCameraReferences()
         {
-            if (!showRoutePreview || routeLine == null || minimapContainer == null)
-            {
-                return;
-            }
-
-            bool needsRefresh =
-                routeDirty ||
-                float.IsNaN(lastRouteCenter.x) ||
-                (lastRouteCenter - mapCenter).sqrMagnitude >= routeRefreshDistance * routeRefreshDistance ||
-                Mathf.Abs(lastRouteZoom - currentZoom) > 0.25f ||
-                Mathf.Abs(Mathf.DeltaAngle(lastRouteHeading, GetMapHeadingDegrees())) > 1f;
-
-            if (!needsRefresh)
-            {
-                return;
-            }
-
-            HandleRouteChanged(currentRoute);
+            if (minimapCamera == null)
+                minimapCamera = FindFirstObjectByType<MinimapCamera>();
+            if (cameraComponent == null && minimapCamera != null)
+                cameraComponent = minimapCamera.GetComponent<Camera>();
         }
+
+        private void SyncZoom()
+        {
+            ResolveCameraReferences();
+
+            float resolved = Mathf.Clamp(fixedZoom, MinZoom, MaxZoom);
+
+            if (minimapCamera != null && minimapCamera.CameraComponent != null)
+            {
+                float camZoom = minimapCamera.CameraComponent.orthographicSize;
+                if (camZoom > 0.01f)
+                    resolved = Mathf.Clamp(camZoom, MinZoom, MaxZoom);
+            }
+
+            if (Mathf.Abs(currentZoom - resolved) > 0.01f)
+            {
+                currentZoom = resolved;
+                MarkAllDirty();
+            }
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // Toggle input
+        // ────────────────────────────────────────────────────────────────────
+
+        private void HandleToggleInput()
+        {
+#if ENABLE_INPUT_SYSTEM
+            bool pressed = Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame;
+#if ENABLE_LEGACY_INPUT_MANAGER
+            pressed = pressed || Input.GetKeyDown(KeyCode.M);
+#endif
+#else
+            bool pressed = Input.GetKeyDown(KeyCode.M);
+#endif
+            if (pressed)
+                ToggleMinimap();
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // Responsive layout
+        // ────────────────────────────────────────────────────────────────────
 
         private void UpdateResponsiveLayout()
         {
-            if (minimapContainer == null)
-            {
-                return;
-            }
+            if (minimapContainer == null) return;
 
             Vector2 screenSize = new Vector2(Screen.width, Screen.height);
-            if (screenSize == lastScreenSize)
-            {
-                return;
-            }
-
+            if (screenSize == lastScreenSize) return;
             lastScreenSize = screenSize;
-            float scale = Mathf.Clamp(Mathf.Min(Screen.width, Screen.height) / Mathf.Max(1f, responsiveReferenceShortSide), 0.88f, 1.08f);
+
+            float scale = Mathf.Clamp(
+                Mathf.Min(Screen.width, Screen.height) / Mathf.Max(1f, responsiveReferenceShortSide),
+                0.88f, 1.08f);
+
             Vector2 size = minimapSize * scale;
             size.x = Mathf.Clamp(size.x, minimumMinimapSize.x, maximumMinimapSize.x);
             size.y = Mathf.Clamp(size.y, minimumMinimapSize.y, maximumMinimapSize.y);
             minimapContainer.sizeDelta = size;
             minimapContainer.anchoredPosition = new Vector2(Mathf.Abs(anchorOffset.x), Mathf.Abs(anchorOffset.y));
 
-            if (viewportRect == null)
-            {
-                viewportRect = minimapContainer.Find("Viewport") as RectTransform;
-            }
-
             if (viewportRect != null)
             {
-                float scaledPadding = Mathf.Clamp(viewportPadding * scale, 10f, 16f);
-                viewportRect.offsetMin = new Vector2(scaledPadding, scaledPadding);
-                viewportRect.offsetMax = new Vector2(-scaledPadding, -scaledPadding);
+                float sp = Mathf.Clamp(viewportPadding * scale, 10f, 16f);
+                viewportRect.offsetMin = new Vector2(sp, sp);
+                viewportRect.offsetMax = new Vector2(-sp, -sp);
             }
 
             if (viewportFrameRect != null)
             {
-                float scaledFramePadding = Mathf.Clamp(framePadding * scale, 5f, 9f);
-                viewportFrameRect.offsetMin = new Vector2(scaledFramePadding, scaledFramePadding);
-                viewportFrameRect.offsetMax = new Vector2(-scaledFramePadding, -scaledFramePadding);
+                float fp = Mathf.Clamp(framePadding * scale, 5f, 9f);
+                viewportFrameRect.offsetMin = new Vector2(fp, fp);
+                viewportFrameRect.offsetMax = new Vector2(-fp, -fp);
             }
 
-            routeDirty = true;
-            lastRoadCenter = new Vector3(float.NaN, float.NaN, float.NaN);
-            lastRoadZoom = -1f;
-            lastRoadHeading = float.NaN;
+            MarkAllDirty();
             ApplyMarkerSizing();
         }
 
-        private void UpdateRoadOverlayState()
-        {
-            if (Time.unscaledTime < nextRoadAttemptTime)
-            {
-                return;
-            }
+        // ────────────────────────────────────────────────────────────────────
+        // Road overlay
+        // ────────────────────────────────────────────────────────────────────
 
-            if (!TryResolveRoadGraph(out RoadGraph graph) || !TryBuildRoadBounds(graph, out roadBounds))
+        private void ResolveRoads()
+        {
+            if (Time.unscaledTime < nextRoadResolveTime) return;
+
+            if (!TryResolveRoadGraph(out RoadGraph graph))
             {
                 if (roadOverlayReady)
                 {
@@ -1458,117 +917,135 @@ namespace DeliveryDriver.Quest.UI
                     hasRoadBounds = false;
                     worldRoadPolylines.Clear();
                     localRoadPolylines.Clear();
-                    lastRoadGraphSource = null;
+                    cachedRoadGraph = null;
                     lastRoadGraphSegmentCount = -1;
-                    if (roadGraphic != null)
-                    {
-                        roadGraphic.Clear();
-                    }
-
-                    if (minimapImage != null)
-                    {
-                        minimapImage.texture = null;
-                        minimapImage.color = new Color(1f, 1f, 1f, 0f);
-                    }
-
-                    if (roadOverlayTexture != null)
-                    {
-                        Destroy(roadOverlayTexture);
-                        roadOverlayTexture = null;
-                    }
+                    roadGraphic?.Clear();
+                    ClearRoadTexture();
                 }
-
-                nextRoadAttemptTime = Time.unscaledTime + Mathf.Max(0.2f, roadRetryInterval);
+                nextRoadResolveTime = Time.unscaledTime + RoadRetryInterval;
                 return;
             }
 
             bool graphChanged =
-                !ReferenceEquals(lastRoadGraphSource, graph) ||
+                !ReferenceEquals(cachedRoadGraph, graph) ||
                 lastRoadGraphSegmentCount != graph.roadSegments.Count;
+
             if (roadOverlayReady && !graphChanged)
-            {
                 return;
-            }
 
-            nextRoadAttemptTime = Time.unscaledTime + Mathf.Max(0.2f, roadRetryInterval);
+            nextRoadResolveTime = Time.unscaledTime + RoadRetryInterval;
 
+            // Build polylines from graph
             worldRoadPolylines.Clear();
-            List<List<Vector3>> builtPolylines = MinimapRoadTextureBuilder.BuildRoadPolylines(graph);
-            for (int i = 0; i < builtPolylines.Count; i++)
+            List<List<Vector3>> built = MinimapRoadTextureBuilder.BuildRoadPolylines(graph);
+            for (int i = 0; i < built.Count; i++)
             {
-                if (builtPolylines[i] != null && builtPolylines[i].Count >= 2)
-                {
-                    worldRoadPolylines.Add(builtPolylines[i]);
-                }
+                if (built[i] != null && built[i].Count >= 2)
+                    worldRoadPolylines.Add(built[i]);
             }
 
             if (worldRoadPolylines.Count == 0)
             {
-                if (!loggedMissingRoadPolylines)
-                {
-                    Debug.LogWarning("[MinimapUI] RoadGraph olustu ancak cizilebilir minimap yol polylineleri uretilmedi.");
-                    loggedMissingRoadPolylines = true;
-                }
-
+                Debug.LogWarning("[MinimapUI] Road graph mevcut ama cizilebilir polyline uretilmedi.");
                 return;
             }
 
-            loggedMissingRoadPolylines = false;
+            // Build bounds
+            if (!TryBuildRoadBounds(graph, out roadBounds))
+                return;
+
             roadOverlayReady = true;
             hasRoadBounds = true;
-            lastRoadGraphSource = graph;
+            cachedRoadGraph = graph;
+
+            if (!loggedRoadOverlayReady)
+            {
+                Debug.Log($"[MinimapUI] Road overlay hazir: {worldRoadPolylines.Count} polyline, {graph.roadSegments.Count} segment.");
+                loggedRoadOverlayReady = true;
+            }
             lastRoadGraphSegmentCount = graph.roadSegments.Count;
-            lastRoadCenter = new Vector3(float.NaN, float.NaN, float.NaN);
-            lastRoadTextureCenter = new Vector3(float.NaN, float.NaN, float.NaN);
-            lastRoadZoom = -1f;
-            lastRoadTextureZoom = -1f;
-            lastRoadTextureHeading = float.NaN;
+            roadsDirty = true;
             routeDirty = true;
         }
 
-        private void UpdateMapCenter()
+        private bool TryResolveRoadGraph(out RoadGraph graph)
         {
-            mapCenter = playerTransform.position;
-            if (!hasRoadBounds || minimapContainer == null)
+            graph = null;
+
+            if (roadGraphBuilder == null && Time.unscaledTime >= nextRoadResolveTime)
             {
-                return;
+                roadGraphBuilder = FindFirstObjectByType<RoadGraphBuilder>();
+                nextRoadResolveTime = Time.unscaledTime + RoadRetryInterval;
             }
 
-            // Keep the player centered for a more standard driving-game minimap.
-            mapCenter = playerTransform.position;
+            if (roadGraphBuilder == null)
+            {
+                if (!loggedNoRoadGraph)
+                {
+                    Debug.LogWarning("[MinimapUI] RoadGraphBuilder bulunamadi.");
+                    loggedNoRoadGraph = true;
+                }
+                return false;
+            }
+
+            loggedNoRoadGraph = false;
+
+            if (!roadGraphBuilder.HasBuiltRoadGraph)
+            {
+                if (!roadGraphBuilder.HasPendingBuild)
+                    roadGraphBuilder.BeginBuildWithDelay(0f);
+                return false;
+            }
+
+            graph = roadGraphBuilder.RoadGraph;
+            return graph != null && graph.roadSegments != null && graph.roadSegments.Count > 0;
         }
 
-        private void UpdateRoadOverlayUv()
+        private bool loggedRoadOverlayGuardFail;
+        private bool loggedRoadOverlayUpdate;
+
+        private void UpdateRoadOverlay()
         {
             if (!roadOverlayReady || roadGraphic == null || !hasRoadBounds || minimapContainer == null)
             {
+                if (roadOverlayReady && !loggedRoadOverlayGuardFail)
+                {
+                    Debug.LogWarning($"[MinimapUI] UpdateRoadOverlay guard fail: roadGraphic={roadGraphic != null}, " +
+                                     $"hasRoadBounds={hasRoadBounds}, minimapContainer={minimapContainer != null}");
+                    loggedRoadOverlayGuardFail = true;
+                }
                 return;
             }
 
-            bool needsRefresh =
-                float.IsNaN(lastRoadCenter.x) ||
-                (lastRoadCenter - mapCenter).sqrMagnitude >= roadRefreshDistance * roadRefreshDistance ||
-                Mathf.Abs(lastRoadZoom - currentZoom) > 0.25f ||
-                Mathf.Abs(Mathf.DeltaAngle(lastRoadHeading, GetMapHeadingDegrees())) > 1f;
+            if (!NeedsUpdate(roadRefreshDistance))
+                return;
 
-            if (!needsRefresh)
+            Rect rect = GetViewportRect();
+            if (rect.width < 1f || rect.height < 1f)
             {
-                return;
+                if (!loggedSmallViewportRect)
+                {
+                    Debug.LogWarning($"[MinimapUI] Viewport rect cok kucuk ({rect.width:F0}x{rect.height:F0}), yol overlay'i ertelendi.");
+                    loggedSmallViewportRect = true;
+                }
+                return; // Layout henuz hesaplanmadi; dirty flag korunur
             }
 
-            Rect rect = GetMinimapViewportRect();
             float clipExpansion = 1f + Mathf.Max(0.02f, edgePaddingNormalized);
+
+            // Convert world polylines to local viewport space
             localRoadPolylines.Clear();
-            for (int lineIndex = 0; lineIndex < worldRoadPolylines.Count; lineIndex++)
+            for (int lineIdx = 0; lineIdx < worldRoadPolylines.Count; lineIdx++)
             {
-                List<Vector3> worldLine = worldRoadPolylines[lineIndex];
+                List<Vector3> worldLine = worldRoadPolylines[lineIdx];
                 List<Vector2> localLine = null;
 
-                for (int pointIndex = 1; pointIndex < worldLine.Count; pointIndex++)
+                for (int ptIdx = 1; ptIdx < worldLine.Count; ptIdx++)
                 {
-                    Vector2 start = ConvertWorldToMinimapLocal(worldLine[pointIndex - 1], rect);
-                    Vector2 end = ConvertWorldToMinimapLocal(worldLine[pointIndex], rect);
-                    if (!TryClipLineToExpandedRect(start, end, rect, clipExpansion, out Vector2 clippedStart, out Vector2 clippedEnd))
+                    Vector2 start = WorldToLocal(worldLine[ptIdx - 1], rect);
+                    Vector2 end = WorldToLocal(worldLine[ptIdx], rect);
+
+                    if (!ClipLine(start, end, rect, clipExpansion, out Vector2 cs, out Vector2 ce))
                     {
                         localLine = null;
                         continue;
@@ -1578,283 +1055,668 @@ namespace DeliveryDriver.Quest.UI
                     {
                         localLine = new List<Vector2>(worldLine.Count);
                         localRoadPolylines.Add(localLine);
-                        AddRoadPoint(localLine, clippedStart);
+                        AddUniquePoint(localLine, cs);
                     }
-
-                    AddRoadPoint(localLine, clippedEnd);
+                    AddUniquePoint(localLine, ce);
                 }
             }
 
-            if (roadGraphic != null)
+            // Apply to graphic
+            roadGraphic.color = new Color(roadColor.r, roadColor.g, roadColor.b, mapAlpha);
+            roadGraphic.SetOutlineColor(roadOutlineColor);
+            roadGraphic.SetLineWidth(GetResolvedRoadLineWidth(rect));
+
+            if (!loggedRoadOverlayUpdate)
             {
-                roadGraphic.color = new Color(roadColor.r, roadColor.g, roadColor.b, mapAlpha);
-                roadGraphic.SetOutlineColor(roadOutlineColor);
-                roadGraphic.SetLineWidth(GetResolvedRoadLineWidth(rect));
+                loggedRoadOverlayUpdate = true;
+                Debug.Log($"[MinimapUI] UpdateRoadOverlay: rect={rect.width:F0}x{rect.height:F0}, zoom={currentZoom:F1}, " +
+                          $"worldPolylines={worldRoadPolylines.Count}, localPolylines={localRoadPolylines.Count}, " +
+                          $"mapCenter={mapCenter}, graphic={roadGraphic != null}, graphicEnabled={roadGraphic?.enabled}, " +
+                          $"canvas={roadGraphic?.canvas != null}, parent={roadGraphic?.transform.parent?.name}, " +
+                          $"canvasRenderer={roadGraphic?.canvasRenderer != null}");
             }
 
-            if (localRoadPolylines.Count == 0)
+            if (localRoadPolylines.Count > 0)
             {
-                if (!loggedEmptyLocalRoadPolylines)
-                {
-                    Debug.LogWarning(
-                        $"[MinimapUI] Road overlay resolved zero visible local polylines. worldPolylines={worldRoadPolylines.Count}, zoom={currentZoom:F1}, viewport={rect.width:F1}x{rect.height:F1}.");
-                    loggedEmptyLocalRoadPolylines = true;
-                }
-
-                if (minimapImage != null && roadOverlayTexture != null)
-                {
-                    RefreshRoadTextureFallback(rect);
-                    minimapImage.color = new Color(1f, 1f, 1f, mapAlpha);
-                }
-
-                roadGraphic?.Clear();
+                roadGraphic.SetPolylines(localRoadPolylines);
+                // Hide texture fallback when vector roads work
+                if (roadOverlayImage != null)
+                    roadOverlayImage.color = new Color(1f, 1f, 1f, 0f);
+            }
+            else if (worldRoadPolylines.Count == 0)
+            {
+                roadGraphic.Clear();
             }
             else
             {
-                loggedEmptyLocalRoadPolylines = false;
-                roadGraphic?.SetPolylines(localRoadPolylines);
-                if (minimapImage != null)
-                {
-                    // Keep the texture path only as a silent fallback behind crisp vector roads.
-                    minimapImage.color = new Color(1f, 1f, 1f, 0f);
-                }
+                // World polylines exist but none converted to local coords.
+                // Use texture fallback for this frame.
+                roadGraphic.Clear();
+                RefreshRoadTextureFallback(rect);
             }
-            lastRoadCenter = mapCenter;
-            lastRoadZoom = currentZoom;
-            lastRoadHeading = GetMapHeadingDegrees();
+
+            // Only clear dirty when we produced renderable output or
+            // there is genuinely no source data left to render.
+            if (localRoadPolylines.Count > 0 || worldRoadPolylines.Count == 0)
+            {
+                roadsDirty = false;
+                SaveUpdateState();
+            }
         }
 
         private void RefreshRoadTextureFallback(Rect rect)
         {
-            if (minimapImage == null || lastRoadGraphSource == null || !hasRoadBounds)
+            if (roadOverlayImage == null || cachedRoadGraph == null || !hasRoadBounds)
+                return;
+
+            if (roadOverlayTexture != null)
             {
+                Destroy(roadOverlayTexture);
+                roadOverlayTexture = null;
+            }
+
+            float visibleHeight = currentZoom * 2f;
+            float visibleWidth = visibleHeight * (rect.width / Mathf.Max(1f, rect.height));
+            float extent = Mathf.Max(visibleWidth, visibleHeight) * 0.82f;
+
+            Bounds localBounds = new Bounds(
+                new Vector3(mapCenter.x, 0f, mapCenter.z),
+                new Vector3(extent * 2f, 1f, extent * 2f));
+
+            int resolution = cachedRoadGraph.roadSegments.Count > 900 ? 1024 : 1536;
+            int roadWidthPx = Mathf.Max(3, Mathf.RoundToInt(baseRoadLineWidth * 1.75f));
+
+            roadOverlayTexture = MinimapRoadTextureBuilder.Build(
+                cachedRoadGraph, localBounds, resolution,
+                new Color(0f, 0f, 0f, 0f),
+                new Color(roadColor.r, roadColor.g, roadColor.b, 1f),
+                new Color(roadOutlineColor.r, roadOutlineColor.g, roadOutlineColor.b, 1f),
+                roadWidthPx);
+
+            roadOverlayImage.texture = roadOverlayTexture;
+            roadOverlayImage.uvRect = new Rect(0f, 0f, 1f, 1f);
+            roadOverlayImage.color = new Color(1f, 1f, 1f, mapAlpha);
+
+            float rotation = alignMapToPlayerHeading && playerTransform != null ? -playerTransform.eulerAngles.y : 0f;
+            roadOverlayImage.rectTransform.localRotation = Quaternion.Euler(0f, 0f, rotation);
+        }
+
+        private void ClearRoadTexture()
+        {
+            if (roadOverlayImage != null)
+            {
+                roadOverlayImage.texture = null;
+                roadOverlayImage.color = new Color(1f, 1f, 1f, 0f);
+            }
+            if (roadOverlayTexture != null)
+            {
+                Destroy(roadOverlayTexture);
+                roadOverlayTexture = null;
+            }
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // Route preview
+        // ────────────────────────────────────────────────────────────────────
+
+        private void UpdateRoutePreview()
+        {
+            if (!showRoutePreview || routeLine == null || minimapContainer == null)
+                return;
+
+            if (currentRoute == null || !currentRoute.IsRenderable)
+            {
+                ClearRoute();
+                routeDirty = false;
                 return;
             }
 
-            float heading = GetMapHeadingDegrees();
-            bool needsTextureRefresh =
-                roadOverlayTexture == null ||
-                float.IsNaN(lastRoadTextureCenter.x) ||
-                (lastRoadTextureCenter - mapCenter).sqrMagnitude >= roadRefreshDistance * roadRefreshDistance ||
-                Mathf.Abs(lastRoadTextureZoom - currentZoom) > 0.25f ||
-                Mathf.Abs(Mathf.DeltaAngle(lastRoadTextureHeading, heading)) > 1f;
+            if (!routeDirty && !NeedsUpdate(routeRefreshDistance))
+                return;
 
-            if (needsTextureRefresh)
+            Rect rect = GetViewportRect();
+            if (rect.width < 1f || rect.height < 1f)
+                return; // Layout henuz hesaplanmadi; routeDirty korunur
+
+            BuildRouteLocalPoints(currentRoute.Points, rect);
+
+            if (routeLocalPoints.Count < 2)
             {
-                if (roadOverlayTexture != null)
-                {
-                    Destroy(roadOverlayTexture);
-                    roadOverlayTexture = null;
-                }
+                ClearRoute();
+                // Keep routeDirty if we have valid route data that just
+                // failed to convert (e.g. all points off viewport).
+                if (currentRoute.Points != null && currentRoute.Points.Count >= 2)
+                    return;
+            }
+            else
+            {
+                Color color = currentRoute.IsFallback ? fallbackRouteLineColor : routeLineColor;
+                if (currentRoute.IsStale)
+                    color.a *= 0.68f;
 
-                float visibleHeight = currentZoom * 2f;
-                float visibleWidth = visibleHeight * (rect.width / Mathf.Max(1f, rect.height));
-                float squareExtent = Mathf.Max(visibleWidth, visibleHeight) * 0.82f;
-                Bounds localBounds = new Bounds(
-                    new Vector3(mapCenter.x, 0f, mapCenter.z),
-                    new Vector3(squareExtent * 2f, 1f, squareExtent * 2f));
-
-                int resolution = lastRoadGraphSource.roadSegments != null && lastRoadGraphSource.roadSegments.Count > 900 ? 1024 : 1536;
-                int roadWidthPixels = Mathf.Max(3, Mathf.RoundToInt(baseRoadLineWidth * 1.75f));
-                roadOverlayTexture = MinimapRoadTextureBuilder.Build(
-                    lastRoadGraphSource,
-                    localBounds,
-                    resolution,
-                    new Color(0f, 0f, 0f, 0f),
-                    new Color(roadColor.r, roadColor.g, roadColor.b, 1f),
-                    new Color(roadOutlineColor.r, roadOutlineColor.g, roadOutlineColor.b, 1f),
-                    roadWidthPixels);
-
-                minimapImage.texture = roadOverlayTexture;
-                minimapImage.uvRect = new Rect(0f, 0f, 1f, 1f);
-                lastRoadTextureCenter = mapCenter;
-                lastRoadTextureZoom = currentZoom;
-                lastRoadTextureHeading = heading;
+                routeLine.color = color;
+                routeLine.SetLineWidth(currentRoute.IsFallback ? Mathf.Max(3.8f, routeLineWidth - 0.6f) : routeLineWidth);
+                routeLine.SetPoints(routeLocalPoints);
             }
 
-            minimapImage.color = new Color(1f, 1f, 1f, mapAlpha);
-            minimapImage.rectTransform.localRotation = Quaternion.Euler(0f, 0f, alignMapToPlayerHeading && playerTransform != null ? -playerTransform.eulerAngles.y : 0f);
+            routeDirty = false;
+            SaveUpdateState();
         }
 
-        private float GetMapHeadingDegrees()
+        private void BuildRouteLocalPoints(IReadOnlyList<Vector3> worldPoints, Rect rect)
         {
-            if (!alignMapToPlayerHeading || playerTransform == null)
+            routeLocalPoints.Clear();
+            if (worldPoints == null || worldPoints.Count < 2) return;
+
+            float clipExpansion = 1f + Mathf.Max(0.04f, routeViewportExpansion * 0.25f);
+            bool entered = false;
+
+            for (int i = 1; i < worldPoints.Count; i++)
             {
-                return 0f;
+                Vector2 prev = WorldToLocal(worldPoints[i - 1], rect);
+                Vector2 curr = WorldToLocal(worldPoints[i], rect);
+
+                if (!ClipLine(prev, curr, rect, clipExpansion, out Vector2 cs, out Vector2 ce))
+                {
+                    if (entered) break;
+                    continue;
+                }
+
+                if (!entered)
+                {
+                    AddUniquePoint(routeLocalPoints, cs);
+                    entered = true;
+                }
+                AddUniquePoint(routeLocalPoints, ce);
+            }
+        }
+
+        private void ClearRoute()
+        {
+            routeLine?.Clear();
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // Markers
+        // ────────────────────────────────────────────────────────────────────
+
+        private void CreatePlayerMarker()
+        {
+            if (markerContainer == null || playerMarkerView != null) return;
+
+            Sprite arrow = spriteRegistry != null
+                ? spriteRegistry.GetPlayerArrowSprite()
+                : MinimapSpriteRegistry.GetFallbackPlayerArrowSprite();
+
+            if (arrow == null)
+            {
+                Debug.LogError("[MinimapUI] Player arrow sprite olusturulamadi.");
+                return;
             }
 
+            playerMarkerView = new MarkerView();
+
+            // Shadow
+            playerMarkerView.Shadow = CreateImageObject("PlayerMarkerShadow", markerContainer, playerMarkerSize);
+            Image shadowImg = playerMarkerView.Shadow.GetComponent<Image>();
+            shadowImg.sprite = arrow;
+            shadowImg.preserveAspect = true;
+            shadowImg.color = new Color(0f, 0f, 0f, 0.40f);
+            shadowImg.raycastTarget = false;
+
+            // Root (plate)
+            playerMarkerView.Root = CreateImageObject("PlayerMarker", markerContainer, playerMarkerSize);
+            Image plateImg = playerMarkerView.Root.GetComponent<Image>();
+            plateImg.sprite = GetCircleMaskSprite();
+            plateImg.color = new Color(0.06f, 0.08f, 0.11f, 0.88f);
+            plateImg.raycastTarget = false;
+
+            // Arrow icon
+            RectTransform arrowRect = CreateImageObject("Arrow", playerMarkerView.Root, Mathf.Max(18f, playerMarkerSize - 6f));
+            playerMarkerView.Icon = arrowRect.GetComponent<Image>();
+            playerMarkerView.Icon.sprite = arrow;
+            playerMarkerView.Icon.preserveAspect = true;
+            playerMarkerView.Icon.color = playerMarkerColor;
+            playerMarkerView.Icon.raycastTarget = false;
+
+            playerMarkerView.BaseScale = Vector3.one;
+            SetMarkerAnchoredPosition(playerMarkerView, Vector2.zero, true);
+            playerMarkerView.Root.SetAsLastSibling();
+            ApplyPlayerMarkerSizing(GetResolvedPlayerMarkerSize());
+        }
+
+        private MarkerView CreateObjectiveMarker(string name, string label, Color color, bool diamondIcon)
+        {
+            MarkerView marker = new MarkerView();
+            float size = markerSize;
+
+            // Shadow
+            marker.Shadow = CreateImageObject($"{name}Shadow", markerContainer, size + 6f);
+            Image shadowImg = marker.Shadow.GetComponent<Image>();
+            shadowImg.sprite = GetSolidSprite();
+            shadowImg.color = new Color(0f, 0f, 0f, 0.30f);
+            shadowImg.raycastTarget = false;
+
+            // Root (frame)
+            marker.Root = CreateImageObject(name, markerContainer, size + 2f);
+            Image rootImg = marker.Root.GetComponent<Image>();
+            rootImg.sprite = GetSolidSprite();
+            rootImg.color = markerFrameColor;
+            rootImg.raycastTarget = false;
+
+            // Icon
+            RectTransform iconRect = CreateImageObject("Icon", marker.Root, Mathf.Max(12f, size * 0.68f));
+            if (diamondIcon) iconRect.localRotation = Quaternion.Euler(0f, 0f, 45f);
+            marker.Icon = iconRect.GetComponent<Image>();
+            marker.Icon.sprite = diamondIcon ? GetCircleMaskSprite() : GetSolidSprite();
+            marker.Icon.color = color;
+            marker.Icon.raycastTarget = false;
+
+            // Label
+            RectTransform labelRect = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI)).GetComponent<RectTransform>();
+            labelRect.SetParent(marker.Root, false);
+            labelRect.anchorMin = Vector2.zero;
+            labelRect.anchorMax = Vector2.one;
+            labelRect.offsetMin = Vector2.zero;
+            labelRect.offsetMax = Vector2.zero;
+            marker.Label = labelRect.GetComponent<TextMeshProUGUI>();
+            marker.Label.text = label;
+            marker.Label.alignment = TextAlignmentOptions.Center;
+            marker.Label.fontSize = 11f;
+            marker.Label.fontStyle = FontStyles.Bold;
+            marker.Label.color = Color.white;
+            marker.Label.outlineWidth = 0.16f;
+            marker.Label.outlineColor = new Color(0f, 0f, 0f, 0.95f);
+            marker.Label.raycastTarget = false;
+            if (TMP_Settings.defaultFontAsset != null)
+                marker.Label.font = TMP_Settings.defaultFontAsset;
+
+            marker.BaseScale = Vector3.one;
+            marker.SetVisible(false);
+            return marker;
+        }
+
+        private void RefreshObjectiveMarkers()
+        {
+            HideAllObjectiveMarkers();
+
+            if (!currentObjective.IsValid || markerContainer == null) return;
+
+            if (currentObjective.Type == ObjectiveType.Pickup)
+            {
+                if (pickupMarker == null)
+                    pickupMarker = CreateObjectiveMarker("PickupMarker", "P", pickupMarkerColor, true);
+                pickupMarker.Icon.color = pickupMarkerColor;
+                pickupMarker.Label.text = "P";
+                pickupMarker.SetVisible(true);
+                UpdateMarkerWorldPosition(pickupMarker, currentObjective.WorldPosition);
+            }
+            else if (currentObjective.Type == ObjectiveType.Delivery)
+            {
+                if (deliveryMarker == null)
+                    deliveryMarker = CreateObjectiveMarker("DeliveryMarker", "D", deliveryMarkerColor, false);
+                deliveryMarker.Icon.color = deliveryMarkerColor;
+                deliveryMarker.Label.text = currentObjective.DeliveryIndex > 0
+                    ? currentObjective.DeliveryIndex.ToString()
+                    : "D";
+                deliveryMarker.SetVisible(true);
+                UpdateMarkerWorldPosition(deliveryMarker, currentObjective.WorldPosition);
+            }
+        }
+
+        private void HideAllObjectiveMarkers()
+        {
+            pickupMarker?.SetVisible(false);
+            deliveryMarker?.SetVisible(false);
+        }
+
+        private void SetObjectiveMarkersVisible(bool visible)
+        {
+            if (pickupMarker != null)
+                pickupMarker.SetVisible(visible && currentObjective.Type == ObjectiveType.Pickup);
+            if (deliveryMarker != null)
+                deliveryMarker.SetVisible(visible && currentObjective.Type == ObjectiveType.Delivery);
+        }
+
+        private void UpdateObjectiveMarkerPositions()
+        {
+            if (!initialized || minimapContainer == null || !currentObjective.IsValid) return;
+
+            Vector3 worldPos = currentObjective.WorldPosition;
+
+            if (pickupMarker != null && pickupMarker.Root.gameObject.activeSelf)
+                UpdateMarkerWorldPosition(pickupMarker, worldPos);
+            if (deliveryMarker != null && deliveryMarker.Root.gameObject.activeSelf)
+                UpdateMarkerWorldPosition(deliveryMarker, worldPos);
+        }
+
+        private void UpdateMarkerWorldPosition(MarkerView marker, Vector3 worldPosition)
+        {
+            if (marker?.Root == null || minimapContainer == null) return;
+
+            Rect rect = GetViewportRect();
+            Vector2 local = WorldToLocal(worldPosition, rect);
+
+            if (clampObjectivesToEdge)
+            {
+                local = ClampToViewport(local, rect);
+                marker.SetVisible(true);
+            }
+            else
+            {
+                bool inBounds = Mathf.Abs(local.x) <= rect.width * 0.65f &&
+                                Mathf.Abs(local.y) <= rect.height * 0.65f;
+                marker.SetVisible(inBounds);
+                if (!inBounds) return;
+            }
+
+            SetMarkerAnchoredPosition(marker, local, false);
+        }
+
+        private void UpdatePlayerMarkerRotation()
+        {
+            if (playerMarkerView == null || playerTransform == null) return;
+
+            float yRotation = alignMapToPlayerHeading ? 0f : -playerTransform.eulerAngles.y;
+            playerMarkerView.Root.localRotation = Quaternion.Euler(0f, 0f, yRotation);
+            if (playerMarkerView.Shadow != null)
+                playerMarkerView.Shadow.localRotation = playerMarkerView.Root.localRotation;
+        }
+
+        private void UpdateMarkerPulse()
+        {
+            float pulse = 1f + (Mathf.Sin(Time.time * markerPulseSpeed * Mathf.PI) * 0.5f + 0.5f) * (markerPulseScale - 1f);
+            Vector3 scale = new Vector3(pulse, pulse, 1f);
+            PulseMarker(pickupMarker, scale);
+            PulseMarker(deliveryMarker, scale);
+        }
+
+        private static void PulseMarker(MarkerView marker, Vector3 pulse)
+        {
+            if (marker?.Root == null || !marker.Root.gameObject.activeSelf) return;
+            marker.Root.localScale = Vector3.Scale(marker.BaseScale, pulse);
+            if (marker.Shadow != null)
+                marker.Shadow.localScale = Vector3.Scale(marker.BaseScale, pulse);
+        }
+
+        private static void SetMarkerAnchoredPosition(MarkerView marker, Vector2 pos, bool isPlayer)
+        {
+            if (marker == null) return;
+            if (marker.Root != null)
+                marker.Root.anchoredPosition = pos;
+            if (marker.Shadow != null)
+            {
+                Vector2 offset = isPlayer ? PlayerMarkerShadowOffset : ObjectiveMarkerShadowOffset;
+                marker.Shadow.anchoredPosition = pos + offset;
+            }
+        }
+
+        private void ApplyMarkerSizing()
+        {
+            float objSize = GetResolvedObjectiveMarkerSize();
+            ApplyObjectiveMarkerSizing(pickupMarker, objSize);
+            ApplyObjectiveMarkerSizing(deliveryMarker, objSize);
+            ApplyPlayerMarkerSizing(GetResolvedPlayerMarkerSize());
+        }
+
+        private float GetResolvedObjectiveMarkerSize()
+        {
+            Rect rect = GetViewportRect();
+            float vp = Mathf.Min(rect.width, rect.height);
+            return vp > 0.01f ? Mathf.Max(markerSize, vp * 0.12f) : markerSize;
+        }
+
+        private float GetResolvedPlayerMarkerSize()
+        {
+            Rect rect = GetViewportRect();
+            float vp = Mathf.Min(rect.width, rect.height);
+            return vp > 0.01f ? Mathf.Max(playerMarkerSize, vp * 0.16f) : playerMarkerSize;
+        }
+
+        private static void ApplyObjectiveMarkerSizing(MarkerView marker, float size)
+        {
+            if (marker == null) return;
+            if (marker.Shadow != null) marker.Shadow.sizeDelta = Vector2.one * (size + 6f);
+            if (marker.Root != null) marker.Root.sizeDelta = Vector2.one * (size + 2f);
+            if (marker.Icon != null) marker.Icon.rectTransform.sizeDelta = Vector2.one * Mathf.Max(12f, size * 0.68f);
+            if (marker.Label != null) marker.Label.fontSize = Mathf.Clamp(size * 0.5f, 11f, 16f);
+        }
+
+        private void ApplyPlayerMarkerSizing(float size)
+        {
+            if (playerMarkerView == null) return;
+            if (playerMarkerView.Shadow != null) playerMarkerView.Shadow.sizeDelta = Vector2.one * (size + 3f);
+            if (playerMarkerView.Root != null) playerMarkerView.Root.sizeDelta = Vector2.one * size;
+            if (playerMarkerView.Icon != null) playerMarkerView.Icon.rectTransform.sizeDelta = Vector2.one * Mathf.Max(18f, size * 0.78f);
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // Coordinate conversion
+        // ────────────────────────────────────────────────────────────────────
+
+        private Vector2 WorldToLocal(Vector3 worldPos, Rect rect)
+        {
+            if (rect.width <= 0.01f || rect.height <= 0.01f)
+                return Vector2.zero;
+
+            float visibleHeight = currentZoom * 2f;
+            float visibleWidth = visibleHeight * (rect.width / Mathf.Max(1f, rect.height));
+
+            Vector3 delta = worldPos - mapCenter;
+            if (alignMapToPlayerHeading && playerTransform != null)
+                delta = Quaternion.Euler(0f, -playerTransform.eulerAngles.y, 0f) * delta;
+
+            return new Vector2(
+                (delta.x / visibleWidth) * rect.width,
+                (delta.z / visibleHeight) * rect.height);
+        }
+
+        private Vector2 ClampToViewport(Vector2 local, Rect rect)
+        {
+            float px = Mathf.Max(10f, rect.width * edgePaddingNormalized);
+            float py = Mathf.Max(10f, rect.height * edgePaddingNormalized);
+            return new Vector2(
+                Mathf.Clamp(local.x, -rect.width * 0.5f + px, rect.width * 0.5f - px),
+                Mathf.Clamp(local.y, -rect.height * 0.5f + py, rect.height * 0.5f - py));
+        }
+
+        private static bool ClipLine(Vector2 start, Vector2 end, Rect rect, float expansion,
+            out Vector2 clippedStart, out Vector2 clippedEnd)
+        {
+            float hw = rect.width * 0.5f * Mathf.Max(1f, expansion);
+            float hh = rect.height * 0.5f * Mathf.Max(1f, expansion);
+            float minX = -hw, maxX = hw, minY = -hh, maxY = hh;
+
+            clippedStart = start;
+            clippedEnd = end;
+
+            int sc = OutCode(clippedStart, minX, maxX, minY, maxY);
+            int ec = OutCode(clippedEnd, minX, maxX, minY, maxY);
+
+            while (true)
+            {
+                if ((sc | ec) == 0) return true;
+                if ((sc & ec) != 0) return false;
+
+                int code = sc != 0 ? sc : ec;
+                float x = 0f, y = 0f;
+
+                if ((code & 8) != 0)
+                {
+                    x = clippedStart.x + (clippedEnd.x - clippedStart.x) * (maxY - clippedStart.y) / (clippedEnd.y - clippedStart.y);
+                    y = maxY;
+                }
+                else if ((code & 4) != 0)
+                {
+                    x = clippedStart.x + (clippedEnd.x - clippedStart.x) * (minY - clippedStart.y) / (clippedEnd.y - clippedStart.y);
+                    y = minY;
+                }
+                else if ((code & 2) != 0)
+                {
+                    y = clippedStart.y + (clippedEnd.y - clippedStart.y) * (maxX - clippedStart.x) / (clippedEnd.x - clippedStart.x);
+                    x = maxX;
+                }
+                else if ((code & 1) != 0)
+                {
+                    y = clippedStart.y + (clippedEnd.y - clippedStart.y) * (minX - clippedStart.x) / (clippedEnd.x - clippedStart.x);
+                    x = minX;
+                }
+
+                if (code == sc)
+                {
+                    clippedStart = new Vector2(x, y);
+                    sc = OutCode(clippedStart, minX, maxX, minY, maxY);
+                }
+                else
+                {
+                    clippedEnd = new Vector2(x, y);
+                    ec = OutCode(clippedEnd, minX, maxX, minY, maxY);
+                }
+            }
+        }
+
+        private static int OutCode(Vector2 p, float minX, float maxX, float minY, float maxY)
+        {
+            int code = 0;
+            if (p.x < minX) code |= 1;
+            else if (p.x > maxX) code |= 2;
+            if (p.y < minY) code |= 4;
+            else if (p.y > maxY) code |= 8;
+            return code;
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // Dirty tracking
+        // ────────────────────────────────────────────────────────────────────
+
+        private bool NeedsUpdate(float distanceThreshold)
+        {
+            if (routeDirty || roadsDirty) return true;
+            if (float.IsNaN(lastUpdatePosition.x)) return true;
+            if ((lastUpdatePosition - mapCenter).sqrMagnitude >= distanceThreshold * distanceThreshold) return true;
+            if (Mathf.Abs(lastUpdateZoom - currentZoom) > 0.25f) return true;
+
+            float heading = GetHeading();
+            if (Mathf.Abs(Mathf.DeltaAngle(lastUpdateHeading, heading)) > 1f) return true;
+
+            return false;
+        }
+
+        private void SaveUpdateState()
+        {
+            lastUpdatePosition = mapCenter;
+            lastUpdateZoom = currentZoom;
+            lastUpdateHeading = GetHeading();
+        }
+
+        private void MarkAllDirty()
+        {
+            routeDirty = true;
+            roadsDirty = true;
+            lastUpdatePosition = new Vector3(float.NaN, float.NaN, float.NaN);
+            lastUpdateZoom = -1f;
+            lastUpdateHeading = float.NaN;
+        }
+
+        private float GetHeading()
+        {
+            if (!alignMapToPlayerHeading || playerTransform == null)
+                return 0f;
             return playerTransform.eulerAngles.y;
         }
 
-        private void ResolvePlayerTransform(bool forceRefresh = false)
+        // ────────────────────────────────────────────────────────────────────
+        // Utility
+        // ────────────────────────────────────────────────────────────────────
+
+        private Rect GetViewportRect()
         {
-            Transform resolvedPlayerTransform = null;
-            if (!forceRefresh && IsUsablePlayerTransform(playerTransform))
-            {
-                return;
-            }
-
-            if (!forceRefresh && Time.unscaledTime < nextPlayerResolveTime)
-            {
-                return;
-            }
-
-            nextPlayerResolveTime = Time.unscaledTime + Mathf.Max(0.1f, playerResolveRetryInterval);
-            if (!TryResolveAuthoritativePlayerTransform(out resolvedPlayerTransform))
-            {
-                if (!loggedMissingPlayerTransform)
-                {
-                    Debug.LogWarning("[MinimapUI] Could not resolve an active player vehicle transform. Waiting for QuestManager or PlayerVehicleManager to publish the authoritative target.");
-                    loggedMissingPlayerTransform = true;
-                }
-
-                playerTransform = null;
-                if (minimapCamera != null)
-                {
-                    minimapCamera.SetPlayer(null);
-                }
-
-                return;
-            }
-
-            loggedMissingPlayerTransform = false;
-            if (playerTransform == resolvedPlayerTransform && !forceRefresh)
-            {
-                return;
-            }
-
-            playerTransform = resolvedPlayerTransform;
-            if (minimapCamera != null)
-            {
-                minimapCamera.SetPlayer(playerTransform);
-            }
-
-            routeDirty = true;
-            lastRouteCenter = new Vector3(float.NaN, float.NaN, float.NaN);
-            lastRoadCenter = new Vector3(float.NaN, float.NaN, float.NaN);
-            lastRoadHeading = float.NaN;
-            lastRouteHeading = float.NaN;
+            if (viewportRect == null && minimapContainer != null)
+                viewportRect = minimapContainer.Find("Viewport") as RectTransform;
+            if (viewportRect != null)
+                return viewportRect.rect;
+            return minimapContainer != null ? minimapContainer.rect : new Rect(0f, 0f, 1f, 1f);
         }
 
-        private bool TryResolveRoadGraph(out RoadGraph graph)
+        private static bool IsUsableTransform(Transform t)
         {
-            if (roadGraphBuilder == null && Time.unscaledTime >= nextRoadGraphResolveTime)
+            return t != null && t.gameObject != null && t.gameObject.activeInHierarchy;
+        }
+
+        private static void AddUniquePoint(List<Vector2> points, Vector2 point)
+        {
+            if (points.Count > 0 && (points[points.Count - 1] - point).sqrMagnitude <= 0.25f)
             {
-                roadGraphBuilder = FindFirstObjectByType<RoadGraphBuilder>();
-                nextRoadGraphResolveTime = Time.unscaledTime + Mathf.Max(0.25f, roadGraphResolveRetryInterval);
+                points[points.Count - 1] = point;
+                return;
             }
+            points.Add(point);
+        }
 
-            if (roadGraphBuilder == null)
-            {
-                if (!loggedMissingRoadGraphBuilder)
-                {
-                    Debug.LogError("[MinimapUI] RoadGraphBuilder could not be found. The minimap road overlay cannot bind to the authoritative road graph source.");
-                    loggedMissingRoadGraphBuilder = true;
-                }
-
-                graph = null;
-                return false;
-            }
-
-            loggedMissingRoadGraphBuilder = false;
-            if (!roadGraphBuilder.HasBuiltRoadGraph)
-            {
-                if (!roadGraphBuilder.HasPendingBuild)
-                {
-                    roadGraphBuilder.BeginBuildWithDelay(0f);
-                }
-
-                if (!loggedMissingRoadGraph)
-                {
-                    Debug.LogWarning("[MinimapUI] Road graph is not built yet. Waiting for RoadGraphBuilder before drawing roads and graph routes.");
-                    loggedMissingRoadGraph = true;
-                }
-
-                graph = null;
-                return false;
-            }
-
-            graph = roadGraphBuilder.RoadGraph;
-            bool hasGraph = graph != null && graph.roadSegments != null && graph.roadSegments.Count > 0;
-            if (!hasGraph && !loggedMissingRoadGraph)
-            {
-                Debug.LogError("[MinimapUI] RoadGraphBuilder finished without producing any road segments. The minimap road overlay cannot render.");
-                loggedMissingRoadGraph = true;
-            }
-            else if (hasGraph)
-            {
-                loggedMissingRoadGraph = false;
-            }
-
-            return hasGraph;
+        private float GetResolvedRoadLineWidth(Rect rect)
+        {
+            float vp = Mathf.Min(rect.width, rect.height);
+            return vp > 0.01f ? Mathf.Max(baseRoadLineWidth, vp * 0.024f) : baseRoadLineWidth;
         }
 
         private bool TryBuildRoadBounds(RoadGraph graph, out Bounds bounds)
         {
             bounds = default;
-            bool initialized = false;
-            if (graph == null || graph.roadSegments == null)
-            {
-                return false;
-            }
+            if (graph?.roadSegments == null) return false;
 
-            for (int segmentIndex = 0; segmentIndex < graph.roadSegments.Count; segmentIndex++)
+            bool init = false;
+            for (int i = 0; i < graph.roadSegments.Count; i++)
             {
-                RoadSegment segment = graph.roadSegments[segmentIndex];
-                if (segment == null || segment.waypoints == null)
-                {
-                    continue;
-                }
+                RoadSegment seg = graph.roadSegments[i];
+                if (seg?.waypoints == null) continue;
 
-                for (int waypointIndex = 0; waypointIndex < segment.waypoints.Count; waypointIndex++)
+                for (int j = 0; j < seg.waypoints.Count; j++)
                 {
-                    Vector3 position = segment.waypoints[waypointIndex].position;
-                    Vector3 flatPosition = new Vector3(position.x, 0f, position.z);
-                    if (!initialized)
-                    {
-                        bounds = new Bounds(flatPosition, Vector3.one);
-                        initialized = true;
-                    }
-                    else
-                    {
-                        bounds.Encapsulate(flatPosition);
-                    }
+                    Vector3 pos = seg.waypoints[j].position;
+                    Vector3 flat = new Vector3(pos.x, 0f, pos.z);
+                    if (!init) { bounds = new Bounds(flat, Vector3.one); init = true; }
+                    else bounds.Encapsulate(flat);
                 }
             }
 
-            if (!initialized)
-            {
-                return false;
-            }
-
+            if (!init) return false;
             bounds.Expand(new Vector3(roadBoundsPadding * 2f, 1f, roadBoundsPadding * 2f));
             return true;
         }
 
-        private void ResolveCameraReferences()
+        private static Transform ResolvePreferredParent()
         {
-            if (minimapCamera == null)
+            Canvas[] canvases = FindObjectsByType<Canvas>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            for (int i = 0; i < canvases.Length; i++)
             {
-                minimapCamera = FindFirstObjectByType<MinimapCamera>();
+                if (canvases[i] != null && canvases[i].name == QuestCanvasName)
+                    return canvases[i].transform;
             }
 
-            if (cameraComponent == null && minimapCamera != null)
-            {
-                cameraComponent = minimapCamera.GetComponent<Camera>();
-            }
+            Canvas globalCanvas = GlobalUiCoordinator.PrimaryCanvas;
+            if (globalCanvas != null) return globalCanvas.transform;
 
-            if (minimapCamera == null && cameraComponent != null)
-            {
-                minimapCamera = cameraComponent.GetComponent<MinimapCamera>();
-            }
+            return canvases.Length > 0 ? canvases[0].transform : null;
         }
+
+        private static RectTransform CreateImageObject(string name, Transform parent, float size)
+        {
+            RectTransform rt = new GameObject(name, typeof(RectTransform), typeof(Image)).GetComponent<RectTransform>();
+            rt.SetParent(parent, false);
+            rt.anchorMin = new Vector2(0.5f, 0.5f);
+            rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = Vector2.one * size;
+            return rt;
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // Static sprite generation
+        // ────────────────────────────────────────────────────────────────────
 
         private static Sprite GetCircleMaskSprite()
         {
-            if (circleMaskSprite != null)
-            {
-                return circleMaskSprite;
-            }
+            if (circleMaskSprite != null) return circleMaskSprite;
 
             const int size = 128;
             circleMaskTexture = new Texture2D(size, size, TextureFormat.ARGB32, false, false);
@@ -1866,366 +1728,35 @@ namespace DeliveryDriver.Quest.UI
             Vector2 center = new Vector2((size - 1) * 0.5f, (size - 1) * 0.5f);
             float radius = size * 0.5f - 2f;
             float feather = 2.5f;
+
             for (int y = 0; y < size; y++)
             {
                 for (int x = 0; x < size; x++)
                 {
-                    float distance = Vector2.Distance(new Vector2(x, y), center);
-                    float alpha = Mathf.Clamp01((radius - distance) / feather);
-                    pixels[(y * size) + x] = new Color32(255, 255, 255, (byte)Mathf.RoundToInt(alpha * 255f));
+                    float dist = Vector2.Distance(new Vector2(x, y), center);
+                    float alpha = Mathf.Clamp01((radius - dist) / feather);
+                    pixels[y * size + x] = new Color32(255, 255, 255, (byte)Mathf.RoundToInt(alpha * 255f));
                 }
             }
 
             circleMaskTexture.SetPixels32(pixels);
             circleMaskTexture.Apply(false, true);
-            circleMaskSprite = Sprite.Create(
-                circleMaskTexture,
-                new Rect(0f, 0f, size, size),
-                new Vector2(0.5f, 0.5f),
-                size);
+            circleMaskSprite = Sprite.Create(circleMaskTexture, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), size);
             circleMaskSprite.name = "RuntimeMinimapCircle";
             return circleMaskSprite;
         }
 
-        private static Transform ResolvePreferredParent()
-        {
-            Canvas[] canvases = FindObjectsByType<Canvas>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            for (int i = 0; i < canvases.Length; i++)
-            {
-                if (canvases[i] != null && canvases[i].name == QuestCanvasName)
-                {
-                    return canvases[i].transform;
-                }
-            }
-
-            Canvas globalCanvas = GlobalUiCoordinator.PrimaryCanvas;
-            if (globalCanvas != null)
-            {
-                return globalCanvas.transform;
-            }
-
-            return canvases.Length > 0 ? canvases[0].transform : null;
-        }
-
-        public void SetPlayerTransform(Transform player)
-        {
-            playerTransform = player;
-            nextPlayerResolveTime = 0f;
-            TryInitializeMinimapRuntime(false);
-            if (minimapCamera != null)
-            {
-                minimapCamera.SetPlayer(player);
-            }
-
-            routeDirty = true;
-            loggedMissingPlayerTransform = player == null;
-            lastRouteCenter = new Vector3(float.NaN, float.NaN, float.NaN);
-            lastRoadCenter = new Vector3(float.NaN, float.NaN, float.NaN);
-            lastRoadHeading = float.NaN;
-            lastRouteHeading = float.NaN;
-            if (pooledPlayerMarker != null)
-            {
-                pooledPlayerMarker.SetVisible(player != null);
-                SetMarkerAnchoredPosition(pooledPlayerMarker, Vector2.zero, true);
-            }
-        }
-
-        private PlayerVehicleManager TryGetVehicleManager()
-        {
-            if (cachedVehicleManager == null)
-            {
-                cachedVehicleManager = PlayerVehicleManager.Instance ?? FindFirstObjectByType<PlayerVehicleManager>();
-            }
-
-            return cachedVehicleManager;
-        }
-
-        private void HandleActiveVehicleChanged(CarController controller)
-        {
-            SetPlayerTransform(controller != null ? controller.transform : null);
-        }
-
-        private void ApplyFixedZoom()
-        {
-            currentZoom = Mathf.Clamp(fixedZoom, MinAllowedZoom, MaxAllowedZoom);
-            RefreshCurrentZoomFromSources();
-        }
-
-        private Rect GetMinimapViewportRect()
-        {
-            if (viewportRect == null && minimapContainer != null)
-            {
-                viewportRect = minimapContainer.Find("Viewport") as RectTransform;
-            }
-
-            if (viewportRect != null)
-            {
-                return viewportRect.rect;
-            }
-
-            return minimapContainer != null ? minimapContainer.rect : new Rect(0f, 0f, 1f, 1f);
-        }
-
-        private void RefreshCurrentZoomFromSources()
-        {
-            ResolveCameraReferences();
-
-            float resolvedZoom = Mathf.Clamp(fixedZoom, MinAllowedZoom, MaxAllowedZoom);
-            bool usedAuthoritativeCameraZoom = false;
-            if (minimapCamera != null && minimapCamera.CameraComponent != null)
-            {
-                float cameraZoom = minimapCamera.CameraComponent.orthographicSize;
-                if (cameraZoom > 0.01f)
-                {
-                    resolvedZoom = Mathf.Clamp(cameraZoom, MinAllowedZoom, MaxAllowedZoom);
-                    usedAuthoritativeCameraZoom = true;
-                }
-            }
-
-            if (Mathf.Abs(currentZoom - resolvedZoom) <= 0.01f)
-            {
-                return;
-            }
-
-            currentZoom = resolvedZoom;
-            routeDirty = true;
-            lastRouteCenter = new Vector3(float.NaN, float.NaN, float.NaN);
-            lastRoadCenter = new Vector3(float.NaN, float.NaN, float.NaN);
-            lastRoadZoom = -1f;
-            lastRouteZoom = -1f;
-
-            if (!usedAuthoritativeCameraZoom && minimapCamera != null)
-            {
-                minimapCamera.SetZoom(currentZoom);
-            }
-        }
-
-        private static bool IsUsablePlayerTransform(Transform candidate)
-        {
-            return candidate != null &&
-                   candidate.gameObject != null &&
-                   candidate.gameObject.activeInHierarchy;
-        }
-
-        private bool TryResolveAuthoritativePlayerTransform(out Transform resolvedPlayerTransform)
-        {
-            resolvedPlayerTransform = null;
-
-            if (QuestManager.Instance != null && IsUsablePlayerTransform(QuestManager.Instance.PlayerTransform))
-            {
-                resolvedPlayerTransform = QuestManager.Instance.PlayerTransform;
-                return true;
-            }
-
-            PlayerVehicleManager vehicleManager = TryGetVehicleManager();
-            if (vehicleManager != null &&
-                vehicleManager.ActiveVehicleController != null &&
-                IsUsablePlayerTransform(vehicleManager.ActiveVehicleController.transform))
-            {
-                resolvedPlayerTransform = vehicleManager.ActiveVehicleController.transform;
-                return true;
-            }
-
-            GameObject taggedPlayer = GameObject.FindGameObjectWithTag("Player");
-            if (taggedPlayer != null && IsUsablePlayerTransform(taggedPlayer.transform))
-            {
-                resolvedPlayerTransform = taggedPlayer.transform;
-                return true;
-            }
-
-            CarController[] controllers = FindObjectsByType<CarController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            Transform inactiveFallback = null;
-            for (int i = 0; i < controllers.Length; i++)
-            {
-                CarController controller = controllers[i];
-                if (controller == null || controller.transform == null)
-                {
-                    continue;
-                }
-
-                if (IsUsablePlayerTransform(controller.transform))
-                {
-                    resolvedPlayerTransform = controller.transform;
-                    return true;
-                }
-
-                if (inactiveFallback == null)
-                {
-                    inactiveFallback = controller.transform;
-                }
-            }
-
-            resolvedPlayerTransform = inactiveFallback;
-            return resolvedPlayerTransform != null;
-        }
-
         private static Sprite GetSolidSprite()
         {
-            if (solidSprite != null)
-            {
-                return solidSprite;
-            }
+            if (solidSprite != null) return solidSprite;
 
-            Texture2D texture = new Texture2D(2, 2, TextureFormat.ARGB32, false, true);
-            texture.name = "RuntimeMinimapSolid";
-            texture.SetPixels(new[] { Color.white, Color.white, Color.white, Color.white });
-            texture.Apply(false, true);
-
-            solidSprite = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(0.5f, 0.5f), 100f);
+            Texture2D tex = new Texture2D(2, 2, TextureFormat.ARGB32, false, true);
+            tex.name = "RuntimeMinimapSolid";
+            tex.SetPixels(new[] { Color.white, Color.white, Color.white, Color.white });
+            tex.Apply(false, true);
+            solidSprite = Sprite.Create(tex, new Rect(0, 0, 2, 2), new Vector2(0.5f, 0.5f), 100f);
             solidSprite.name = "RuntimeMinimapSolid";
             return solidSprite;
-        }
-
-        private void UpdateMarkerPulse()
-        {
-            float pulse = 1f + (Mathf.Sin(Time.time * markerPulseSpeed * Mathf.PI) * 0.5f + 0.5f) * (markerPulseScale - 1f);
-            Vector3 pulseScale = new Vector3(pulse, pulse, 1f);
-
-            ApplyMarkerPulse(pooledPickupMarker, pulseScale);
-            ApplyMarkerPulse(pooledDeliveryMarker, pulseScale);
-        }
-
-        private static void ApplyMarkerPulse(MarkerView marker, Vector3 pulseScale)
-        {
-            if (marker == null || marker.Root == null || !marker.Root.gameObject.activeSelf)
-            {
-                return;
-            }
-
-            marker.Root.localScale = Vector3.Scale(marker.BaseScale, pulseScale);
-            if (marker.Shadow != null)
-            {
-                marker.Shadow.localScale = Vector3.Scale(marker.BaseScale, pulseScale);
-            }
-        }
-
-        private void ApplyMarkerSizing()
-        {
-            float objectiveMarkerResolvedSize = GetResolvedObjectiveMarkerSize();
-            ApplyObjectiveMarkerSizing(pooledPickupMarker, objectiveMarkerResolvedSize);
-            ApplyObjectiveMarkerSizing(pooledDeliveryMarker, objectiveMarkerResolvedSize);
-            ApplyPlayerMarkerSizing(GetResolvedPlayerMarkerSize());
-        }
-
-        private float GetResolvedObjectiveMarkerSize()
-        {
-            Rect rect = GetMinimapViewportRect();
-            float viewportSize = Mathf.Min(rect.width, rect.height);
-            if (viewportSize <= 0.01f)
-            {
-                return markerSize;
-            }
-
-            return Mathf.Max(markerSize, viewportSize * 0.12f);
-        }
-
-        private float GetResolvedPlayerMarkerSize()
-        {
-            Rect rect = GetMinimapViewportRect();
-            float viewportSize = Mathf.Min(rect.width, rect.height);
-            if (viewportSize <= 0.01f)
-            {
-                return playerMarkerSize;
-            }
-
-            return Mathf.Max(playerMarkerSize, viewportSize * 0.16f);
-        }
-
-        private static void ApplyObjectiveMarkerSizing(MarkerView marker, float size)
-        {
-            if (marker == null)
-            {
-                return;
-            }
-
-            if (marker.Shadow != null)
-            {
-                marker.Shadow.sizeDelta = Vector2.one * (size + 6f);
-            }
-
-            if (marker.Root != null)
-            {
-                marker.Root.sizeDelta = Vector2.one * (size + 2f);
-            }
-
-            if (marker.Icon != null)
-            {
-                marker.Icon.rectTransform.sizeDelta = Vector2.one * Mathf.Max(12f, size * 0.68f);
-            }
-
-            if (marker.Label != null)
-            {
-                marker.Label.fontSize = Mathf.Clamp(size * 0.5f, 11f, 16f);
-            }
-        }
-
-        private void ApplyPlayerMarkerSizing(float size)
-        {
-            if (pooledPlayerMarker == null)
-            {
-                return;
-            }
-
-            if (pooledPlayerMarker.Shadow != null)
-            {
-                pooledPlayerMarker.Shadow.sizeDelta = Vector2.one * (size + 3f);
-            }
-
-            if (pooledPlayerMarker.Root != null)
-            {
-                pooledPlayerMarker.Root.sizeDelta = Vector2.one * size;
-            }
-
-            if (pooledPlayerMarker.Icon != null)
-            {
-                pooledPlayerMarker.Icon.rectTransform.sizeDelta = Vector2.one * Mathf.Max(18f, size * 0.78f);
-            }
-        }
-
-        private float GetResolvedRoadLineWidth(Rect rect)
-        {
-            float viewportSize = Mathf.Min(rect.width, rect.height);
-            if (viewportSize <= 0.01f)
-            {
-                return baseRoadLineWidth;
-            }
-
-            return Mathf.Max(baseRoadLineWidth, viewportSize * 0.024f);
-        }
-
-        public void SetMinimapVisible(bool visible)
-        {
-            showMinimap = visible;
-
-            if (minimapContainer != null)
-            {
-                if (minimapCanvasGroup == null)
-                {
-                    minimapCanvasGroup = minimapContainer.GetComponent<CanvasGroup>();
-                    if (minimapCanvasGroup == null)
-                    {
-                        minimapCanvasGroup = minimapContainer.gameObject.AddComponent<CanvasGroup>();
-                    }
-                }
-
-                minimapCanvasGroup.alpha = visible ? 1f : 0f;
-                minimapCanvasGroup.interactable = false;
-                minimapCanvasGroup.blocksRaycasts = false;
-            }
-
-            if (minimapCamera != null)
-            {
-                minimapCamera.SetVisible(visible);
-            }
-            else if (cameraComponent != null)
-            {
-                cameraComponent.enabled = visible;
-            }
-        }
-
-        public void ToggleMinimap()
-        {
-            SetMinimapVisible(!showMinimap);
         }
     }
 }

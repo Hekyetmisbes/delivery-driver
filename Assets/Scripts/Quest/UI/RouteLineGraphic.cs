@@ -7,7 +7,7 @@ namespace DeliveryDriver.Quest.UI
     /// <summary>
     /// Simple UI polyline renderer for route previews.
     /// </summary>
-    public class RouteLineGraphic : Graphic
+    public class RouteLineGraphic : MaskableGraphic
     {
         [SerializeField] private float lineWidth = 4f;
         [SerializeField] private bool showOutline = true;
