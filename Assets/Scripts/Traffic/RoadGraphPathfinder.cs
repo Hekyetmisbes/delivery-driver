@@ -114,16 +114,16 @@ namespace TrafficSystem
 
         private const float LeftLanePenalty = 6f;
         private const float UnnamedLanePenalty = 1.25f;
-        private const float ReverseAlignmentPenalty = 20f;
+        private const float ReverseAlignmentPenalty = 8f;
         private const float HardReverseTurnPenalty = 10f;
-        private const float TransferBackwardDotThreshold = -0.15f;
-        private const float TransferLeftAllowance = 0.75f;
+        private const float TransferBackwardDotThreshold = -0.5f;
+        private const float TransferLeftAllowance = 1.5f;
         private const float TransferDistancePenaltyMultiplier = 4f;
         private const float TransferNormalizedPenalty = 40f;
         private const float TransferHeightPenalty = 10f;
         private const float MaxTransferHeightDelta = 2.5f;
-        private const int TransferEndpointWindow = 2;
-        private const int CandidateWaypointLimit = 4;
+        private const int CandidateWaypointLimit = 6;
+        private const int MaxAStarIterations = 6000;
         private static readonly SearchBuffers SharedBuffers = new SearchBuffers();
 
         public static List<Vector3> FindPath(
@@ -200,6 +200,9 @@ namespace TrafficSystem
 
             List<Vector3> bestPath = null;
             float bestPathCost = float.MaxValue;
+            long timeBudgetTicks = System.Diagnostics.Stopwatch.Frequency / 125; // ~8ms
+            long startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+
             for (int startCandidateIndex = 0; startCandidateIndex < startCandidates.Count; startCandidateIndex++)
             {
                 for (int endCandidateIndex = 0; endCandidateIndex < endCandidates.Count; endCandidateIndex++)
@@ -229,6 +232,12 @@ namespace TrafficSystem
 
                     bestPath = candidatePath;
                     bestPathCost = candidateCost;
+                }
+
+                // Bail out if time budget exceeded and we already have a path
+                if (bestPath != null && System.Diagnostics.Stopwatch.GetTimestamp() - startTicks > timeBudgetTicks)
+                {
+                    break;
                 }
             }
 
@@ -413,8 +422,14 @@ namespace TrafficSystem
             gScore[startKey] = 0f;
             Enqueue(startKey, GridManhattanHeuristic(startRef.position, endPos, heuristicCellSize));
 
+            int iterations = 0;
             while (pq.Count > 0)
             {
+                if (++iterations > MaxAStarIterations)
+                {
+                    break;
+                }
+
                 long currentKey = Dequeue();
                 if (currentKey == endKey)
                 {
@@ -680,12 +695,17 @@ namespace TrafficSystem
             }
 
             float dot = Vector3.Dot(GetPlanarDirection(waypointForward), desiredTravelDirection);
-            if (dot < 0f)
+            if (dot < -0.5f)
             {
-                return ReverseAlignmentPenalty + (-dot * 10f);
+                return ReverseAlignmentPenalty + ((-dot - 0.5f) * 6f);
             }
 
-            return (1f - dot) * 2f;
+            if (dot < 0f)
+            {
+                return (-dot) * 4f;
+            }
+
+            return (1f - dot) * 1.5f;
         }
 
         private static float GetTurnPenalty(Vector3 currentForward, Vector3 nextForward)
@@ -712,25 +732,15 @@ namespace TrafficSystem
             RoadSegment candidateSegment,
             int candidateWaypointIndex)
         {
-            if (currentSegment == null || candidateSegment == null || candidateSegment == currentSegment)
-            {
-                return false;
-            }
-
-            return IsNearSegmentEndpoint(currentSegment, currentWaypointIndex) &&
-                   IsNearSegmentEndpoint(candidateSegment, candidateWaypointIndex);
-        }
-
-        private static bool IsNearSegmentEndpoint(RoadSegment segment, int waypointIndex)
-        {
-            if (segment == null || segment.waypoints == null || segment.waypoints.Count == 0)
-            {
-                return false;
-            }
-
-            int lastIndex = segment.waypoints.Count - 1;
-            return waypointIndex <= TransferEndpointWindow ||
-                   waypointIndex >= Mathf.Max(0, lastIndex - TransferEndpointWindow);
+            // Only reject transfers to the same segment.  Spatial distance, alignment,
+            // lateral offset, and height checks in TryGetTransferPenalty already guard
+            // against bad transfers.  The previous endpoint-proximity requirement was
+            // blocking valid routes on SimplePoly dual-lane road layouts where segments
+            // are short mesh pieces and the player or destination projects to a
+            // mid-segment waypoint.
+            return currentSegment != null &&
+                   candidateSegment != null &&
+                   candidateSegment != currentSegment;
         }
 
         private static bool TryGetTransferPenalty(

@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using DeliveryDriver.Company;
@@ -10,45 +11,31 @@ namespace DeliveryDriver.Navigation
 {
     public class NavigationService : MonoBehaviour
     {
-        private readonly struct RouteProjection
-        {
-            public RouteProjection(int segmentIndex, Vector3 projectedPoint, float distanceSqr)
-            {
-                SegmentIndex = segmentIndex;
-                ProjectedPoint = projectedPoint;
-                DistanceSqr = distanceSqr;
-            }
-
-            public int SegmentIndex { get; }
-            public Vector3 ProjectedPoint { get; }
-            public float DistanceSqr { get; }
-            public bool IsValid => SegmentIndex >= 0;
-        }
-
-        private readonly struct RouteIssueDiagnostics
-        {
-            public RouteIssueDiagnostics(
-                RoadGraphPathfinder.PathSearchDiagnostics pathDiagnostics,
-                int startComponent,
-                int endComponent,
-                bool sameComponent,
-                string playerSource)
-            {
-                PathDiagnostics = pathDiagnostics;
-                StartComponent = startComponent;
-                EndComponent = endComponent;
-                SameComponent = sameComponent;
-                PlayerSource = playerSource;
-            }
-
-            public RoadGraphPathfinder.PathSearchDiagnostics PathDiagnostics { get; }
-            public int StartComponent { get; }
-            public int EndComponent { get; }
-            public bool SameComponent { get; }
-            public string PlayerSource { get; }
-        }
+        // ────────────────────────────────────────────────────────────────────
+        // Singleton
+        // ────────────────────────────────────────────────────────────────────
 
         public static NavigationService Instance { get; private set; }
+
+        public static NavigationService EnsureInstance()
+        {
+            if (Instance != null)
+                return Instance;
+
+            NavigationService existing = FindFirstObjectByType<NavigationService>();
+            if (existing != null)
+            {
+                Instance = existing;
+                return Instance;
+            }
+
+            GameObject go = new GameObject("NavigationService");
+            return go.AddComponent<NavigationService>();
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // Inspector
+        // ────────────────────────────────────────────────────────────────────
 
         [Header("Route Refresh")]
         [SerializeField] private float routeRefreshInterval = 0.2f;
@@ -60,9 +47,13 @@ namespace DeliveryDriver.Navigation
         [Header("Reroute")]
         [SerializeField] private float offRouteDistanceThreshold = 14f;
         [SerializeField] private float staleRouteKeepDistance = 20f;
-        [SerializeField] private float rerouteCooldown = 1f;
-        [SerializeField] private float routeRetryInterval = 1.5f;
+        [SerializeField] private float rerouteCooldown = 1.5f;
+        [SerializeField] private float routeRetryInterval = 2.5f;
         [SerializeField] private float rerouteNotificationCooldown = 6f;
+
+        // ────────────────────────────────────────────────────────────────────
+        // Public state & events
+        // ────────────────────────────────────────────────────────────────────
 
         public NavigationObjective CurrentObjective { get; private set; }
         public RouteResult CurrentRoute { get; private set; } = RouteResult.Unavailable;
@@ -71,53 +62,62 @@ namespace DeliveryDriver.Navigation
         public event Action<RouteResult> OnRouteChanged;
         public event Action OnNavigationCleared;
 
+        // ────────────────────────────────────────────────────────────────────
+        // Transfer distance steps for pathfinding
+        // ────────────────────────────────────────────────────────────────────
+
+        private static readonly float[] TransferDistances = { 6f, 10f, 16f, 24f, 32f };
+
+        // ────────────────────────────────────────────────────────────────────
+        // Internal state
+        // ────────────────────────────────────────────────────────────────────
+
+        // Cached references
         private Transform cachedPlayerTransform;
         private PlayerVehicleManager cachedVehicleManager;
         private RoadGraphBuilder cachedRoadGraphBuilder;
-        private RoadGraph cachedRoadGraph;
 
+        // Route data
         private readonly List<Vector3> routePoints = new List<Vector3>();
-        private readonly List<Vector3> renderRoutePoints = new List<Vector3>();
-        private readonly List<Vector3> lastGoodRoutePoints = new List<Vector3>();
+        private readonly List<Vector3> renderPoints = new List<Vector3>();
+        private readonly List<Vector3> lastGoodRoute = new List<Vector3>();
 
-        private Vector3 lastRouteObjectivePosition;
+        // Route state
+        private Vector3 lastObjectivePosition;
         private Vector3 lastPublishedStart;
         private int lastPublishedSegmentIndex = -1;
         private RouteKind lastPublishedKind = RouteKind.None;
-        private float routeRefreshTimer;
-        private float nextRouteRetryTime;
-        private float nextAllowedRerouteTime;
-        private float nextNotificationTime;
-        private float nextRouteLogTime;
-        private float nextPlayerResolveTime;
-        private float nextRoadGraphResolveTime;
-        private bool routeBuildPending = true;
-        private string lastResolvedPlayerSource = string.Empty;
-
-        private static readonly float[] TransferDistances = { 6f, 10f, 16f, 24f };
-        private const float ProjectionEpsilon = 0.15f;
-        private const float RouteLogCooldown = 2f;
-
         private int currentTransferStep;
         private int baselineTransferStep;
+        private bool needsRouteBuild = true;
 
-        public static NavigationService EnsureInstance()
-        {
-            if (Instance != null)
-            {
-                return Instance;
-            }
+        // Timers
+        private float routeRefreshTimer;
+        private float nextRouteRetryTime;
+        private float nextRerouteTime;
+        private float nextNotificationTime;
+        private float nextPlayerResolveTime;
+        private float nextRoadGraphResolveTime;
 
-            NavigationService existing = UnityEngine.Object.FindFirstObjectByType<NavigationService>();
-            if (existing != null)
-            {
-                Instance = existing;
-                return Instance;
-            }
+        // Async reroute
+        private Coroutine asyncRouteCoroutine;
+        private int consecutiveFailures;
+        private float nextRouteLogTime;
 
-            GameObject serviceObject = new GameObject("NavigationService");
-            return serviceObject.AddComponent<NavigationService>();
-        }
+        // Diagnostics
+        private string lastPlayerSource = string.Empty;
+
+        // ────────────────────────────────────────────────────────────────────
+        // Constants
+        // ────────────────────────────────────────────────────────────────────
+
+        private const float ProjectionEpsilon = 0.15f;
+        private const float FallbackMinDistance = 0.5f;
+        private const float RouteLogCooldown = 5f;
+
+        // ────────────────────────────────────────────────────────────────────
+        // Lifecycle
+        // ────────────────────────────────────────────────────────────────────
 
         private void Awake()
         {
@@ -126,98 +126,38 @@ namespace DeliveryDriver.Navigation
                 Destroy(gameObject);
                 return;
             }
-
             Instance = this;
         }
 
         private void OnEnable()
         {
-            PlayerVehicleManager.ActiveVehicleChanged += HandleActiveVehicleChanged;
+            PlayerVehicleManager.ActiveVehicleChanged += HandleVehicleChanged;
         }
 
         private void OnDestroy()
         {
-            PlayerVehicleManager.ActiveVehicleChanged -= HandleActiveVehicleChanged;
-
-            if (Instance == this)
-            {
-                Instance = null;
-            }
+            PlayerVehicleManager.ActiveVehicleChanged -= HandleVehicleChanged;
+            if (Instance == this) Instance = null;
         }
 
-        private void Update()
-        {
-            if (!CurrentObjective.IsValid)
-            {
-                return;
-            }
-
-            routeRefreshTimer += Time.deltaTime;
-            if (routeRefreshTimer < routeRefreshInterval)
-            {
-                return;
-            }
-            routeRefreshTimer = 0f;
-
-            if (!TryResolvePlayerTransform(out Transform player))
-            {
-                return;
-            }
-
-            Vector3 start = player.position;
-            Vector3 end = CurrentObjective.WorldPosition;
-            bool objectiveMoved = routePoints.Count > 0 &&
-                                  (end - lastRouteObjectivePosition).sqrMagnitude > (objectiveMoveThreshold * objectiveMoveThreshold);
-
-            if (routeBuildPending || objectiveMoved)
-            {
-                TryRebuildRoute(start, end, true);
-                return;
-            }
-
-            if (routePoints.Count < 2)
-            {
-                if (Time.time >= nextRouteRetryTime)
-                {
-                    TryRebuildRoute(start, end, true);
-                }
-
-                return;
-            }
-
-            RouteProjection projection = ProjectOntoRoute(routePoints, start);
-            float offRouteThresholdSqr = offRouteDistanceThreshold * offRouteDistanceThreshold;
-            if (!projection.IsValid || projection.DistanceSqr > offRouteThresholdSqr)
-            {
-                if (Time.time >= nextAllowedRerouteTime)
-                {
-                    TryRebuildRoute(start, end, true);
-                }
-                else if (CurrentRoute != null && CurrentRoute.IsRenderable)
-                {
-                    PublishUnavailableRoute();
-                }
-
-                return;
-            }
-
-            PublishProjectedRoute(start, projection, RouteKind.Graph, false);
-        }
+        // ────────────────────────────────────────────────────────────────────
+        // Public API
+        // ────────────────────────────────────────────────────────────────────
 
         public void SetObjective(NavigationObjective objective)
         {
             CurrentObjective = objective;
-            InvalidateRoute();
-            PublishUnavailableRoute();
+            ResetRouteState();
+            PublishUnavailable();
             OnObjectiveChanged?.Invoke(objective);
-            ForceRouteRebuild();
+            TryImmediateRouteBuild();
         }
 
         public void ClearObjective()
         {
             CurrentObjective = NavigationObjective.Empty;
-            InvalidateRoute();
-            PublishUnavailableRoute();
+            ResetRouteState();
+            PublishUnavailable();
             OnNavigationCleared?.Invoke();
         }
 
@@ -226,213 +166,278 @@ namespace DeliveryDriver.Navigation
             cachedPlayerTransform = player;
             nextPlayerResolveTime = 0f;
             if (CurrentObjective.IsValid)
-            {
-                ForceRouteRebuild();
-            }
+                TryImmediateRouteBuild();
         }
 
-        private void ForceRouteRebuild()
-        {
-            if (!CurrentObjective.IsValid || !TryResolvePlayerTransform(out Transform player))
-            {
-                return;
-            }
+        // ────────────────────────────────────────────────────────────────────
+        // Update loop
+        // ────────────────────────────────────────────────────────────────────
 
-            TryRebuildRoute(player.position, CurrentObjective.WorldPosition, true);
-        }
-
-        private void InvalidateRoute()
+        private void Update()
         {
-            routePoints.Clear();
-            renderRoutePoints.Clear();
-            lastGoodRoutePoints.Clear();
-            routeBuildPending = true;
-            nextRouteRetryTime = 0f;
-            nextAllowedRerouteTime = 0f;
-            nextRouteLogTime = 0f;
-            currentTransferStep = 0;
-            baselineTransferStep = 0;
-            lastPublishedSegmentIndex = -1;
-            lastPublishedKind = RouteKind.None;
-            lastPublishedStart = Vector3.zero;
-            lastRouteObjectivePosition = Vector3.zero;
+            if (!CurrentObjective.IsValid) return;
+
+            routeRefreshTimer += Time.deltaTime;
+            if (routeRefreshTimer < routeRefreshInterval) return;
             routeRefreshTimer = 0f;
+
+            if (!ResolvePlayer(out Transform player)) return;
+
+            Vector3 playerPos = player.position;
+            Vector3 objectivePos = CurrentObjective.WorldPosition;
+
+            // Check if objective moved significantly
+            bool objectiveMoved = routePoints.Count > 0 &&
+                (objectivePos - lastObjectivePosition).sqrMagnitude > objectiveMoveThreshold * objectiveMoveThreshold;
+
+            // Need to build route?
+            if (needsRouteBuild || objectiveMoved)
+            {
+                RequestAsyncRoute(playerPos, objectivePos);
+                return;
+            }
+
+            // No valid route? Retry on timer
+            if (routePoints.Count < 2)
+            {
+                if (Time.time >= nextRouteRetryTime)
+                    RequestAsyncRoute(playerPos, objectivePos);
+                return;
+            }
+
+            // Check if player is on route
+            ProjectOnRoute(routePoints, playerPos, out int segIdx, out Vector3 projected, out float distSqr);
+            float offRouteSqr = offRouteDistanceThreshold * offRouteDistanceThreshold;
+
+            if (segIdx < 0 || distSqr > offRouteSqr)
+            {
+                // Off route - reroute if cooldown allows
+                if (Time.time >= nextRerouteTime)
+                    RequestAsyncRoute(playerPos, objectivePos);
+                return;
+            }
+
+            // On route - publish projected view
+            PublishProjected(playerPos, segIdx, projected, RouteKind.Graph, false);
         }
 
-        private void TryRebuildRoute(Vector3 start, Vector3 end, bool allowNotification)
+        // ────────────────────────────────────────────────────────────────────
+        // Route building
+        // ────────────────────────────────────────────────────────────────────
+
+        private void TryImmediateRouteBuild()
         {
-            routeBuildPending = false;
-            lastRouteObjectivePosition = end;
+            if (!CurrentObjective.IsValid) return;
+            if (!ResolvePlayer(out Transform player)) return;
+            BuildRoute(player.position, CurrentObjective.WorldPosition);
+        }
 
-            if (!TryResolveRoadGraph(out RoadGraph graph))
+        private void BuildRoute(Vector3 start, Vector3 end)
+        {
+            needsRouteBuild = false;
+            lastObjectivePosition = end;
+
+            // Try road graph path
+            if (TryResolveRoadGraph(out RoadGraph graph))
             {
-                HandleRouteBuildFailure(start, allowNotification);
-                return;
-            }
-
-            int step = Mathf.Clamp(Mathf.Max(currentTransferStep, baselineTransferStep), 0, TransferDistances.Length - 1);
-            float transferDistance = TransferDistances[step];
-            List<Vector3> path = RoadGraphPathfinder.FindPath(graph, start, end, transferDistance);
-
-            if (path != null && path.Count >= 2)
-            {
-                routePoints.Clear();
-                routePoints.AddRange(path);
-                lastGoodRoutePoints.Clear();
-                lastGoodRoutePoints.AddRange(path);
-                baselineTransferStep = Mathf.Max(0, step - 1);
-                currentTransferStep = baselineTransferStep;
-                nextRouteRetryTime = 0f;
-                nextAllowedRerouteTime = Time.time + rerouteCooldown;
-                PublishProjectedRoute(start, ProjectOntoRoute(routePoints, start), RouteKind.Graph, true);
-                return;
-            }
-
-            // Failed - escalate transfer distance for next retry
-            currentTransferStep = Mathf.Min(step + 1, TransferDistances.Length - 1);
-            nextAllowedRerouteTime = Time.time + rerouteCooldown;
-            nextRouteRetryTime = Time.time + routeRetryInterval;
-
-            if (lastGoodRoutePoints.Count >= 2)
-            {
-                RouteProjection staleProjection = ProjectOntoRoute(lastGoodRoutePoints, start);
-                float staleKeepDistanceSqr = staleRouteKeepDistance * staleRouteKeepDistance;
-                if (!staleProjection.IsValid || staleProjection.DistanceSqr > staleKeepDistanceSqr)
+                if (TryFindGraphRoute(graph, start, end))
                 {
-                    HandleUnavailableRoute(start, end, allowNotification, "Road-graph route could not be recalculated.");
+                    consecutiveFailures = 0;
                     return;
                 }
-
-                routePoints.Clear();
-                routePoints.AddRange(lastGoodRoutePoints);
-                nextRouteRetryTime = Time.time + routeRetryInterval;
-                if (allowNotification && Time.time >= nextNotificationTime)
-                {
-                    nextNotificationTime = Time.time + rerouteNotificationCooldown;
-                    NotificationQueue.Enqueue(
-                        "Navigasyon",
-                        "Rota yeniden hesaplanıyor",
-                        2f,
-                        NotificationPriority.Normal);
-                }
-                PublishProjectedRoute(start, staleProjection, RouteKind.StaleGraph, true);
-                return;
             }
 
-            HandleUnavailableRoute(start, end, allowNotification, "Road-graph pathfinder could not produce a valid route.");
-            return;
-        }
-
-        private void HandleRouteBuildFailure(Vector3 start, bool allowNotification)
-        {
-            if (lastGoodRoutePoints.Count >= 2)
+            // Graph route failed - try stale route
+            if (TryUseStaleRoute(start))
             {
-                RouteProjection staleProjection = ProjectOntoRoute(lastGoodRoutePoints, start);
-                float staleKeepDistanceSqr = staleRouteKeepDistance * staleRouteKeepDistance;
-                if (!staleProjection.IsValid || staleProjection.DistanceSqr > staleKeepDistanceSqr)
-                {
-                    HandleUnavailableRoute(start, CurrentObjective.WorldPosition, allowNotification, "Road graph is unavailable or not ready.");
-                    return;
-                }
-
-                routePoints.Clear();
-                routePoints.AddRange(lastGoodRoutePoints);
-
-                if (allowNotification && Time.time >= nextNotificationTime)
-                {
-                    nextNotificationTime = Time.time + rerouteNotificationCooldown;
-                    NotificationQueue.Enqueue(
-                        "Navigasyon",
-                        "Rota yeniden hesaplaniyor",
-                        2f,
-                        NotificationPriority.Normal);
-                }
-
-                PublishProjectedRoute(start, staleProjection, RouteKind.StaleGraph, true);
+                consecutiveFailures = 0;
                 return;
             }
 
-            HandleUnavailableRoute(start, CurrentObjective.WorldPosition, allowNotification, "Road graph is unavailable or not ready.");
+            // All failed - use fallback straight line
+            consecutiveFailures++;
+            PublishFallback(start, end);
+            ScheduleRetry();
+            LogRouteIssue("Rota hesaplanamadi.", start, end);
+            ShowRerouteNotification();
         }
 
-        private void HandleUnavailableRoute(Vector3 start, Vector3 end, bool showNotification, string reason)
+        private bool TryFindGraphRoute(RoadGraph graph, Vector3 start, Vector3 end)
         {
+            int startStep = Mathf.Clamp(Mathf.Max(currentTransferStep, baselineTransferStep), 0, TransferDistances.Length - 1);
+            List<Vector3> path = null;
+            int resolvedStep = -1;
+            long budgetTicks = System.Diagnostics.Stopwatch.Frequency / 50; // ~20ms total budget
+            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+
+            for (int step = startStep; step < TransferDistances.Length; step++)
+            {
+                path = RoadGraphPathfinder.FindPath(graph, start, end, TransferDistances[step]);
+                if (path != null && path.Count >= 2)
+                {
+                    resolvedStep = step;
+                    break;
+                }
+
+                // Don't burn more than 20ms trying progressively wider transfers
+                if (System.Diagnostics.Stopwatch.GetTimestamp() - t0 > budgetTicks)
+                {
+                    break;
+                }
+            }
+
+            if (resolvedStep < 0 || path == null || path.Count < 2)
+            {
+                currentTransferStep = TransferDistances.Length - 1;
+                nextRerouteTime = Time.time + rerouteCooldown;
+                return false;
+            }
+
+            // Success
             routePoints.Clear();
-            renderRoutePoints.Clear();
-            PublishUnavailableRoute();
-            nextRouteRetryTime = Mathf.Max(nextRouteRetryTime, Time.time + routeRetryInterval);
-            TryLogRouteIssue(reason, start, end);
+            routePoints.AddRange(path);
+            lastGoodRoute.Clear();
+            lastGoodRoute.AddRange(path);
+            baselineTransferStep = Mathf.Max(0, resolvedStep - 1);
+            currentTransferStep = baselineTransferStep;
+            nextRouteRetryTime = 0f;
+            nextRerouteTime = Time.time + rerouteCooldown;
 
-            if (showNotification && Time.time >= nextNotificationTime)
+            ProjectOnRoute(routePoints, start, out int segIdx, out Vector3 projected, out _);
+            PublishProjected(start, segIdx, projected, RouteKind.Graph, true);
+            return true;
+        }
+
+        private bool TryUseStaleRoute(Vector3 playerPos)
+        {
+            if (lastGoodRoute.Count < 2) return false;
+
+            ProjectOnRoute(lastGoodRoute, playerPos, out int segIdx, out Vector3 projected, out float distSqr);
+            float keepDistSqr = staleRouteKeepDistance * staleRouteKeepDistance;
+
+            if (segIdx < 0 || distSqr > keepDistSqr)
+                return false;
+
+            routePoints.Clear();
+            routePoints.AddRange(lastGoodRoute);
+            nextRouteRetryTime = Time.time + routeRetryInterval;
+            nextRerouteTime = Time.time + rerouteCooldown;
+
+            ShowRerouteNotification();
+            PublishProjected(playerPos, segIdx, projected, RouteKind.StaleGraph, true);
+            return true;
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // Route projection
+        // ────────────────────────────────────────────────────────────────────
+
+        private static void ProjectOnRoute(List<Vector3> points, Vector3 worldPos,
+            out int bestSegment, out Vector3 bestProjection, out float bestDistSqr)
+        {
+            bestSegment = -1;
+            bestProjection = worldPos;
+            bestDistSqr = float.MaxValue;
+
+            if (points == null || points.Count < 2) return;
+
+            for (int i = 0; i < points.Count - 1; i++)
             {
-                nextNotificationTime = Time.time + rerouteNotificationCooldown;
-                NotificationQueue.Enqueue(
-                    "Navigasyon",
-                    "Rota yeniden hesaplanıyor",
-                    2f,
-                    NotificationPriority.Normal);
+                Vector3 proj = ProjectPointOnSegment(worldPos, points[i], points[i + 1]);
+                float dSqr = (worldPos - proj).sqrMagnitude;
+                if (dSqr < bestDistSqr)
+                {
+                    bestDistSqr = dSqr;
+                    bestProjection = proj;
+                    bestSegment = i;
+                }
             }
         }
 
-        private void TryLogRouteIssue(string reason, Vector3 start, Vector3 end)
+        private static Vector3 ProjectPointOnSegment(Vector3 point, Vector3 a, Vector3 b)
         {
-            if (Time.time < nextRouteLogTime)
-            {
-                return;
-            }
-
-            nextRouteLogTime = Time.time + RouteLogCooldown;
-            if (TryBuildRouteIssueDiagnostics(start, end, out RouteIssueDiagnostics diagnostics))
-            {
-                RoadSegment startSegment = diagnostics.PathDiagnostics.StartSegment;
-                RoadSegment endSegment = diagnostics.PathDiagnostics.EndSegment;
-                Debug.LogWarning(
-                    $"[NavigationService] {reason} Start={start}, Objective={end}, " +
-                    $"playerSource={diagnostics.PlayerSource}, graphSegments={diagnostics.PathDiagnostics.SegmentCount}, explicitConnections={diagnostics.PathDiagnostics.ConnectionCount}, " +
-                    $"startSegment={FormatSegmentLabel(startSegment, diagnostics.PathDiagnostics.StartWaypointIndex)}, startProjectionDistance={diagnostics.PathDiagnostics.StartProjectionDistance:F2}, " +
-                    $"endSegment={FormatSegmentLabel(endSegment, diagnostics.PathDiagnostics.EndWaypointIndex)}, endProjectionDistance={diagnostics.PathDiagnostics.EndProjectionDistance:F2}, " +
-                    $"sameComponent={diagnostics.SameComponent}, startComponent={diagnostics.StartComponent}, endComponent={diagnostics.EndComponent}.");
-                return;
-            }
-
-            Debug.LogWarning($"[NavigationService] {reason} Start={start}, Objective={end}.");
+            Vector3 ab = b - a;
+            float lenSqr = ab.sqrMagnitude;
+            if (lenSqr <= Mathf.Epsilon) return a;
+            float t = Mathf.Clamp01(Vector3.Dot(point - a, ab) / lenSqr);
+            return a + ab * t;
         }
 
-        private void PublishProjectedRoute(Vector3 start, RouteProjection projection, RouteKind kind, bool forcePublish)
+        // ────────────────────────────────────────────────────────────────────
+        // Route publishing
+        // ────────────────────────────────────────────────────────────────────
+
+        private void PublishProjected(Vector3 start, int segIdx, Vector3 projected, RouteKind kind, bool force)
         {
-            if (!projection.IsValid)
+            if (segIdx < 0)
             {
-                PublishUnavailableRoute();
+                PublishUnavailable();
                 return;
             }
 
-            BuildRenderableRoute(start, projection);
-            if (renderRoutePoints.Count < 2)
+            // Build renderable route: start -> projected -> remaining waypoints
+            renderPoints.Clear();
+            AddUniquePoint(renderPoints, start);
+            AddUniquePoint(renderPoints, projected);
+            for (int i = segIdx + 1; i < routePoints.Count; i++)
+                AddUniquePoint(renderPoints, routePoints[i]);
+
+            if (renderPoints.Count < 2)
             {
-                PublishUnavailableRoute();
+                PublishUnavailable();
                 return;
             }
 
-            float publishDistanceThresholdSqr = routePublishDistanceThreshold * routePublishDistanceThreshold;
-            bool shouldPublish = forcePublish ||
-                                 kind != lastPublishedKind ||
-                                 projection.SegmentIndex != lastPublishedSegmentIndex ||
-                                 (start - lastPublishedStart).sqrMagnitude >= publishDistanceThresholdSqr;
+            // Throttle publishes
+            float pubDistSqr = routePublishDistanceThreshold * routePublishDistanceThreshold;
+            bool shouldPublish = force ||
+                kind != lastPublishedKind ||
+                segIdx != lastPublishedSegmentIndex ||
+                (start - lastPublishedStart).sqrMagnitude >= pubDistSqr;
 
-            if (!shouldPublish)
+            if (!shouldPublish) return;
+
+            lastPublishedStart = start;
+            lastPublishedSegmentIndex = segIdx;
+            lastPublishedKind = kind;
+
+            CurrentRoute = new RouteResult(new List<Vector3>(renderPoints), kind);
+            OnRouteChanged?.Invoke(CurrentRoute);
+        }
+
+        private void PublishFallback(Vector3 start, Vector3 end)
+        {
+            if ((end - start).sqrMagnitude <= FallbackMinDistance * FallbackMinDistance)
             {
+                PublishUnavailable();
+                return;
+            }
+
+            float pubDistSqr = routePublishDistanceThreshold * routePublishDistanceThreshold;
+            bool shouldPublish = lastPublishedKind != RouteKind.Fallback ||
+                (start - lastPublishedStart).sqrMagnitude >= pubDistSqr;
+
+            if (!shouldPublish) return;
+
+            renderPoints.Clear();
+            AddUniquePoint(renderPoints, start);
+            AddUniquePoint(renderPoints, end);
+
+            if (renderPoints.Count < 2)
+            {
+                PublishUnavailable();
                 return;
             }
 
             lastPublishedStart = start;
-            lastPublishedSegmentIndex = projection.SegmentIndex;
-            lastPublishedKind = kind;
+            lastPublishedSegmentIndex = -1;
+            lastPublishedKind = RouteKind.Fallback;
 
-            CurrentRoute = new RouteResult(new List<Vector3>(renderRoutePoints), kind);
+            CurrentRoute = new RouteResult(new List<Vector3>(renderPoints), RouteKind.Fallback);
             OnRouteChanged?.Invoke(CurrentRoute);
         }
 
-        private void PublishUnavailableRoute()
+        private void PublishUnavailable()
         {
             if (lastPublishedKind == RouteKind.None && (CurrentRoute == null || !CurrentRoute.IsRenderable))
             {
@@ -440,86 +445,131 @@ namespace DeliveryDriver.Navigation
                 return;
             }
 
-            renderRoutePoints.Clear();
+            renderPoints.Clear();
             CurrentRoute = RouteResult.Unavailable;
             lastPublishedKind = RouteKind.None;
             lastPublishedSegmentIndex = -1;
             OnRouteChanged?.Invoke(CurrentRoute);
         }
 
-        private void BuildRenderableRoute(Vector3 start, RouteProjection projection)
-        {
-            renderRoutePoints.Clear();
-            AddUniquePoint(renderRoutePoints, start);
-            AddUniquePoint(renderRoutePoints, projection.ProjectedPoint);
+        // ────────────────────────────────────────────────────────────────────
+        // State management
+        // ────────────────────────────────────────────────────────────────────
 
-            for (int i = projection.SegmentIndex + 1; i < routePoints.Count; i++)
+        private void ResetRouteState()
+        {
+            if (asyncRouteCoroutine != null)
             {
-                AddUniquePoint(renderRoutePoints, routePoints[i]);
+                StopCoroutine(asyncRouteCoroutine);
+                asyncRouteCoroutine = null;
             }
+            consecutiveFailures = 0;
+            routePoints.Clear();
+            renderPoints.Clear();
+            lastGoodRoute.Clear();
+            needsRouteBuild = true;
+            nextRouteRetryTime = 0f;
+            nextRerouteTime = 0f;
+            nextRouteLogTime = 0f;
+            currentTransferStep = 0;
+            baselineTransferStep = 0;
+            lastPublishedSegmentIndex = -1;
+            lastPublishedKind = RouteKind.None;
+            lastPublishedStart = Vector3.zero;
+            lastObjectivePosition = Vector3.zero;
+            routeRefreshTimer = 0f;
         }
 
-        private static void AddUniquePoint(List<Vector3> points, Vector3 point)
+        private void RequestAsyncRoute(Vector3 start, Vector3 end)
         {
-            if (points.Count > 0)
+            if (asyncRouteCoroutine != null) return; // Already computing
+            asyncRouteCoroutine = StartCoroutine(BuildRouteAsync(start, end));
+        }
+
+        private IEnumerator BuildRouteAsync(Vector3 start, Vector3 end)
+        {
+            needsRouteBuild = false;
+            lastObjectivePosition = end;
+
+            bool found = false;
+
+            if (TryResolveRoadGraph(out RoadGraph graph))
             {
-                Vector3 previous = points[points.Count - 1];
-                if ((previous - point).sqrMagnitude <= ProjectionEpsilon * ProjectionEpsilon)
+                int startStep = Mathf.Clamp(Mathf.Max(currentTransferStep, baselineTransferStep), 0, TransferDistances.Length - 1);
+
+                for (int step = startStep; step < TransferDistances.Length; step++)
                 {
-                    points[points.Count - 1] = point;
-                    return;
+                    // Yield before each pathfinding attempt to avoid blocking the frame
+                    if (step > startStep)
+                        yield return null;
+
+                    // Re-read player position for freshness
+                    if (ResolvePlayer(out Transform player) && CurrentObjective.IsValid)
+                    {
+                        start = player.position;
+                        end = CurrentObjective.WorldPosition;
+                    }
+
+                    List<Vector3> path = RoadGraphPathfinder.FindPath(graph, start, end, TransferDistances[step]);
+                    if (path != null && path.Count >= 2)
+                    {
+                        routePoints.Clear();
+                        routePoints.AddRange(path);
+                        lastGoodRoute.Clear();
+                        lastGoodRoute.AddRange(path);
+                        baselineTransferStep = Mathf.Max(0, step - 1);
+                        currentTransferStep = baselineTransferStep;
+                        nextRouteRetryTime = 0f;
+                        nextRerouteTime = Time.time + rerouteCooldown;
+                        consecutiveFailures = 0;
+
+                        ProjectOnRoute(routePoints, start, out int segIdx, out Vector3 projected, out _);
+                        PublishProjected(start, segIdx, projected, RouteKind.Graph, true);
+                        found = true;
+                        break;
+                    }
                 }
             }
 
-            points.Add(point);
-        }
-
-        private static RouteProjection ProjectOntoRoute(List<Vector3> points, Vector3 worldPosition)
-        {
-            if (points == null || points.Count < 2)
+            if (!found)
             {
-                return new RouteProjection(-1, worldPosition, float.MaxValue);
-            }
+                currentTransferStep = TransferDistances.Length - 1;
 
-            int bestSegmentIndex = -1;
-            Vector3 bestProjection = worldPosition;
-            float bestDistanceSqr = float.MaxValue;
-
-            for (int i = 0; i < points.Count - 1; i++)
-            {
-                Vector3 projectedPoint = ProjectPointOnSegment(worldPosition, points[i], points[i + 1]);
-                float distanceSqr = (worldPosition - projectedPoint).sqrMagnitude;
-                if (distanceSqr < bestDistanceSqr)
+                if (TryUseStaleRoute(start))
                 {
-                    bestDistanceSqr = distanceSqr;
-                    bestProjection = projectedPoint;
-                    bestSegmentIndex = i;
+                    consecutiveFailures = 0;
+                }
+                else
+                {
+                    consecutiveFailures++;
+                    PublishFallback(start, end);
+                    float backoff = Mathf.Min(routeRetryInterval * Mathf.Pow(1.5f, consecutiveFailures), 10f);
+                    nextRouteRetryTime = Mathf.Max(nextRouteRetryTime, Time.time + backoff);
+                    nextRerouteTime = Time.time + Mathf.Min(rerouteCooldown * Mathf.Pow(1.5f, consecutiveFailures), 8f);
+                    LogRouteIssue("Rota hesaplanamadi.", start, end);
+                    ShowRerouteNotification();
                 }
             }
 
-            return new RouteProjection(bestSegmentIndex, bestProjection, bestDistanceSqr);
+            asyncRouteCoroutine = null;
         }
 
-        private static Vector3 ProjectPointOnSegment(Vector3 point, Vector3 segmentStart, Vector3 segmentEnd)
+        private void ScheduleRetry()
         {
-            Vector3 segment = segmentEnd - segmentStart;
-            float lengthSqr = segment.sqrMagnitude;
-            if (lengthSqr <= Mathf.Epsilon)
-            {
-                return segmentStart;
-            }
-
-            float t = Vector3.Dot(point - segmentStart, segment) / lengthSqr;
-            t = Mathf.Clamp01(t);
-            return segmentStart + (segment * t);
+            nextRouteRetryTime = Mathf.Max(nextRouteRetryTime, Time.time + routeRetryInterval);
+            nextRerouteTime = Time.time + rerouteCooldown;
         }
 
-        private bool TryResolvePlayerTransform(out Transform player)
+        // ────────────────────────────────────────────────────────────────────
+        // Player resolution
+        // ────────────────────────────────────────────────────────────────────
+
+        private bool ResolvePlayer(out Transform player)
         {
-            if (IsUsablePlayerTransform(cachedPlayerTransform))
+            if (IsUsable(cachedPlayerTransform))
             {
                 player = cachedPlayerTransform;
-                return player != null;
+                return true;
             }
 
             if (Time.unscaledTime < nextPlayerResolveTime)
@@ -529,12 +579,48 @@ namespace DeliveryDriver.Navigation
             }
 
             nextPlayerResolveTime = Time.unscaledTime + Mathf.Max(0.1f, playerResolveRetryInterval);
-            if (TryResolveAuthoritativePlayerTransform(out Transform resolvedPlayerTransform, out string playerSource))
+
+            // 1. QuestManager
+            if (QuestManager.Instance != null && IsUsable(QuestManager.Instance.PlayerTransform))
             {
-                cachedPlayerTransform = resolvedPlayerTransform;
-                lastResolvedPlayerSource = playerSource;
+                cachedPlayerTransform = QuestManager.Instance.PlayerTransform;
+                lastPlayerSource = "QuestManager";
                 player = cachedPlayerTransform;
-                return player != null;
+                return true;
+            }
+
+            // 2. PlayerVehicleManager
+            PlayerVehicleManager vm = GetVehicleManager();
+            if (vm != null && vm.ActiveVehicleController != null &&
+                IsUsable(vm.ActiveVehicleController.transform))
+            {
+                cachedPlayerTransform = vm.ActiveVehicleController.transform;
+                lastPlayerSource = "PlayerVehicleManager";
+                player = cachedPlayerTransform;
+                return true;
+            }
+
+            // 3. Player tag
+            GameObject tagged = GameObject.FindGameObjectWithTag("Player");
+            if (tagged != null && IsUsable(tagged.transform))
+            {
+                cachedPlayerTransform = tagged.transform;
+                lastPlayerSource = "PlayerTag";
+                player = cachedPlayerTransform;
+                return true;
+            }
+
+            // 4. Any CarController
+            CarController[] controllers = FindObjectsByType<CarController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            for (int i = 0; i < controllers.Length; i++)
+            {
+                if (controllers[i] != null && IsUsable(controllers[i].transform))
+                {
+                    cachedPlayerTransform = controllers[i].transform;
+                    lastPlayerSource = "CarController";
+                    player = cachedPlayerTransform;
+                    return true;
+                }
             }
 
             cachedPlayerTransform = null;
@@ -542,244 +628,103 @@ namespace DeliveryDriver.Navigation
             return false;
         }
 
+        private void HandleVehicleChanged(CarController controller)
+        {
+            SetPlayerTransform(controller != null ? controller.transform : null);
+        }
+
+        private PlayerVehicleManager GetVehicleManager()
+        {
+            if (cachedVehicleManager == null)
+                cachedVehicleManager = PlayerVehicleManager.Instance ?? FindFirstObjectByType<PlayerVehicleManager>();
+            return cachedVehicleManager;
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // Road graph resolution
+        // ────────────────────────────────────────────────────────────────────
+
         private bool TryResolveRoadGraph(out RoadGraph graph)
         {
+            graph = null;
+
             if (cachedRoadGraphBuilder == null && Time.unscaledTime >= nextRoadGraphResolveTime)
             {
                 cachedRoadGraphBuilder = FindFirstObjectByType<RoadGraphBuilder>();
                 nextRoadGraphResolveTime = Time.unscaledTime + Mathf.Max(0.25f, roadGraphResolveRetryInterval);
             }
 
-            if (cachedRoadGraphBuilder == null)
-            {
-                cachedRoadGraph = null;
-                graph = null;
-                return false;
-            }
+            if (cachedRoadGraphBuilder == null) return false;
 
             if (cachedRoadGraphBuilder.HasBuiltRoadGraph)
             {
-                cachedRoadGraph = cachedRoadGraphBuilder.RoadGraph;
-                graph = cachedRoadGraph;
+                graph = cachedRoadGraphBuilder.RoadGraph;
                 return graph != null && graph.roadSegments != null && graph.roadSegments.Count > 0;
             }
 
-            cachedRoadGraph = null;
+            // Trigger build if not pending
             if (!cachedRoadGraphBuilder.HasPendingBuild)
-            {
                 cachedRoadGraphBuilder.BeginBuildWithDelay(0f);
-            }
 
-            graph = null;
             nextRouteRetryTime = Mathf.Max(nextRouteRetryTime, Time.time + routeRetryInterval);
             return false;
         }
 
-        private bool TryResolveAuthoritativePlayerTransform(out Transform player, out string source)
+        // ────────────────────────────────────────────────────────────────────
+        // Notifications & logging
+        // ────────────────────────────────────────────────────────────────────
+
+        private void ShowRerouteNotification()
         {
-            player = null;
-            source = string.Empty;
+            if (Time.time < nextNotificationTime) return;
+            nextNotificationTime = Time.time + rerouteNotificationCooldown;
 
-            if (QuestManager.Instance != null && IsUsablePlayerTransform(QuestManager.Instance.PlayerTransform))
-            {
-                player = QuestManager.Instance.PlayerTransform;
-                source = "QuestManager.PlayerTransform";
-                return true;
-            }
-
-            PlayerVehicleManager vehicleManager = TryGetVehicleManager();
-            if (vehicleManager != null &&
-                vehicleManager.ActiveVehicleController != null &&
-                IsUsablePlayerTransform(vehicleManager.ActiveVehicleController.transform))
-            {
-                player = vehicleManager.ActiveVehicleController.transform;
-                source = "PlayerVehicleManager.ActiveVehicleController";
-                return true;
-            }
-
-            GameObject taggedPlayer = GameObject.FindGameObjectWithTag("Player");
-            if (taggedPlayer != null && IsUsablePlayerTransform(taggedPlayer.transform))
-            {
-                player = taggedPlayer.transform;
-                source = "PlayerTag";
-                return true;
-            }
-
-            CarController[] controllers = FindObjectsByType<CarController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            for (int i = 0; i < controllers.Length; i++)
-            {
-                CarController controller = controllers[i];
-                if (controller == null || !IsUsablePlayerTransform(controller.transform))
-                {
-                    continue;
-                }
-
-                player = controller.transform;
-                source = "SceneCarController";
-                return true;
-            }
-
-            return false;
+            NotificationQueue.Enqueue(
+                "Navigasyon",
+                "Rota yeniden hesaplanıyor",
+                2f,
+                NotificationPriority.Normal);
         }
 
-        private PlayerVehicleManager TryGetVehicleManager()
+        private void LogRouteIssue(string reason, Vector3 start, Vector3 end)
         {
-            if (cachedVehicleManager == null)
+            if (Time.time < nextRouteLogTime) return;
+            nextRouteLogTime = Time.time + RouteLogCooldown;
+
+            if (TryResolveRoadGraph(out RoadGraph graph) &&
+                RoadGraphPathfinder.TryGetPathDiagnostics(graph, start, end, out var diag))
             {
-                cachedVehicleManager = PlayerVehicleManager.Instance ?? FindFirstObjectByType<PlayerVehicleManager>();
-            }
-
-            return cachedVehicleManager;
-        }
-
-        private void HandleActiveVehicleChanged(CarController controller)
-        {
-            SetPlayerTransform(controller != null ? controller.transform : null);
-        }
-
-        private static bool IsUsablePlayerTransform(Transform candidate)
-        {
-            return candidate != null &&
-                   candidate.gameObject != null &&
-                   candidate.gameObject.activeInHierarchy;
-        }
-
-        private bool TryBuildRouteIssueDiagnostics(Vector3 start, Vector3 end, out RouteIssueDiagnostics diagnostics)
-        {
-            diagnostics = default;
-            if (!TryResolveRoadGraph(out RoadGraph graph) ||
-                !RoadGraphPathfinder.TryGetPathDiagnostics(graph, start, end, out RoadGraphPathfinder.PathSearchDiagnostics pathDiagnostics))
-            {
-                return false;
-            }
-
-            BuildSegmentConnectivityMap(graph, out Dictionary<int, int> componentBySegmentId, out int _);
-            int startComponent = ResolveSegmentComponent(componentBySegmentId, pathDiagnostics.StartSegment);
-            int endComponent = ResolveSegmentComponent(componentBySegmentId, pathDiagnostics.EndSegment);
-            diagnostics = new RouteIssueDiagnostics(
-                pathDiagnostics,
-                startComponent,
-                endComponent,
-                startComponent >= 0 && startComponent == endComponent,
-                string.IsNullOrEmpty(lastResolvedPlayerSource) ? "unknown" : lastResolvedPlayerSource);
-            return true;
-        }
-
-        private static void BuildSegmentConnectivityMap(
-            RoadGraph graph,
-            out Dictionary<int, int> componentBySegmentId,
-            out int componentCount)
-        {
-            componentBySegmentId = new Dictionary<int, int>();
-            componentCount = 0;
-            if (graph == null || graph.roadSegments == null)
-            {
+                Debug.LogWarning(
+                    $"[NavigationService] {reason} Start={start}, End={end}, " +
+                    $"player={lastPlayerSource}, segments={diag.SegmentCount}, " +
+                    $"startDist={diag.StartProjectionDistance:F2}, endDist={diag.EndProjectionDistance:F2}");
                 return;
             }
 
-            Dictionary<int, List<int>> adjacency = new Dictionary<int, List<int>>(graph.roadSegments.Count);
-            for (int i = 0; i < graph.roadSegments.Count; i++)
-            {
-                RoadSegment segment = graph.roadSegments[i];
-                if (segment == null)
-                {
-                    continue;
-                }
-
-                if (!adjacency.ContainsKey(segment.id))
-                {
-                    adjacency[segment.id] = new List<int>();
-                }
-
-                if (segment.connections == null)
-                {
-                    continue;
-                }
-
-                for (int connectionIndex = 0; connectionIndex < segment.connections.Count; connectionIndex++)
-                {
-                    RoadConnection connection = segment.connections[connectionIndex];
-                    if (connection == null || connection.toSegment == null)
-                    {
-                        continue;
-                    }
-
-                    AddAdjacentSegment(adjacency, segment.id, connection.toSegment.id);
-                    AddAdjacentSegment(adjacency, connection.toSegment.id, segment.id);
-                }
-            }
-
-            foreach (KeyValuePair<int, List<int>> pair in adjacency)
-            {
-                if (componentBySegmentId.ContainsKey(pair.Key))
-                {
-                    continue;
-                }
-
-                Queue<int> pending = new Queue<int>();
-                pending.Enqueue(pair.Key);
-                componentBySegmentId[pair.Key] = componentCount;
-
-                while (pending.Count > 0)
-                {
-                    int current = pending.Dequeue();
-                    if (!adjacency.TryGetValue(current, out List<int> neighbors))
-                    {
-                        continue;
-                    }
-
-                    for (int neighborIndex = 0; neighborIndex < neighbors.Count; neighborIndex++)
-                    {
-                        int neighbor = neighbors[neighborIndex];
-                        if (componentBySegmentId.ContainsKey(neighbor))
-                        {
-                            continue;
-                        }
-
-                        componentBySegmentId[neighbor] = componentCount;
-                        pending.Enqueue(neighbor);
-                    }
-                }
-
-                componentCount++;
-            }
+            Debug.LogWarning($"[NavigationService] {reason} Start={start}, End={end}");
         }
 
-        private static void AddAdjacentSegment(Dictionary<int, List<int>> adjacency, int segmentId, int neighborSegmentId)
-        {
-            if (!adjacency.TryGetValue(segmentId, out List<int> neighbors))
-            {
-                neighbors = new List<int>();
-                adjacency[segmentId] = neighbors;
-            }
+        // ────────────────────────────────────────────────────────────────────
+        // Utility
+        // ────────────────────────────────────────────────────────────────────
 
-            if (!neighbors.Contains(neighborSegmentId))
-            {
-                neighbors.Add(neighborSegmentId);
-            }
+        private static bool IsUsable(Transform t)
+        {
+            return t != null && t.gameObject != null && t.gameObject.activeInHierarchy;
         }
 
-        private static int ResolveSegmentComponent(Dictionary<int, int> componentBySegmentId, RoadSegment segment)
+        private static void AddUniquePoint(List<Vector3> points, Vector3 point)
         {
-            if (segment == null)
+            if (points.Count > 0)
             {
-                return -1;
+                Vector3 prev = points[points.Count - 1];
+                if ((prev - point).sqrMagnitude <= ProjectionEpsilon * ProjectionEpsilon)
+                {
+                    points[points.Count - 1] = point;
+                    return;
+                }
             }
-
-            return componentBySegmentId.TryGetValue(segment.id, out int componentId)
-                ? componentId
-                : -1;
-        }
-
-        private static string FormatSegmentLabel(RoadSegment segment, int waypointIndex)
-        {
-            if (segment == null)
-            {
-                return "null";
-            }
-
-            string segmentName = string.IsNullOrWhiteSpace(segment.name) ? "unnamed" : segment.name;
-            return $"{segment.id}:{segmentName}@{waypointIndex}";
+            points.Add(point);
         }
     }
 }

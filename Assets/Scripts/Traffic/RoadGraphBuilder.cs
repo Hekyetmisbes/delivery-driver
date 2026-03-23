@@ -125,6 +125,12 @@ namespace TrafficSystem
             // Build connections between road segments
             BuildConnections();
 
+            // Pre-build the spatial index so the first FindPath call does not stall.
+            // The pathfinder uses Mathf.Max(1f, transferMaxDistance) as cell size.
+            // Pre-build with a common transfer distance to avoid lazy first-call cost.
+            const float preBuildCellSize = 24f;
+            roadGraph.GetOrBuildSpatialIndex(preBuildCellSize);
+
             Debug.Log($"[RoadGraphBuilder] Built road graph: {roadGraph.roadSegments.Count} segments, " +
                      $"{GetTotalWaypointCount()} waypoints");
         }
