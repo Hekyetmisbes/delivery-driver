@@ -267,7 +267,7 @@ namespace DeliveryDriver.Navigation
             int startStep = Mathf.Clamp(Mathf.Max(currentTransferStep, baselineTransferStep), 0, TransferDistances.Length - 1);
             List<Vector3> path = null;
             int resolvedStep = -1;
-            long budgetTicks = System.Diagnostics.Stopwatch.Frequency / 50; // ~20ms total budget
+            long budgetTicks = System.Diagnostics.Stopwatch.Frequency / 20; // ~50ms total budget
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
 
             for (int step = startStep; step < TransferDistances.Length; step++)
@@ -279,7 +279,7 @@ namespace DeliveryDriver.Navigation
                     break;
                 }
 
-                // Don't burn more than 20ms trying progressively wider transfers
+                // Don't burn more than ~50ms trying progressively wider transfers
                 if (System.Diagnostics.Stopwatch.GetTimestamp() - t0 > budgetTicks)
                 {
                     break;
@@ -697,6 +697,7 @@ namespace DeliveryDriver.Navigation
                 Debug.LogWarning(
                     $"[NavigationService] {reason} Start={start}, End={end}, " +
                     $"player={lastPlayerSource}, segments={diag.SegmentCount}, " +
+                    $"connections={diag.ConnectionCount}, " +
                     $"startDist={diag.StartProjectionDistance:F2}, endDist={diag.EndProjectionDistance:F2}");
                 return;
             }

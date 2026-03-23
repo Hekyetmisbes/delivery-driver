@@ -116,14 +116,14 @@ namespace TrafficSystem
         private const float UnnamedLanePenalty = 1.25f;
         private const float ReverseAlignmentPenalty = 8f;
         private const float HardReverseTurnPenalty = 10f;
-        private const float TransferBackwardDotThreshold = -0.5f;
-        private const float TransferLeftAllowance = 1.5f;
+        private const float TransferBackwardDotThreshold = -0.85f;
+        private const float TransferLeftAllowance = 4f;
         private const float TransferDistancePenaltyMultiplier = 4f;
         private const float TransferNormalizedPenalty = 40f;
         private const float TransferHeightPenalty = 10f;
         private const float MaxTransferHeightDelta = 2.5f;
-        private const int CandidateWaypointLimit = 6;
-        private const int MaxAStarIterations = 6000;
+        private const int CandidateWaypointLimit = 10;
+        private const int MaxAStarIterations = 18000;
         private static readonly SearchBuffers SharedBuffers = new SearchBuffers();
 
         public static List<Vector3> FindPath(
