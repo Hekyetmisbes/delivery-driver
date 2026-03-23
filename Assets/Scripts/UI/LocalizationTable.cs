@@ -289,15 +289,15 @@ namespace DeliveryDriver.UI
         [Serializable]
         private class LocalizationData
         {
-            public LocalizationEntry[] tr;
-            public LocalizationEntry[] en;
+            public LocalizationEntry[] tr = Array.Empty<LocalizationEntry>();
+            public LocalizationEntry[] en = Array.Empty<LocalizationEntry>();
         }
 
         [Serializable]
         private class LocalizationEntry
         {
-            public string key;
-            public string value;
+            public string key = string.Empty;
+            public string value = string.Empty;
         }
     }
 }
