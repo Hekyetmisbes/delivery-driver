@@ -111,6 +111,11 @@ InitTestScene*.unity*
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
 
+# Local .NET tool/cache artifacts
+/.dotnet/
+/.dotnet-sandbox/
+/urp-build-scene-report.txt
+
 # EasyRoads3D generated files (root level)
 /EasyRoads3Dv3/
 
