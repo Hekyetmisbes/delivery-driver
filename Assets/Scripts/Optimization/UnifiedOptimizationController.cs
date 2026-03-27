@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.Profiling;
+using UnityEngine.Rendering;
 using TrafficSystem;
 
 namespace DeliveryDriver.Optimization
@@ -223,7 +224,12 @@ namespace DeliveryDriver.Optimization
             }
 
             mainCamera.layerCullDistances = distances;
-            mainCamera.layerCullSpherical = true;
+
+            // Scriptable Render Pipeline backends ignore this property and log an error.
+            if (GraphicsSettings.currentRenderPipeline == null)
+            {
+                mainCamera.layerCullSpherical = true;
+            }
             Debug.Log("[OptController] Layer culling applied");
         }
 
