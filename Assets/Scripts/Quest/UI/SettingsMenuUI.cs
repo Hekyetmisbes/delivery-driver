@@ -21,6 +21,7 @@ namespace DeliveryDriver.Quest.UI
         [Header("Gameplay")]
         [SerializeField] private TMP_Dropdown questDifficultyDropdown;
         [SerializeField] private TMP_Dropdown speedUnitDropdown;
+        [SerializeField] private TMP_Dropdown languageDropdown;
 
         [Header("UI")]
         [SerializeField] private Slider uiScaleSlider;
@@ -52,11 +53,13 @@ namespace DeliveryDriver.Quest.UI
         {
             BindControls();
             RefreshUI();
+            DeliveryDriver.UI.LocalizationTable.OnLocaleChanged += HandleLocaleChanged;
         }
 
         private void OnDestroy()
         {
             UnbindControls();
+            DeliveryDriver.UI.LocalizationTable.OnLocaleChanged -= HandleLocaleChanged;
         }
 
         public void SetOpen(bool isOpen)
@@ -109,6 +112,11 @@ namespace DeliveryDriver.Quest.UI
                 speedUnitDropdown.onValueChanged.AddListener(OnSpeedUnitChanged);
             }
 
+            if (languageDropdown != null)
+            {
+                languageDropdown.onValueChanged.AddListener(OnLanguageChanged);
+            }
+
             if (closeButton != null)
             {
                 closeButton.onClick.AddListener(HandleClose);
@@ -155,6 +163,11 @@ namespace DeliveryDriver.Quest.UI
             if (speedUnitDropdown != null)
             {
                 speedUnitDropdown.onValueChanged.RemoveListener(OnSpeedUnitChanged);
+            }
+
+            if (languageDropdown != null)
+            {
+                languageDropdown.onValueChanged.RemoveListener(OnLanguageChanged);
             }
 
             if (closeButton != null)
@@ -209,42 +222,62 @@ namespace DeliveryDriver.Quest.UI
 
             if (questDifficultyDropdown != null)
             {
-                EnsureDifficultyOptions();
+                RefreshDifficultyOptions();
                 questDifficultyDropdown.value = (int)settings.DifficultyPreference;
             }
 
             if (speedUnitDropdown != null)
             {
-                EnsureSpeedUnitOptions();
+                RefreshSpeedUnitOptions();
                 speedUnitDropdown.value = (int)settings.SpeedUnitPreference;
+            }
+
+            if (languageDropdown != null)
+            {
+                RefreshLanguageOptions();
+                languageDropdown.value = DeliveryDriver.UI.LocalizationTable.GetLocaleIndex(settings.Language);
             }
 
             suppressCallbacks = false;
         }
 
-        private void EnsureDifficultyOptions()
+        private void RefreshDifficultyOptions()
         {
-            if (questDifficultyDropdown == null || questDifficultyDropdown.options.Count > 0)
+            if (questDifficultyDropdown == null)
             {
                 return;
             }
 
-            questDifficultyDropdown.options.Add(new TMP_Dropdown.OptionData("Match Player Level"));
-            questDifficultyDropdown.options.Add(new TMP_Dropdown.OptionData("Easy"));
-            questDifficultyDropdown.options.Add(new TMP_Dropdown.OptionData("Medium"));
-            questDifficultyDropdown.options.Add(new TMP_Dropdown.OptionData("Hard"));
-            questDifficultyDropdown.options.Add(new TMP_Dropdown.OptionData("Expert"));
+            questDifficultyDropdown.ClearOptions();
+            questDifficultyDropdown.options.Add(new TMP_Dropdown.OptionData(DeliveryDriver.UI.LocalizationTable.Get("difficulty_match_player_level")));
+            questDifficultyDropdown.options.Add(new TMP_Dropdown.OptionData(DeliveryDriver.UI.LocalizationTable.Get("difficulty_easy")));
+            questDifficultyDropdown.options.Add(new TMP_Dropdown.OptionData(DeliveryDriver.UI.LocalizationTable.Get("difficulty_medium")));
+            questDifficultyDropdown.options.Add(new TMP_Dropdown.OptionData(DeliveryDriver.UI.LocalizationTable.Get("difficulty_hard")));
+            questDifficultyDropdown.options.Add(new TMP_Dropdown.OptionData(DeliveryDriver.UI.LocalizationTable.Get("difficulty_expert")));
         }
 
-        private void EnsureSpeedUnitOptions()
+        private void RefreshSpeedUnitOptions()
         {
-            if (speedUnitDropdown == null || speedUnitDropdown.options.Count > 0)
+            if (speedUnitDropdown == null)
             {
                 return;
             }
 
+            speedUnitDropdown.ClearOptions();
             speedUnitDropdown.options.Add(new TMP_Dropdown.OptionData("KMH"));
             speedUnitDropdown.options.Add(new TMP_Dropdown.OptionData("MPH"));
+        }
+
+        private void RefreshLanguageOptions()
+        {
+            if (languageDropdown == null)
+            {
+                return;
+            }
+
+            languageDropdown.ClearOptions();
+            languageDropdown.options.Add(new TMP_Dropdown.OptionData(DeliveryDriver.UI.LocalizationTable.GetLocaleDisplayName(DeliveryDriver.UI.LocalizationTable.TurkishLocale)));
+            languageDropdown.options.Add(new TMP_Dropdown.OptionData(DeliveryDriver.UI.LocalizationTable.GetLocaleDisplayName(DeliveryDriver.UI.LocalizationTable.EnglishLocale)));
         }
 
         private void OnMasterVolumeChanged(float value)
@@ -315,6 +348,16 @@ namespace DeliveryDriver.Quest.UI
             ApplyIfNeeded();
         }
 
+        private void OnLanguageChanged(int value)
+        {
+            if (suppressCallbacks)
+            {
+                return;
+            }
+
+            DeliveryDriver.UI.LocalizationTable.SetLocale(DeliveryDriver.UI.LocalizationTable.GetLocaleByIndex(value));
+        }
+
         private void ApplyIfNeeded()
         {
             if (applyOnChange)
@@ -359,6 +402,11 @@ namespace DeliveryDriver.Quest.UI
         private void HandleClose()
         {
             SetOpen(false);
+        }
+
+        private void HandleLocaleChanged()
+        {
+            RefreshUI();
         }
 
 #if ENABLE_INPUT_SYSTEM

@@ -16,6 +16,7 @@ namespace DeliveryDriver.Quest.UI
         public Toggle FullScreenToggle { get; set; }
         public TMP_Dropdown FpsDropdown { get; set; }
         public TMP_Dropdown SpeedUnitDropdown { get; set; }
+        public TMP_Dropdown LanguageDropdown { get; set; }
         public TMP_Dropdown ColorBlindDropdown { get; set; }
         public Slider TextScaleSlider { get; set; }
         public Toggle HighContrastToggle { get; set; }

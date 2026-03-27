@@ -1,3 +1,4 @@
+using DeliveryDriver.UI;
 using System;
 using UnityEngine;
 
@@ -63,7 +64,7 @@ internal static class DeliveryPhoneMissionFlow
 
         phoneMissionUi.ShowOffer(
             DeliveryMissionRules.GetMissionLabel(missionType),
-            $"Yeni gorev teklifi\n{DeliveryMissionRules.BuildMissionOfferBody(missionType, rewardMultiplier, rushHourBonus, nightBonus, rainRiskBonus, multiStopMinStops, multiStopMaxStops)}\nKabul edersen gorev olusacak.",
+            BuildMissionOfferBody(missionType, rewardMultiplier, rushHourBonus, nightBonus, rainRiskBonus, multiStopMinStops, multiStopMaxStops),
             DeliveryMissionRules.BuildMissionRewardPreview(missionType, rewardMultiplier));
         return true;
     }
@@ -71,5 +72,24 @@ internal static class DeliveryPhoneMissionFlow
     public static void HideOffer(PhoneMissionUI phoneMissionUi)
     {
         phoneMissionUi?.HideOffer();
+    }
+
+    private static string BuildMissionOfferBody(
+        DeliveryMissionType missionType,
+        float rewardMultiplier,
+        bool rushHourBonus,
+        bool nightBonus,
+        bool rainRiskBonus,
+        int multiStopMinStops,
+        int multiStopMaxStops)
+    {
+        string intro = LocalizationTable.CurrentLocale == LocalizationTable.EnglishLocale
+            ? "New mission offer"
+            : "Yeni görev teklifi";
+        string outro = LocalizationTable.CurrentLocale == LocalizationTable.EnglishLocale
+            ? "Accepting it will create the mission."
+            : "Kabul edersen görev oluşacak.";
+
+        return $"{intro}\n{DeliveryMissionRules.BuildMissionOfferBody(missionType, rewardMultiplier, rushHourBonus, nightBonus, rainRiskBonus, multiStopMinStops, multiStopMaxStops)}\n{outro}";
     }
 }

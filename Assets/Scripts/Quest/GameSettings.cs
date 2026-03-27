@@ -186,8 +186,9 @@ namespace DeliveryDriver.Quest
 
         public void SetLanguage(string lang)
         {
-            if (string.Equals(language, lang, System.StringComparison.OrdinalIgnoreCase)) return;
-            language = lang;
+            string normalizedLanguage = NormalizeLanguageCode(lang);
+            if (string.Equals(language, normalizedLanguage, System.StringComparison.OrdinalIgnoreCase)) return;
+            language = normalizedLanguage;
             OnLanguageChanged?.Invoke();
         }
 
@@ -361,7 +362,7 @@ namespace DeliveryDriver.Quest
 
             if (PlayerPrefs.HasKey(LanguageKey))
             {
-                language = PlayerPrefs.GetString(LanguageKey, language);
+                language = NormalizeLanguageCode(PlayerPrefs.GetString(LanguageKey, language));
             }
 
             if (PlayerPrefs.HasKey(ColorBlindModeKey))
@@ -379,6 +380,13 @@ namespace DeliveryDriver.Quest
                 highContrastMode = PlayerPrefs.GetInt(HighContrastModeKey, 0) == 1;
             }
 
+        }
+
+        private static string NormalizeLanguageCode(string value)
+        {
+            return string.Equals(value, "en", System.StringComparison.OrdinalIgnoreCase)
+                ? "en"
+                : "tr";
         }
     }
 }

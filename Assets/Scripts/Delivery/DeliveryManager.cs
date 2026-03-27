@@ -4,6 +4,7 @@ using UnityEngine;
 using DeliveryDriver.Quest;
 using DeliveryDriver.City;
 using DeliveryDriver.Navigation;
+using DeliveryDriver.UI;
 using TrafficSystem;
 
 /// <summary>
@@ -2055,7 +2056,9 @@ public class DeliveryManager : MonoBehaviour
         string summary = DeliveryMissionRules.BuildMissionConditionSummary(rewardMultiplier, rushHourBonus, nightBonus, rainRiskBonus);
         return string.IsNullOrEmpty(summary)
             ? string.Empty
-            : $"\nConditions: {summary}";
+            : LocalizationTable.CurrentLocale == LocalizationTable.EnglishLocale
+                ? $"\nConditions: {summary}"
+                : $"\nKoşullar: {summary}";
     }
 
     private string BuildDeliveryObjectiveDescription(int currentStopIndex)

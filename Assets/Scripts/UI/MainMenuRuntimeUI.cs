@@ -8,6 +8,16 @@ using UnityEngine.UI;
 
 public class MainMenuRuntimeUI : MonoBehaviour
 {
+    private const float SettingsLabelColumnWidth = 260f;
+    private const float SettingsRowHeight = 54f;
+
+    private enum MenuPanelState
+    {
+        Main,
+        Settings,
+        Credits
+    }
+
     [Header("Scenes")]
     [SerializeField] private string gameSceneName = "Game";
 
@@ -50,6 +60,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
     private Toggle fullScreenToggle;
     private TMP_Dropdown fpsDropdown;
     private TMP_Dropdown speedUnitDropdown;
+    private TMP_Dropdown languageDropdown;
     private TMP_Dropdown colorBlindDropdown;
     private Slider textScaleSlider;
     private Toggle highContrastToggle;
@@ -57,6 +68,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
     private bool suppressCallbacks;
     private int[] qualityTierToProjectQuality = { 0, 1, 2 };
     private Resolution[] availableResolutions;
+    private MenuPanelState currentPanelState = MenuPanelState.Main;
 
     private void Awake()
     {
@@ -67,23 +79,27 @@ public class MainMenuRuntimeUI : MonoBehaviour
         }
 
         SceneManager.activeSceneChanged += HandleActiveSceneChanged;
+        LocalizationTable.OnLocaleChanged += HandleLocaleChanged;
     }
 
     private void OnDestroy()
     {
         SceneManager.activeSceneChanged -= HandleActiveSceneChanged;
+        LocalizationTable.OnLocaleChanged -= HandleLocaleChanged;
         CleanupUi();
     }
 
-    private void CleanupUi()
+    private void CleanupUi(bool destroyCanvas = true)
     {
         if (overlayObject != null) Destroy(overlayObject);
         if (backgroundObject != null) Destroy(backgroundObject);
-        if (createdCanvasObject != null) Destroy(createdCanvasObject);
+        if (destroyCanvas && createdCanvasObject != null) Destroy(createdCanvasObject);
+        ResetUiReferences(destroyCanvas);
     }
 
     private void Start()
     {
+        LocalizationTable.EnsureLoaded();
         BuildUi();
         ShowMainPanel();
         RefreshSettingsControls();
@@ -161,7 +177,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
     private void BuildSettingsPanel(Transform parent)
     {
         VerticalLayoutGroup layout = parent.gameObject.AddComponent<VerticalLayoutGroup>();
-        layout.padding = new RectOffset(30, 30, 28, 28);
+        layout.padding = new RectOffset(30, 30, 24, 24);
         layout.spacing = 14f;
         layout.childControlHeight = true;
         layout.childControlWidth = true;
@@ -170,7 +186,9 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
         CreateTitle(parent, LocalizationTable.Get("settings_title"));
 
-        Transform audioSection = CreateSectionContainer(parent, "AudioSection");
+        Transform contentRoot = CreateScrollableSettingsContent(parent);
+
+        Transform audioSection = CreateSectionContainer(contentRoot, "AudioSection", 220f);
         CreateSectionLabel(audioSection, LocalizationTable.Get("audio"));
 
         masterVolumeSlider = CreateLabeledSlider(audioSection, LocalizationTable.Get("master_volume"));
@@ -182,7 +200,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
         sfxVolumeSlider = CreateLabeledSlider(audioSection, LocalizationTable.Get("sfx_volume"));
         sfxVolumeSlider.onValueChanged.AddListener(OnSfxVolumeChanged);
 
-        Transform graphicsSection = CreateSectionContainer(parent, "GraphicsSection");
+        Transform graphicsSection = CreateSectionContainer(contentRoot, "GraphicsSection", 430f);
         CreateSectionLabel(graphicsSection, LocalizationTable.Get("graphics"));
 
         ConfigureQualityTierMapping();
@@ -203,7 +221,15 @@ public class MainMenuRuntimeUI : MonoBehaviour
             new[] { "KMH", "MPH" });
         speedUnitDropdown.onValueChanged.AddListener(OnSpeedUnitChanged);
 
-        Transform accessibilitySection = CreateSectionContainer(parent, "AccessibilitySection");
+        languageDropdown = CreateLabeledDropdown(graphicsSection, LocalizationTable.Get("language"),
+            new[]
+            {
+                LocalizationTable.GetLocaleDisplayName(LocalizationTable.TurkishLocale),
+                LocalizationTable.GetLocaleDisplayName(LocalizationTable.EnglishLocale)
+            });
+        languageDropdown.onValueChanged.AddListener(OnLanguageChanged);
+
+        Transform accessibilitySection = CreateSectionContainer(contentRoot, "AccessibilitySection", 250f);
         CreateSectionLabel(accessibilitySection, LocalizationTable.Get("accessibility"));
 
         colorBlindDropdown = CreateLabeledDropdown(accessibilitySection, LocalizationTable.Get("color_blind_mode"),
@@ -357,6 +383,16 @@ public class MainMenuRuntimeUI : MonoBehaviour
         GameSettings.Instance.SaveSettings();
     }
 
+    private void OnLanguageChanged(int index)
+    {
+        if (suppressCallbacks)
+        {
+            return;
+        }
+
+        LocalizationTable.SetLocale(LocalizationTable.GetLocaleByIndex(index));
+    }
+
     private void RefreshSettingsControls()
     {
         if (GameSettings.Instance == null)
@@ -397,6 +433,11 @@ public class MainMenuRuntimeUI : MonoBehaviour
         if (speedUnitDropdown != null)
         {
             speedUnitDropdown.value = GameSettings.Instance.SpeedUnitPreference == SpeedUnitPreference.Mph ? 1 : 0;
+        }
+
+        if (languageDropdown != null)
+        {
+            languageDropdown.value = LocalizationTable.GetLocaleIndex(GameSettings.Instance.Language);
         }
 
         if (colorBlindDropdown != null)
@@ -510,6 +551,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
     private void ShowMainPanel()
     {
+        currentPanelState = MenuPanelState.Main;
         AnimateHidePanel(settingsPanel, settingsPanelCanvasGroup);
         AnimateHidePanel(creditsPanel, creditsPanelCanvasGroup);
         AnimateShowPanel(mainPanel, mainPanelCanvasGroup);
@@ -517,6 +559,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
     private void ShowSettingsPanel()
     {
+        currentPanelState = MenuPanelState.Settings;
         AnimateHidePanel(mainPanel, mainPanelCanvasGroup);
         AnimateHidePanel(creditsPanel, creditsPanelCanvasGroup);
         AnimateShowPanel(settingsPanel, settingsPanelCanvasGroup);
@@ -524,6 +567,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
     private void ShowCreditsPanel()
     {
+        currentPanelState = MenuPanelState.Credits;
         AnimateHidePanel(mainPanel, mainPanelCanvasGroup);
         AnimateHidePanel(settingsPanel, settingsPanelCanvasGroup);
         AnimateShowPanel(creditsPanel, creditsPanelCanvasGroup);
@@ -586,13 +630,13 @@ public class MainMenuRuntimeUI : MonoBehaviour
         titleObject.transform.SetParent(parent, false);
 
         LayoutElement layout = titleObject.GetComponent<LayoutElement>();
-        layout.preferredHeight = 72f;
+        layout.preferredHeight = 58f;
 
         TextMeshProUGUI text = titleObject.GetComponent<TextMeshProUGUI>();
         text.text = title;
         text.alignment = TextAlignmentOptions.Center;
         text.color = Color.white;
-        text.fontSize = 52f;
+        text.fontSize = 38f;
         text.fontStyle = FontStyles.Bold;
         if (TMP_Settings.defaultFontAsset != null)
         {
@@ -643,25 +687,32 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
     private Slider CreateLabeledSlider(Transform parent, string label)
     {
-        GameObject row = new GameObject($"{label}Row", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(LayoutElement));
+        GameObject row = new GameObject($"{label}Row", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
         row.transform.SetParent(parent, false);
 
         LayoutElement rowLayout = row.GetComponent<LayoutElement>();
-        rowLayout.preferredHeight = 74f;
+        rowLayout.preferredHeight = SettingsRowHeight;
+        rowLayout.minHeight = SettingsRowHeight;
 
-        VerticalLayoutGroup v = row.GetComponent<VerticalLayoutGroup>();
-        v.spacing = 4f;
-        v.childControlHeight = true;
-        v.childControlWidth = true;
-        v.childForceExpandHeight = false;
-        v.childForceExpandWidth = true;
+        HorizontalLayoutGroup h = row.GetComponent<HorizontalLayoutGroup>();
+        h.spacing = 14f;
+        h.childControlHeight = true;
+        h.childControlWidth = true;
+        h.childForceExpandHeight = false;
+        h.childForceExpandWidth = true;
+        h.childAlignment = TextAnchor.MiddleLeft;
 
-        GameObject labelObj = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+        GameObject labelObj = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
         labelObj.transform.SetParent(row.transform, false);
+        LayoutElement labelLayout = labelObj.GetComponent<LayoutElement>();
+        labelLayout.preferredWidth = SettingsLabelColumnWidth;
+        labelLayout.minWidth = SettingsLabelColumnWidth;
+        labelLayout.flexibleWidth = 0f;
         TextMeshProUGUI labelText = labelObj.GetComponent<TextMeshProUGUI>();
         labelText.text = label;
-        labelText.fontSize = 22f;
+        labelText.fontSize = 20f;
         labelText.color = Color.white;
+        labelText.alignment = TextAlignmentOptions.MidlineLeft;
         if (TMP_Settings.defaultFontAsset != null)
         {
             labelText.font = TMP_Settings.defaultFontAsset;
@@ -669,13 +720,11 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
         GameObject sliderObj = new GameObject("Slider", typeof(RectTransform), typeof(Slider), typeof(Image));
         sliderObj.transform.SetParent(row.transform, false);
-        sliderObj.GetComponent<Image>().color = new Color(0.18f, 0.22f, 0.28f, 1f);
-        if (sliderBackgroundSprite != null)
-        {
-            Image sliderImage = sliderObj.GetComponent<Image>();
-            sliderImage.sprite = sliderBackgroundSprite;
-            sliderImage.type = Image.Type.Sliced;
-        }
+        LayoutElement sliderLayout = sliderObj.AddComponent<LayoutElement>();
+        sliderLayout.minHeight = 26f;
+        sliderLayout.preferredHeight = 26f;
+        sliderLayout.flexibleWidth = 1f;
+        sliderObj.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0f);
 
         Slider slider = sliderObj.GetComponent<Slider>();
         slider.minValue = 0f;
@@ -686,48 +735,47 @@ public class MainMenuRuntimeUI : MonoBehaviour
         RectTransform fillAreaRect = fillArea.GetComponent<RectTransform>();
         fillAreaRect.anchorMin = new Vector2(0f, 0f);
         fillAreaRect.anchorMax = new Vector2(1f, 1f);
-        fillAreaRect.offsetMin = new Vector2(10f, 6f);
-        fillAreaRect.offsetMax = new Vector2(-10f, -6f);
+        fillAreaRect.offsetMin = new Vector2(8f, 8f);
+        fillAreaRect.offsetMax = new Vector2(-8f, -8f);
+
+        GameObject track = new GameObject("Track", typeof(RectTransform), typeof(Image));
+        track.transform.SetParent(fillArea.transform, false);
+        RectTransform trackRect = track.GetComponent<RectTransform>();
+        trackRect.anchorMin = new Vector2(0f, 0.5f);
+        trackRect.anchorMax = new Vector2(1f, 0.5f);
+        trackRect.pivot = new Vector2(0.5f, 0.5f);
+        trackRect.sizeDelta = new Vector2(0f, 6f);
+        Image trackImage = track.GetComponent<Image>();
+        trackImage.color = new Color(0.24f, 0.29f, 0.37f, 1f);
 
         GameObject fill = new GameObject("Fill", typeof(RectTransform), typeof(Image));
         fill.transform.SetParent(fillArea.transform, false);
-        fill.GetComponent<Image>().color = new Color(0.2f, 0.62f, 0.95f, 1f);
-        if (sliderFillSprite != null)
-        {
-            Image fillImage = fill.GetComponent<Image>();
-            fillImage.sprite = sliderFillSprite;
-            fillImage.type = Image.Type.Sliced;
-        }
+        Image fillImage = fill.GetComponent<Image>();
+        fillImage.color = new Color(0.21f, 0.56f, 0.93f, 1f);
         RectTransform fillRect = fill.GetComponent<RectTransform>();
-        fillRect.anchorMin = new Vector2(0f, 0f);
-        fillRect.anchorMax = new Vector2(1f, 1f);
-        fillRect.offsetMin = Vector2.zero;
-        fillRect.offsetMax = Vector2.zero;
+        fillRect.anchorMin = new Vector2(0f, 0.5f);
+        fillRect.anchorMax = new Vector2(1f, 0.5f);
+        fillRect.pivot = new Vector2(0f, 0.5f);
+        fillRect.sizeDelta = new Vector2(0f, 6f);
 
         GameObject handleArea = new GameObject("Handle Slide Area", typeof(RectTransform));
         handleArea.transform.SetParent(sliderObj.transform, false);
         RectTransform handleAreaRect = handleArea.GetComponent<RectTransform>();
         handleAreaRect.anchorMin = new Vector2(0f, 0f);
         handleAreaRect.anchorMax = new Vector2(1f, 1f);
-        handleAreaRect.offsetMin = new Vector2(10f, 0f);
-        handleAreaRect.offsetMax = new Vector2(-10f, 0f);
+        handleAreaRect.offsetMin = new Vector2(8f, 0f);
+        handleAreaRect.offsetMax = new Vector2(-8f, 0f);
 
         GameObject handle = new GameObject("Handle", typeof(RectTransform), typeof(Image));
         handle.transform.SetParent(handleArea.transform, false);
-        handle.GetComponent<Image>().color = Color.white;
-        if (sliderHandleSprite != null)
-        {
-            Image handleImage = handle.GetComponent<Image>();
-            handleImage.sprite = sliderHandleSprite;
-            handleImage.type = Image.Type.Simple;
-            handleImage.preserveAspect = true;
-        }
+        Image handleImage = handle.GetComponent<Image>();
+        handleImage.color = new Color(0.95f, 0.97f, 1f, 1f);
         RectTransform handleRect = handle.GetComponent<RectTransform>();
-        handleRect.sizeDelta = new Vector2(20f, 28f);
+        handleRect.sizeDelta = new Vector2(12f, 20f);
 
         slider.fillRect = fillRect;
         slider.handleRect = handleRect;
-        slider.targetGraphic = handle.GetComponent<Image>();
+        slider.targetGraphic = handleImage;
         slider.direction = Slider.Direction.LeftToRight;
 
         return slider;
@@ -735,51 +783,57 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
     private TMP_Dropdown CreateLabeledDropdown(Transform parent, string label, string[] options)
     {
-        GameObject row = new GameObject($"{label}Row", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(LayoutElement));
+        GameObject row = new GameObject($"{label}Row", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
         row.transform.SetParent(parent, false);
 
         LayoutElement rowLayout = row.GetComponent<LayoutElement>();
-        rowLayout.preferredHeight = 64f;
+        rowLayout.preferredHeight = SettingsRowHeight;
+        rowLayout.minHeight = SettingsRowHeight;
 
-        VerticalLayoutGroup v = row.GetComponent<VerticalLayoutGroup>();
-        v.spacing = 4f;
-        v.childControlHeight = true;
-        v.childControlWidth = true;
-        v.childForceExpandHeight = false;
-        v.childForceExpandWidth = true;
+        HorizontalLayoutGroup h = row.GetComponent<HorizontalLayoutGroup>();
+        h.spacing = 14f;
+        h.childControlHeight = true;
+        h.childControlWidth = true;
+        h.childForceExpandHeight = false;
+        h.childForceExpandWidth = true;
+        h.childAlignment = TextAnchor.MiddleLeft;
 
-        GameObject labelObj = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+        GameObject labelObj = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
         labelObj.transform.SetParent(row.transform, false);
+        LayoutElement labelLayout = labelObj.GetComponent<LayoutElement>();
+        labelLayout.preferredWidth = SettingsLabelColumnWidth;
+        labelLayout.minWidth = SettingsLabelColumnWidth;
+        labelLayout.flexibleWidth = 0f;
         TextMeshProUGUI labelText = labelObj.GetComponent<TextMeshProUGUI>();
         labelText.text = label;
-        labelText.fontSize = 22f;
+        labelText.fontSize = 20f;
         labelText.color = Color.white;
+        labelText.alignment = TextAlignmentOptions.MidlineLeft;
         if (TMP_Settings.defaultFontAsset != null)
         {
             labelText.font = TMP_Settings.defaultFontAsset;
         }
 
-        GameObject ddObj = new GameObject("Dropdown", typeof(RectTransform), typeof(TMP_Dropdown), typeof(Image));
+        GameObject ddObj = new GameObject("Dropdown", typeof(RectTransform), typeof(TMP_Dropdown), typeof(Image), typeof(LayoutElement));
         ddObj.transform.SetParent(row.transform, false);
-        ddObj.GetComponent<Image>().color = new Color(0.18f, 0.22f, 0.28f, 1f);
-        if (dropdownBackgroundSprite != null)
-        {
-            Image dropdownImage = ddObj.GetComponent<Image>();
-            dropdownImage.sprite = dropdownBackgroundSprite;
-            dropdownImage.type = Image.Type.Sliced;
-        }
+        LayoutElement dropdownLayout = ddObj.GetComponent<LayoutElement>();
+        dropdownLayout.minHeight = 44f;
+        dropdownLayout.preferredHeight = 44f;
+        dropdownLayout.flexibleWidth = 1f;
+        Image dropdownImage = ddObj.GetComponent<Image>();
+        dropdownImage.color = new Color(0.18f, 0.22f, 0.28f, 1f);
 
         GameObject captionObj = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
         captionObj.transform.SetParent(ddObj.transform, false);
         RectTransform capRect = captionObj.GetComponent<RectTransform>();
         capRect.anchorMin = Vector2.zero;
         capRect.anchorMax = Vector2.one;
-        capRect.offsetMin = new Vector2(8f, 0f);
-        capRect.offsetMax = new Vector2(-30f, 0f);
+        capRect.offsetMin = new Vector2(12f, 6f);
+        capRect.offsetMax = new Vector2(-32f, -6f);
         TextMeshProUGUI captionText = captionObj.GetComponent<TextMeshProUGUI>();
         captionText.fontSize = 18f;
         captionText.color = Color.white;
-        captionText.alignment = TextAlignmentOptions.Left;
+        captionText.alignment = TextAlignmentOptions.MidlineLeft;
         if (TMP_Settings.defaultFontAsset != null)
         {
             captionText.font = TMP_Settings.defaultFontAsset;
@@ -787,34 +841,80 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
         GameObject templateObj = new GameObject("Template", typeof(RectTransform), typeof(Image), typeof(ScrollRect));
         templateObj.transform.SetParent(ddObj.transform, false);
+        RectTransform templateRect = templateObj.GetComponent<RectTransform>();
+        templateRect.anchorMin = new Vector2(0f, 1f);
+        templateRect.anchorMax = new Vector2(1f, 1f);
+        templateRect.pivot = new Vector2(0.5f, 0f);
+        templateRect.anchoredPosition = new Vector2(0f, 2f);
+        templateRect.sizeDelta = new Vector2(0f, 164f);
+        Image templateImage = templateObj.GetComponent<Image>();
+        templateImage.color = new Color(0.12f, 0.16f, 0.22f, 0.98f);
         templateObj.SetActive(false);
 
         GameObject viewportObj = new GameObject("Viewport", typeof(RectTransform), typeof(Mask), typeof(Image));
         viewportObj.transform.SetParent(templateObj.transform, false);
-        viewportObj.GetComponent<Image>().color = Color.white;
+        RectTransform viewportRect = viewportObj.GetComponent<RectTransform>();
+        viewportRect.anchorMin = Vector2.zero;
+        viewportRect.anchorMax = Vector2.one;
+        viewportRect.offsetMin = Vector2.zero;
+        viewportRect.offsetMax = Vector2.zero;
+        viewportObj.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.001f);
         viewportObj.GetComponent<Mask>().showMaskGraphic = false;
 
         GameObject contentObj = new GameObject("Content", typeof(RectTransform));
         contentObj.transform.SetParent(viewportObj.transform, false);
+        RectTransform contentRect = contentObj.GetComponent<RectTransform>();
+        contentRect.anchorMin = new Vector2(0f, 1f);
+        contentRect.anchorMax = new Vector2(1f, 1f);
+        contentRect.pivot = new Vector2(0.5f, 1f);
+        contentRect.sizeDelta = new Vector2(0f, 36f);
 
         GameObject itemObj = new GameObject("Item", typeof(RectTransform), typeof(Toggle));
         itemObj.transform.SetParent(contentObj.transform, false);
+        RectTransform itemRect = itemObj.GetComponent<RectTransform>();
+        itemRect.anchorMin = new Vector2(0f, 0.5f);
+        itemRect.anchorMax = new Vector2(1f, 0.5f);
+        itemRect.sizeDelta = new Vector2(0f, 34f);
 
         GameObject itemBgObj = new GameObject("Item Background", typeof(RectTransform), typeof(Image));
         itemBgObj.transform.SetParent(itemObj.transform, false);
+        RectTransform itemBgRect = itemBgObj.GetComponent<RectTransform>();
+        itemBgRect.anchorMin = Vector2.zero;
+        itemBgRect.anchorMax = Vector2.one;
+        itemBgRect.offsetMin = Vector2.zero;
+        itemBgRect.offsetMax = Vector2.zero;
+        Image itemBgImage = itemBgObj.GetComponent<Image>();
+        itemBgImage.color = new Color(0.20f, 0.25f, 0.34f, 1f);
 
         GameObject itemLabelObj = new GameObject("Item Label", typeof(RectTransform), typeof(TextMeshProUGUI));
         itemLabelObj.transform.SetParent(itemObj.transform, false);
+        RectTransform itemLabelRect = itemLabelObj.GetComponent<RectTransform>();
+        itemLabelRect.anchorMin = Vector2.zero;
+        itemLabelRect.anchorMax = Vector2.one;
+        itemLabelRect.offsetMin = new Vector2(10f, 2f);
+        itemLabelRect.offsetMax = new Vector2(-10f, -2f);
         TextMeshProUGUI itemLabelText = itemLabelObj.GetComponent<TextMeshProUGUI>();
-        itemLabelText.fontSize = 18f;
+        itemLabelText.fontSize = 17f;
         itemLabelText.color = Color.white;
+        itemLabelText.alignment = TextAlignmentOptions.MidlineLeft;
         if (TMP_Settings.defaultFontAsset != null)
         {
             itemLabelText.font = TMP_Settings.defaultFontAsset;
         }
 
+        Toggle itemToggle = itemObj.GetComponent<Toggle>();
+        itemToggle.targetGraphic = itemBgImage;
+        itemToggle.isOn = true;
+
+        ScrollRect scrollRect = templateObj.GetComponent<ScrollRect>();
+        scrollRect.content = contentRect;
+        scrollRect.viewport = viewportRect;
+        scrollRect.horizontal = false;
+        scrollRect.vertical = true;
+        scrollRect.movementType = ScrollRect.MovementType.Clamped;
+
         TMP_Dropdown dropdown = ddObj.GetComponent<TMP_Dropdown>();
-        dropdown.template = templateObj.GetComponent<RectTransform>();
+        dropdown.template = templateRect;
         dropdown.captionText = captionText;
         dropdown.itemText = itemLabelText;
         dropdown.ClearOptions();
@@ -829,7 +929,8 @@ public class MainMenuRuntimeUI : MonoBehaviour
         row.transform.SetParent(parent, false);
 
         LayoutElement rowLayout = row.GetComponent<LayoutElement>();
-        rowLayout.preferredHeight = 38f;
+        rowLayout.preferredHeight = 44f;
+        rowLayout.minHeight = 44f;
 
         HorizontalLayoutGroup h = row.GetComponent<HorizontalLayoutGroup>();
         h.spacing = 10f;
@@ -840,18 +941,27 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
         GameObject labelObj = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
         labelObj.transform.SetParent(row.transform, false);
-        labelObj.GetComponent<LayoutElement>().preferredWidth = 230f;
+        LayoutElement labelLayout = labelObj.GetComponent<LayoutElement>();
+        labelLayout.preferredWidth = SettingsLabelColumnWidth;
+        labelLayout.minWidth = SettingsLabelColumnWidth;
+        labelLayout.flexibleWidth = 1f;
         TextMeshProUGUI labelText = labelObj.GetComponent<TextMeshProUGUI>();
         labelText.text = label;
-        labelText.fontSize = 22f;
+        labelText.fontSize = 20f;
         labelText.color = Color.white;
+        labelText.alignment = TextAlignmentOptions.MidlineLeft;
         if (TMP_Settings.defaultFontAsset != null)
         {
             labelText.font = TMP_Settings.defaultFontAsset;
         }
 
-        GameObject toggleObj = new GameObject("Toggle", typeof(RectTransform), typeof(Toggle), typeof(Image));
+        GameObject toggleObj = new GameObject("Toggle", typeof(RectTransform), typeof(Toggle), typeof(Image), typeof(LayoutElement));
         toggleObj.transform.SetParent(row.transform, false);
+        LayoutElement toggleLayout = toggleObj.GetComponent<LayoutElement>();
+        toggleLayout.minWidth = 34f;
+        toggleLayout.preferredWidth = 34f;
+        toggleLayout.minHeight = 34f;
+        toggleLayout.preferredHeight = 34f;
         Image bg = toggleObj.GetComponent<Image>();
         bg.color = new Color(0.18f, 0.22f, 0.28f, 1f);
         if (toggleBackgroundSprite != null)
@@ -880,6 +990,11 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
     private Transform CreateSectionContainer(Transform parent, string objectName)
     {
+        return CreateSectionContainer(parent, objectName, 160f);
+    }
+
+    private Transform CreateSectionContainer(Transform parent, string objectName, float preferredHeight)
+    {
         GameObject sectionObject = new GameObject(objectName, typeof(RectTransform), typeof(Image), typeof(VerticalLayoutGroup), typeof(LayoutElement));
         sectionObject.transform.SetParent(parent, false);
 
@@ -892,15 +1007,16 @@ public class MainMenuRuntimeUI : MonoBehaviour
         }
 
         VerticalLayoutGroup sectionLayout = sectionObject.GetComponent<VerticalLayoutGroup>();
-        sectionLayout.padding = new RectOffset(16, 16, 14, 14);
-        sectionLayout.spacing = 8f;
+        sectionLayout.padding = new RectOffset(18, 18, 14, 14);
+        sectionLayout.spacing = 12f;
         sectionLayout.childControlWidth = true;
         sectionLayout.childControlHeight = true;
         sectionLayout.childForceExpandWidth = true;
         sectionLayout.childForceExpandHeight = false;
 
         LayoutElement sectionSize = sectionObject.GetComponent<LayoutElement>();
-        sectionSize.minHeight = 120f;
+        sectionSize.minHeight = preferredHeight;
+        sectionSize.preferredHeight = preferredHeight;
 
         return sectionObject.transform;
     }
@@ -925,6 +1041,50 @@ public class MainMenuRuntimeUI : MonoBehaviour
         }
     }
 
+    private Transform CreateScrollableSettingsContent(Transform parent)
+    {
+        GameObject scrollRoot = new GameObject("SettingsScrollRoot", typeof(RectTransform), typeof(Image), typeof(LayoutElement), typeof(ScrollRect), typeof(RectMask2D));
+        scrollRoot.transform.SetParent(parent, false);
+
+        LayoutElement layoutElement = scrollRoot.GetComponent<LayoutElement>();
+        layoutElement.flexibleHeight = 1f;
+        layoutElement.minHeight = 300f;
+
+        Image background = scrollRoot.GetComponent<Image>();
+        background.color = new Color(1f, 1f, 1f, 0.02f);
+
+        GameObject content = new GameObject("Content", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+        content.transform.SetParent(scrollRoot.transform, false);
+        RectTransform contentRect = content.GetComponent<RectTransform>();
+        contentRect.anchorMin = new Vector2(0f, 1f);
+        contentRect.anchorMax = new Vector2(1f, 1f);
+        contentRect.pivot = new Vector2(0.5f, 1f);
+        contentRect.anchoredPosition = Vector2.zero;
+        contentRect.sizeDelta = Vector2.zero;
+
+        VerticalLayoutGroup contentLayout = content.GetComponent<VerticalLayoutGroup>();
+        contentLayout.spacing = 14f;
+        contentLayout.padding = new RectOffset(0, 0, 0, 4);
+        contentLayout.childControlWidth = true;
+        contentLayout.childControlHeight = true;
+        contentLayout.childForceExpandWidth = true;
+        contentLayout.childForceExpandHeight = false;
+
+        ContentSizeFitter fitter = content.GetComponent<ContentSizeFitter>();
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+
+        ScrollRect scrollRect = scrollRoot.GetComponent<ScrollRect>();
+        scrollRect.viewport = scrollRoot.GetComponent<RectTransform>();
+        scrollRect.content = contentRect;
+        scrollRect.horizontal = false;
+        scrollRect.vertical = true;
+        scrollRect.movementType = ScrollRect.MovementType.Clamped;
+        scrollRect.scrollSensitivity = 24f;
+
+        return content.transform;
+    }
+
     private void CreateBackground(Transform parent)
     {
         backgroundObject = new GameObject("MainMenuBackground", typeof(RectTransform), typeof(Image));
@@ -946,8 +1106,8 @@ public class MainMenuRuntimeUI : MonoBehaviour
     private string BuildCreditsText()
     {
         return
-            "Game by: " + developerName + "\n\n" +
-            "Used Assets:\n" +
+            LocalizationTable.Get("credits_game_by") + ": " + developerName + "\n\n" +
+            LocalizationTable.Get("credits_used_assets") + ":\n" +
             "- Main Menu Artwork (Assets/Images/MainMenuImage.png)\n" +
             "- SimplePoly City - Low Poly Assets\n" +
             "- Nebula - Free low poly car pack\n" +
@@ -957,7 +1117,63 @@ public class MainMenuRuntimeUI : MonoBehaviour
             "- HQP Studios Low Poly 3D Icons - Pack Lite\n" +
             "- Keypad\n" +
             "- TextMesh Pro\n\n" +
-            "Thanks for playing Delivery Driver.";
+            LocalizationTable.Get("credits_thanks");
+    }
+
+    private void HandleLocaleChanged()
+    {
+        if (!isActiveAndEnabled)
+        {
+            return;
+        }
+
+        MenuPanelState activePanel = currentPanelState;
+        CleanupUi(false);
+        BuildUi();
+
+        switch (activePanel)
+        {
+            case MenuPanelState.Settings:
+                ShowSettingsPanel();
+                break;
+            case MenuPanelState.Credits:
+                ShowCreditsPanel();
+                break;
+            default:
+                ShowMainPanel();
+                break;
+        }
+
+        RefreshSettingsControls();
+    }
+
+    private void ResetUiReferences(bool clearCanvasReference = true)
+    {
+        mainPanel = null;
+        settingsPanel = null;
+        creditsPanel = null;
+        if (clearCanvasReference)
+        {
+            createdCanvasObject = null;
+        }
+        backgroundObject = null;
+        overlayObject = null;
+        mainPanelCanvasGroup = null;
+        settingsPanelCanvasGroup = null;
+        creditsPanelCanvasGroup = null;
+        masterVolumeSlider = null;
+        musicVolumeSlider = null;
+        sfxVolumeSlider = null;
+        qualityDropdown = null;
+        resolutionDropdown = null;
+        fullScreenToggle = null;
+        fpsDropdown = null;
+        speedUnitDropdown = null;
+        languageDropdown = null;
+        colorBlindDropdown = null;
+        textScaleSlider = null;
+        highContrastToggle = null;
+        availableResolutions = null;
     }
 
     private static Canvas EnsureCanvas(out bool wasCreated)
