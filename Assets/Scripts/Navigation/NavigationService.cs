@@ -20,12 +20,16 @@ namespace DeliveryDriver.Navigation
         public static NavigationService EnsureInstance()
         {
             if (Instance != null)
+            {
+                VehicleObjectiveArrow3D.EnsureInstance();
                 return Instance;
+            }
 
             NavigationService existing = FindFirstObjectByType<NavigationService>();
             if (existing != null)
             {
                 Instance = existing;
+                VehicleObjectiveArrow3D.EnsureInstance()?.BindNavigationService(Instance);
                 return Instance;
             }
 
@@ -50,6 +54,14 @@ namespace DeliveryDriver.Navigation
         [SerializeField] private float rerouteCooldown = 1.5f;
         [SerializeField] private float routeRetryInterval = 2.5f;
         [SerializeField] private float rerouteNotificationCooldown = 6f;
+        [SerializeField] private float minAsyncRerouteInterval = 0.75f;
+        [SerializeField] private float reroutePlayerMovementThreshold = 6f;
+        [SerializeField] private float rerouteObjectiveMovementThreshold = 3f;
+        [SerializeField] private float hardOffRouteDistanceThreshold = 26f;
+        [SerializeField] private float initialAsyncRouteDelay = 0.02f;
+        [SerializeField] private int pathSearchIterationsPerFrame = 220;
+        [SerializeField] private int maxTransferStepsPerRequest = 1;
+        [SerializeField] private float continuedRouteAttemptDelay = 0.08f;
 
         // ────────────────────────────────────────────────────────────────────
         // Public state & events
@@ -98,11 +110,16 @@ namespace DeliveryDriver.Navigation
         private float nextNotificationTime;
         private float nextPlayerResolveTime;
         private float nextRoadGraphResolveTime;
+        private int pendingTransferStartStep;
 
         // Async reroute
         private Coroutine asyncRouteCoroutine;
         private int consecutiveFailures;
         private float nextRouteLogTime;
+        private Vector3 lastRequestedRouteStart;
+        private Vector3 lastRequestedRouteObjective;
+        private float nextAsyncRouteAllowedTime;
+        private bool hasRequestedRoute;
 
         // Diagnostics
         private string lastPlayerSource = string.Empty;
@@ -127,6 +144,7 @@ namespace DeliveryDriver.Navigation
                 return;
             }
             Instance = this;
+            VehicleObjectiveArrow3D.EnsureInstance()?.BindNavigationService(this);
         }
 
         private void OnEnable()
@@ -165,6 +183,7 @@ namespace DeliveryDriver.Navigation
         {
             cachedPlayerTransform = player;
             nextPlayerResolveTime = 0f;
+            VehicleObjectiveArrow3D.EnsureInstance()?.SetPlayerTransform(player);
             if (CurrentObjective.IsValid)
                 TryImmediateRouteBuild();
         }
@@ -193,7 +212,7 @@ namespace DeliveryDriver.Navigation
             // Need to build route?
             if (needsRouteBuild || objectiveMoved)
             {
-                RequestAsyncRoute(playerPos, objectivePos);
+                RequestAsyncRoute(playerPos, objectivePos, force: objectiveMoved || !hasRequestedRoute);
                 return;
             }
 
@@ -201,7 +220,7 @@ namespace DeliveryDriver.Navigation
             if (routePoints.Count < 2)
             {
                 if (Time.time >= nextRouteRetryTime)
-                    RequestAsyncRoute(playerPos, objectivePos);
+                    RequestAsyncRoute(playerPos, objectivePos, force: false);
                 return;
             }
 
@@ -213,7 +232,11 @@ namespace DeliveryDriver.Navigation
             {
                 // Off route - reroute if cooldown allows
                 if (Time.time >= nextRerouteTime)
-                    RequestAsyncRoute(playerPos, objectivePos);
+                {
+                    float hardOffRouteSqr = hardOffRouteDistanceThreshold * hardOffRouteDistanceThreshold;
+                    bool force = segIdx < 0 || distSqr > hardOffRouteSqr;
+                    RequestAsyncRoute(playerPos, objectivePos, force);
+                }
                 return;
             }
 
@@ -229,7 +252,7 @@ namespace DeliveryDriver.Navigation
         {
             if (!CurrentObjective.IsValid) return;
             if (!ResolvePlayer(out Transform player)) return;
-            BuildRoute(player.position, CurrentObjective.WorldPosition);
+            RequestAsyncRoute(player.position, CurrentObjective.WorldPosition, force: true);
         }
 
         private void BuildRoute(Vector3 start, Vector3 end)
@@ -473,17 +496,65 @@ namespace DeliveryDriver.Navigation
             nextRouteLogTime = 0f;
             currentTransferStep = 0;
             baselineTransferStep = 0;
+            pendingTransferStartStep = 0;
             lastPublishedSegmentIndex = -1;
             lastPublishedKind = RouteKind.None;
             lastPublishedStart = Vector3.zero;
             lastObjectivePosition = Vector3.zero;
             routeRefreshTimer = 0f;
+            lastRequestedRouteStart = Vector3.zero;
+            lastRequestedRouteObjective = Vector3.zero;
+            nextAsyncRouteAllowedTime = 0f;
+            hasRequestedRoute = false;
         }
 
-        private void RequestAsyncRoute(Vector3 start, Vector3 end)
+        private void RequestAsyncRoute(Vector3 start, Vector3 end, bool force = false)
         {
-            if (asyncRouteCoroutine != null) return; // Already computing
+            if (asyncRouteCoroutine != null)
+            {
+                return;
+            }
+
+            if (!force && !ShouldRequestAsyncRoute(start, end))
+            {
+                return;
+            }
+
+            hasRequestedRoute = true;
+            lastRequestedRouteStart = start;
+            lastRequestedRouteObjective = end;
+            nextAsyncRouteAllowedTime = Time.time + Mathf.Max(0.1f, minAsyncRerouteInterval);
             asyncRouteCoroutine = StartCoroutine(BuildRouteAsync(start, end));
+        }
+
+        private bool ShouldRequestAsyncRoute(Vector3 start, Vector3 end)
+        {
+            if (!hasRequestedRoute)
+            {
+                return true;
+            }
+
+            if (needsRouteBuild)
+            {
+                return Time.time >= nextAsyncRouteAllowedTime;
+            }
+
+            if (Time.time >= nextRouteRetryTime)
+            {
+                return true;
+            }
+
+            if (Time.time < nextAsyncRouteAllowedTime)
+            {
+                return false;
+            }
+
+            float playerThresholdSqr = reroutePlayerMovementThreshold * reroutePlayerMovementThreshold;
+            float objectiveThresholdSqr = rerouteObjectiveMovementThreshold * rerouteObjectiveMovementThreshold;
+
+            bool playerMovedEnough = (start - lastRequestedRouteStart).sqrMagnitude >= playerThresholdSqr;
+            bool objectiveMovedEnough = (end - lastRequestedRouteObjective).sqrMagnitude >= objectiveThresholdSqr;
+            return playerMovedEnough || objectiveMovedEnough;
         }
 
         private IEnumerator BuildRouteAsync(Vector3 start, Vector3 end)
@@ -493,16 +564,21 @@ namespace DeliveryDriver.Navigation
 
             bool found = false;
 
+            if (initialAsyncRouteDelay > 0f)
+            {
+                yield return null;
+            }
+
             if (TryResolveRoadGraph(out RoadGraph graph))
             {
-                int startStep = Mathf.Clamp(Mathf.Max(currentTransferStep, baselineTransferStep), 0, TransferDistances.Length - 1);
+                int startStep = Mathf.Clamp(
+                    Mathf.Max(pendingTransferStartStep, baselineTransferStep),
+                    0,
+                    TransferDistances.Length - 1);
+                int transferStepsTried = 0;
 
                 for (int step = startStep; step < TransferDistances.Length; step++)
                 {
-                    // Yield before each pathfinding attempt to avoid blocking the frame
-                    if (step > startStep)
-                        yield return null;
-
                     // Re-read player position for freshness
                     if (ResolvePlayer(out Transform player) && CurrentObjective.IsValid)
                     {
@@ -510,7 +586,22 @@ namespace DeliveryDriver.Navigation
                         end = CurrentObjective.WorldPosition;
                     }
 
-                    List<Vector3> path = RoadGraphPathfinder.FindPath(graph, start, end, TransferDistances[step]);
+                    RoadGraphPathfinder.IncrementalPathSearchSession session =
+                        RoadGraphPathfinder.StartIncrementalSearch(graph, start, end, TransferDistances[step]);
+
+                    while (session != null && session.Status == RoadGraphPathfinder.IncrementalSearchStatus.Running)
+                    {
+                        session.Step(Mathf.Max(16, pathSearchIterationsPerFrame));
+                        if (session.Status == RoadGraphPathfinder.IncrementalSearchStatus.Running)
+                        {
+                            yield return null;
+                        }
+                    }
+
+                    List<Vector3> path = session != null && session.Status == RoadGraphPathfinder.IncrementalSearchStatus.Succeeded
+                        ? session.Path
+                        : null;
+                    transferStepsTried++;
                     if (path != null && path.Count >= 2)
                     {
                         routePoints.Clear();
@@ -519,6 +610,7 @@ namespace DeliveryDriver.Navigation
                         lastGoodRoute.AddRange(path);
                         baselineTransferStep = Mathf.Max(0, step - 1);
                         currentTransferStep = baselineTransferStep;
+                        pendingTransferStartStep = baselineTransferStep;
                         nextRouteRetryTime = 0f;
                         nextRerouteTime = Time.time + rerouteCooldown;
                         consecutiveFailures = 0;
@@ -528,12 +620,37 @@ namespace DeliveryDriver.Navigation
                         found = true;
                         break;
                     }
+
+                    currentTransferStep = Mathf.Min(step + 1, TransferDistances.Length - 1);
+                    pendingTransferStartStep = currentTransferStep;
+
+                    if (transferStepsTried >= Mathf.Max(1, maxTransferStepsPerRequest) &&
+                        step < TransferDistances.Length - 1)
+                    {
+                        break;
+                    }
                 }
             }
 
             if (!found)
             {
+                if (currentTransferStep < TransferDistances.Length - 1)
+                {
+                    needsRouteBuild = true;
+                    nextRouteRetryTime = Mathf.Min(nextRouteRetryTime <= 0f ? float.MaxValue : nextRouteRetryTime, Time.time + continuedRouteAttemptDelay);
+                    nextAsyncRouteAllowedTime = Time.time + Mathf.Max(0.01f, continuedRouteAttemptDelay);
+
+                    if (TryUseStaleRoute(start))
+                    {
+                        consecutiveFailures = 0;
+                    }
+
+                    asyncRouteCoroutine = null;
+                    yield break;
+                }
+
                 currentTransferStep = TransferDistances.Length - 1;
+                pendingTransferStartStep = currentTransferStep;
 
                 if (TryUseStaleRoute(start))
                 {
