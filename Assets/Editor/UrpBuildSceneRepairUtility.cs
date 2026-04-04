@@ -85,6 +85,8 @@ namespace DeliveryDriver.EditorTools
                 return;
             }
 
+            HashSet<string> legacyShaderNames = BuildLegacyShaderNameSet(upgraders);
+
             List<string> buildScenePaths = EditorBuildSettings.scenes
                 .Where(scene => scene.enabled && !string.IsNullOrWhiteSpace(scene.path))
                 .Select(scene => scene.path)
@@ -123,7 +125,7 @@ namespace DeliveryDriver.EditorTools
             foreach (string materialPath in materialAssetPaths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
             {
                 Material material = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
-                if (TryUpgradeMaterial(material, upgraders, processedMaterials))
+                if (TryUpgradeMaterial(material, upgraders, processedMaterials, legacyShaderNames))
                 {
                     EditorUtility.SetDirty(material);
                     upgradedMaterialAssets++;
@@ -143,7 +145,7 @@ namespace DeliveryDriver.EditorTools
                     }
 
                     int before = upgradedPrefabMaterials;
-                    upgradedPrefabMaterials += UpgradeMaterialsInHierarchy(prefabRoot, upgraders, processedMaterials);
+                    upgradedPrefabMaterials += UpgradeMaterialsInHierarchy(prefabRoot, upgraders, processedMaterials, legacyShaderNames);
                     if (upgradedPrefabMaterials > before)
                     {
                         PrefabUtility.SaveAsPrefabAsset(prefabRoot, prefabPath);
@@ -171,10 +173,10 @@ namespace DeliveryDriver.EditorTools
                     var scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
                     int before = upgradedSceneMaterials;
 
-                    upgradedSceneMaterials += UpgradeMaterialsInLoadedScenes(upgraders, processedMaterials);
+                    upgradedSceneMaterials += UpgradeMaterialsInLoadedScenes(upgraders, processedMaterials, legacyShaderNames);
 
                     Material skybox = RenderSettings.skybox;
-                    if (TryUpgradeMaterial(skybox, upgraders, processedMaterials))
+                    if (TryUpgradeMaterial(skybox, upgraders, processedMaterials, legacyShaderNames))
                     {
                         upgradedSceneMaterials++;
                     }
@@ -205,7 +207,8 @@ namespace DeliveryDriver.EditorTools
 
         private static int UpgradeMaterialsInLoadedScenes(
             List<MaterialUpgrader> upgraders,
-            HashSet<int> processedMaterials)
+            HashSet<int> processedMaterials,
+            HashSet<string> legacyShaderNames)
         {
             int upgradedCount = 0;
 
@@ -216,7 +219,7 @@ namespace DeliveryDriver.EditorTools
                     continue;
                 }
 
-                upgradedCount += UpgradeRendererMaterials(renderer, upgraders, processedMaterials);
+                upgradedCount += UpgradeRendererMaterials(renderer, upgraders, processedMaterials, legacyShaderNames);
             }
 
             foreach (Terrain terrain in Resources.FindObjectsOfTypeAll<Terrain>())
@@ -226,7 +229,7 @@ namespace DeliveryDriver.EditorTools
                     continue;
                 }
 
-                if (TryUpgradeMaterial(terrain.materialTemplate, upgraders, processedMaterials))
+                if (TryUpgradeMaterial(terrain.materialTemplate, upgraders, processedMaterials, legacyShaderNames))
                 {
                     EditorUtility.SetDirty(terrain);
                     upgradedCount++;
@@ -239,18 +242,19 @@ namespace DeliveryDriver.EditorTools
         private static int UpgradeMaterialsInHierarchy(
             GameObject root,
             List<MaterialUpgrader> upgraders,
-            HashSet<int> processedMaterials)
+            HashSet<int> processedMaterials,
+            HashSet<string> legacyShaderNames)
         {
             int upgradedCount = 0;
 
             foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
             {
-                upgradedCount += UpgradeRendererMaterials(renderer, upgraders, processedMaterials);
+                upgradedCount += UpgradeRendererMaterials(renderer, upgraders, processedMaterials, legacyShaderNames);
             }
 
             foreach (Terrain terrain in root.GetComponentsInChildren<Terrain>(true))
             {
-                if (TryUpgradeMaterial(terrain.materialTemplate, upgraders, processedMaterials))
+                if (TryUpgradeMaterial(terrain.materialTemplate, upgraders, processedMaterials, legacyShaderNames))
                 {
                     EditorUtility.SetDirty(terrain);
                     upgradedCount++;
@@ -263,14 +267,15 @@ namespace DeliveryDriver.EditorTools
         private static int UpgradeRendererMaterials(
             Renderer renderer,
             List<MaterialUpgrader> upgraders,
-            HashSet<int> processedMaterials)
+            HashSet<int> processedMaterials,
+            HashSet<string> legacyShaderNames)
         {
             int upgradedCount = 0;
             Material[] materials = renderer.sharedMaterials;
 
             for (int i = 0; i < materials.Length; i++)
             {
-                if (TryUpgradeMaterial(materials[i], upgraders, processedMaterials))
+                if (TryUpgradeMaterial(materials[i], upgraders, processedMaterials, legacyShaderNames))
                 {
                     upgradedCount++;
                 }
@@ -287,7 +292,8 @@ namespace DeliveryDriver.EditorTools
         private static bool TryUpgradeMaterial(
             Material material,
             List<MaterialUpgrader> upgraders,
-            HashSet<int> processedMaterials)
+            HashSet<int> processedMaterials,
+            HashSet<string> legacyShaderNames)
         {
             if (material == null || material.shader == null)
             {
@@ -296,6 +302,11 @@ namespace DeliveryDriver.EditorTools
 
             int instanceId = material.GetInstanceID();
             if (!processedMaterials.Add(instanceId))
+            {
+                return false;
+            }
+
+            if (!legacyShaderNames.Contains(material.shader.name))
             {
                 return false;
             }
@@ -320,6 +331,15 @@ namespace DeliveryDriver.EditorTools
             }
 
             return true;
+        }
+
+        private static HashSet<string> BuildLegacyShaderNameSet(List<MaterialUpgrader> upgraders)
+        {
+            return new HashSet<string>(
+                upgraders
+                    .Select(upgrader => upgrader.OldShaderPath)
+                    .Where(path => !string.IsNullOrWhiteSpace(path)),
+                StringComparer.Ordinal);
         }
 
         private static void Fail(string message, bool interactive)
