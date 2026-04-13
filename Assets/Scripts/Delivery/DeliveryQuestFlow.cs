@@ -60,7 +60,8 @@ internal static class DeliveryQuestFlow
             BaseReward = baseReward,
             BonusReward = bonusReward,
             PickupLocation = new QuestLocation(pickupPos, $"Pickup: {FormatCoordinates(pickupPos)}", deliveryRadius),
-            DeliveryLocations = new List<QuestLocation>()
+            DeliveryLocations = new List<QuestLocation>(),
+            PickupAuthority = QuestPickupAuthority.PhysicalBox
         };
 
         if (quest.PickupLocation != null)
@@ -132,11 +133,11 @@ internal static class DeliveryQuestFlow
             quest.DeliveryLocations.Add(deliveryLocation);
         }
 
-        quest.QuestDescription = firstObjectiveDescription;
-        quest.Status = QuestStatus.Active;
-        quest.HasPickedUpCargo = true;
         quest.CurrentDeliveryIndex = 0;
-        QuestManager.Instance?.OnQuestUpdated?.Invoke(quest);
+        if (!string.IsNullOrWhiteSpace(firstObjectiveDescription))
+        {
+            quest.QuestDescription = firstObjectiveDescription;
+        }
 
         if (showDebugInfo)
         {

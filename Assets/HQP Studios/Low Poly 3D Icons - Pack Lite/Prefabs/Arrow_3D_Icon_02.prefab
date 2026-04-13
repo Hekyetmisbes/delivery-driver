@@ -22,15 +22,15 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 4aeddb990822b4027b321a351d0d20da, type: 3}
       propertyPath: m_LocalRotation.w
-      value: 0.04149304
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 4aeddb990822b4027b321a351d0d20da, type: 3}
       propertyPath: m_LocalRotation.x
-      value: -0
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 4aeddb990822b4027b321a351d0d20da, type: 3}
       propertyPath: m_LocalRotation.y
-      value: -0.99913883
+      value: -0
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 4aeddb990822b4027b321a351d0d20da, type: 3}
       propertyPath: m_LocalRotation.z
@@ -51,10 +51,6 @@ PrefabInstance:
     - target: {fileID: 919132149155446097, guid: 4aeddb990822b4027b321a351d0d20da, type: 3}
       propertyPath: m_Name
       value: Arrow_3D_Icon_02
-      objectReference: {fileID: 0}
-    - target: {fileID: 919132149155446097, guid: 4aeddb990822b4027b321a351d0d20da, type: 3}
-      propertyPath: m_IsActive
-      value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []

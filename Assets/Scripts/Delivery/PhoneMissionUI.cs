@@ -38,6 +38,7 @@ public class PhoneMissionUI : MonoBehaviour
 
     private void Awake()
     {
+        LocalizationTable.OnLocaleChanged += HandleLocaleChanged;
         if (autoCreateRuntimeUi)
         {
             EnsureRuntimeUI();
@@ -45,6 +46,11 @@ public class PhoneMissionUI : MonoBehaviour
 
         WireButtons();
         HideOffer();
+    }
+
+    private void OnDestroy()
+    {
+        LocalizationTable.OnLocaleChanged -= HandleLocaleChanged;
     }
 
     public void BindCallbacks(Action acceptAction, Action rejectAction)
@@ -61,19 +67,25 @@ public class PhoneMissionUI : MonoBehaviour
 
         if (titleText != null)
         {
-            titleText.text = string.IsNullOrWhiteSpace(title) ? "Yeni Gorev Teklifi" : title;
+            titleText.text = string.IsNullOrWhiteSpace(title)
+                ? (LocalizationTable.CurrentLocale == LocalizationTable.EnglishLocale ? "New Mission Offer" : "Yeni Görev Teklifi")
+                : title;
         }
 
         if (bodyText != null)
         {
             bodyText.text = string.IsNullOrWhiteSpace(body)
-                ? "Telefonuna yeni bir teslimat gorevi geldi."
+                ? (LocalizationTable.CurrentLocale == LocalizationTable.EnglishLocale
+                    ? "A new delivery mission has arrived on your phone."
+                    : "Telefonuna yeni bir teslimat görevi geldi.")
                 : body;
         }
 
         if (rewardText != null)
         {
-            rewardText.text = string.IsNullOrWhiteSpace(reward) ? "Odul: -" : reward;
+            rewardText.text = string.IsNullOrWhiteSpace(reward)
+                ? (LocalizationTable.CurrentLocale == LocalizationTable.EnglishLocale ? "Reward: -" : "Ödül: -")
+                : reward;
         }
 
         if (panelRoot != null)
@@ -158,14 +170,14 @@ public class PhoneMissionUI : MonoBehaviour
         {
             acceptButton.onClick.RemoveListener(HandleAcceptClicked);
             acceptButton.onClick.AddListener(HandleAcceptClicked);
-            SetButtonLabel(acceptButton, acceptButtonLabel);
+            SetButtonLabel(acceptButton, ResolveButtonLabel(acceptButtonLabel, "accept"));
         }
 
         if (rejectButton != null)
         {
             rejectButton.onClick.RemoveListener(HandleRejectClicked);
             rejectButton.onClick.AddListener(HandleRejectClicked);
-            SetButtonLabel(rejectButton, rejectButtonLabel);
+            SetButtonLabel(rejectButton, ResolveButtonLabel(rejectButtonLabel, "reject"));
         }
     }
 
@@ -384,6 +396,25 @@ public class PhoneMissionUI : MonoBehaviour
         }
 
         return button;
+    }
+
+    private void HandleLocaleChanged()
+    {
+        WireButtons();
+    }
+
+    private static string ResolveButtonLabel(string configuredLabel, string localizationKey)
+    {
+        if (string.IsNullOrWhiteSpace(configuredLabel) ||
+            configuredLabel == "Kabul Et" ||
+            configuredLabel == "Reddet" ||
+            configuredLabel == "Accept" ||
+            configuredLabel == "Reject")
+        {
+            return LocalizationTable.Get(localizationKey);
+        }
+
+        return configuredLabel;
     }
 
     private void ResolveSkinSprites()

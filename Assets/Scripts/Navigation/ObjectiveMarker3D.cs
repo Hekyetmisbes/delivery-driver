@@ -14,7 +14,7 @@ namespace DeliveryDriver.Navigation
         [SerializeField] private float pulseAmount = 0.2f;
         [SerializeField] private Color pickupColor = new Color(0.1f, 1f, 1f, 1f);
         [SerializeField] private Color deliveryColor = new Color(1f, 0.9f, 0.05f, 1f);
-        [SerializeField] private string markerLayerName = "MiniMapMarker";
+        [SerializeField] private string markerLayerName = "NavigationMarker";
         [SerializeField] private float followSmoothTime = 0.08f;
 
         private GameObject markerObject;
@@ -125,7 +125,7 @@ namespace DeliveryDriver.Navigation
             }
 
             markerObject = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            markerObject.name = "MiniMapObjectiveMarker";
+            markerObject.name = "NavigationObjectiveMarker";
             markerObject.transform.localScale = markerScale;
 
             int layer = ResolveMarkerLayer();
@@ -141,7 +141,7 @@ namespace DeliveryDriver.Navigation
             }
 
             MeshRenderer renderer = markerObject.GetComponent<MeshRenderer>();
-            markerMaterial = MinimapShaderHelper.CreateColorMaterial(pickupColor, renderer);
+            markerMaterial = RuntimeColorMaterialHelper.CreateColorMaterial(pickupColor, renderer);
             if (markerMaterial != null && renderer != null)
             {
                 renderer.material = markerMaterial;

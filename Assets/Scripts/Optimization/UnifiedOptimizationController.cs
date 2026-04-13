@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.Profiling;
+using UnityEngine.Rendering;
 using TrafficSystem;
 
 namespace DeliveryDriver.Optimization
@@ -219,15 +220,16 @@ namespace DeliveryDriver.Optimization
             }
             else
             {
-                // Default layer keeps farClipPlane (terrain + ground are on Default)
-                // Only cull minimap layers that shouldn't render on main camera
                 SetLayerCull(distances, "Water", 500f);
-                SetLayerCull(distances, "MiniMapBuilding", 0f);
-                SetLayerCull(distances, "MiniMapMarker", 0f);
             }
 
             mainCamera.layerCullDistances = distances;
-            mainCamera.layerCullSpherical = true;
+
+            // Scriptable Render Pipeline backends ignore this property and log an error.
+            if (GraphicsSettings.currentRenderPipeline == null)
+            {
+                mainCamera.layerCullSpherical = true;
+            }
             Debug.Log("[OptController] Layer culling applied");
         }
 

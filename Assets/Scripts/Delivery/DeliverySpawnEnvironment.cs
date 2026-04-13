@@ -586,7 +586,7 @@ internal sealed class DeliverySpawnEnvironment
 
         if (cachedBuildingLayer == int.MinValue)
         {
-            cachedBuildingLayer = LayerMask.NameToLayer("MiniMapBuilding");
+            cachedBuildingLayer = LayerMask.NameToLayer("Building");
         }
 
         if (cachedBuildingLayer >= 0 && obj.layer == cachedBuildingLayer)

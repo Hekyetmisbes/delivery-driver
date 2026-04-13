@@ -49,6 +49,8 @@ namespace TrafficSystem
         [Header("Debug Visualization")]
         [SerializeField] private bool showWaypoints = false;
         [SerializeField] private bool showConnections = true;
+        [SerializeField] private bool showMidSegmentConnections = false;
+        [SerializeField] private bool showConnectionsOnlyWhenSelected = true;
         [SerializeField] private bool showWaypointForward = false;
         [SerializeField] private float waypointGizmoSize = 0.5f;
 
@@ -124,6 +126,12 @@ namespace TrafficSystem
 
             // Build connections between road segments
             BuildConnections();
+
+            // Pre-build the spatial index so the first FindPath call does not stall.
+            // The pathfinder uses Mathf.Max(1f, transferMaxDistance) as cell size.
+            // Pre-build with a common transfer distance to avoid lazy first-call cost.
+            const float preBuildCellSize = 24f;
+            roadGraph.GetOrBuildSpatialIndex(preBuildCellSize);
 
             Debug.Log($"[RoadGraphBuilder] Built road graph: {roadGraph.roadSegments.Count} segments, " +
                      $"{GetTotalWaypointCount()} waypoints");
@@ -1240,12 +1248,25 @@ namespace TrafficSystem
             return count;
         }
 
+        private void OnDrawGizmos()
+        {
+            DrawRoadGraphGizmos(drawSelectedOnlyConnections: false);
+        }
+
+        private void OnDrawGizmosSelected()
+        {
+            DrawRoadGraphGizmos(drawSelectedOnlyConnections: true);
+        }
+
         /// <summary>
         /// Gizmo visualization for debugging
         /// </summary>
-        private void OnDrawGizmos()
+        private void DrawRoadGraphGizmos(bool drawSelectedOnlyConnections)
         {
             if (roadGraph == null || roadGraph.roadSegments.Count == 0) return;
+
+            bool shouldDrawConnections = showConnections &&
+                                         (!showConnectionsOnlyWhenSelected || drawSelectedOnlyConnections);
 
             foreach (var segment in roadGraph.roadSegments)
             {
@@ -1277,7 +1298,7 @@ namespace TrafficSystem
                     }
                 }
 
-                if (showConnections)
+                if (shouldDrawConnections)
                 {
                     if (segment.connections == null)
                     {
@@ -1300,6 +1321,11 @@ namespace TrafficSystem
                             continue;
                         }
 
+                        if (!showMidSegmentConnections && !IsEndpointConnection(segment, connection))
+                        {
+                            continue;
+                        }
+
                         Vector3 from = segment.waypoints[connection.fromWaypointIndex].position;
                         Vector3 to = connection.toSegment.waypoints[connection.toWaypointIndex].position;
                         Gizmos.DrawLine(from, to);
@@ -1312,6 +1338,21 @@ namespace TrafficSystem
                     }
                 }
             }
+        }
+
+        private static bool IsEndpointConnection(RoadSegment fromSegment, RoadConnection connection)
+        {
+            if (fromSegment == null || connection?.toSegment == null)
+            {
+                return false;
+            }
+
+            int fromLast = fromSegment.waypoints.Count - 1;
+            int toLast = connection.toSegment.waypoints.Count - 1;
+
+            bool fromIsEndpoint = connection.fromWaypointIndex == 0 || connection.fromWaypointIndex == fromLast;
+            bool toIsEndpoint = connection.toWaypointIndex == 0 || connection.toWaypointIndex == toLast;
+            return fromIsEndpoint && toIsEndpoint;
         }
     }
 }

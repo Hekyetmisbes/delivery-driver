@@ -1,0 +1,4 @@
+<linker>
+  <assembly fullname="Mono.Data.Sqlite" preserve="all" />
+  <assembly fullname="System.Data" preserve="all" />
+</linker>

@@ -4,6 +4,7 @@ using UnityEngine;
 using DeliveryDriver.Quest;
 using DeliveryDriver.City;
 using DeliveryDriver.Navigation;
+using DeliveryDriver.UI;
 using TrafficSystem;
 
 /// <summary>
@@ -12,7 +13,9 @@ using TrafficSystem;
 /// </summary>
 public class DeliveryManager : MonoBehaviour
 {
-    private const float SpawnReachabilityTransferDistance = 24f;
+    // SpawnReachabilityTransferDistance and MaxSpawnReachabilityPathChecks removed:
+    // Full A* reachability checks during spawn selection caused multi-second freezes.
+    // The BFS component connectivity check (TryCheckSpawnConnectivity) is sufficient.
 
     [Header("Prefabs")]
     [SerializeField] private GameObject boxPrefab;
@@ -121,6 +124,9 @@ public class DeliveryManager : MonoBehaviour
     private bool hasTerrainBounds;
     private bool isFinishingDeliveryLifecycle;
     private bool usingRoadGraphSpawnCache;
+    private readonly Dictionary<int, int> roadGraphComponentBySegmentId = new Dictionary<int, int>();
+    private RoadGraph cachedRoadGraphConnectivitySource;
+    private int cachedRoadGraphConnectivitySegmentCount = -1;
 
     public bool IsDeliveryActive => isDeliveryActive;
     public bool HasBox => currentBox != null;
@@ -653,6 +659,27 @@ public class DeliveryManager : MonoBehaviour
             return;
         }
 
+        // Cache pickup and delivery targets before the player reaches the box.
+        currentPickupPoint = spawnPos;
+        currentPickupNeighborhoodName = ResolveNeighborhoodName(currentPickupPoint);
+        currentDeliveryPoint = Vector3.zero;
+        currentDeliveryNeighborhoodName = "";
+        currentDeliveryStops.Clear();
+        currentDeliveryStopNeighborhoods.Clear();
+        currentDeliveryStopIndex = 0;
+        lastObservedQuestDeliveryIndex = -1;
+        isDeliveryActive = false;
+
+        if (!PrepareDeliveryRoute(currentPickupPoint))
+        {
+            Debug.LogError("[DeliveryManager] Could not prepare delivery route for spawned box.");
+            if (requirePhoneMissionAccept)
+            {
+                ScheduleMissionOffer(nextOfferDelayAfterFailure);
+            }
+            return;
+        }
+
         // Spawn box with slight rotation variation
         Quaternion rotation = Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0);
         GameObject boxObj = Instantiate(boxPrefab, spawnPos, rotation);
@@ -709,20 +736,11 @@ public class DeliveryManager : MonoBehaviour
             currentPickupIndicator.transform.SetParent(currentBox.transform);
         }
 
-        // Store pickup point
-        currentPickupPoint = spawnPos;
-        currentPickupNeighborhoodName = ResolveNeighborhoodName(currentPickupPoint);
-        currentDeliveryNeighborhoodName = "";
-        currentDeliveryStops.Clear();
-        currentDeliveryStopNeighborhoods.Clear();
-        currentDeliveryStopIndex = 0;
-        lastObservedQuestDeliveryIndex = -1;
-        isDeliveryActive = false;
-
         // Create quest in quest system
         if (useQuestSystem)
         {
             CreateDeliveryQuest(spawnPos, currentMissionType);
+            UpdateQuestWithDelivery(currentDeliveryStops, currentDeliveryStopNeighborhoods);
         }
 
         if (showDebugInfo)
@@ -772,7 +790,6 @@ public class DeliveryManager : MonoBehaviour
     {
         if (box != currentBox) return;
 
-        BuildDeliveryStops(box.transform.position);
         if (currentDeliveryStops.Count == 0)
         {
             HandleDeliveryFailure("No valid delivery location");
@@ -782,6 +799,20 @@ public class DeliveryManager : MonoBehaviour
         currentDeliveryStopIndex = 0;
         currentDeliveryPoint = currentDeliveryStops[currentDeliveryStopIndex];
         currentDeliveryNeighborhoodName = currentDeliveryStopNeighborhoods[currentDeliveryStopIndex];
+
+        if (useQuestSystem && currentDeliveryQuest != null)
+        {
+            bool pickupCommitted = QuestManager.Instance != null &&
+                                   QuestManager.Instance.CommitExternalPickup(currentDeliveryQuest, BuildDeliveryObjectiveDescription(0));
+            if (!pickupCommitted)
+            {
+                HandleDeliveryFailure("Quest pickup handoff failed");
+                return;
+            }
+
+            lastObservedQuestDeliveryIndex = 0;
+        }
+
         isDeliveryActive = true;
 
         // Spawn delivery indicator
@@ -798,12 +829,6 @@ public class DeliveryManager : MonoBehaviour
         // Create ghost box preview at delivery location
         CreateDeliveryPreview();
 
-        // Update quest with delivery location
-        if (useQuestSystem)
-        {
-            UpdateQuestWithDelivery(currentDeliveryStops, currentDeliveryStopNeighborhoods);
-        }
-
         // Notify UI
         if (deliveryUI != null)
         {
@@ -817,6 +842,12 @@ public class DeliveryManager : MonoBehaviour
         }
 
         NavigationService.EnsureInstance()?.SetObjective(new NavigationObjective(ObjectiveType.Delivery, currentDeliveryPoint, currentDeliveryStopIndex, currentDeliveryStops.Count));
+    }
+
+    private bool PrepareDeliveryRoute(Vector3 pickupPoint)
+    {
+        BuildDeliveryStops(pickupPoint);
+        return currentDeliveryStops.Count > 0;
     }
 
     /// <summary>
@@ -835,7 +866,7 @@ public class DeliveryManager : MonoBehaviour
 
         // Create glowing material
         MeshRenderer indicatorRenderer = indicator.GetComponent<MeshRenderer>();
-        Material indicatorMat = MinimapShaderHelper.CreateColorMaterial(new Color(1f, 0.8f, 0f, 1f), indicatorRenderer);
+                Material indicatorMat = RuntimeColorMaterialHelper.CreateColorMaterial(new Color(1f, 0.8f, 0f, 1f), indicatorRenderer);
         if (indicatorMat != null && indicatorRenderer != null)
         {
             indicatorRenderer.material = indicatorMat;
@@ -961,20 +992,33 @@ public class DeliveryManager : MonoBehaviour
         point = Vector3.zero;
         neighborhood = string.Empty;
 
-        const int maxAttempts = 70;
-        for (int i = 0; i < maxAttempts; i++)
+        List<Vector3> orderedCandidates = new List<Vector3>();
+        if (!TryGetOrderedSpawnCandidates(referencePoint, requireMinDistance, orderedCandidates))
         {
-            if (!TryGetValidSpawnPoint(referencePoint, requireMinDistance, out Vector3 candidate))
-            {
-                continue;
-            }
+            return false;
+        }
 
+        bool allowExcludedNeighborhood = orderedCandidates.Count <= 2;
+        Vector3 deferredCandidate = Vector3.zero;
+        string deferredNeighborhood = string.Empty;
+        bool hasDeferredCandidate = false;
+
+        for (int i = 0; i < orderedCandidates.Count; i++)
+        {
+            Vector3 candidate = orderedCandidates[i];
             string candidateNeighborhood = ResolveNeighborhoodName(candidate);
             bool isExcludedNeighborhood = !string.IsNullOrWhiteSpace(candidateNeighborhood) &&
                                           excludedNeighborhoods != null &&
                                           excludedNeighborhoods.Contains(candidateNeighborhood);
-            if (isExcludedNeighborhood && i < maxAttempts - 8)
+            if (isExcludedNeighborhood)
             {
+                if (!allowExcludedNeighborhood && !hasDeferredCandidate)
+                {
+                    deferredCandidate = candidate;
+                    deferredNeighborhood = candidateNeighborhood;
+                    hasDeferredCandidate = true;
+                }
+
                 continue;
             }
 
@@ -983,70 +1027,23 @@ public class DeliveryManager : MonoBehaviour
             return true;
         }
 
+        if (hasDeferredCandidate)
+        {
+            point = deferredCandidate;
+            neighborhood = deferredNeighborhood;
+            return true;
+        }
+
         return false;
     }
 
     private bool TryGetValidSpawnPoint(Vector3 referencePoint, bool enforceMinDistance, out Vector3 spawnPoint)
     {
-        const int maxAttempts = 40;
-        bool validateAsRoadGraph = usingRoadGraphSpawnCache && availableSpawnPoints.Count > 0;
-        bool preferReachableSpawn = TryGetReachabilityReferencePoint(referencePoint, out Vector3 reachabilityReferencePoint);
-        int reachabilityRejectCount = 0;
-
-        for (int i = 0; i < maxAttempts; i++)
+        List<Vector3> orderedCandidates = new List<Vector3>();
+        if (TryGetOrderedSpawnCandidates(referencePoint, enforceMinDistance, orderedCandidates) &&
+            orderedCandidates.Count > 0)
         {
-            Vector3 candidate = availableSpawnPoints.Count > 0
-                ? availableSpawnPoints[UnityEngine.Random.Range(0, availableSpawnPoints.Count)]
-                : GetRandomGroundPosition(false);
-
-            bool isValid = validateAsRoadGraph
-                ? IsValidRoadGraphSpawnPosition(candidate)
-                : IsValidSpawnPosition(candidate);
-            if (!isValid)
-            {
-                continue;
-            }
-
-            if (enforceMinDistance && Vector3.Distance(referencePoint, candidate) < minDistanceBetweenPoints)
-            {
-                continue;
-            }
-
-            if (preferReachableSpawn && !IsSpawnReachableOnRoadGraph(reachabilityReferencePoint, candidate))
-            {
-                reachabilityRejectCount++;
-                continue;
-            }
-
-            spawnPoint = candidate;
-            return true;
-        }
-
-        if (preferReachableSpawn && reachabilityRejectCount > 0)
-        {
-            Debug.LogWarning($"[DeliveryManager] No graph-reachable spawn found after rejecting {reachabilityRejectCount} unreachable candidate(s). Falling back to legacy spawn selection.");
-        }
-
-        for (int i = 0; i < maxAttempts; i++)
-        {
-            Vector3 candidate = availableSpawnPoints.Count > 0
-                ? availableSpawnPoints[UnityEngine.Random.Range(0, availableSpawnPoints.Count)]
-                : GetRandomGroundPosition(false);
-
-            bool isValid = validateAsRoadGraph
-                ? IsValidRoadGraphSpawnPosition(candidate)
-                : IsValidSpawnPosition(candidate);
-            if (!isValid)
-            {
-                continue;
-            }
-
-            if (enforceMinDistance && Vector3.Distance(referencePoint, candidate) < minDistanceBetweenPoints)
-            {
-                continue;
-            }
-
-            spawnPoint = candidate;
+            spawnPoint = orderedCandidates[0];
             return true;
         }
 
@@ -1076,6 +1073,107 @@ public class DeliveryManager : MonoBehaviour
         return false;
     }
 
+    private bool TryGetOrderedSpawnCandidates(Vector3 referencePoint, bool enforceMinDistance, List<Vector3> orderedCandidates)
+    {
+        orderedCandidates.Clear();
+
+        const int maxAttempts = 40;
+        bool validateAsRoadGraph = usingRoadGraphSpawnCache && availableSpawnPoints.Count > 0;
+        bool preferReachableSpawn = TryGetReachabilityReferencePoint(referencePoint, out Vector3 reachabilityReferencePoint);
+        int reachabilityRejectCount = 0;
+
+        List<int> shuffledIndices = availableSpawnPoints.Count > 0 ? BuildShuffledSpawnIndices() : null;
+        int preferredAttemptCount = shuffledIndices != null ? shuffledIndices.Count : maxAttempts;
+
+        for (int i = 0; i < preferredAttemptCount; i++)
+        {
+            Vector3 candidate = shuffledIndices != null
+                ? availableSpawnPoints[shuffledIndices[i]]
+                : GetRandomGroundPosition(false);
+
+            if (!IsSpawnCandidateEligible(candidate, validateAsRoadGraph, referencePoint, enforceMinDistance))
+            {
+                continue;
+            }
+
+            // Use the cheap BFS component check only. Full A* pathfinding was removed
+            // because it caused multi-second freezes when accepting phone missions.
+            // If two points share the same road-graph connected component they are
+            // reachable; that is sufficient for spawn-point selection.
+            if (preferReachableSpawn &&
+                TryCheckSpawnConnectivity(reachabilityReferencePoint, candidate, out bool sharesRoadComponent) &&
+                !sharesRoadComponent)
+            {
+                reachabilityRejectCount++;
+                continue;
+            }
+
+            orderedCandidates.Add(candidate);
+        }
+
+        if (orderedCandidates.Count > 0)
+        {
+            return true;
+        }
+
+        if (preferReachableSpawn && reachabilityRejectCount > 0)
+        {
+            Debug.LogWarning($"[DeliveryManager] No graph-reachable spawn found after rejecting {reachabilityRejectCount} unreachable candidate(s). Falling back to legacy spawn selection.");
+        }
+
+        int fallbackAttemptCount = shuffledIndices != null ? shuffledIndices.Count : maxAttempts;
+        for (int i = 0; i < fallbackAttemptCount; i++)
+        {
+            Vector3 candidate = shuffledIndices != null
+                ? availableSpawnPoints[shuffledIndices[i]]
+                : GetRandomGroundPosition(false);
+
+            if (IsSpawnCandidateEligible(candidate, validateAsRoadGraph, referencePoint, enforceMinDistance))
+            {
+                orderedCandidates.Add(candidate);
+            }
+        }
+
+        return orderedCandidates.Count > 0;
+    }
+
+    private bool IsSpawnCandidateEligible(Vector3 candidate, bool validateAsRoadGraph, Vector3 referencePoint, bool enforceMinDistance)
+    {
+        bool isValid = validateAsRoadGraph
+            ? IsValidRoadGraphSpawnPosition(candidate)
+            : IsValidSpawnPosition(candidate);
+        if (!isValid)
+        {
+            return false;
+        }
+
+        if (enforceMinDistance && Vector3.Distance(referencePoint, candidate) < minDistanceBetweenPoints)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private List<int> BuildShuffledSpawnIndices()
+    {
+        List<int> indices = new List<int>(availableSpawnPoints.Count);
+        for (int i = 0; i < availableSpawnPoints.Count; i++)
+        {
+            indices.Add(i);
+        }
+
+        for (int i = indices.Count - 1; i > 0; i--)
+        {
+            int swapIndex = UnityEngine.Random.Range(0, i + 1);
+            int temp = indices[i];
+            indices[i] = indices[swapIndex];
+            indices[swapIndex] = temp;
+        }
+
+        return indices;
+    }
+
     private bool TryGetReachabilityReferencePoint(Vector3 referencePoint, out Vector3 resolvedReferencePoint)
     {
         resolvedReferencePoint = referencePoint;
@@ -1101,20 +1199,142 @@ public class DeliveryManager : MonoBehaviour
         return true;
     }
 
-    private bool IsSpawnReachableOnRoadGraph(Vector3 referencePoint, Vector3 candidatePoint)
+    // IsSpawnReachableOnRoadGraph removed: replaced by TryCheckSpawnConnectivity
+    // which uses cheap BFS component membership instead of full A* pathfinding.
+
+    private bool TryCheckSpawnConnectivity(Vector3 referencePoint, Vector3 candidatePoint, out bool sharesRoadComponent)
     {
+        sharesRoadComponent = false;
         if (!HasRoadGraphData())
+        {
+            return false;
+        }
+
+        RoadGraph graph = roadGraphBuilder.RoadGraph;
+        if (!TryEnsureRoadGraphConnectivityCache(graph))
+        {
+            return false;
+        }
+
+        var (referenceSegment, _, _, _) = graph.ProjectPointOnRoad(referencePoint);
+        var (candidateSegment, _, _, _) = graph.ProjectPointOnRoad(candidatePoint);
+        if (referenceSegment == null || candidateSegment == null)
+        {
+            return false;
+        }
+
+        if (!roadGraphComponentBySegmentId.TryGetValue(referenceSegment.id, out int referenceComponent) ||
+            !roadGraphComponentBySegmentId.TryGetValue(candidateSegment.id, out int candidateComponent))
+        {
+            return false;
+        }
+
+        sharesRoadComponent = referenceComponent == candidateComponent;
+        return true;
+    }
+
+    private bool TryEnsureRoadGraphConnectivityCache(RoadGraph graph)
+    {
+        if (graph == null || graph.roadSegments == null || graph.roadSegments.Count == 0)
+        {
+            roadGraphComponentBySegmentId.Clear();
+            cachedRoadGraphConnectivitySource = null;
+            cachedRoadGraphConnectivitySegmentCount = -1;
+            return false;
+        }
+
+        if (ReferenceEquals(cachedRoadGraphConnectivitySource, graph) &&
+            cachedRoadGraphConnectivitySegmentCount == graph.roadSegments.Count &&
+            roadGraphComponentBySegmentId.Count > 0)
         {
             return true;
         }
 
-        List<Vector3> path = RoadGraphPathfinder.FindPath(
-            roadGraphBuilder.RoadGraph,
-            referencePoint,
-            candidatePoint,
-            SpawnReachabilityTransferDistance);
+        roadGraphComponentBySegmentId.Clear();
+        Dictionary<int, List<int>> adjacency = new Dictionary<int, List<int>>(graph.roadSegments.Count);
+        for (int i = 0; i < graph.roadSegments.Count; i++)
+        {
+            RoadSegment segment = graph.roadSegments[i];
+            if (segment == null)
+            {
+                continue;
+            }
 
-        return path != null && path.Count >= 2;
+            if (!adjacency.ContainsKey(segment.id))
+            {
+                adjacency[segment.id] = new List<int>();
+            }
+
+            if (segment.connections == null)
+            {
+                continue;
+            }
+
+            for (int connectionIndex = 0; connectionIndex < segment.connections.Count; connectionIndex++)
+            {
+                RoadConnection connection = segment.connections[connectionIndex];
+                if (connection == null || connection.toSegment == null)
+                {
+                    continue;
+                }
+
+                AddAdjacentRoadSegment(adjacency, segment.id, connection.toSegment.id);
+                AddAdjacentRoadSegment(adjacency, connection.toSegment.id, segment.id);
+            }
+        }
+
+        int componentId = 0;
+        Queue<int> pending = new Queue<int>();
+        foreach (KeyValuePair<int, List<int>> pair in adjacency)
+        {
+            if (roadGraphComponentBySegmentId.ContainsKey(pair.Key))
+            {
+                continue;
+            }
+
+            pending.Enqueue(pair.Key);
+            roadGraphComponentBySegmentId[pair.Key] = componentId;
+            while (pending.Count > 0)
+            {
+                int current = pending.Dequeue();
+                if (!adjacency.TryGetValue(current, out List<int> neighbors))
+                {
+                    continue;
+                }
+
+                for (int neighborIndex = 0; neighborIndex < neighbors.Count; neighborIndex++)
+                {
+                    int neighbor = neighbors[neighborIndex];
+                    if (roadGraphComponentBySegmentId.ContainsKey(neighbor))
+                    {
+                        continue;
+                    }
+
+                    roadGraphComponentBySegmentId[neighbor] = componentId;
+                    pending.Enqueue(neighbor);
+                }
+            }
+
+            componentId++;
+        }
+
+        cachedRoadGraphConnectivitySource = graph;
+        cachedRoadGraphConnectivitySegmentCount = graph.roadSegments.Count;
+        return roadGraphComponentBySegmentId.Count > 0;
+    }
+
+    private static void AddAdjacentRoadSegment(Dictionary<int, List<int>> adjacency, int fromSegmentId, int toSegmentId)
+    {
+        if (!adjacency.TryGetValue(fromSegmentId, out List<int> neighbors))
+        {
+            neighbors = new List<int>();
+            adjacency[fromSegmentId] = neighbors;
+        }
+
+        if (!neighbors.Contains(toSegmentId))
+        {
+            neighbors.Add(toSegmentId);
+        }
     }
 
     private bool TryGetEmergencyGroundSpawn(out Vector3 spawnPoint)
@@ -1503,7 +1723,7 @@ public class DeliveryManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Update quest with delivery location
+    /// Populate the quest's delivery targets before the physical pickup occurs.
     /// </summary>
     private void UpdateQuestWithDelivery(List<Vector3> deliveryStops, List<string> deliveryNeighborhoods)
     {
@@ -1515,8 +1735,7 @@ public class DeliveryManager : MonoBehaviour
             deliveryIndicatorPrefab,
             deliveryRadius,
             showDebugInfo,
-            BuildDeliveryObjectiveDescription(0));
-        lastObservedQuestDeliveryIndex = 0;
+            null);
     }
 
     /// <summary>
@@ -1837,7 +2056,9 @@ public class DeliveryManager : MonoBehaviour
         string summary = DeliveryMissionRules.BuildMissionConditionSummary(rewardMultiplier, rushHourBonus, nightBonus, rainRiskBonus);
         return string.IsNullOrEmpty(summary)
             ? string.Empty
-            : $"\nConditions: {summary}";
+            : LocalizationTable.CurrentLocale == LocalizationTable.EnglishLocale
+                ? $"\nConditions: {summary}"
+                : $"\nKoşullar: {summary}";
     }
 
     private string BuildDeliveryObjectiveDescription(int currentStopIndex)

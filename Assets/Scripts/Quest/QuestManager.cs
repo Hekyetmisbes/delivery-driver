@@ -893,6 +893,11 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
+            if (!ShouldQuestHandlePickup(currentQuest))
+            {
+                return;
+            }
+
             if (!currentQuest.PickupLocation.IsPlayerInRange(playerTransform))
             {
                 return;
@@ -936,6 +941,11 @@ namespace DeliveryDriver.Quest
 
             if (zone.ZoneType == QuestZoneType.Pickup)
             {
+                if (!ShouldQuestHandlePickup(currentQuest))
+                {
+                    return;
+                }
+
                 OnCargoPickedUp();
             }
             else if (zone.ZoneType == QuestZoneType.Delivery)
@@ -947,6 +957,38 @@ namespace DeliveryDriver.Quest
         public void ClearAllZones()
         {
             GetZoneMarkerService().ClearAllZones();
+        }
+
+        public bool CommitExternalPickup(QuestData quest, string deliveryObjectiveDescription = null)
+        {
+            if (quest == null || quest.Status != QuestStatus.Active)
+            {
+                return false;
+            }
+
+            if (!ReferenceEquals(currentQuest, quest))
+            {
+                if (!activeQuests.Contains(quest))
+                {
+                    return false;
+                }
+
+                currentQuest = quest;
+            }
+
+            if (quest.HasPickedUpCargo || quest.DeliveryLocations == null || quest.DeliveryLocations.Count == 0)
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(deliveryObjectiveDescription))
+            {
+                quest.QuestDescription = deliveryObjectiveDescription;
+            }
+
+            quest.CurrentDeliveryIndex = 0;
+            OnCargoPickedUp();
+            return true;
         }
 
         private void OnCargoPickedUp()
@@ -1387,6 +1429,11 @@ namespace DeliveryDriver.Quest
 
             int index = Mathf.Clamp(currentQuest.CurrentDeliveryIndex, 0, currentQuest.DeliveryLocations.Count - 1);
             return currentQuest.DeliveryLocations[index];
+        }
+
+        private static bool ShouldQuestHandlePickup(QuestData quest)
+        {
+            return quest != null && quest.PickupAuthority != QuestPickupAuthority.PhysicalBox;
         }
 
         private void MarkQuestUiDirty()

@@ -5,6 +5,13 @@ namespace TrafficSystem
 {
     public static class RoadGraphPathfinder
     {
+        public enum IncrementalSearchStatus
+        {
+            Running,
+            Succeeded,
+            Failed
+        }
+
         private sealed class SearchBuffers
         {
             public readonly List<WaypointCandidate> candidateBuffer = new List<WaypointCandidate>(CandidateWaypointLimit + 4);
@@ -62,6 +69,404 @@ namespace TrafficSystem
             }
         }
 
+        public sealed class IncrementalPathSearchSession
+        {
+            private readonly RoadGraphSpatialIndex idx;
+            private readonly SearchBuffers buffers = new SearchBuffers();
+            private readonly Vector3 projectedStart;
+            private readonly Vector3 projectedEnd;
+            private readonly Vector3 desiredTravelDirection;
+            private readonly float transferMaxDistance;
+            private readonly float transferMaxDistanceSqr;
+            private readonly float spatialCellSize;
+            private readonly float heuristicCellSize;
+            private readonly List<long> startCandidateKeys = new List<long>(CandidateWaypointLimit);
+            private readonly List<long> endCandidateKeys = new List<long>(CandidateWaypointLimit);
+
+            private int startCandidateIndex;
+            private int endCandidateIndex;
+            private bool pairInitialized;
+            private long currentStartKey;
+            private long currentEndKey;
+            private Vector3 currentEndPosition;
+
+            public IncrementalSearchStatus Status { get; private set; }
+            public List<Vector3> Path { get; private set; }
+            public float PathCost { get; private set; } = float.MaxValue;
+
+            internal IncrementalPathSearchSession(
+                RoadGraph graph,
+                Vector3 startWorld,
+                Vector3 endWorld,
+                float transferDistance)
+            {
+                Status = IncrementalSearchStatus.Failed;
+
+                if (graph == null || graph.roadSegments == null || graph.roadSegments.Count == 0)
+                {
+                    return;
+                }
+
+                var (projectedStartSegment, projectedStartEdgeIndex, projectedStartPoint, projectedStartTangent) = graph.ProjectPointOnRoad(startWorld);
+                var (projectedEndSegment, projectedEndEdgeIndex, projectedEndPoint, projectedEndTangent) = graph.ProjectPointOnRoad(endWorld);
+
+                if (projectedStartSegment == null || projectedEndSegment == null)
+                {
+                    return;
+                }
+
+                projectedStart = projectedStartPoint;
+                projectedEnd = projectedEndPoint;
+                transferMaxDistance = transferDistance;
+                transferMaxDistanceSqr = transferDistance * transferDistance;
+                spatialCellSize = Mathf.Max(1f, transferDistance);
+                heuristicCellSize = Mathf.Max(2f, spatialCellSize * 0.5f);
+                idx = graph.GetOrBuildSpatialIndex(spatialCellSize);
+
+                Vector3 routeDirection = GetPlanarDirection(projectedEnd - projectedStart);
+                if (routeDirection.sqrMagnitude < 0.0001f)
+                {
+                    routeDirection = GetPlanarDirection(projectedStartTangent);
+                }
+
+                if (routeDirection.sqrMagnitude < 0.0001f)
+                {
+                    routeDirection = GetPlanarDirection(projectedEndTangent);
+                }
+
+                desiredTravelDirection = routeDirection;
+
+                int projectedStartFallbackIndex = Mathf.Clamp(
+                    projectedStartEdgeIndex + 1,
+                    0,
+                    projectedStartSegment.waypoints.Count - 1);
+                int projectedEndFallbackIndex = Mathf.Clamp(
+                    projectedEndEdgeIndex,
+                    0,
+                    projectedEndSegment.waypoints.Count - 1);
+
+                float waypointSearchRadius = Mathf.Max(6f, transferDistance * 1.5f);
+                List<long> scratchStart = buffers.startCandidateKeys;
+                List<long> scratchEnd = buffers.endCandidateKeys;
+
+                CollectPreferredWaypointKeys(
+                    idx,
+                    projectedStart,
+                    desiredTravelDirection,
+                    waypointSearchRadius,
+                    RoadGraphSpatialIndex.PackKey(projectedStartSegment.id, projectedStartFallbackIndex),
+                    buffers,
+                    scratchStart);
+
+                CollectPreferredWaypointKeys(
+                    idx,
+                    projectedEnd,
+                    desiredTravelDirection,
+                    waypointSearchRadius,
+                    RoadGraphSpatialIndex.PackKey(projectedEndSegment.id, projectedEndFallbackIndex),
+                    buffers,
+                    scratchEnd);
+
+                if (scratchStart.Count == 0 || scratchEnd.Count == 0)
+                {
+                    return;
+                }
+
+                startCandidateKeys.AddRange(scratchStart);
+                endCandidateKeys.AddRange(scratchEnd);
+                Status = IncrementalSearchStatus.Running;
+            }
+
+            public void Step(int maxIterations)
+            {
+                if (Status != IncrementalSearchStatus.Running)
+                {
+                    return;
+                }
+
+                int remainingIterations = Mathf.Max(1, maxIterations);
+
+                while (remainingIterations > 0 && Status == IncrementalSearchStatus.Running)
+                {
+                    if (!pairInitialized)
+                    {
+                        if (!TryBeginNextPair())
+                        {
+                            Status = IncrementalSearchStatus.Failed;
+                            return;
+                        }
+
+                        if (Status != IncrementalSearchStatus.Running)
+                        {
+                            return;
+                        }
+                    }
+
+                    int consumedIterations = ContinueCurrentPair(remainingIterations);
+                    if (consumedIterations <= 0)
+                    {
+                        break;
+                    }
+
+                    remainingIterations -= consumedIterations;
+                }
+            }
+
+            private bool TryBeginNextPair()
+            {
+                while (startCandidateIndex < startCandidateKeys.Count)
+                {
+                    while (endCandidateIndex < endCandidateKeys.Count)
+                    {
+                        currentStartKey = startCandidateKeys[startCandidateIndex];
+                        currentEndKey = endCandidateKeys[endCandidateIndex++];
+
+                        if (!idx.waypointByKey.TryGetValue(currentStartKey, out RoadGraphSpatialIndex.WaypointRef startRef) ||
+                            !idx.waypointByKey.TryGetValue(currentEndKey, out RoadGraphSpatialIndex.WaypointRef endRef))
+                        {
+                            continue;
+                        }
+
+                        if (startRef.segment.id == endRef.segment.id && startRef.index <= endRef.index)
+                        {
+                            Path = CollectWaypointsBetween(startRef.segment, startRef.index, endRef.index, projectedStart, projectedEnd);
+                            PathCost = Vector3.Distance(projectedStart, projectedEnd);
+                            Status = Path != null && Path.Count >= 2
+                                ? IncrementalSearchStatus.Succeeded
+                                : IncrementalSearchStatus.Failed;
+                            return true;
+                        }
+
+                        buffers.PreparePathSearch();
+                        buffers.gScore[currentStartKey] = 0f;
+                        Enqueue(buffers, currentStartKey, GridManhattanHeuristic(startRef.position, endRef.position, heuristicCellSize));
+                        currentEndPosition = endRef.position;
+                        pairInitialized = true;
+                        return true;
+                    }
+
+                    startCandidateIndex++;
+                    endCandidateIndex = 0;
+                }
+
+                return false;
+            }
+
+            private int ContinueCurrentPair(int maxIterations)
+            {
+                int iterations = 0;
+
+                while (buffers.priorityQueue.Count > 0 && iterations < maxIterations && Status == IncrementalSearchStatus.Running)
+                {
+                    iterations++;
+                    long currentKey = Dequeue(buffers);
+
+                    if (currentKey == currentEndKey)
+                    {
+                        if (TryBuildCurrentPath(out List<Vector3> path, out float pathCost))
+                        {
+                            Path = path;
+                            PathCost = pathCost;
+                            Status = IncrementalSearchStatus.Succeeded;
+                        }
+
+                        pairInitialized = false;
+                        return iterations;
+                    }
+
+                    if (buffers.closed.Contains(currentKey))
+                    {
+                        continue;
+                    }
+
+                    buffers.closed.Add(currentKey);
+                    if (!buffers.gScore.TryGetValue(currentKey, out float currentG))
+                    {
+                        continue;
+                    }
+
+                    RoadGraphSpatialIndex.UnpackKey(currentKey, out int curSegId, out int curWpIdx);
+                    if (!idx.segmentById.TryGetValue(curSegId, out RoadSegment curSeg))
+                    {
+                        continue;
+                    }
+
+                    Vector3 curPos = curSeg.waypoints[curWpIdx].position;
+                    Vector3 curForward = idx.waypointByKey.TryGetValue(currentKey, out RoadGraphSpatialIndex.WaypointRef curRef)
+                        ? curRef.forward
+                        : GetWaypointForward(curSeg, curWpIdx);
+
+                    int forwardNeighborIndex = curWpIdx + 1;
+                    if (forwardNeighborIndex < curSeg.waypoints.Count)
+                    {
+                        Vector3 nextPos = curSeg.waypoints[forwardNeighborIndex].position;
+                        long forwardKey = RoadGraphSpatialIndex.PackKey(curSegId, forwardNeighborIndex);
+                        Vector3 nextForward = idx.waypointByKey.TryGetValue(forwardKey, out RoadGraphSpatialIndex.WaypointRef forwardRef)
+                            ? forwardRef.forward
+                            : GetWaypointForward(curSeg, forwardNeighborIndex);
+                        float forwardCost = GetLanePenalty(curSeg) +
+                                            GetAlignmentPenalty(nextForward, desiredTravelDirection) +
+                                            GetTurnPenalty(curForward, nextForward);
+                        TryNeighbor(currentKey, curPos, currentG, forwardKey, nextPos, forwardCost);
+                    }
+
+                    for (int connectionIndex = 0; connectionIndex < curSeg.connections.Count; connectionIndex++)
+                    {
+                        RoadConnection connection = curSeg.connections[connectionIndex];
+                        if (connection.fromWaypointIndex != curWpIdx)
+                        {
+                            continue;
+                        }
+
+                        long connectionKey = RoadGraphSpatialIndex.PackKey(connection.toSegment.id, connection.toWaypointIndex);
+                        Vector3 connectionPos = connection.toSegment.waypoints[connection.toWaypointIndex].position;
+                        Vector3 connectionForward = idx.waypointByKey.TryGetValue(connectionKey, out RoadGraphSpatialIndex.WaypointRef connectionRef)
+                            ? connectionRef.forward
+                            : GetWaypointForward(connection.toSegment, connection.toWaypointIndex);
+                        float connectionCost = GetLanePenalty(connection.toSegment) +
+                                               GetAlignmentPenalty(connectionForward, desiredTravelDirection) +
+                                               GetTurnPenalty(curForward, connectionForward);
+                        TryNeighbor(currentKey, curPos, currentG, connectionKey, connectionPos, connectionCost);
+                    }
+
+                    if (transferMaxDistance > 0.01f)
+                    {
+                        Vector2Int currentCell = RoadGraphSpatialIndex.ToGridCell(curPos, spatialCellSize);
+                        int radius = Mathf.CeilToInt(transferMaxDistance / spatialCellSize);
+
+                        for (int gx = currentCell.x - radius; gx <= currentCell.x + radius; gx++)
+                        {
+                            for (int gz = currentCell.y - radius; gz <= currentCell.y + radius; gz++)
+                            {
+                                Vector2Int lookupCell = new Vector2Int(gx, gz);
+                                if (!idx.spatialGrid.TryGetValue(lookupCell, out List<long> bucket))
+                                {
+                                    continue;
+                                }
+
+                                for (int bucketIndex = 0; bucketIndex < bucket.Count; bucketIndex++)
+                                {
+                                    long transferKey = bucket[bucketIndex];
+                                    if (transferKey == currentKey || buffers.closed.Contains(transferKey))
+                                    {
+                                        continue;
+                                    }
+
+                                    if (!idx.waypointByKey.TryGetValue(transferKey, out RoadGraphSpatialIndex.WaypointRef candidate))
+                                    {
+                                        continue;
+                                    }
+
+                                    Vector3 delta = candidate.position - curPos;
+                                    delta.y = 0f;
+                                    float distanceSqr = delta.sqrMagnitude;
+                                    if (distanceSqr <= 0.0001f || distanceSqr > transferMaxDistanceSqr)
+                                    {
+                                        continue;
+                                    }
+
+                                    if (!IsTransferCandidateEligible(curSeg, curWpIdx, candidate.segment, candidate.index))
+                                    {
+                                        continue;
+                                    }
+
+                                    if (!TryGetTransferPenalty(curPos, curForward, candidate.position, transferMaxDistance, out float transferPenalty))
+                                    {
+                                        continue;
+                                    }
+
+                                    float transferDistance = Mathf.Sqrt(distanceSqr);
+                                    float normalizedTransferDistance = transferMaxDistance > 0.01f
+                                        ? transferDistance / transferMaxDistance
+                                        : 1f;
+                                    float transferCost = (transferDistance * TransferDistancePenaltyMultiplier) +
+                                                         (normalizedTransferDistance * normalizedTransferDistance * TransferNormalizedPenalty) +
+                                                         transferPenalty +
+                                                         GetLanePenalty(candidate.segment) +
+                                                         GetAlignmentPenalty(candidate.forward, desiredTravelDirection) +
+                                                         GetTurnPenalty(curForward, candidate.forward);
+                                    TryNeighbor(currentKey, curPos, currentG, transferKey, candidate.position, transferCost);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (buffers.priorityQueue.Count == 0)
+                {
+                    pairInitialized = false;
+                }
+
+                return iterations;
+            }
+
+            private void TryNeighbor(long currentKey, Vector3 currentPosition, float currentG, long neighborKey, Vector3 neighborPosition, float extraCost)
+            {
+                if (buffers.closed.Contains(neighborKey))
+                {
+                    return;
+                }
+
+                float tentativeG = currentG + Vector3.Distance(currentPosition, neighborPosition) + extraCost;
+                if (!buffers.gScore.TryGetValue(neighborKey, out float bestKnownG) || tentativeG < bestKnownG)
+                {
+                    buffers.gScore[neighborKey] = tentativeG;
+                    buffers.prev[neighborKey] = currentKey;
+                    float priority = tentativeG + GridManhattanHeuristic(neighborPosition, currentEndPosition, heuristicCellSize);
+                    Enqueue(buffers, neighborKey, priority);
+                }
+            }
+
+            private bool TryBuildCurrentPath(out List<Vector3> path, out float pathCost)
+            {
+                path = null;
+                pathCost = float.MaxValue;
+
+                if (!buffers.prev.ContainsKey(currentEndKey) && currentStartKey != currentEndKey)
+                {
+                    return false;
+                }
+
+                List<long> pathKeys = buffers.pathKeys;
+                pathKeys.Clear();
+
+                long currentKey = currentEndKey;
+                while (currentKey != currentStartKey)
+                {
+                    pathKeys.Add(currentKey);
+                    if (!buffers.prev.ContainsKey(currentKey))
+                    {
+                        return false;
+                    }
+
+                    currentKey = buffers.prev[currentKey];
+                }
+
+                pathKeys.Add(currentStartKey);
+                pathKeys.Reverse();
+
+                path = new List<Vector3>(pathKeys.Count + 2);
+                path.Add(projectedStart);
+
+                for (int i = 0; i < pathKeys.Count; i++)
+                {
+                    RoadGraphSpatialIndex.UnpackKey(pathKeys[i], out int segmentId, out int waypointIndex);
+                    if (idx.segmentById.TryGetValue(segmentId, out RoadSegment segment) &&
+                        waypointIndex >= 0 &&
+                        waypointIndex < segment.waypoints.Count)
+                    {
+                        path.Add(segment.waypoints[waypointIndex].position);
+                    }
+                }
+
+                path.Add(projectedEnd);
+                pathCost = buffers.gScore.TryGetValue(currentEndKey, out float totalCost)
+                    ? totalCost
+                    : CalculatePathLength(path);
+                return path.Count >= 2;
+            }
+        }
+
         public readonly struct PathSearchDiagnostics
         {
             public PathSearchDiagnostics(
@@ -114,125 +519,40 @@ namespace TrafficSystem
 
         private const float LeftLanePenalty = 6f;
         private const float UnnamedLanePenalty = 1.25f;
-        private const float ReverseAlignmentPenalty = 20f;
+        private const float ReverseAlignmentPenalty = 8f;
         private const float HardReverseTurnPenalty = 10f;
-        private const float TransferBackwardDotThreshold = -0.15f;
-        private const float TransferLeftAllowance = 0.75f;
+        private const float TransferBackwardDotThreshold = -0.85f;
+        private const float TransferLeftAllowance = 4f;
         private const float TransferDistancePenaltyMultiplier = 4f;
         private const float TransferNormalizedPenalty = 40f;
         private const float TransferHeightPenalty = 10f;
         private const float MaxTransferHeightDelta = 2.5f;
-        private const int TransferEndpointWindow = 2;
-        private const int CandidateWaypointLimit = 4;
-        private static readonly SearchBuffers SharedBuffers = new SearchBuffers();
-
+        private const int CandidateWaypointLimit = 10;
+        private const int MaxAStarIterations = 18000;
         public static List<Vector3> FindPath(
             RoadGraph graph,
             Vector3 startWorld,
             Vector3 endWorld,
             float transferMaxDistance = 8f)
         {
-            if (graph == null || graph.roadSegments.Count == 0)
+            IncrementalPathSearchSession session = StartIncrementalSearch(graph, startWorld, endWorld, transferMaxDistance);
+            while (session != null && session.Status == IncrementalSearchStatus.Running)
             {
-                return null;
+                session.Step(MaxAStarIterations);
             }
 
-            var (projectedStartSegment, projectedStartEdgeIndex, projectedStart, projectedStartTangent) = graph.ProjectPointOnRoad(startWorld);
-            var (projectedEndSegment, projectedEndEdgeIndex, projectedEnd, projectedEndTangent) = graph.ProjectPointOnRoad(endWorld);
+            return session != null && session.Status == IncrementalSearchStatus.Succeeded
+                ? session.Path
+                : null;
+        }
 
-            if (projectedStartSegment == null || projectedEndSegment == null)
-            {
-                return null;
-            }
-
-            // Use cached spatial index instead of rebuilding every call
-            float spatialCellSize = Mathf.Max(1f, transferMaxDistance);
-            float heuristicCellSize = Mathf.Max(2f, spatialCellSize * 0.5f);
-            float transferMaxDistanceSqr = transferMaxDistance * transferMaxDistance;
-
-            RoadGraphSpatialIndex idx = graph.GetOrBuildSpatialIndex(spatialCellSize);
-
-            Vector3 desiredTravelDirection = GetPlanarDirection(projectedEnd - projectedStart);
-            if (desiredTravelDirection.sqrMagnitude < 0.0001f)
-            {
-                desiredTravelDirection = GetPlanarDirection(projectedStartTangent);
-            }
-
-            if (desiredTravelDirection.sqrMagnitude < 0.0001f)
-            {
-                desiredTravelDirection = GetPlanarDirection(projectedEndTangent);
-            }
-
-            int projectedStartFallbackIndex = Mathf.Clamp(
-                projectedStartEdgeIndex + 1,
-                0,
-                projectedStartSegment.waypoints.Count - 1);
-            int projectedEndFallbackIndex = Mathf.Clamp(
-                projectedEndEdgeIndex,
-                0,
-                projectedEndSegment.waypoints.Count - 1);
-
-            float waypointSearchRadius = Mathf.Max(6f, transferMaxDistance * 1.5f);
-            SearchBuffers buffers = SharedBuffers;
-            List<long> startCandidates = buffers.startCandidateKeys;
-            List<long> endCandidates = buffers.endCandidateKeys;
-            CollectPreferredWaypointKeys(
-                idx,
-                projectedStart,
-                desiredTravelDirection,
-                waypointSearchRadius,
-                RoadGraphSpatialIndex.PackKey(projectedStartSegment.id, projectedStartFallbackIndex),
-                buffers,
-                startCandidates);
-            CollectPreferredWaypointKeys(
-                idx,
-                projectedEnd,
-                desiredTravelDirection,
-                waypointSearchRadius,
-                RoadGraphSpatialIndex.PackKey(projectedEndSegment.id, projectedEndFallbackIndex),
-                buffers,
-                endCandidates);
-
-            if (startCandidates.Count == 0 || endCandidates.Count == 0)
-            {
-                return null;
-            }
-
-            List<Vector3> bestPath = null;
-            float bestPathCost = float.MaxValue;
-            for (int startCandidateIndex = 0; startCandidateIndex < startCandidates.Count; startCandidateIndex++)
-            {
-                for (int endCandidateIndex = 0; endCandidateIndex < endCandidates.Count; endCandidateIndex++)
-                {
-                    if (!TryFindPathBetweenKeys(
-                            idx,
-                            startCandidates[startCandidateIndex],
-                            endCandidates[endCandidateIndex],
-                            projectedStart,
-                            projectedEnd,
-                            desiredTravelDirection,
-                            transferMaxDistance,
-                            transferMaxDistanceSqr,
-                            spatialCellSize,
-                            heuristicCellSize,
-                            buffers,
-                            out List<Vector3> candidatePath,
-                            out float candidateCost))
-                    {
-                        continue;
-                    }
-
-                    if (candidateCost >= bestPathCost)
-                    {
-                        continue;
-                    }
-
-                    bestPath = candidatePath;
-                    bestPathCost = candidateCost;
-                }
-            }
-
-            return bestPath;
+        public static IncrementalPathSearchSession StartIncrementalSearch(
+            RoadGraph graph,
+            Vector3 startWorld,
+            Vector3 endWorld,
+            float transferMaxDistance = 8f)
+        {
+            return new IncrementalPathSearchSession(graph, startWorld, endWorld, transferMaxDistance);
         }
 
         public static bool TryGetPathDiagnostics(
@@ -413,8 +733,14 @@ namespace TrafficSystem
             gScore[startKey] = 0f;
             Enqueue(startKey, GridManhattanHeuristic(startRef.position, endPos, heuristicCellSize));
 
+            int iterations = 0;
             while (pq.Count > 0)
             {
+                if (++iterations > MaxAStarIterations)
+                {
+                    break;
+                }
+
                 long currentKey = Dequeue();
                 if (currentKey == endKey)
                 {
@@ -599,6 +925,33 @@ namespace TrafficSystem
             return path.Count >= 2;
         }
 
+        private static void Enqueue(SearchBuffers buffers, long key, float cost)
+        {
+            SortedList<float, Queue<long>> priorityQueue = buffers.priorityQueue;
+            if (!priorityQueue.TryGetValue(cost, out Queue<long> queue))
+            {
+                queue = buffers.RentQueue();
+                priorityQueue[cost] = queue;
+            }
+
+            queue.Enqueue(key);
+        }
+
+        private static long Dequeue(SearchBuffers buffers)
+        {
+            SortedList<float, Queue<long>> priorityQueue = buffers.priorityQueue;
+            float first = priorityQueue.Keys[0];
+            Queue<long> queue = priorityQueue[first];
+            long key = queue.Dequeue();
+            if (queue.Count == 0)
+            {
+                priorityQueue.Remove(first);
+                buffers.ReturnQueue(queue);
+            }
+
+            return key;
+        }
+
         private static Vector2Int ToGridCell(Vector3 position, float cellSize)
         {
             return new Vector2Int(
@@ -680,12 +1033,17 @@ namespace TrafficSystem
             }
 
             float dot = Vector3.Dot(GetPlanarDirection(waypointForward), desiredTravelDirection);
-            if (dot < 0f)
+            if (dot < -0.5f)
             {
-                return ReverseAlignmentPenalty + (-dot * 10f);
+                return ReverseAlignmentPenalty + ((-dot - 0.5f) * 6f);
             }
 
-            return (1f - dot) * 2f;
+            if (dot < 0f)
+            {
+                return (-dot) * 4f;
+            }
+
+            return (1f - dot) * 1.5f;
         }
 
         private static float GetTurnPenalty(Vector3 currentForward, Vector3 nextForward)
@@ -712,25 +1070,15 @@ namespace TrafficSystem
             RoadSegment candidateSegment,
             int candidateWaypointIndex)
         {
-            if (currentSegment == null || candidateSegment == null || candidateSegment == currentSegment)
-            {
-                return false;
-            }
-
-            return IsNearSegmentEndpoint(currentSegment, currentWaypointIndex) &&
-                   IsNearSegmentEndpoint(candidateSegment, candidateWaypointIndex);
-        }
-
-        private static bool IsNearSegmentEndpoint(RoadSegment segment, int waypointIndex)
-        {
-            if (segment == null || segment.waypoints == null || segment.waypoints.Count == 0)
-            {
-                return false;
-            }
-
-            int lastIndex = segment.waypoints.Count - 1;
-            return waypointIndex <= TransferEndpointWindow ||
-                   waypointIndex >= Mathf.Max(0, lastIndex - TransferEndpointWindow);
+            // Only reject transfers to the same segment.  Spatial distance, alignment,
+            // lateral offset, and height checks in TryGetTransferPenalty already guard
+            // against bad transfers.  The previous endpoint-proximity requirement was
+            // blocking valid routes on SimplePoly dual-lane road layouts where segments
+            // are short mesh pieces and the player or destination projects to a
+            // mid-segment waypoint.
+            return currentSegment != null &&
+                   candidateSegment != null &&
+                   candidateSegment != currentSegment;
         }
 
         private static bool TryGetTransferPenalty(

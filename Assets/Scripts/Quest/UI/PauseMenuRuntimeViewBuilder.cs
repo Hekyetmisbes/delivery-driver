@@ -27,6 +27,10 @@ namespace DeliveryDriver.Quest.UI
 
     internal sealed class PauseMenuRuntimeViewBuilder
     {
+        private const float LabelColumnWidth = 260f;
+        private const float RowMinHeight = 44f;
+        private const float SectionSpacing = 12f;
+
         private readonly PauseMenuRuntimeViewConfig config;
 
         public PauseMenuRuntimeViewBuilder(PauseMenuRuntimeViewConfig config)
@@ -63,26 +67,24 @@ namespace DeliveryDriver.Quest.UI
             panelObject.AddComponent<GraphicRaycaster>();
 
             VerticalLayoutGroup layout = panelObject.AddComponent<VerticalLayoutGroup>();
-            layout.padding = new RectOffset(30, 30, 28, 24);
-            layout.spacing = 16f;
+            layout.padding = new RectOffset(30, 30, 24, 24);
+            layout.spacing = 14f;
             layout.childControlHeight = true;
             layout.childControlWidth = true;
             layout.childForceExpandHeight = false;
             layout.childForceExpandWidth = true;
 
-            return BuildSections(panelObject, panelCanvasGroup);
-        }
-
-        private PauseMenuRuntimeView BuildSections(GameObject panelObject, CanvasGroup panelCanvasGroup)
-        {
             CreateHeader(panelObject.transform, LocalizationTable.Get("paused_title"));
-            Transform audioSection = CreateSectionContainer(panelObject.transform, "SesBolumu");
+
+            Transform contentRoot = CreateScrollableContentRoot(panelObject.transform, out _);
+
+            Transform audioSection = CreateSectionContainer(contentRoot, "SesBolumu", 220f);
             CreateSectionLabel(audioSection, LocalizationTable.Get("audio"));
             Slider masterVolumeSlider = CreateLabeledSlider(audioSection, LocalizationTable.Get("master_volume"));
             Slider musicVolumeSlider = CreateLabeledSlider(audioSection, LocalizationTable.Get("music_volume"));
             Slider sfxVolumeSlider = CreateLabeledSlider(audioSection, LocalizationTable.Get("sfx_volume"));
 
-            Transform graphicsSection = CreateSectionContainer(panelObject.transform, "GrafikBolumu");
+            Transform graphicsSection = CreateSectionContainer(contentRoot, "GrafikBolumu", 430f);
             CreateSectionLabel(graphicsSection, LocalizationTable.Get("graphics"));
             TMP_Dropdown qualityDropdown = CreateLabeledDropdown(
                 graphicsSection,
@@ -104,8 +106,16 @@ namespace DeliveryDriver.Quest.UI
                 graphicsSection,
                 LocalizationTable.Get("speed_unit"),
                 new List<string> { "KMH", "MPH" });
+            TMP_Dropdown languageDropdown = CreateLabeledDropdown(
+                graphicsSection,
+                LocalizationTable.Get("language"),
+                new List<string>
+                {
+                    LocalizationTable.GetLocaleDisplayName(LocalizationTable.TurkishLocale),
+                    LocalizationTable.GetLocaleDisplayName(LocalizationTable.EnglishLocale)
+                });
 
-            Transform accessibilitySection = CreateSectionContainer(panelObject.transform, "ErisilebilirlikBolumu");
+            Transform accessibilitySection = CreateSectionContainer(contentRoot, "ErisilebilirlikBolumu", 250f);
             CreateSectionLabel(accessibilitySection, LocalizationTable.Get("accessibility"));
             TMP_Dropdown colorBlindDropdown = CreateLabeledDropdown(
                 accessibilitySection,
@@ -133,6 +143,7 @@ namespace DeliveryDriver.Quest.UI
                 fullScreenToggle,
                 fpsDropdown,
                 speedUnitDropdown,
+                languageDropdown,
                 colorBlindDropdown,
                 textScaleSlider,
                 highContrastToggle);
@@ -149,6 +160,7 @@ namespace DeliveryDriver.Quest.UI
             Toggle fullScreenToggle,
             TMP_Dropdown fpsDropdown,
             TMP_Dropdown speedUnitDropdown,
+            TMP_Dropdown languageDropdown,
             TMP_Dropdown colorBlindDropdown,
             Slider textScaleSlider,
             Toggle highContrastToggle)
@@ -165,7 +177,7 @@ namespace DeliveryDriver.Quest.UI
             buttonLayout.childControlHeight = true;
             buttonLayout.childForceExpandWidth = true;
             buttonLayout.childForceExpandHeight = false;
-            buttonRow.GetComponent<LayoutElement>().minHeight = 58f;
+            buttonRow.GetComponent<LayoutElement>().minHeight = 62f;
 
             Button resumeButton = CreateButton(buttonRow.transform, "ResumeButton", config.ResumeButtonLabel, UIThemeConstants.ButtonGreen);
             Button quitButton = CreateButton(buttonRow.transform, "QuitButton", config.QuitButtonLabel, UIThemeConstants.ButtonRed);
@@ -184,6 +196,7 @@ namespace DeliveryDriver.Quest.UI
                 FullScreenToggle = fullScreenToggle,
                 FpsDropdown = fpsDropdown,
                 SpeedUnitDropdown = speedUnitDropdown,
+                LanguageDropdown = languageDropdown,
                 ColorBlindDropdown = colorBlindDropdown,
                 TextScaleSlider = textScaleSlider,
                 HighContrastToggle = highContrastToggle,
@@ -255,7 +268,7 @@ namespace DeliveryDriver.Quest.UI
 #endif
         }
 
-        private Transform CreateSectionContainer(Transform parent, string objectName)
+        private Transform CreateSectionContainer(Transform parent, string objectName, float preferredHeight)
         {
             GameObject sectionObject = new GameObject(objectName, typeof(RectTransform), typeof(Image), typeof(VerticalLayoutGroup), typeof(LayoutElement));
             sectionObject.transform.SetParent(parent, false);
@@ -270,24 +283,70 @@ namespace DeliveryDriver.Quest.UI
 
             VerticalLayoutGroup sectionLayout = sectionObject.GetComponent<VerticalLayoutGroup>();
             sectionLayout.padding = new RectOffset(20, 20, 16, 16);
-            sectionLayout.spacing = 10f;
+            sectionLayout.spacing = SectionSpacing;
             sectionLayout.childControlWidth = true;
             sectionLayout.childControlHeight = true;
             sectionLayout.childForceExpandWidth = true;
             sectionLayout.childForceExpandHeight = false;
-            sectionObject.GetComponent<LayoutElement>().minHeight = 0f;
+            LayoutElement layoutElement = sectionObject.GetComponent<LayoutElement>();
+            layoutElement.minHeight = preferredHeight;
+            layoutElement.preferredHeight = preferredHeight;
             return sectionObject.transform;
+        }
+
+        private Transform CreateScrollableContentRoot(Transform parent, out ScrollRect scrollRect)
+        {
+            GameObject scrollRoot = new GameObject("SettingsScrollRoot", typeof(RectTransform), typeof(Image), typeof(LayoutElement), typeof(ScrollRect), typeof(RectMask2D));
+            scrollRoot.transform.SetParent(parent, false);
+
+            LayoutElement layoutElement = scrollRoot.GetComponent<LayoutElement>();
+            layoutElement.flexibleHeight = 1f;
+            layoutElement.minHeight = 240f;
+
+            Image scrollBackground = scrollRoot.GetComponent<Image>();
+            scrollBackground.color = new Color(0.04f, 0.06f, 0.09f, 0.2f);
+
+            GameObject contentObject = new GameObject("Content", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+            contentObject.transform.SetParent(scrollRoot.transform, false);
+            RectTransform contentRect = contentObject.GetComponent<RectTransform>();
+            contentRect.anchorMin = new Vector2(0f, 1f);
+            contentRect.anchorMax = new Vector2(1f, 1f);
+            contentRect.pivot = new Vector2(0.5f, 1f);
+            contentRect.anchoredPosition = Vector2.zero;
+            contentRect.sizeDelta = Vector2.zero;
+
+            VerticalLayoutGroup contentLayout = contentObject.GetComponent<VerticalLayoutGroup>();
+            contentLayout.spacing = 14f;
+            contentLayout.padding = new RectOffset(0, 0, 0, 4);
+            contentLayout.childControlWidth = true;
+            contentLayout.childControlHeight = true;
+            contentLayout.childForceExpandWidth = true;
+            contentLayout.childForceExpandHeight = false;
+
+            ContentSizeFitter fitter = contentObject.GetComponent<ContentSizeFitter>();
+            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+
+            scrollRect = scrollRoot.GetComponent<ScrollRect>();
+            scrollRect.viewport = scrollRoot.GetComponent<RectTransform>();
+            scrollRect.content = contentRect;
+            scrollRect.horizontal = false;
+            scrollRect.vertical = true;
+            scrollRect.movementType = ScrollRect.MovementType.Clamped;
+            scrollRect.scrollSensitivity = 24f;
+
+            return contentObject.transform;
         }
 
         private static void CreateSectionLabel(Transform parent, string label)
         {
             GameObject headerObject = new GameObject($"{label}Header", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
             headerObject.transform.SetParent(parent, false);
-            headerObject.GetComponent<LayoutElement>().minHeight = 28f;
+            headerObject.GetComponent<LayoutElement>().minHeight = 32f;
 
             TextMeshProUGUI text = headerObject.GetComponent<TextMeshProUGUI>();
             text.text = label;
-            text.fontSize = 20f;
+            text.fontSize = 24f;
             text.fontStyle = FontStyles.Bold;
             text.alignment = TextAlignmentOptions.Left;
             text.color = new Color(0.78f, 0.87f, 0.98f, 0.95f);
@@ -301,11 +360,11 @@ namespace DeliveryDriver.Quest.UI
         {
             GameObject headerObject = new GameObject("Header", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
             headerObject.transform.SetParent(parent, false);
-            headerObject.GetComponent<LayoutElement>().minHeight = 54f;
+            headerObject.GetComponent<LayoutElement>().minHeight = 50f;
 
             TextMeshProUGUI text = headerObject.GetComponent<TextMeshProUGUI>();
             text.text = label;
-            text.fontSize = 36f;
+            text.fontSize = 32f;
             text.fontStyle = FontStyles.Bold;
             text.alignment = TextAlignmentOptions.Center;
             text.color = new Color(0.95f, 0.98f, 1f, 1f);
@@ -317,25 +376,31 @@ namespace DeliveryDriver.Quest.UI
 
         private Slider CreateLabeledSlider(Transform parent, string label)
         {
-            GameObject rowObject = new GameObject($"{label}Row", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(LayoutElement));
+            GameObject rowObject = new GameObject($"{label}Row", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
             rowObject.transform.SetParent(parent, false);
 
-            VerticalLayoutGroup rowLayout = rowObject.GetComponent<VerticalLayoutGroup>();
-            rowLayout.spacing = 6f;
+            HorizontalLayoutGroup rowLayout = rowObject.GetComponent<HorizontalLayoutGroup>();
+            rowLayout.spacing = 14f;
             rowLayout.childControlHeight = true;
             rowLayout.childControlWidth = true;
             rowLayout.childForceExpandHeight = false;
             rowLayout.childForceExpandWidth = true;
-            rowObject.GetComponent<LayoutElement>().minHeight = 68f;
+            rowLayout.childAlignment = TextAnchor.MiddleLeft;
+            rowObject.GetComponent<LayoutElement>().minHeight = RowMinHeight;
+            rowObject.GetComponent<LayoutElement>().preferredHeight = RowMinHeight;
 
-            GameObject labelObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+            GameObject labelObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
             labelObject.transform.SetParent(rowObject.transform, false);
+            LayoutElement labelLayout = labelObject.GetComponent<LayoutElement>();
+            labelLayout.minWidth = LabelColumnWidth;
+            labelLayout.preferredWidth = LabelColumnWidth;
+            labelLayout.flexibleWidth = 0f;
             TextMeshProUGUI labelText = labelObject.GetComponent<TextMeshProUGUI>();
             labelText.text = label;
             labelText.fontSize = 20f;
             labelText.fontStyle = FontStyles.Bold;
             labelText.color = new Color(0.9f, 0.95f, 1f, 1f);
-            labelText.alignment = TextAlignmentOptions.Left;
+            labelText.alignment = TextAlignmentOptions.MidlineLeft;
             if (TMP_Settings.defaultFontAsset != null)
             {
                 labelText.font = TMP_Settings.defaultFontAsset;
@@ -352,8 +417,11 @@ namespace DeliveryDriver.Quest.UI
             sliderRect.anchorMin = new Vector2(0f, 0.5f);
             sliderRect.anchorMax = new Vector2(1f, 0.5f);
             sliderRect.pivot = new Vector2(0.5f, 0.5f);
-            sliderRect.sizeDelta = new Vector2(0f, 26f);
-            sliderObject.GetComponent<LayoutElement>().minHeight = 26f;
+            sliderRect.sizeDelta = new Vector2(0f, 20f);
+            LayoutElement sliderLayout = sliderObject.GetComponent<LayoutElement>();
+            sliderLayout.minHeight = 24f;
+            sliderLayout.preferredHeight = 24f;
+            sliderLayout.flexibleWidth = 1f;
 
             GameObject backgroundObject = new GameObject("Background", typeof(RectTransform), typeof(Image));
             backgroundObject.transform.SetParent(sliderObject.transform, false);
@@ -361,41 +429,42 @@ namespace DeliveryDriver.Quest.UI
             backgroundRect.anchorMin = new Vector2(0f, 0.25f);
             backgroundRect.anchorMax = new Vector2(1f, 0.75f);
             Image backgroundImage = backgroundObject.GetComponent<Image>();
-            backgroundImage.color = new Color(0.22f, 0.26f, 0.32f, 1f);
-            if (config.SliderBackgroundSprite != null)
-            {
-                backgroundImage.sprite = config.SliderBackgroundSprite;
-                backgroundImage.type = Image.Type.Sliced;
-            }
+            backgroundImage.color = new Color(0.22f, 0.26f, 0.32f, 0f);
 
             GameObject fillArea = new GameObject("Fill Area", typeof(RectTransform));
             fillArea.transform.SetParent(sliderObject.transform, false);
             RectTransform fillAreaRect = fillArea.GetComponent<RectTransform>();
             fillAreaRect.anchorMin = new Vector2(0f, 0f);
             fillAreaRect.anchorMax = new Vector2(1f, 1f);
-            fillAreaRect.offsetMin = new Vector2(16f, 7f);
-            fillAreaRect.offsetMax = new Vector2(-16f, -7f);
+            fillAreaRect.offsetMin = new Vector2(8f, 6f);
+            fillAreaRect.offsetMax = new Vector2(-8f, -6f);
+
+            GameObject trackObject = new GameObject("Track", typeof(RectTransform), typeof(Image));
+            trackObject.transform.SetParent(fillArea.transform, false);
+            RectTransform trackRect = trackObject.GetComponent<RectTransform>();
+            trackRect.anchorMin = new Vector2(0f, 0.5f);
+            trackRect.anchorMax = new Vector2(1f, 0.5f);
+            trackRect.pivot = new Vector2(0.5f, 0.5f);
+            trackRect.sizeDelta = new Vector2(0f, 4f);
+            trackObject.GetComponent<Image>().color = new Color(0.24f, 0.29f, 0.37f, 1f);
 
             GameObject fillObject = new GameObject("Fill", typeof(RectTransform), typeof(Image));
             fillObject.transform.SetParent(fillArea.transform, false);
             RectTransform fillRect = fillObject.GetComponent<RectTransform>();
-            fillRect.anchorMin = new Vector2(0f, 0f);
-            fillRect.anchorMax = new Vector2(1f, 1f);
+            fillRect.anchorMin = new Vector2(0f, 0.5f);
+            fillRect.anchorMax = new Vector2(1f, 0.5f);
+            fillRect.pivot = new Vector2(0f, 0.5f);
+            fillRect.sizeDelta = new Vector2(0f, 4f);
             Image fillImage = fillObject.GetComponent<Image>();
             fillImage.color = new Color(0.16f, 0.52f, 0.88f, 1f);
-            if (config.SliderFillSprite != null)
-            {
-                fillImage.sprite = config.SliderFillSprite;
-                fillImage.type = Image.Type.Sliced;
-            }
 
             GameObject handleArea = new GameObject("Handle Slide Area", typeof(RectTransform));
             handleArea.transform.SetParent(sliderObject.transform, false);
             RectTransform handleAreaRect = handleArea.GetComponent<RectTransform>();
             handleAreaRect.anchorMin = new Vector2(0f, 0f);
             handleAreaRect.anchorMax = new Vector2(1f, 1f);
-            handleAreaRect.offsetMin = new Vector2(16f, 0f);
-            handleAreaRect.offsetMax = new Vector2(-16f, 0f);
+            handleAreaRect.offsetMin = new Vector2(8f, 0f);
+            handleAreaRect.offsetMax = new Vector2(-8f, 0f);
 
             GameObject handleObject = new GameObject("Handle", typeof(RectTransform), typeof(Image));
             handleObject.transform.SetParent(handleArea.transform, false);
@@ -403,15 +472,10 @@ namespace DeliveryDriver.Quest.UI
             handleRect.anchorMin = new Vector2(0.5f, 0.5f);
             handleRect.anchorMax = new Vector2(0.5f, 0.5f);
             handleRect.pivot = new Vector2(0.5f, 0.5f);
-            handleRect.sizeDelta = new Vector2(28f, 28f);
+            handleRect.sizeDelta = new Vector2(10f, 18f);
             Image handleImage = handleObject.GetComponent<Image>();
             handleImage.color = Color.white;
             handleImage.preserveAspect = true;
-            if (config.SliderHandleSprite != null)
-            {
-                handleImage.sprite = config.SliderHandleSprite;
-                handleImage.type = Image.Type.Simple;
-            }
 
             Slider slider = sliderObject.GetComponent<Slider>();
             slider.minValue = 0f;
@@ -495,7 +559,7 @@ namespace DeliveryDriver.Quest.UI
                 options.Add($"{resolution.width} x {resolution.height}");
             }
 
-            TMP_Dropdown dropdown = CreateLabeledDropdown(parent, "Cozunurluk", options);
+            TMP_Dropdown dropdown = CreateLabeledDropdown(parent, LocalizationTable.Get("resolution"), options);
             dropdown.value = currentIndex;
             return new ResolutionBuildResult(dropdown, uniqueResolutions.ToArray());
         }
@@ -512,12 +576,13 @@ namespace DeliveryDriver.Quest.UI
             rowLayout.childForceExpandHeight = false;
             rowLayout.childForceExpandWidth = false;
             rowLayout.childAlignment = TextAnchor.MiddleLeft;
-            rowObject.GetComponent<LayoutElement>().minHeight = 46f;
+            rowObject.GetComponent<LayoutElement>().minHeight = RowMinHeight;
+            rowObject.GetComponent<LayoutElement>().preferredHeight = RowMinHeight;
 
             GameObject labelObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
             labelObject.transform.SetParent(rowObject.transform, false);
             LayoutElement labelLayout = labelObject.GetComponent<LayoutElement>();
-            labelLayout.preferredWidth = 230f;
+            labelLayout.preferredWidth = LabelColumnWidth;
             labelLayout.flexibleWidth = 0f;
 
             TextMeshProUGUI labelText = labelObject.GetComponent<TextMeshProUGUI>();
@@ -534,34 +599,24 @@ namespace DeliveryDriver.Quest.UI
             GameObject dropdownObject = new GameObject($"{label}Dropdown", typeof(RectTransform), typeof(TMP_Dropdown), typeof(Image), typeof(LayoutElement));
             dropdownObject.transform.SetParent(rowObject.transform, false);
             LayoutElement dropdownLayout = dropdownObject.GetComponent<LayoutElement>();
-            dropdownLayout.minHeight = 44f;
-            dropdownLayout.preferredWidth = 300f;
+            dropdownLayout.minHeight = 38f;
+            dropdownLayout.preferredWidth = 320f;
             dropdownLayout.flexibleWidth = 1f;
 
             Image dropdownImage = dropdownObject.GetComponent<Image>();
             dropdownImage.color = new Color(0.22f, 0.26f, 0.32f, 1f);
-            if (config.DropdownBackgroundSprite != null)
-            {
-                dropdownImage.sprite = config.DropdownBackgroundSprite;
-                dropdownImage.type = Image.Type.Sliced;
-            }
-            else if (config.ButtonBackgroundSprite != null)
-            {
-                dropdownImage.sprite = config.ButtonBackgroundSprite;
-                dropdownImage.type = Image.Type.Sliced;
-            }
 
             GameObject captionObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
             captionObject.transform.SetParent(dropdownObject.transform, false);
             RectTransform captionRect = captionObject.GetComponent<RectTransform>();
             captionRect.anchorMin = Vector2.zero;
             captionRect.anchorMax = Vector2.one;
-            captionRect.offsetMin = new Vector2(14f, 4f);
-            captionRect.offsetMax = new Vector2(-40f, -4f);
+            captionRect.offsetMin = new Vector2(14f, 6f);
+            captionRect.offsetMax = new Vector2(-40f, -6f);
             TextMeshProUGUI captionText = captionObject.GetComponent<TextMeshProUGUI>();
-            captionText.fontSize = 17f;
+            captionText.fontSize = 18f;
             captionText.color = Color.white;
-            captionText.alignment = TextAlignmentOptions.Left;
+            captionText.alignment = TextAlignmentOptions.MidlineLeft;
             if (TMP_Settings.defaultFontAsset != null)
             {
                 captionText.font = TMP_Settings.defaultFontAsset;
@@ -577,7 +632,7 @@ namespace DeliveryDriver.Quest.UI
             arrowRect.anchoredPosition = new Vector2(-8f, 0f);
             TextMeshProUGUI arrowText = arrowObject.GetComponent<TextMeshProUGUI>();
             arrowText.text = "\u25BC";
-            arrowText.fontSize = 13f;
+            arrowText.fontSize = 11f;
             arrowText.color = Color.white;
             arrowText.alignment = TextAlignmentOptions.Center;
             if (TMP_Settings.defaultFontAsset != null)
@@ -597,26 +652,16 @@ namespace DeliveryDriver.Quest.UI
             templateRect.anchorMax = new Vector2(1f, 1f);
             templateRect.pivot = new Vector2(0.5f, 0f);
             templateRect.anchoredPosition = new Vector2(0f, 2f);
-            templateRect.sizeDelta = new Vector2(0f, 150f);
+            templateRect.sizeDelta = new Vector2(0f, 156f);
             Image templateImage = templateObject.GetComponent<Image>();
-            templateImage.color = new Color(0.15f, 0.18f, 0.22f, 0.98f);
-            if (config.DropdownBackgroundSprite != null)
-            {
-                templateImage.sprite = config.DropdownBackgroundSprite;
-                templateImage.type = Image.Type.Sliced;
-            }
-            else if (config.PanelBackgroundSprite != null)
-            {
-                templateImage.sprite = config.PanelBackgroundSprite;
-                templateImage.type = Image.Type.Sliced;
-            }
+            templateImage.color = new Color(0.12f, 0.16f, 0.22f, 0.98f);
 
             GameObject viewportObject = new GameObject("Viewport", typeof(RectTransform), typeof(Mask), typeof(Image));
             viewportObject.transform.SetParent(templateObject.transform, false);
             RectTransform viewportRect = viewportObject.GetComponent<RectTransform>();
             viewportRect.anchorMin = Vector2.zero;
             viewportRect.anchorMax = Vector2.one;
-            viewportObject.GetComponent<Image>().color = Color.white;
+            viewportObject.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.001f);
             viewportObject.GetComponent<Mask>().showMaskGraphic = false;
 
             GameObject contentObject = new GameObject("Content", typeof(RectTransform));
@@ -625,14 +670,14 @@ namespace DeliveryDriver.Quest.UI
             contentRect.anchorMin = new Vector2(0f, 1f);
             contentRect.anchorMax = new Vector2(1f, 1f);
             contentRect.pivot = new Vector2(0.5f, 1f);
-            contentRect.sizeDelta = new Vector2(0f, 28f);
+            contentRect.sizeDelta = new Vector2(0f, 36f);
 
             GameObject itemObject = new GameObject("Item", typeof(RectTransform), typeof(Toggle));
             itemObject.transform.SetParent(contentObject.transform, false);
             RectTransform itemRect = itemObject.GetComponent<RectTransform>();
             itemRect.anchorMin = new Vector2(0f, 0.5f);
             itemRect.anchorMax = new Vector2(1f, 0.5f);
-            itemRect.sizeDelta = new Vector2(0f, 28f);
+            itemRect.sizeDelta = new Vector2(0f, 34f);
 
             GameObject itemBgObject = new GameObject("Item Background", typeof(RectTransform), typeof(Image));
             itemBgObject.transform.SetParent(itemObject.transform, false);
@@ -640,7 +685,7 @@ namespace DeliveryDriver.Quest.UI
             itemBgRect.anchorMin = Vector2.zero;
             itemBgRect.anchorMax = Vector2.one;
             Image itemBgImage = itemBgObject.GetComponent<Image>();
-            itemBgImage.color = new Color(0.25f, 0.35f, 0.5f, 0.5f);
+            itemBgImage.color = new Color(0.20f, 0.25f, 0.34f, 1f);
 
             GameObject itemLabelObject = new GameObject("Item Label", typeof(RectTransform), typeof(TextMeshProUGUI));
             itemLabelObject.transform.SetParent(itemObject.transform, false);
@@ -650,7 +695,7 @@ namespace DeliveryDriver.Quest.UI
             itemLabelRect.offsetMin = new Vector2(10f, 1f);
             itemLabelRect.offsetMax = new Vector2(-10f, -1f);
             TextMeshProUGUI itemLabelText = itemLabelObject.GetComponent<TextMeshProUGUI>();
-            itemLabelText.fontSize = 16f;
+            itemLabelText.fontSize = 17f;
             itemLabelText.color = Color.white;
             itemLabelText.alignment = TextAlignmentOptions.Left;
             if (TMP_Settings.defaultFontAsset != null)
@@ -660,6 +705,14 @@ namespace DeliveryDriver.Quest.UI
 
             Toggle itemToggle = itemObject.GetComponent<Toggle>();
             itemToggle.targetGraphic = itemBgImage;
+            
+            ColorBlock toggleColors = itemToggle.colors;
+            toggleColors.normalColor = new Color(0.20f, 0.25f, 0.34f, 1f);
+            toggleColors.highlightedColor = new Color(0.30f, 0.35f, 0.44f, 1f);
+            toggleColors.pressedColor = new Color(0.15f, 0.20f, 0.29f, 1f);
+            toggleColors.selectedColor = new Color(0.25f, 0.30f, 0.39f, 1f);
+            itemToggle.colors = toggleColors;
+            
             itemToggle.isOn = true;
 
             ScrollRect scrollRect = templateObject.GetComponent<ScrollRect>();
@@ -672,6 +725,14 @@ namespace DeliveryDriver.Quest.UI
 
             TMP_Dropdown dropdown = dropdownObject.GetComponent<TMP_Dropdown>();
             dropdown.targetGraphic = dropdownObject.GetComponent<Image>();
+            
+            ColorBlock dropdownColors = dropdown.colors;
+            dropdownColors.normalColor = new Color(0.22f, 0.26f, 0.32f, 1f);
+            dropdownColors.highlightedColor = new Color(0.32f, 0.36f, 0.42f, 1f);
+            dropdownColors.pressedColor = new Color(0.12f, 0.16f, 0.22f, 1f);
+            dropdownColors.selectedColor = new Color(0.27f, 0.31f, 0.37f, 1f);
+            dropdown.colors = dropdownColors;
+
             dropdown.template = templateRect;
             dropdown.captionText = captionText;
             dropdown.itemText = itemLabelText;
@@ -692,12 +753,13 @@ namespace DeliveryDriver.Quest.UI
             rowLayout.childForceExpandHeight = false;
             rowLayout.childForceExpandWidth = false;
             rowLayout.childAlignment = TextAnchor.MiddleLeft;
-            rowObject.GetComponent<LayoutElement>().minHeight = 46f;
+            rowObject.GetComponent<LayoutElement>().minHeight = RowMinHeight;
+            rowObject.GetComponent<LayoutElement>().preferredHeight = RowMinHeight;
 
             GameObject labelObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
             labelObject.transform.SetParent(rowObject.transform, false);
             LayoutElement labelLayout = labelObject.GetComponent<LayoutElement>();
-            labelLayout.preferredWidth = 230f;
+            labelLayout.preferredWidth = LabelColumnWidth;
             labelLayout.flexibleWidth = 1f;
             TextMeshProUGUI labelText = labelObject.GetComponent<TextMeshProUGUI>();
             labelText.text = label;
@@ -713,9 +775,9 @@ namespace DeliveryDriver.Quest.UI
             GameObject toggleObject = new GameObject($"{label}Toggle", typeof(RectTransform), typeof(Toggle), typeof(LayoutElement));
             toggleObject.transform.SetParent(rowObject.transform, false);
             LayoutElement toggleLayout = toggleObject.GetComponent<LayoutElement>();
-            toggleLayout.minWidth = 42f;
-            toggleLayout.minHeight = 42f;
-            toggleLayout.preferredWidth = 42f;
+            toggleLayout.minWidth = 34f;
+            toggleLayout.minHeight = 34f;
+            toggleLayout.preferredWidth = 34f;
             toggleLayout.flexibleWidth = 0f;
 
             GameObject bgObject = new GameObject("Background", typeof(RectTransform), typeof(Image));
@@ -723,19 +785,9 @@ namespace DeliveryDriver.Quest.UI
             RectTransform bgRect = bgObject.GetComponent<RectTransform>();
             bgRect.anchorMin = new Vector2(0.5f, 0.5f);
             bgRect.anchorMax = new Vector2(0.5f, 0.5f);
-            bgRect.sizeDelta = new Vector2(36f, 36f);
+            bgRect.sizeDelta = new Vector2(32f, 32f);
             Image bgImage = bgObject.GetComponent<Image>();
             bgImage.color = new Color(0.22f, 0.26f, 0.32f, 1f);
-            if (config.ToggleBackgroundSprite != null)
-            {
-                bgImage.sprite = config.ToggleBackgroundSprite;
-                bgImage.type = Image.Type.Sliced;
-            }
-            else if (config.ButtonBackgroundSprite != null)
-            {
-                bgImage.sprite = config.ButtonBackgroundSprite;
-                bgImage.type = Image.Type.Sliced;
-            }
 
             GameObject checkObject = new GameObject("Checkmark", typeof(RectTransform), typeof(Image));
             checkObject.transform.SetParent(bgObject.transform, false);
@@ -743,7 +795,7 @@ namespace DeliveryDriver.Quest.UI
             checkRect.anchorMin = new Vector2(0.5f, 0.5f);
             checkRect.anchorMax = new Vector2(0.5f, 0.5f);
             checkRect.pivot = new Vector2(0.5f, 0.5f);
-            checkRect.sizeDelta = new Vector2(20f, 20f);
+            checkRect.sizeDelta = new Vector2(16f, 16f);
 
             Image checkImage = checkObject.GetComponent<Image>();
             checkImage.color = new Color(0.16f, 0.52f, 0.88f, 1f);
@@ -754,11 +806,19 @@ namespace DeliveryDriver.Quest.UI
             }
             else
             {
-                checkRect.sizeDelta = new Vector2(14f, 14f);
+                checkRect.sizeDelta = new Vector2(12f, 12f);
             }
 
             Toggle toggle = toggleObject.GetComponent<Toggle>();
             toggle.targetGraphic = bgImage;
+            
+            ColorBlock toggleColors = toggle.colors;
+            toggleColors.normalColor = new Color(0.22f, 0.26f, 0.32f, 1f);
+            toggleColors.highlightedColor = new Color(0.32f, 0.36f, 0.42f, 1f);
+            toggleColors.pressedColor = new Color(0.12f, 0.16f, 0.22f, 1f);
+            toggleColors.selectedColor = new Color(0.27f, 0.31f, 0.37f, 1f);
+            toggle.colors = toggleColors;
+
             toggle.graphic = checkImage;
             toggle.isOn = false;
             return toggle;

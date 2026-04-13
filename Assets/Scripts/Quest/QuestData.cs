@@ -103,6 +103,11 @@ namespace DeliveryDriver.Quest
         public bool HasPickedUpCargo;
 
         /// <summary>
+        /// Controls which runtime system is allowed to complete pickup.
+        /// </summary>
+        public QuestPickupAuthority PickupAuthority;
+
+        /// <summary>
         /// Index of the current delivery target (for multi-stop quests)
         /// </summary>
         public int CurrentDeliveryIndex;
@@ -184,6 +189,7 @@ namespace DeliveryDriver.Quest
             IsRepeatable = true;
             XPReward = 50;
             HasPickedUpCargo = false;
+            PickupAuthority = QuestPickupAuthority.Proximity;
             CurrentDeliveryIndex = 0;
             StartTime = 0f;
             PausedTime = 0f;

@@ -40,7 +40,6 @@ namespace DeliveryDriver.Quest
         private const string ColorBlindModeKey = "ColorBlindMode";
         private const string TextScaleMultiplierKey = "TextScaleMultiplier";
         private const string HighContrastModeKey = "HighContrastMode";
-        private const string MinimapZoomKey = "MinimapZoom";
 
         [Header("Audio")]
         [Range(0f, 1f)] [SerializeField] private float masterVolume = 1f;
@@ -71,9 +70,6 @@ namespace DeliveryDriver.Quest
         [Range(0.8f, 1.5f)] [SerializeField] private float textScaleMultiplier = 1f;
         [SerializeField] private bool highContrastMode = false;
 
-        [Header("Minimap")]
-        [SerializeField] private float minimapZoom = 250f;
-
 #if ENABLE_INPUT_SYSTEM
         [Header("Input")]
         [SerializeField] private InputActionAsset inputActions;
@@ -93,8 +89,6 @@ namespace DeliveryDriver.Quest
         public int ColorBlindMode => colorBlindMode;
         public float TextScaleMultiplier => textScaleMultiplier;
         public bool HighContrastMode => highContrastMode;
-        public float MinimapZoom => minimapZoom;
-
         public static event System.Action<SpeedUnitPreference> OnSpeedUnitChanged;
         public static event System.Action OnLanguageChanged;
         public static event System.Action OnAccessibilityChanged;
@@ -192,8 +186,9 @@ namespace DeliveryDriver.Quest
 
         public void SetLanguage(string lang)
         {
-            if (string.Equals(language, lang, System.StringComparison.OrdinalIgnoreCase)) return;
-            language = lang;
+            string normalizedLanguage = NormalizeLanguageCode(lang);
+            if (string.Equals(language, normalizedLanguage, System.StringComparison.OrdinalIgnoreCase)) return;
+            language = normalizedLanguage;
             OnLanguageChanged?.Invoke();
         }
 
@@ -213,11 +208,6 @@ namespace DeliveryDriver.Quest
         {
             highContrastMode = value;
             OnAccessibilityChanged?.Invoke();
-        }
-
-        public void SetMinimapZoom(float zoom)
-        {
-            minimapZoom = Mathf.Clamp(zoom, 100f, 500f);
         }
 
         public QuestDifficulty ResolveQuestDifficulty(int playerLevel)
@@ -302,7 +292,6 @@ namespace DeliveryDriver.Quest
             PlayerPrefs.SetInt(ColorBlindModeKey, colorBlindMode);
             PlayerPrefs.SetFloat(TextScaleMultiplierKey, textScaleMultiplier);
             PlayerPrefs.SetInt(HighContrastModeKey, highContrastMode ? 1 : 0);
-            PlayerPrefs.SetFloat(MinimapZoomKey, minimapZoom);
             PlayerPrefs.Save();
         }
 
@@ -373,7 +362,7 @@ namespace DeliveryDriver.Quest
 
             if (PlayerPrefs.HasKey(LanguageKey))
             {
-                language = PlayerPrefs.GetString(LanguageKey, language);
+                language = NormalizeLanguageCode(PlayerPrefs.GetString(LanguageKey, language));
             }
 
             if (PlayerPrefs.HasKey(ColorBlindModeKey))
@@ -391,10 +380,13 @@ namespace DeliveryDriver.Quest
                 highContrastMode = PlayerPrefs.GetInt(HighContrastModeKey, 0) == 1;
             }
 
-            if (PlayerPrefs.HasKey(MinimapZoomKey))
-            {
-                minimapZoom = PlayerPrefs.GetFloat(MinimapZoomKey, minimapZoom);
-            }
+        }
+
+        private static string NormalizeLanguageCode(string value)
+        {
+            return string.Equals(value, "en", System.StringComparison.OrdinalIgnoreCase)
+                ? "en"
+                : "tr";
         }
     }
 }

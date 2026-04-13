@@ -9,12 +9,13 @@ namespace DeliveryDriver.Quest
 {
     public class QuestDatabaseService : MonoBehaviour
     {
-        private const string ConnTypeName = "Mono.Data.Sqlite.SqliteConnection, Mono.Data.Sqlite";
         public const string DefaultPlayerId = "local-player";
         public const string DefaultPlayerDisplayName = "Local Player";
         public const string DefaultCompanyId = "company-local-player";
         public const string DefaultCompanyName = "Hekye Logistics";
         private static QuestDatabaseService instance;
+        private static bool databaseInitializationCompleted;
+        private static bool databaseInitializationSucceeded;
         private readonly object gate = new object();
 
         [SerializeField] private string databaseFileName = "quest.db";
@@ -24,7 +25,7 @@ namespace DeliveryDriver.Quest
         private VehicleType currentSelectedVehicleType = VehicleType.Van;
 
         public static QuestDatabaseService Instance => instance;
-        public bool IsReady => connType != null && providerHealthy && File.Exists(dbPath);
+        public bool IsReady => connType != null && providerHealthy && databaseInitializationCompleted && databaseInitializationSucceeded && File.Exists(dbPath);
         public string DatabasePath => dbPath;
         public VehicleType CurrentSelectedVehicleType => currentSelectedVehicleType;
 
@@ -32,6 +33,8 @@ namespace DeliveryDriver.Quest
         private static void Bootstrap()
         {
             if (instance != null) return;
+            databaseInitializationCompleted = false;
+            databaseInitializationSucceeded = false;
             GameObject go = new GameObject("QuestDatabaseService");
             DontDestroyOnLoad(go);
             instance = go.AddComponent<QuestDatabaseService>();
@@ -43,10 +46,11 @@ namespace DeliveryDriver.Quest
             instance = this;
             DontDestroyOnLoad(gameObject);
             dbPath = Path.Combine(Application.persistentDataPath, databaseFileName);
-            connType = Type.GetType(ConnTypeName);
+            Debug.Log($"[QuestDatabaseService] Initializing. Persistent DB path: {dbPath}");
+            connType = SqliteProviderResolver.ResolveConnectionType();
             if (connType == null)
             {
-                Debug.LogError("[QuestDatabaseService] Mono.Data.Sqlite not available.");
+                Debug.LogError("[QuestDatabaseService] Mono.Data.Sqlite not available. The managed SQLite provider may be missing from the build or stripped by the linker.");
                 providerHealthy = false;
                 return;
             }
@@ -54,8 +58,30 @@ namespace DeliveryDriver.Quest
             providerHealthy = ValidateProvider();
             if (!providerHealthy)
             {
-                Debug.LogError("[QuestDatabaseService] SQLite provider initialization failed. Database service disabled.");
+                Debug.LogError($"[QuestDatabaseService] SQLite provider initialization failed. Database service disabled. {SqliteProviderResolver.GetNativeDependencyDiagnostics()}");
+                return;
             }
+
+            string nativeVersion = SqliteProviderResolver.TryGetNativeVersion();
+            Debug.Log(string.IsNullOrWhiteSpace(nativeVersion)
+                ? "[QuestDatabaseService] SQLite provider validated successfully."
+                : $"[QuestDatabaseService] SQLite provider validated successfully. Native sqlite3 version: {nativeVersion}");
+        }
+
+        public static void ReportDatabaseInitialization(bool success)
+        {
+            databaseInitializationCompleted = true;
+            databaseInitializationSucceeded = success;
+
+            Debug.Log(success
+                ? "[QuestDatabaseService] Database bootstrap completed successfully."
+                : "[QuestDatabaseService] Database bootstrap failed. Service will remain unavailable.");
+        }
+
+        public static void ResetDatabaseInitialization()
+        {
+            databaseInitializationCompleted = false;
+            databaseInitializationSucceeded = false;
         }
 
         public bool EnsurePlayer(string playerId, string displayName = "Player")
@@ -609,7 +635,7 @@ namespace DeliveryDriver.Quest
             return list;
         }
 
-        private object Open() { object c = Activator.CreateInstance(connType, $"URI=file:{dbPath}"); Invoke(c, "Open"); return c; }
+        private object Open() { object c = Activator.CreateInstance(connType, $"Data Source={dbPath}"); Invoke(c, "Open"); return c; }
         private object Build(object conn, string sql, Dictionary<string, object> p)
         {
             object cmd = Invoke(conn, "CreateCommand"); SetProp(cmd, "CommandText", sql);
@@ -732,13 +758,13 @@ namespace DeliveryDriver.Quest
             object conn = null;
             try
             {
-                conn = Activator.CreateInstance(connType, "URI=file::memory:");
+                conn = Activator.CreateInstance(connType, "Data Source=:memory:");
                 Invoke(conn, "Open");
                 return true;
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[QuestDatabaseService] Provider validation failed: {FormatExceptionChain(ex)}");
+                Debug.LogError($"[QuestDatabaseService] Provider validation failed: {FormatExceptionChain(ex)} | {SqliteProviderResolver.GetNativeDependencyDiagnostics()}");
                 return false;
             }
             finally

@@ -28,6 +28,7 @@ namespace DeliveryDriver.Quest.UI
             view.FullScreenToggle?.onValueChanged.AddListener(OnFullScreenChanged);
             view.FpsDropdown?.onValueChanged.AddListener(OnFpsChanged);
             view.SpeedUnitDropdown?.onValueChanged.AddListener(OnSpeedUnitChanged);
+            view.LanguageDropdown?.onValueChanged.AddListener(OnLanguageChanged);
             view.ColorBlindDropdown?.onValueChanged.AddListener(OnColorBlindModeChanged);
             view.TextScaleSlider?.onValueChanged.AddListener(OnTextScaleChanged);
             view.HighContrastToggle?.onValueChanged.AddListener(OnHighContrastChanged);
@@ -67,6 +68,16 @@ namespace DeliveryDriver.Quest.UI
             {
                 view.FpsDropdown.ClearOptions();
                 view.FpsDropdown.AddOptions(new List<string> { "30", "60", "120", LocalizationTable.Get("fps_unlimited") });
+            }
+
+            if (view.LanguageDropdown != null)
+            {
+                view.LanguageDropdown.ClearOptions();
+                view.LanguageDropdown.AddOptions(new List<string>
+                {
+                    LocalizationTable.GetLocaleDisplayName(LocalizationTable.TurkishLocale),
+                    LocalizationTable.GetLocaleDisplayName(LocalizationTable.EnglishLocale)
+                });
             }
 
             RefreshAll();
@@ -132,6 +143,11 @@ namespace DeliveryDriver.Quest.UI
             if (view.SpeedUnitDropdown != null)
             {
                 view.SpeedUnitDropdown.value = settings.SpeedUnitPreference == SpeedUnitPreference.Mph ? 1 : 0;
+            }
+
+            if (view.LanguageDropdown != null)
+            {
+                view.LanguageDropdown.value = LocalizationTable.GetLocaleIndex(settings.Language);
             }
 
             suppressGraphicsCallbacks = false;
@@ -265,6 +281,16 @@ namespace DeliveryDriver.Quest.UI
             GameSettings.Instance.SetSpeedUnitPreference(index == 1 ? SpeedUnitPreference.Mph : SpeedUnitPreference.Kmh);
             GameSettings.Instance.ApplySettings();
             GameSettings.Instance.SaveSettings();
+        }
+
+        private void OnLanguageChanged(int index)
+        {
+            if (suppressGraphicsCallbacks)
+            {
+                return;
+            }
+
+            LocalizationTable.SetLocale(LocalizationTable.GetLocaleByIndex(index));
         }
 
         private static void OnColorBlindModeChanged(int mode)

@@ -12,7 +12,6 @@ namespace DeliveryDriver.Quest
     /// </summary>
     public class QuestDatabaseBootstrap : MonoBehaviour
     {
-        private const string SqliteConnectionTypeName = "Mono.Data.Sqlite.SqliteConnection, Mono.Data.Sqlite";
         private const string SeedStateKey = "quest_db_seed_applied_v1";
 
         [Header("Database")]
@@ -41,8 +40,13 @@ namespace DeliveryDriver.Quest
 
         private IEnumerator InitializeDatabaseRoutine()
         {
+            QuestDatabaseService.ResetDatabaseInitialization();
+
             string schemaPath = Path.Combine(Application.streamingAssetsPath, schemaRelativePath);
             string seedPath = Path.Combine(Application.streamingAssetsPath, seedRelativePath);
+            string dbPath = Path.Combine(Application.persistentDataPath, databaseFileName);
+
+            Debug.Log($"[QuestDatabaseBootstrap] Starting initialization. Schema='{schemaPath}', Seed='{seedPath}', DB='{dbPath}'");
 
             string schemaSql = null;
             string seedSql = null;
@@ -53,14 +57,17 @@ namespace DeliveryDriver.Quest
             if (string.IsNullOrWhiteSpace(schemaSql))
             {
                 Debug.LogError("[QuestDatabaseBootstrap] Schema SQL could not be loaded. Initialization aborted.");
+                QuestDatabaseService.ReportDatabaseInitialization(false);
                 Destroy(gameObject);
                 yield break;
             }
 
-            string dbPath = Path.Combine(Application.persistentDataPath, databaseFileName);
             bool isFirstRun = !File.Exists(dbPath);
 
-            if (!ExecuteDatabaseSetup(dbPath, schemaSql, seedSql, isFirstRun))
+            bool setupSucceeded = ExecuteDatabaseSetup(dbPath, schemaSql, seedSql, isFirstRun);
+            QuestDatabaseService.ReportDatabaseInitialization(setupSucceeded);
+
+            if (!setupSucceeded)
             {
                 Debug.LogError("[QuestDatabaseBootstrap] Database initialization failed.");
             }
@@ -70,14 +77,14 @@ namespace DeliveryDriver.Quest
 
         private bool ExecuteDatabaseSetup(string dbPath, string schemaSql, string seedSql, bool isFirstRun)
         {
-            Type connectionType = Type.GetType(SqliteConnectionTypeName);
+            Type connectionType = SqliteProviderResolver.ResolveConnectionType();
             if (connectionType == null)
             {
                 Debug.LogError("[QuestDatabaseBootstrap] Mono.Data.Sqlite is not available.");
                 return false;
             }
 
-            string connectionString = $"URI=file:{dbPath}";
+            string connectionString = $"Data Source={dbPath}";
             object connection = null;
 
             try
@@ -97,6 +104,12 @@ namespace DeliveryDriver.Quest
                     ExecuteSql(connection, seedSql);
                     PlayerPrefs.SetInt(SeedStateKey, 1);
                     PlayerPrefs.Save();
+                }
+
+                if (!HasRequiredTables(connection))
+                {
+                    Debug.LogError("[QuestDatabaseBootstrap] Database schema verification failed. Required tables are missing after setup.");
+                    return false;
                 }
 
                 Debug.Log($"[QuestDatabaseBootstrap] Database ready at: {dbPath}");
@@ -123,34 +136,196 @@ namespace DeliveryDriver.Quest
             }
         }
 
+        private static bool HasRequiredTables(object connection)
+        {
+            return HasTable(connection, "players") && HasTable(connection, "company_profiles");
+        }
+
+        private static bool HasTable(object connection, string tableName)
+        {
+            object command = null;
+            try
+            {
+                command = Invoke(connection, "CreateCommand");
+                SetProperty(command, "CommandText", "SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name=@name;");
+
+                object parameter = Invoke(command, "CreateParameter");
+                SetProperty(parameter, "ParameterName", "@name");
+                SetProperty(parameter, "Value", tableName);
+
+                object parameters = GetProperty(command, "Parameters");
+                if (parameters is System.Collections.IList list)
+                {
+                    list.Add(parameter);
+                }
+                else
+                {
+                    Invoke(parameters, "Add", parameter);
+                }
+
+                object result = Invoke(command, "ExecuteScalar");
+                return result != null && result != DBNull.Value && Convert.ToInt32(result) > 0;
+            }
+            finally
+            {
+                if (command != null)
+                {
+                    try
+                    {
+                        Invoke(command, "Dispose");
+                    }
+                    catch
+                    {
+                        // Ignore dispose failures.
+                    }
+                }
+            }
+        }
+
         private static void ExecuteSql(object connection, string sql)
         {
-            object command = Invoke(connection, "CreateCommand");
-            SetProperty(command, "CommandText", sql);
-            Invoke(command, "ExecuteNonQuery");
-            Invoke(command, "Dispose");
+            object command = null;
+            try
+            {
+                command = Invoke(connection, "CreateCommand");
+                SetProperty(command, "CommandText", sql);
+                Invoke(command, "ExecuteNonQuery");
+            }
+            finally
+            {
+                if (command != null)
+                {
+                    try
+                    {
+                        Invoke(command, "Dispose");
+                    }
+                    catch
+                    {
+                        // Ignore dispose failures.
+                    }
+                }
+            }
         }
 
         private static object Invoke(object target, string methodName, params object[] args)
         {
-            MethodInfo method = target.GetType().GetMethod(methodName, BindingFlags.Public | BindingFlags.Instance);
-            if (method == null)
+            Type type = target.GetType();
+            object[] resolvedArgs = args ?? Array.Empty<object>();
+            MethodInfo best = null;
+            int bestScore = -1;
+
+            foreach (MethodInfo candidate in type.GetMethods(BindingFlags.Public | BindingFlags.Instance))
             {
-                throw new MissingMethodException(target.GetType().FullName, methodName);
+                if (!string.Equals(candidate.Name, methodName, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                ParameterInfo[] parameters = candidate.GetParameters();
+                if (parameters.Length != resolvedArgs.Length)
+                {
+                    continue;
+                }
+
+                int score = 0;
+                bool compatible = true;
+                for (int i = 0; i < parameters.Length; i++)
+                {
+                    Type parameterType = parameters[i].ParameterType;
+                    if (parameterType.IsByRef)
+                    {
+                        parameterType = parameterType.GetElementType();
+                    }
+
+                    object arg = resolvedArgs[i];
+                    if (arg == null)
+                    {
+                        if (parameterType.IsValueType && Nullable.GetUnderlyingType(parameterType) == null)
+                        {
+                            compatible = false;
+                            break;
+                        }
+
+                        score += 1;
+                        continue;
+                    }
+
+                    Type argumentType = arg.GetType();
+                    if (parameterType == argumentType)
+                    {
+                        score += 4;
+                    }
+                    else if (parameterType.IsAssignableFrom(argumentType))
+                    {
+                        score += 3;
+                    }
+                    else if (parameterType == typeof(object))
+                    {
+                        score += 2;
+                    }
+                    else
+                    {
+                        compatible = false;
+                        break;
+                    }
+                }
+
+                if (!compatible || score <= bestScore)
+                {
+                    continue;
+                }
+
+                best = candidate;
+                bestScore = score;
             }
 
-            return method.Invoke(target, args);
+            if (best == null)
+            {
+                throw new MissingMethodException(type.FullName, methodName);
+            }
+
+            return best.Invoke(target, resolvedArgs);
         }
 
         private static void SetProperty(object target, string propertyName, object value)
         {
-            PropertyInfo property = target.GetType().GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance);
+            PropertyInfo property = FindProperty(target.GetType(), propertyName);
             if (property == null || !property.CanWrite)
             {
                 throw new MissingMemberException(target.GetType().FullName, propertyName);
             }
 
             property.SetValue(target, value);
+        }
+
+        private static object GetProperty(object target, string propertyName)
+        {
+            PropertyInfo property = FindProperty(target.GetType(), propertyName);
+            if (property == null || !property.CanRead)
+            {
+                throw new MissingMemberException(target.GetType().FullName, propertyName);
+            }
+
+            return property.GetValue(target);
+        }
+
+        private static PropertyInfo FindProperty(Type type, string propertyName)
+        {
+            Type current = type;
+            while (current != null)
+            {
+                PropertyInfo property = current.GetProperty(
+                    propertyName,
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                if (property != null)
+                {
+                    return property;
+                }
+
+                current = current.BaseType;
+            }
+
+            return null;
         }
 
         private static IEnumerator LoadTextFromPath(string path, Action<string> onLoaded)

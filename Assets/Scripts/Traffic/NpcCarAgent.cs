@@ -2667,7 +2667,6 @@ namespace TrafficSystem
             public bool hasSharpTurn;
             public float turnSharpness;
             public bool hasIntersection;
-            public bool hasTrafficControl;
             public float recommendedSpeed;
         }
 

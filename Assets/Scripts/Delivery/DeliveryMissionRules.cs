@@ -1,5 +1,6 @@
 using UnityEngine;
 using DeliveryDriver.Quest;
+using DeliveryDriver.UI;
 using TrafficSystem;
 
 internal enum DeliveryMissionType
@@ -89,10 +90,18 @@ internal static class DeliveryMissionRules
     {
         string missionLine = missionType switch
         {
-            DeliveryMissionType.Timed => "Sureli teslimat. Hedefe hizli ulasman gerekiyor.",
-            DeliveryMissionType.Fragile => "Kirilgan kargo. Carpmalardan kacinarak tasimalisin.",
-            DeliveryMissionType.MultiStop => $"Cok durakli rota. Genelde {Mathf.Max(2, multiStopMinStops)}-{Mathf.Max(multiStopMinStops, multiStopMaxStops)} teslim noktasi olur.",
-            _ => "Standart paket teslimati."
+            DeliveryMissionType.Timed => IsEnglish()
+                ? "Timed delivery. You need to reach the destination quickly."
+                : "Süreli teslimat. Hedefe hızlı ulaşman gerekiyor.",
+            DeliveryMissionType.Fragile => IsEnglish()
+                ? "Fragile cargo. Avoid collisions while transporting it."
+                : "Kırılgan kargo. Çarpmalardan kaçınarak taşımalısın.",
+            DeliveryMissionType.MultiStop => IsEnglish()
+                ? $"Multi-stop route. Usually includes {Mathf.Max(2, multiStopMinStops)}-{Mathf.Max(multiStopMinStops, multiStopMaxStops)} delivery points."
+                : $"Çok duraklı rota. Genelde {Mathf.Max(2, multiStopMinStops)}-{Mathf.Max(multiStopMinStops, multiStopMaxStops)} teslim noktası olur.",
+            _ => IsEnglish()
+                ? "Standard package delivery."
+                : "Standart paket teslimatı."
         };
 
         string conditionSummary = BuildMissionConditionSummary(rewardMultiplier, rushHourBonus, nightBonus, rainRiskBonus);
@@ -102,23 +111,38 @@ internal static class DeliveryMissionRules
     public static string BuildMissionRewardPreview(DeliveryMissionType missionType, float rewardMultiplier)
     {
         GetMissionRewardValues(missionType, rewardMultiplier, out int baseReward, out int bonusReward);
-        return $"Odul: ${baseReward} (+Bonus ${bonusReward})";
+        return IsEnglish()
+            ? $"Reward: ${baseReward} (+Bonus ${bonusReward})"
+            : $"Ödül: ${baseReward} (+Bonus ${bonusReward})";
     }
 
     public static string BuildMissionConditionSummary(float rewardMultiplier, bool rushHourBonus, bool nightBonus, bool rainRiskBonus)
     {
         System.Collections.Generic.List<string> tags = new System.Collections.Generic.List<string>();
-        if (rushHourBonus) tags.Add("Rush Hour");
-        if (nightBonus) tags.Add("Night");
-        if (rainRiskBonus) tags.Add("Rain Risk");
+        if (rushHourBonus) tags.Add(IsEnglish() ? "Rush Hour" : "Yoğun Trafik");
+        if (nightBonus) tags.Add(IsEnglish() ? "Night" : "Gece");
+        if (rainRiskBonus) tags.Add(IsEnglish() ? "Rain Risk" : "Yağmur Riski");
 
         return tags.Count == 0
             ? string.Empty
-            : $"{string.Join(", ", tags)} (x{Mathf.Max(1f, rewardMultiplier):F2} reward)";
+            : IsEnglish()
+                ? $"{string.Join(", ", tags)} (x{Mathf.Max(1f, rewardMultiplier):F2} reward)"
+                : $"{string.Join(", ", tags)} (x{Mathf.Max(1f, rewardMultiplier):F2} ödül)";
     }
 
     public static string GetMissionLabel(DeliveryMissionType missionType)
     {
+        if (!IsEnglish())
+        {
+            return missionType switch
+            {
+                DeliveryMissionType.Timed => "Süreli Teslimat",
+                DeliveryMissionType.Fragile => "Kırılgan Kargo",
+                DeliveryMissionType.MultiStop => "Çok Duraklı Rota",
+                _ => "Paket Teslimatı"
+            };
+        }
+
         return missionType switch
         {
             DeliveryMissionType.Timed => "Timed Run",
@@ -172,5 +196,10 @@ internal static class DeliveryMissionRules
     {
         int hour = System.DateTime.Now.Hour;
         return hour >= 22 || hour <= 5;
+    }
+
+    private static bool IsEnglish()
+    {
+        return LocalizationTable.CurrentLocale == LocalizationTable.EnglishLocale;
     }
 }

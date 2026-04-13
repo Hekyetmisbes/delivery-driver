@@ -11,7 +11,7 @@ namespace DeliveryDriver.Navigation
         [SerializeField] private Color routeLineColor = new Color(0.2f, 0.85f, 1f, 0.95f);
         [SerializeField] private float routeLineWidth = 2.4f;
         [SerializeField] private float routeHeightOffset = 18f;
-        [SerializeField] private string routeLineLayerName = "MiniMapMarker";
+        [SerializeField] private string routeLineLayerName = "NavigationMarker";
         [SerializeField] private int routeCornerVertices = 6;
         [SerializeField] private int routeCapVertices = 8;
 
@@ -93,7 +93,7 @@ namespace DeliveryDriver.Navigation
                 return;
             }
 
-            routeLineObject = new GameObject("MiniMapRouteLine");
+            routeLineObject = new GameObject("NavigationRouteLine");
             int routeLayer = LayerMask.NameToLayer(routeLineLayerName);
             if (routeLayer >= 0)
             {
@@ -113,7 +113,7 @@ namespace DeliveryDriver.Navigation
             routeLineRenderer.startColor = routeLineColor;
             routeLineRenderer.endColor = routeLineColor;
 
-            routeLineMaterial = MinimapShaderHelper.CreateColorMaterial(routeLineColor, null);
+            routeLineMaterial = RuntimeColorMaterialHelper.CreateColorMaterial(routeLineColor, null);
             if (routeLineMaterial != null)
             {
                 routeLineRenderer.material = routeLineMaterial;

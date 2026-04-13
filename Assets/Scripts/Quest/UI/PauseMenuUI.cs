@@ -18,8 +18,8 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private bool buildKenneyPauseMenuAtRuntime = true;
         [SerializeField] private bool useKenneySkin = true;
         [SerializeField] private Vector2 pauseMenuSize = new Vector2(760f, 840f);
-        [SerializeField] private string resumeButtonLabel = "Devam Et";
-        [SerializeField] private string quitButtonLabel = "Oyundan Cik";
+        [SerializeField] private string resumeButtonLabel = "";
+        [SerializeField] private string quitButtonLabel = "";
         [SerializeField] private string resumeSceneName = "";
         [SerializeField] private string quitSceneName = "";
         [SerializeField] private bool enablePauseToggleInput = true;
@@ -42,10 +42,20 @@ namespace DeliveryDriver.Quest.UI
 
         private bool isPaused;
 
+        private void Awake()
+        {
+            LocalizationTable.OnLocaleChanged += HandleLocaleChanged;
+        }
+
         private void Start()
         {
             EnsurePauseMenu();
             SetPaused(startPaused);
+        }
+
+        private void OnDestroy()
+        {
+            LocalizationTable.OnLocaleChanged -= HandleLocaleChanged;
         }
 
         private void Update()
@@ -216,24 +226,21 @@ namespace DeliveryDriver.Quest.UI
             showStatsOnPause = false;
             enablePauseToggleInput = false;
             startPaused = true;
-            resumeButtonLabel = "Ana Menu";
+            resumeButtonLabel = string.Empty;
             resumeSceneName = mainMenuSceneName;
-            quitButtonLabel = "Oyundan Cik";
+            quitButtonLabel = string.Empty;
             quitSceneName = string.Empty;
         }
 
         private string GetResumeButtonLabel()
         {
-            return string.IsNullOrWhiteSpace(resumeButtonLabel)
-                ? LocalizationTable.Get("resume")
-                : resumeButtonLabel;
+            string localizationKey = string.IsNullOrWhiteSpace(resumeSceneName) ? "resume" : "quit_to_menu";
+            return ResolveButtonLabel(resumeButtonLabel, localizationKey);
         }
 
         private string GetQuitButtonLabel()
         {
-            return string.IsNullOrWhiteSpace(quitButtonLabel)
-                ? LocalizationTable.Get("quit_game")
-                : quitButtonLabel;
+            return ResolveButtonLabel(quitButtonLabel, "quit_game");
         }
 
         private void OnResumeButtonClicked()
@@ -301,6 +308,63 @@ namespace DeliveryDriver.Quest.UI
             toggleCheckmarkSprite ??= RuntimeUiSkinLoader.LoadSprite(
                 "UI/Kenney/icon_accept",
                 "Assets/Resources/UI/FreeButtonSet/checkmark_64.png");
+        }
+
+        private void HandleLocaleChanged()
+        {
+            if (!buildKenneyPauseMenuAtRuntime || !runtimePausePanelBuilt)
+            {
+                return;
+            }
+
+            bool wasPaused = isPaused;
+            DestroyRuntimePausePanel();
+            EnsurePauseMenu();
+            SetPaused(wasPaused);
+        }
+
+        private void DestroyRuntimePausePanel()
+        {
+            if (pausePanel != null)
+            {
+                Destroy(pausePanel);
+            }
+
+            pausePanel = null;
+            pausePanelCanvasGroup = null;
+            runtimeView = null;
+            settingsCoordinator = null;
+            runtimePausePanelBuilt = false;
+        }
+
+        private static string ResolveButtonLabel(string configuredLabel, string localizationKey)
+        {
+            if (ShouldUseLocalizedLabel(configuredLabel, localizationKey))
+            {
+                return LocalizationTable.Get(localizationKey);
+            }
+
+            return configuredLabel;
+        }
+
+        private static bool ShouldUseLocalizedLabel(string configuredLabel, string localizationKey)
+        {
+            if (string.IsNullOrWhiteSpace(configuredLabel))
+            {
+                return true;
+            }
+
+            switch (localizationKey)
+            {
+                case "resume":
+                    return configuredLabel == "Devam Et" || configuredLabel == "Resume";
+                case "quit_to_menu":
+                    return configuredLabel == "Ana Menüye Dön" || configuredLabel == "Ana Menuye Don" || configuredLabel == "Return to Menu";
+                case "quit_game":
+                    return configuredLabel == "Oyundan Çık" || configuredLabel == "Oyundan Cik" || configuredLabel == "Quit Game";
+                default:
+                    return false;
+            }
         }
     }
 }
