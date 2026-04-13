@@ -36,6 +36,7 @@ namespace DeliveryDriver.Company
         private bool suppressDropdownCallbacks;
         private bool profileLoaded;
         private VehicleType selectedVehicleType = VehicleType.Van;
+        private readonly List<VehicleType> availableVehicleTypes = new List<VehicleType>();
         private float previousTimeScale = 1f;
         private bool gameplayPausedByPanel;
         private bool questPausedByPanel;
@@ -101,33 +102,33 @@ namespace DeliveryDriver.Company
                 yield return null;
             }
 
-            QuestDatabaseService database = QuestDatabaseService.Instance;
-            if (database == null || !database.IsReady)
+            if (!TryLoadCompanyProfile(out CompanyProfileData profile))
             {
-                Debug.LogError("[CompanyPageUI] Database is not ready. Company page remains blocked.");
-                ShowFatalError("Sirket verisi yuklenemedi.\nVeritabani hazir degil.");
+                Debug.LogError("[CompanyPageUI] Company profile could not be resolved from the database.");
+                ShowFatalError("Sirket verisi yuklenemedi.\nVeritabani baglantisi hazir degil veya kayit okunamadi.");
                 yield break;
             }
 
-            if (!database.EnsureDefaultCompanyProfile())
-            {
-                Debug.LogError("[CompanyPageUI] Default company profile could not be ensured.");
-                ShowFatalError("Sirket verisi yuklenemedi.\nSirket profili olusturulamadi.");
-                yield break;
-            }
+            VehicleType resolvedVehicleType = RefreshVehicleDropdownOptions(profile.SelectedVehicleType);
+            bool preferredVehicleAvailable = resolvedVehicleType == profile.SelectedVehicleType;
+            profile.SelectedVehicleType = resolvedVehicleType;
 
-            CompanyProfileData profile = database.GetCompanyProfile(QuestDatabaseService.DefaultPlayerId);
-            if (profile == null)
+            if (!preferredVehicleAvailable)
             {
-                Debug.LogError("[CompanyPageUI] Company profile could not be loaded from the database.");
-                ShowFatalError("Sirket verisi yuklenemedi.\nKayit okunamadi.");
-                yield break;
+                TryPersistVehicleType(resolvedVehicleType);
             }
 
             ApplyProfile(profile);
-            if (!ApplyVehicleSelection(profile.SelectedVehicleType))
+
+            if (!ApplyVehicleSelection(profile.SelectedVehicleType, true))
             {
                 ShowFatalError("Sirket verisi yuklenemedi.\nArac tipi uygulanamadi.");
+                yield break;
+            }
+
+            if (!preferredVehicleAvailable)
+            {
+                SetWarningState($"Kayitli arac buildde hazir degildi. {VehicleTypeExtensions.ToDisplayLabel(resolvedVehicleType)} kullaniliyor.");
                 yield break;
             }
 
@@ -215,7 +216,7 @@ namespace DeliveryDriver.Company
             managerValueText.text = profile.PlayerDisplayName;
 
             suppressDropdownCallbacks = true;
-            vehicleTypeDropdown.SetValueWithoutNotify(VehicleTypeExtensions.ToDropdownIndex(profile.SelectedVehicleType));
+            vehicleTypeDropdown.SetValueWithoutNotify(GetDropdownIndexForVehicleType(profile.SelectedVehicleType));
             vehicleTypeDropdown.RefreshShownValue();
             suppressDropdownCallbacks = false;
         }
@@ -244,7 +245,7 @@ namespace DeliveryDriver.Company
         {
             if (vehicleTypeDropdown != null)
             {
-                vehicleTypeDropdown.interactable = true;
+                vehicleTypeDropdown.interactable = availableVehicleTypes.Count > 1;
             }
 
             if (continueButton != null)
@@ -256,6 +257,25 @@ namespace DeliveryDriver.Company
             {
                 statusText.text = message;
                 statusText.color = UIThemeConstants.Positive;
+            }
+        }
+
+        private void SetWarningState(string message)
+        {
+            if (vehicleTypeDropdown != null)
+            {
+                vehicleTypeDropdown.interactable = availableVehicleTypes.Count > 1;
+            }
+
+            if (continueButton != null)
+            {
+                continueButton.interactable = true;
+            }
+
+            if (statusText != null)
+            {
+                statusText.text = message;
+                statusText.color = UIThemeConstants.Warning;
             }
         }
 
@@ -286,28 +306,19 @@ namespace DeliveryDriver.Company
                 return;
             }
 
-            VehicleType requestedVehicleType = VehicleTypeExtensions.FromDropdownIndex(index);
-            QuestDatabaseService database = QuestDatabaseService.Instance;
-            if (database == null || !database.IsReady)
-            {
-                Debug.LogError("[CompanyPageUI] Database became unavailable while saving vehicle type.");
-                RevertVehicleSelection();
-                ShowFatalError("Sirket verisi yuklenemedi.\nArac tipi kaydedilemedi.");
-                return;
-            }
-
-            if (!database.SaveSelectedVehicleType(QuestDatabaseService.DefaultPlayerId, requestedVehicleType))
+            VehicleType requestedVehicleType = GetVehicleTypeForDropdownIndex(index);
+            if (!TryPersistVehicleType(requestedVehicleType))
             {
                 RevertVehicleSelection();
-                ShowFatalError("Sirket verisi yuklenemedi.\nArac tipi kaydedilemedi.");
+                SetWarningState("Arac tipi veritabanina kaydedilemedi. Secim geri alindi.");
                 return;
             }
 
             if (!ApplyVehicleSelection(requestedVehicleType))
             {
-                database.SaveSelectedVehicleType(QuestDatabaseService.DefaultPlayerId, selectedVehicleType);
+                TryPersistVehicleType(selectedVehicleType);
                 RevertVehicleSelection();
-                ShowFatalError("Sirket verisi yuklenemedi.\nArac tipi uygulanamadi.");
+                SetWarningState("Secilen arac buildde kullanilamiyor. Onceki arac korunuyor.");
                 return;
             }
 
@@ -323,7 +334,7 @@ namespace DeliveryDriver.Company
             }
 
             suppressDropdownCallbacks = true;
-            vehicleTypeDropdown.SetValueWithoutNotify(VehicleTypeExtensions.ToDropdownIndex(selectedVehicleType));
+            vehicleTypeDropdown.SetValueWithoutNotify(GetDropdownIndexForVehicleType(selectedVehicleType));
             vehicleTypeDropdown.RefreshShownValue();
             suppressDropdownCallbacks = false;
         }
@@ -344,22 +355,120 @@ namespace DeliveryDriver.Company
             Destroy(gameObject);
         }
 
-        private bool ApplyVehicleSelection(VehicleType vehicleType)
+        private bool ApplyVehicleSelection(VehicleType vehicleType, bool allowDuringActiveQuest = false)
         {
-            PlayerVehicleManager vehicleManager = FindFirstObjectByType<PlayerVehicleManager>();
+            PlayerVehicleManager vehicleManager = ResolveVehicleManager();
             if (vehicleManager == null)
             {
                 Debug.LogError("[CompanyPageUI] PlayerVehicleManager was not found while applying vehicle selection.");
                 return false;
             }
 
-            if (!vehicleManager.ApplyVehicleType(vehicleType))
+            bool applied = allowDuringActiveQuest
+                ? vehicleManager.EnsureVehicleType(vehicleType)
+                : vehicleManager.ApplyVehicleType(vehicleType);
+
+            if (!applied)
             {
                 Debug.LogError($"[CompanyPageUI] Vehicle type '{vehicleType}' could not be applied.");
                 return false;
             }
 
             return true;
+        }
+
+        private VehicleType RefreshVehicleDropdownOptions(VehicleType preferredVehicleType)
+        {
+            availableVehicleTypes.Clear();
+
+            PlayerVehicleManager vehicleManager = ResolveVehicleManager();
+            if (vehicleManager != null)
+            {
+                if (vehicleManager.IsVehicleTypeAvailable(VehicleType.Van))
+                {
+                    availableVehicleTypes.Add(VehicleType.Van);
+                }
+
+                if (vehicleManager.IsVehicleTypeAvailable(VehicleType.Truck))
+                {
+                    availableVehicleTypes.Add(VehicleType.Truck);
+                }
+            }
+
+            if (availableVehicleTypes.Count == 0)
+            {
+                availableVehicleTypes.Add(VehicleType.Van);
+            }
+
+            List<string> labels = new List<string>(availableVehicleTypes.Count);
+            for (int i = 0; i < availableVehicleTypes.Count; i++)
+            {
+                labels.Add(VehicleTypeExtensions.ToDisplayLabel(availableVehicleTypes[i]));
+            }
+
+            suppressDropdownCallbacks = true;
+            vehicleTypeDropdown.ClearOptions();
+            vehicleTypeDropdown.AddOptions(labels);
+            vehicleTypeDropdown.interactable = availableVehicleTypes.Count > 1;
+
+            VehicleType resolvedVehicleType = availableVehicleTypes.Contains(preferredVehicleType)
+                ? preferredVehicleType
+                : availableVehicleTypes[0];
+
+            vehicleTypeDropdown.SetValueWithoutNotify(GetDropdownIndexForVehicleType(resolvedVehicleType));
+            vehicleTypeDropdown.RefreshShownValue();
+            suppressDropdownCallbacks = false;
+
+            return resolvedVehicleType;
+        }
+
+        private int GetDropdownIndexForVehicleType(VehicleType vehicleType)
+        {
+            int index = availableVehicleTypes.IndexOf(vehicleType);
+            return index >= 0 ? index : 0;
+        }
+
+        private VehicleType GetVehicleTypeForDropdownIndex(int index)
+        {
+            if (index >= 0 && index < availableVehicleTypes.Count)
+            {
+                return availableVehicleTypes[index];
+            }
+
+            return selectedVehicleType;
+        }
+
+        private static PlayerVehicleManager ResolveVehicleManager()
+        {
+            return PlayerVehicleManager.Instance ?? UnityEngine.Object.FindFirstObjectByType<PlayerVehicleManager>();
+        }
+
+        private static bool TryLoadCompanyProfile(out CompanyProfileData profile)
+        {
+            profile = null;
+            QuestDatabaseService database = QuestDatabaseService.Instance;
+            if (database == null || !database.IsReady)
+            {
+                Debug.LogError("[CompanyPageUI] Database is not ready. Company page cannot continue without SQLite.");
+                return false;
+            }
+
+            if (!database.EnsureDefaultCompanyProfile())
+            {
+                Debug.LogError("[CompanyPageUI] Failed to ensure the default company profile in the database.");
+                return false;
+            }
+
+            profile = database.GetCompanyProfile(QuestDatabaseService.DefaultPlayerId);
+            return profile != null;
+        }
+
+        private static bool TryPersistVehicleType(VehicleType requestedVehicleType)
+        {
+            QuestDatabaseService database = QuestDatabaseService.Instance;
+            return database != null &&
+                   database.IsReady &&
+                   database.SaveSelectedVehicleType(QuestDatabaseService.DefaultPlayerId, requestedVehicleType);
         }
 
         private void PauseGameplayForCompanyPage()
@@ -726,8 +835,8 @@ namespace DeliveryDriver.Company
             arrowRect.anchoredPosition = new Vector2(-8f, 0f);
 
             TextMeshProUGUI arrowText = arrowObject.GetComponent<TextMeshProUGUI>();
-            arrowText.text = "v";
-            arrowText.fontSize = 18f;
+            arrowText.text = "\u25BC";
+            arrowText.fontSize = 11f;
             arrowText.color = Color.white;
             arrowText.alignment = TextAlignmentOptions.Center;
             if (TMP_Settings.defaultFontAsset != null)
@@ -741,9 +850,9 @@ namespace DeliveryDriver.Company
             RectTransform templateRect = templateObject.GetComponent<RectTransform>();
             templateRect.anchorMin = new Vector2(0f, 1f);
             templateRect.anchorMax = new Vector2(1f, 1f);
-            templateRect.pivot = new Vector2(0.5f, 1f);
-            templateRect.anchoredPosition = new Vector2(0f, -4f);
-            templateRect.sizeDelta = new Vector2(0f, 110f);
+            templateRect.pivot = new Vector2(0.5f, 0f);
+            templateRect.anchoredPosition = new Vector2(0f, 2f);
+            templateRect.sizeDelta = new Vector2(0f, 156f);
 
             Image templateImage = templateObject.GetComponent<Image>();
             templateImage.color = new Color(0.12f, 0.16f, 0.22f, 0.98f);
@@ -760,7 +869,7 @@ namespace DeliveryDriver.Company
             viewportRect.offsetMax = Vector2.zero;
 
             Image viewportImage = viewportObject.GetComponent<Image>();
-            viewportImage.color = Color.white;
+            viewportImage.color = new Color(1f, 1f, 1f, 0.001f);
             viewportObject.GetComponent<Mask>().showMaskGraphic = false;
 
             GameObject contentObject = new GameObject("Content", typeof(RectTransform));
@@ -770,7 +879,7 @@ namespace DeliveryDriver.Company
             contentRect.anchorMin = new Vector2(0f, 1f);
             contentRect.anchorMax = new Vector2(1f, 1f);
             contentRect.pivot = new Vector2(0.5f, 1f);
-            contentRect.sizeDelta = new Vector2(0f, 28f);
+            contentRect.sizeDelta = new Vector2(0f, 36f);
 
             GameObject itemObject = new GameObject("Item", typeof(RectTransform), typeof(Toggle));
             itemObject.transform.SetParent(contentObject.transform, false);
@@ -778,7 +887,7 @@ namespace DeliveryDriver.Company
             RectTransform itemRect = itemObject.GetComponent<RectTransform>();
             itemRect.anchorMin = new Vector2(0f, 0.5f);
             itemRect.anchorMax = new Vector2(1f, 0.5f);
-            itemRect.sizeDelta = new Vector2(0f, 28f);
+            itemRect.sizeDelta = new Vector2(0f, 34f);
 
             GameObject itemBackgroundObject = new GameObject("Item Background", typeof(RectTransform), typeof(Image));
             itemBackgroundObject.transform.SetParent(itemObject.transform, false);
@@ -790,7 +899,7 @@ namespace DeliveryDriver.Company
             itemBackgroundRect.offsetMax = Vector2.zero;
 
             Image itemBackgroundImage = itemBackgroundObject.GetComponent<Image>();
-            itemBackgroundImage.color = new Color(0.25f, 0.35f, 0.5f, 0.5f);
+            itemBackgroundImage.color = new Color(0.20f, 0.25f, 0.34f, 1f);
 
             GameObject itemLabelObject = new GameObject("Item Label", typeof(RectTransform), typeof(TextMeshProUGUI));
             itemLabelObject.transform.SetParent(itemObject.transform, false);
@@ -802,9 +911,9 @@ namespace DeliveryDriver.Company
             itemLabelRect.offsetMax = new Vector2(-10f, -1f);
 
             TextMeshProUGUI itemLabelText = itemLabelObject.GetComponent<TextMeshProUGUI>();
-            itemLabelText.fontSize = 16f;
+            itemLabelText.fontSize = 17f;
             itemLabelText.color = Color.white;
-            itemLabelText.alignment = TextAlignmentOptions.Left;
+            itemLabelText.alignment = TextAlignmentOptions.MidlineLeft;
             if (TMP_Settings.defaultFontAsset != null)
             {
                 itemLabelText.font = TMP_Settings.defaultFontAsset;
@@ -812,6 +921,15 @@ namespace DeliveryDriver.Company
 
             Toggle itemToggle = itemObject.GetComponent<Toggle>();
             itemToggle.targetGraphic = itemBackgroundImage;
+            
+            ColorBlock cb = itemToggle.colors;
+            cb.normalColor = new Color(0.20f, 0.25f, 0.34f, 1f);
+            cb.highlightedColor = new Color(0.30f, 0.35f, 0.44f, 1f);
+            cb.pressedColor = new Color(0.15f, 0.20f, 0.29f, 1f);
+            cb.selectedColor = new Color(0.25f, 0.30f, 0.39f, 1f);
+            cb.colorMultiplier = 1f;
+            itemToggle.colors = cb;
+            
             itemToggle.isOn = true;
 
             ScrollRect scrollRect = templateObject.GetComponent<ScrollRect>();
@@ -825,6 +943,14 @@ namespace DeliveryDriver.Company
 
             TMP_Dropdown dropdown = dropdownObject.GetComponent<TMP_Dropdown>();
             dropdown.targetGraphic = dropdownImage;
+
+            ColorBlock dropdownColors = dropdown.colors;
+            dropdownColors.normalColor = new Color(0.22f, 0.26f, 0.32f, 1f);
+            dropdownColors.highlightedColor = new Color(0.32f, 0.36f, 0.42f, 1f);
+            dropdownColors.pressedColor = new Color(0.12f, 0.16f, 0.22f, 1f);
+            dropdownColors.selectedColor = new Color(0.27f, 0.31f, 0.37f, 1f);
+            dropdown.colors = dropdownColors;
+
             dropdown.template = templateRect;
             dropdown.captionText = captionText;
             dropdown.itemText = itemLabelText;

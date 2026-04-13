@@ -125,17 +125,40 @@ namespace DeliveryDriver.Company
             return ApplyVehicleTypeInternal(vehicleType, false);
         }
 
-        private bool ApplyVehicleTypeInternal(VehicleType vehicleType, bool allowDuringActiveQuest)
+        public bool EnsureVehicleType(VehicleType vehicleType)
         {
-            if (!prefabsConfigured)
+            return ApplyVehicleTypeInternal(vehicleType, true);
+        }
+
+        public bool IsVehicleTypeAvailable(VehicleType vehicleType)
+        {
+            SynchronizeSceneVehicleState();
+
+            if (prefabsConfigured)
             {
-                Debug.LogError("[PlayerVehicleManager] Vehicle prefab references are not configured.");
-                return false;
+                GameObject targetTemplate = GetTemplateRoot(vehicleType);
+                return targetTemplate != null && targetTemplate.GetComponent<CarController>() != null;
             }
 
-            if (!allowDuringActiveQuest && HasActiveQuest())
+            return CanUseCurrentVehicleAsFallback(vehicleType);
+        }
+
+        private bool ApplyVehicleTypeInternal(VehicleType vehicleType, bool allowDuringActiveQuest)
+        {
+            SynchronizeSceneVehicleState();
+
+            if (!prefabsConfigured)
             {
-                Debug.LogWarning("[PlayerVehicleManager] Vehicle switching is blocked while an active quest is running.");
+                if (CanUseCurrentVehicleAsFallback(vehicleType))
+                {
+                    Debug.LogWarning($"[PlayerVehicleManager] Vehicle prefabs are not configured. Keeping the currently active scene vehicle for '{vehicleType}'.");
+                    ConfigureVehicleSpecializedBindings(activeVehicleController, activeVehicleType);
+                    EnsureSingleActivePlayerVehicle(activeVehicleController.gameObject);
+                    RebindSystems(activeVehicleController);
+                    return true;
+                }
+
+                Debug.LogError("[PlayerVehicleManager] Vehicle prefab references are not configured.");
                 return false;
             }
 
@@ -152,18 +175,20 @@ namespace DeliveryDriver.Company
                 Debug.LogError($"[PlayerVehicleManager] Prefab '{targetTemplate.name}' is missing CarController.");
                 return false;
             }
-
-            SynchronizeSceneVehicleState();
-
             if (activeVehicleController != null &&
                 activeVehicleController.gameObject != null &&
-                activeVehicleType == vehicleType &&
-                NormalizeVehicleName(activeVehicleController.gameObject.name) == NormalizeVehicleName(targetTemplate.name))
+                activeVehicleType == vehicleType)
             {
                 ConfigureVehicleSpecializedBindings(activeVehicleController, vehicleType);
                 EnsureSingleActivePlayerVehicle(activeVehicleController.gameObject);
                 RebindSystems(activeVehicleController);
                 return true;
+            }
+
+            if (!allowDuringActiveQuest && HasActiveQuest())
+            {
+                Debug.LogWarning("[PlayerVehicleManager] Vehicle switching is blocked while an active quest is running.");
+                return false;
             }
 
             if (!TryResolveSpawnSource(out SpawnSourceContext spawnSource))
@@ -279,23 +304,46 @@ namespace DeliveryDriver.Company
                 return;
             }
 
-            VehicleType desiredVehicleType = ResolveDesiredVehicleType();
+            if (!TryResolveDesiredVehicleType(out VehicleType desiredVehicleType))
+            {
+                return;
+            }
+
             ApplyVehicleTypeInternal(desiredVehicleType, true);
         }
 
-        private static VehicleType ResolveDesiredVehicleType()
+        private bool TryResolveDesiredVehicleType(out VehicleType desiredVehicleType)
         {
+            desiredVehicleType = VehicleType.Van;
             QuestDatabaseService database = QuestDatabaseService.Instance;
-            if (database != null && database.IsReady)
+            if (database == null || !database.IsReady)
             {
-                CompanyProfileData profile = database.GetCompanyProfile(QuestDatabaseService.DefaultPlayerId);
-                if (profile != null)
-                {
-                    return profile.SelectedVehicleType;
-                }
+                Debug.LogWarning("[PlayerVehicleManager] Database-backed company profile is not ready yet. Runtime vehicle spawn will wait for SQLite initialization.");
+                return false;
             }
 
-            return VehicleType.Van;
+            if (!database.EnsureDefaultCompanyProfile())
+            {
+                Debug.LogError("[PlayerVehicleManager] Failed to ensure the default company profile before resolving the active vehicle type.");
+                return false;
+            }
+
+            CompanyProfileData profile = database.GetCompanyProfile(QuestDatabaseService.DefaultPlayerId);
+            if (profile == null)
+            {
+                Debug.LogError("[PlayerVehicleManager] Company profile could not be loaded from the database.");
+                return false;
+            }
+
+            desiredVehicleType = profile.SelectedVehicleType;
+            return true;
+        }
+
+        private bool CanUseCurrentVehicleAsFallback(VehicleType requestedVehicleType)
+        {
+            return activeVehicleController != null &&
+                   activeVehicleController.gameObject != null &&
+                   activeVehicleType == requestedVehicleType;
         }
 
         private void EnsureSingleActivePlayerVehicle(GameObject activeRoot)

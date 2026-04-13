@@ -12,8 +12,11 @@ namespace DeliveryDriver.Company
     {
         private const string GameSceneName = "Game";
         private const string VehicleCatalogResourcePath = "Company/VehiclePrefabCatalog";
+        private const string VehicleResourcesRoot = "Company/Vehicles";
         private const string VanPrefabAssetPath = "Assets/Prefabs/Vehicle/Minivan.prefab";
         private const string TruckPrefabAssetPath = "Assets/Prefabs/Vehicle/LorryCargo.prefab";
+        private const string VanPrefabResourcePath = VehicleResourcesRoot + "/Minivan";
+        private const string TruckPrefabResourcePath = VehicleResourcesRoot + "/LorryCargo";
         private static bool sceneHookRegistered;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -94,6 +97,16 @@ namespace DeliveryDriver.Company
 
         private static GameObject LoadVehiclePrefab(string assetPath, string label)
         {
+            string resourcePath = string.Equals(label, "Truck", StringComparison.OrdinalIgnoreCase)
+                ? TruckPrefabResourcePath
+                : VanPrefabResourcePath;
+
+            GameObject directResourcePrefab = Resources.Load<GameObject>(resourcePath);
+            if (directResourcePrefab != null)
+            {
+                return directResourcePrefab;
+            }
+
             VehiclePrefabCatalog catalog = Resources.Load<VehiclePrefabCatalog>(VehicleCatalogResourcePath);
             if (catalog != null && catalog.TryGetPrefab(label, out GameObject catalogPrefab))
             {
@@ -104,12 +117,12 @@ namespace DeliveryDriver.Company
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
             if (prefab == null)
             {
-                Debug.LogError($"[GameSceneCompanyPageInstaller] {label} prefab load failed. No runtime catalog entry was found at Resources/{VehicleCatalogResourcePath} and editor asset lookup also failed at '{assetPath}'.");
+                Debug.LogError($"[GameSceneCompanyPageInstaller] {label} prefab load failed. No runtime prefab was found at Resources/{resourcePath}, no valid catalog entry was found at Resources/{VehicleCatalogResourcePath}, and editor asset lookup also failed at '{assetPath}'.");
             }
 
             return prefab;
 #else
-            Debug.LogError($"[GameSceneCompanyPageInstaller] {label} prefab reference missing. Expected a runtime-loadable catalog at Resources/{VehicleCatalogResourcePath}.");
+            Debug.LogError($"[GameSceneCompanyPageInstaller] {label} prefab reference missing. Expected a runtime prefab at Resources/{resourcePath} or a runtime-loadable catalog at Resources/{VehicleCatalogResourcePath}.");
             return null;
 #endif
         }
