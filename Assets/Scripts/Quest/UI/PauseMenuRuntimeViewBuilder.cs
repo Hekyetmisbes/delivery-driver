@@ -705,6 +705,14 @@ namespace DeliveryDriver.Quest.UI
 
             Toggle itemToggle = itemObject.GetComponent<Toggle>();
             itemToggle.targetGraphic = itemBgImage;
+            
+            ColorBlock toggleColors = itemToggle.colors;
+            toggleColors.normalColor = new Color(0.20f, 0.25f, 0.34f, 1f);
+            toggleColors.highlightedColor = new Color(0.30f, 0.35f, 0.44f, 1f);
+            toggleColors.pressedColor = new Color(0.15f, 0.20f, 0.29f, 1f);
+            toggleColors.selectedColor = new Color(0.25f, 0.30f, 0.39f, 1f);
+            itemToggle.colors = toggleColors;
+            
             itemToggle.isOn = true;
 
             ScrollRect scrollRect = templateObject.GetComponent<ScrollRect>();
@@ -717,6 +725,14 @@ namespace DeliveryDriver.Quest.UI
 
             TMP_Dropdown dropdown = dropdownObject.GetComponent<TMP_Dropdown>();
             dropdown.targetGraphic = dropdownObject.GetComponent<Image>();
+            
+            ColorBlock dropdownColors = dropdown.colors;
+            dropdownColors.normalColor = new Color(0.22f, 0.26f, 0.32f, 1f);
+            dropdownColors.highlightedColor = new Color(0.32f, 0.36f, 0.42f, 1f);
+            dropdownColors.pressedColor = new Color(0.12f, 0.16f, 0.22f, 1f);
+            dropdownColors.selectedColor = new Color(0.27f, 0.31f, 0.37f, 1f);
+            dropdown.colors = dropdownColors;
+
             dropdown.template = templateRect;
             dropdown.captionText = captionText;
             dropdown.itemText = itemLabelText;
@@ -795,6 +811,14 @@ namespace DeliveryDriver.Quest.UI
 
             Toggle toggle = toggleObject.GetComponent<Toggle>();
             toggle.targetGraphic = bgImage;
+            
+            ColorBlock toggleColors = toggle.colors;
+            toggleColors.normalColor = new Color(0.22f, 0.26f, 0.32f, 1f);
+            toggleColors.highlightedColor = new Color(0.32f, 0.36f, 0.42f, 1f);
+            toggleColors.pressedColor = new Color(0.12f, 0.16f, 0.22f, 1f);
+            toggleColors.selectedColor = new Color(0.27f, 0.31f, 0.37f, 1f);
+            toggle.colors = toggleColors;
+
             toggle.graphic = checkImage;
             toggle.isOn = false;
             return toggle;
