@@ -694,7 +694,10 @@ namespace DeliveryDriver.Quest
 
             quest.StartQuest();
             GetZoneMarkerService().ClearAllZones();
-            GetZoneMarkerService().SpawnQuestZone(quest.PickupLocation, QuestZoneType.Pickup);
+            if (ShouldQuestUseWorldZoneMarkers(quest))
+            {
+                GetZoneMarkerService().SpawnQuestZone(quest.PickupLocation, QuestZoneType.Pickup);
+            }
 
             if (PlayerProgressionManager.Instance != null)
             {
@@ -1019,7 +1022,10 @@ namespace DeliveryDriver.Quest
             }
 
             QuestLocation delivery = GetCurrentDeliveryLocation();
-            GetZoneMarkerService().SpawnQuestZone(delivery, QuestZoneType.Delivery);
+            if (ShouldQuestUseWorldZoneMarkers(currentQuest))
+            {
+                GetZoneMarkerService().SpawnQuestZone(delivery, QuestZoneType.Delivery);
+            }
             MarkQuestUiDirty();
             TryNotifyQuestUpdated();
             Debug.Log($"[QuestManager] Cargo loaded! Deliver to {delivery?.LocationName ?? "destination"}.");
@@ -1049,7 +1055,10 @@ namespace DeliveryDriver.Quest
             if (currentQuest.CurrentDeliveryIndex < currentQuest.DeliveryLocations.Count - 1)
             {
                 currentQuest.CurrentDeliveryIndex++;
-                GetZoneMarkerService().SpawnQuestZone(GetCurrentDeliveryLocation(), QuestZoneType.Delivery);
+                if (ShouldQuestUseWorldZoneMarkers(currentQuest))
+                {
+                    GetZoneMarkerService().SpawnQuestZone(GetCurrentDeliveryLocation(), QuestZoneType.Delivery);
+                }
                 MarkQuestUiDirty();
                 TryNotifyQuestUpdated();
             }
@@ -1436,6 +1445,11 @@ namespace DeliveryDriver.Quest
             return quest != null && quest.PickupAuthority != QuestPickupAuthority.PhysicalBox;
         }
 
+        private static bool ShouldQuestUseWorldZoneMarkers(QuestData quest)
+        {
+            return quest != null && quest.PickupAuthority != QuestPickupAuthority.PhysicalBox;
+        }
+
         private void MarkQuestUiDirty()
         {
             questUiDirty = true;
@@ -1503,7 +1517,22 @@ namespace DeliveryDriver.Quest
 
             QuestSaveRestoreService.RestoreLoadedQuestState(
                 restoredState,
-                quests => GetZoneMarkerService().RestoreQuestMarkers(quests, quest => GetCurrentDeliveryLocation(quest)),
+                quests =>
+                {
+                    List<QuestData> questsWithWorldMarkers = new List<QuestData>();
+                    if (quests != null)
+                    {
+                        foreach (QuestData quest in quests)
+                        {
+                            if (ShouldQuestUseWorldZoneMarkers(quest))
+                            {
+                                questsWithWorldMarkers.Add(quest);
+                            }
+                        }
+                    }
+
+                    GetZoneMarkerService().RestoreQuestMarkers(questsWithWorldMarkers, quest => GetCurrentDeliveryLocation(quest));
+                },
                 quest =>
                 {
                     OnQuestStarted.Invoke(quest);

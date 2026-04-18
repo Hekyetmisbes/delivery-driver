@@ -83,12 +83,8 @@ internal static class DeliveryPhoneMissionFlow
         int multiStopMinStops,
         int multiStopMaxStops)
     {
-        string intro = LocalizationTable.CurrentLocale == LocalizationTable.EnglishLocale
-            ? "New mission offer"
-            : "Yeni görev teklifi";
-        string outro = LocalizationTable.CurrentLocale == LocalizationTable.EnglishLocale
-            ? "Accepting it will create the mission."
-            : "Kabul edersen görev oluşacak.";
+        string intro = LocalizationTable.Get("mission_offer_intro");
+        string outro = LocalizationTable.Get("mission_offer_outro");
 
         return $"{intro}\n{DeliveryMissionRules.BuildMissionOfferBody(missionType, rewardMultiplier, rushHourBonus, nightBonus, rainRiskBonus, multiStopMinStops, multiStopMaxStops)}\n{outro}";
     }

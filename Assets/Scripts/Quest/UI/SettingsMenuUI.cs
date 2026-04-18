@@ -264,8 +264,8 @@ namespace DeliveryDriver.Quest.UI
             }
 
             speedUnitDropdown.ClearOptions();
-            speedUnitDropdown.options.Add(new TMP_Dropdown.OptionData("KMH"));
-            speedUnitDropdown.options.Add(new TMP_Dropdown.OptionData("MPH"));
+            speedUnitDropdown.options.Add(new TMP_Dropdown.OptionData(DeliveryDriver.UI.LocalizationTable.Get("unit_kmh")));
+            speedUnitDropdown.options.Add(new TMP_Dropdown.OptionData(DeliveryDriver.UI.LocalizationTable.Get("unit_mph")));
         }
 
         private void RefreshLanguageOptions()

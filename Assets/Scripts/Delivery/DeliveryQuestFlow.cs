@@ -11,7 +11,6 @@ internal static class DeliveryQuestFlow
         float rewardMultiplier,
         string conditionSummary,
         CargoLibrary cargoLibrary,
-        GameObject pickupIndicatorPrefab,
         GameObject deliveryIndicatorPrefab,
         float deliveryRadius,
         bool showDebugInfo)
@@ -66,9 +65,7 @@ internal static class DeliveryQuestFlow
 
         if (quest.PickupLocation != null)
         {
-            quest.PickupLocation.VisualMarker = pickupIndicatorPrefab != null
-                ? pickupIndicatorPrefab
-                : deliveryIndicatorPrefab;
+            quest.PickupLocation.VisualMarker = null;
         }
 
         if (cargoLibrary != null)

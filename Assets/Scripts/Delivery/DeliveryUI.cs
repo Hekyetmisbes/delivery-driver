@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using DeliveryDriver.UI;
 
 /// <summary>
 /// UI display for delivery mission info
@@ -110,14 +111,14 @@ public class DeliveryUI : MonoBehaviour
         float distance = Vector3.Distance(playerTransform.position, targetPoint);
         string pickupNeighborhood = GetNeighborhoodLabel(deliveryManager.CurrentPickupNeighborhoodName);
         string neighborhoodSummary = deliveryManager.IsDeliveryActive
-            ? $"Mahalle: {pickupNeighborhood} -> {GetNeighborhoodLabel(deliveryManager.CurrentDeliveryNeighborhoodName)}"
-            : $"Alim Mahallesi: {pickupNeighborhood}";
+            ? LocalizationTable.Format("delivery_neighborhood_route", pickupNeighborhood, GetNeighborhoodLabel(deliveryManager.CurrentDeliveryNeighborhoodName))
+            : LocalizationTable.Format("delivery_pickup_neighborhood", pickupNeighborhood);
 
         if (statusText != null)
         {
             string baseStatus = deliveryManager.IsDeliveryActive
-                ? "Paketi teslim et!"
-                : "Paketi bul!";
+                ? LocalizationTable.Get("delivery_status_deliver_package")
+                : LocalizationTable.Get("delivery_status_find_package");
             statusText.text = neighborhoodText == null
                 ? $"{baseStatus}\n{neighborhoodSummary}"
                 : baseStatus;
@@ -127,8 +128,8 @@ public class DeliveryUI : MonoBehaviour
         {
             float d = distance * distanceDisplayMultiplier;
             distanceText.text = d >= 1000f
-                ? $"Mesafe: {d / 1000f:F1}km"
-                : $"Mesafe: {d:F0}m";
+                ? LocalizationTable.Format("delivery_distance_km", d / 1000f)
+                : LocalizationTable.Format("delivery_distance_m", d);
         }
 
         if (neighborhoodText != null)
@@ -144,7 +145,7 @@ public class DeliveryUI : MonoBehaviour
     {
         if (statusText != null)
         {
-            statusText.text = "Paketi teslim et!";
+            statusText.text = LocalizationTable.Get("delivery_status_deliver_package");
         }
 
         if (deliveryPanel != null)
@@ -154,7 +155,10 @@ public class DeliveryUI : MonoBehaviour
 
         if (neighborhoodText != null)
         {
-            neighborhoodText.text = $"Mahalle: {GetNeighborhoodLabel(pickupNeighborhood)} -> {GetNeighborhoodLabel(deliveryNeighborhood)}";
+            neighborhoodText.text = LocalizationTable.Format(
+                "delivery_neighborhood_route",
+                GetNeighborhoodLabel(pickupNeighborhood),
+                GetNeighborhoodLabel(deliveryNeighborhood));
         }
     }
 
@@ -167,8 +171,8 @@ public class DeliveryUI : MonoBehaviour
         {
             float d = distance * distanceDisplayMultiplier;
             distanceText.text = d >= 1000f
-                ? $"Mesafe: {d / 1000f:F1}km"
-                : $"Mesafe: {d:F0}m";
+                ? LocalizationTable.Format("delivery_distance_km", d / 1000f)
+                : LocalizationTable.Format("delivery_distance_m", d);
         }
     }
 
@@ -195,7 +199,7 @@ public class DeliveryUI : MonoBehaviour
 
     private string GetNeighborhoodLabel(string neighborhoodName)
     {
-        return string.IsNullOrWhiteSpace(neighborhoodName) ? "Bilinmiyor" : neighborhoodName;
+        return string.IsNullOrWhiteSpace(neighborhoodName) ? LocalizationTable.Get("unknown") : neighborhoodName;
     }
 
     private void ApplyKenneySkin()

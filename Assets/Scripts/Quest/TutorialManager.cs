@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Events;
+using DeliveryDriver.UI;
 
 namespace DeliveryDriver.Quest
 {
@@ -85,8 +86,8 @@ namespace DeliveryDriver.Quest
             tutorialSteps = new List<TutorialStep>
             {
                 new TutorialStep(
-                    "Welcome to Delivery Driver! Complete deliveries to earn money and level up.",
-                    "Welcome!"
+                    LocalizationTable.Get("tutorial_welcome_message"),
+                    LocalizationTable.Get("tutorial_welcome_title")
                 )
                 {
                     autoAdvanceDelay = 0f,
@@ -94,8 +95,8 @@ namespace DeliveryDriver.Quest
                 },
 
                 new TutorialStep(
-                    "Press Q to open the quest menu and see available deliveries.",
-                    "Open Quest Menu"
+                    LocalizationTable.Get("tutorial_open_quest_message"),
+                    LocalizationTable.Get("tutorial_open_quest_title")
                 )
                 {
                     triggerType = TutorialTriggerType.QuestOpened,
@@ -103,32 +104,32 @@ namespace DeliveryDriver.Quest
                 },
 
                 new TutorialStep(
-                    "Select a delivery quest to begin. Each quest shows the distance, time limit, and reward.",
-                    "Accept a Quest"
+                    LocalizationTable.Get("tutorial_accept_quest_message"),
+                    LocalizationTable.Get("tutorial_accept_quest_title")
                 )
                 {
                     triggerType = TutorialTriggerType.QuestAccepted
                 },
 
                 new TutorialStep(
-                    "Drive to the blue marker to pick up the cargo. Follow the compass at the top of the screen.",
-                    "Pick Up Cargo"
+                    LocalizationTable.Get("tutorial_pickup_message"),
+                    LocalizationTable.Get("tutorial_pickup_title")
                 )
                 {
                     triggerType = TutorialTriggerType.CargoPickedUp
                 },
 
                 new TutorialStep(
-                    "Now deliver the cargo to the green marker before time runs out! Drive carefully if the cargo is fragile.",
-                    "Deliver Cargo"
+                    LocalizationTable.Get("tutorial_deliver_message"),
+                    LocalizationTable.Get("tutorial_deliver_title")
                 )
                 {
                     triggerType = TutorialTriggerType.CargoDelivered
                 },
 
                 new TutorialStep(
-                    "Great job! Complete more deliveries to earn money, gain experience, and unlock new challenges. Good luck!",
-                    "Tutorial Complete"
+                    LocalizationTable.Get("tutorial_complete_message"),
+                    LocalizationTable.Get("tutorial_complete_title")
                 )
                 {
                     autoAdvanceDelay = 5f,

@@ -79,7 +79,7 @@ namespace DeliveryDriver.Quest.UI
 
             if (questNameText != null)
             {
-                questNameText.text = quest != null ? quest.QuestName : "Delivery Complete";
+                questNameText.text = quest != null ? quest.QuestName : LocalizationTable.Get("quest_complete_default_name");
             }
 
             if (statsText != null)
@@ -119,7 +119,7 @@ namespace DeliveryDriver.Quest.UI
 
             if (questNameText != null)
             {
-                questNameText.text = quest != null ? quest.QuestName : "Delivery Failed";
+                questNameText.text = quest != null ? quest.QuestName : LocalizationTable.Get("quest_failed_default_name");
             }
 
             if (statsText != null)
@@ -198,38 +198,40 @@ namespace DeliveryDriver.Quest.UI
         {
             if (quest == null)
             {
-                return string.IsNullOrWhiteSpace(failureReason) ? string.Empty : $"Reason: {failureReason}";
+                return string.IsNullOrWhiteSpace(failureReason)
+                    ? string.Empty
+                    : $"{LocalizationTable.Get("reason")}: {failureReason}";
             }
 
             float timeTaken = Mathf.Max(0f, quest.TimeLimit - quest.TimeRemaining);
-            string timeLine = $"Time: {FormatTime(timeTaken)} / {FormatTime(quest.TimeLimit)}";
+            string timeLine = $"{LocalizationTable.Get("time")}: {FormatTime(timeTaken)} / {FormatTime(quest.TimeLimit)}";
 
             string stopsLine = string.Empty;
             if (quest.DeliveryLocations != null && quest.DeliveryLocations.Count > 1)
             {
                 int totalStops = quest.DeliveryLocations.Count;
                 int completedStops = Mathf.Clamp(quest.CurrentDeliveryIndex, 0, totalStops);
-                stopsLine = $"Stops: {completedStops}/{totalStops}";
+                stopsLine = $"{LocalizationTable.Get("stops")}: {completedStops}/{totalStops}";
             }
 
             string cargoLine = string.Empty;
             if (quest.Cargo != null && quest.Cargo.IsFragile)
             {
-                cargoLine = $"Cargo condition: {quest.Cargo.CargoHealth:0}%";
+                cargoLine = $"{LocalizationTable.Get("cargo_condition")}: {quest.Cargo.CargoHealth:0}%";
             }
 
-            string reasonLine = string.IsNullOrWhiteSpace(failureReason) ? string.Empty : $"Reason: {failureReason}";
-            string penaltyLine = penaltyAmount > 0 ? $"Penalty: -${penaltyAmount}" : string.Empty;
-            string collisionLine = quest.CollisionCount > 0 ? $"Collisions: {quest.CollisionCount} (NPC: {quest.NpcCollisionCount})" : "Collisions: 0";
-            string hardBrakeLine = quest.HardBrakeCount > 0 ? $"Hard brakes: {quest.HardBrakeCount}" : "Hard brakes: 0";
-            string driftLine = quest.DriftScorePoints > 0 ? $"Drift score: {quest.DriftScorePoints}" : "Drift score: 0";
+            string reasonLine = string.IsNullOrWhiteSpace(failureReason) ? string.Empty : $"{LocalizationTable.Get("reason")}: {failureReason}";
+            string penaltyLine = penaltyAmount > 0 ? $"{LocalizationTable.Get("penalty")}: -${penaltyAmount}" : string.Empty;
+            string collisionLine = $"{LocalizationTable.Get("collisions")}: {quest.CollisionCount} (NPC: {quest.NpcCollisionCount})";
+            string hardBrakeLine = $"{LocalizationTable.Get("hard_brakes")}: {quest.HardBrakeCount}";
+            string driftLine = $"{LocalizationTable.Get("drift_score")}: {quest.DriftScorePoints}";
 
             string breakdownLine = string.Empty;
             if (breakdown.HasValue)
             {
                 QuestManager.RewardPenaltyBreakdown b = breakdown.Value;
-                string driftBonusText = b.DriftBonus > 0 ? $" | Drift bonus: +${b.DriftBonus}" : string.Empty;
-                breakdownLine = $"Reward: ${b.FinalReward} | Penalties: -${b.TotalPenalty}{driftBonusText}";
+                string driftBonusText = b.DriftBonus > 0 ? $" | {LocalizationTable.Get("drift_bonus")}: +${b.DriftBonus}" : string.Empty;
+                breakdownLine = LocalizationTable.Format("quest_complete_breakdown", b.FinalReward, b.TotalPenalty, driftBonusText);
             }
 
             string[] lines = { timeLine, stopsLine, cargoLine, collisionLine, hardBrakeLine, driftLine, breakdownLine, reasonLine, penaltyLine };

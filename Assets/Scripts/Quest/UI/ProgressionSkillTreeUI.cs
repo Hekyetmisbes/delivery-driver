@@ -6,6 +6,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.UI;
 using UnityEngine.UI;
+using DeliveryDriver.UI;
 
 namespace DeliveryDriver.Quest.UI
 {
@@ -29,7 +30,11 @@ namespace DeliveryDriver.Quest.UI
         private Image xpFillImage;
         private TextMeshProUGUI skillPointsText;
         private TextMeshProUGUI rewardsText;
+        private TextMeshProUGUI titleText;
+        private TextMeshProUGUI rewardsTitleText;
+        private TextMeshProUGUI hintText;
         private readonly Dictionary<DriverSkillType, TextMeshProUGUI> skillRankLabels = new Dictionary<DriverSkillType, TextMeshProUGUI>();
+        private readonly Dictionary<DriverSkillType, TextMeshProUGUI> skillNameLabels = new Dictionary<DriverSkillType, TextMeshProUGUI>();
         private readonly Dictionary<DriverSkillType, Button> skillButtons = new Dictionary<DriverSkillType, Button>();
 
         private void Start()
@@ -37,6 +42,7 @@ namespace DeliveryDriver.Quest.UI
             EnsureEventSystem();
             BuildUI();
             BindEvents();
+            LocalizationTable.OnLocaleChanged += HandleLocaleChanged;
             Refresh();
         }
 
@@ -63,6 +69,8 @@ namespace DeliveryDriver.Quest.UI
                 DriverProgressionSystem.Instance.OnSkillRankChanged -= OnSkillRankChanged;
                 DriverProgressionSystem.Instance.OnLevelRewardUnlocked -= OnLevelRewardUnlocked;
             }
+
+            LocalizationTable.OnLocaleChanged -= HandleLocaleChanged;
         }
 
         private void BindEvents()
@@ -107,6 +115,11 @@ namespace DeliveryDriver.Quest.UI
             Refresh();
         }
 
+        private void HandleLocaleChanged()
+        {
+            Refresh();
+        }
+
         private void BuildUI()
         {
             ResolveSkinSprites();
@@ -131,13 +144,13 @@ namespace DeliveryDriver.Quest.UI
             progressHudPanel = CreatePanel("DriverProgressHUD", parent, new Vector2(20f, -20f), new Vector2(370f, 145f), TextAnchor.UpperLeft, null, hudPanelSprite);
             progressHudPanel.SetActive(false);
 
-            levelText = CreateText("LevelText", progressHudPanel.transform, "Seviye 1", 24, FontStyles.Bold);
+            levelText = CreateText("LevelText", progressHudPanel.transform, LocalizationTable.Format("progression_level", 1), 24, FontStyles.Bold);
             levelText.rectTransform.anchoredPosition = new Vector2(14f, -10f);
 
             moneyText = CreateText("MoneyText", progressHudPanel.transform, "$0", 20, FontStyles.Normal);
             moneyText.rectTransform.anchoredPosition = new Vector2(14f, -42f);
 
-            xpText = CreateText("XPText", progressHudPanel.transform, "0 / 100 XP", 18, FontStyles.Normal);
+            xpText = CreateText("XPText", progressHudPanel.transform, LocalizationTable.Format("progression_xp", 0, 100), 18, FontStyles.Normal);
             xpText.rectTransform.anchoredPosition = new Vector2(14f, -70f);
 
             GameObject xpBackground = new GameObject("XPBarBG");
@@ -165,7 +178,8 @@ namespace DeliveryDriver.Quest.UI
             xpFillImage.fillAmount = 0f;
             xpFillImage.color = new Color(0.21f, 0.73f, 0.39f, 0.95f);
 
-            CreateText("HintText", progressHudPanel.transform, $"Skill Tree: [{toggleSkillTreeKey}]", 16, FontStyles.Italic).rectTransform.anchoredPosition = new Vector2(14f, -124f);
+            hintText = CreateText("HintText", progressHudPanel.transform, LocalizationTable.Format("progression_skill_tree_hint", toggleSkillTreeKey), 16, FontStyles.Italic);
+            hintText.rectTransform.anchoredPosition = new Vector2(14f, -124f);
         }
 
         private void BuildSkillTreeWindow(Transform parent)
@@ -173,15 +187,15 @@ namespace DeliveryDriver.Quest.UI
             skillTreeWindow = CreatePanel("SkillTreeWindow", parent, new Vector2(-20f, -20f), new Vector2(460f, 520f), TextAnchor.UpperRight);
             skillTreeWindow.SetActive(false);
 
-            TextMeshProUGUI title = CreateText("Title", skillTreeWindow.transform, "Yetenek Agaci", 28, FontStyles.Bold);
-            title.alignment = TextAlignmentOptions.Center;
-            title.rectTransform.anchorMin = new Vector2(0f, 1f);
-            title.rectTransform.anchorMax = new Vector2(1f, 1f);
-            title.rectTransform.pivot = new Vector2(0.5f, 1f);
-            title.rectTransform.anchoredPosition = new Vector2(0f, -14f);
-            title.rectTransform.sizeDelta = new Vector2(0f, 36f);
+            titleText = CreateText("Title", skillTreeWindow.transform, LocalizationTable.Get("progression_skill_tree_title"), 28, FontStyles.Bold);
+            titleText.alignment = TextAlignmentOptions.Center;
+            titleText.rectTransform.anchorMin = new Vector2(0f, 1f);
+            titleText.rectTransform.anchorMax = new Vector2(1f, 1f);
+            titleText.rectTransform.pivot = new Vector2(0.5f, 1f);
+            titleText.rectTransform.anchoredPosition = new Vector2(0f, -14f);
+            titleText.rectTransform.sizeDelta = new Vector2(0f, 36f);
 
-            skillPointsText = CreateText("SkillPoints", skillTreeWindow.transform, "Yet.Puan: 0", 19, FontStyles.Bold);
+            skillPointsText = CreateText("SkillPoints", skillTreeWindow.transform, LocalizationTable.Format("progression_skill_points", 0), 19, FontStyles.Bold);
             skillPointsText.rectTransform.anchoredPosition = new Vector2(16f, -52f);
 
             float y = -96f;
@@ -196,10 +210,11 @@ namespace DeliveryDriver.Quest.UI
                     new Color(0f, 0f, 0f, 0.32f),
                     skillRowSprite);
 
-                TextMeshProUGUI nameLabel = CreateText("Name", row.transform, skill.ToString(), 19, FontStyles.Bold);
+                TextMeshProUGUI nameLabel = CreateText("Name", row.transform, GetSkillDisplayName(skill), 19, FontStyles.Bold);
                 nameLabel.rectTransform.anchoredPosition = new Vector2(10f, -8f);
+                skillNameLabels[skill] = nameLabel;
 
-                TextMeshProUGUI rankLabel = CreateText("Rank", row.transform, "Rank 0/3", 16, FontStyles.Normal);
+                TextMeshProUGUI rankLabel = CreateText("Rank", row.transform, LocalizationTable.Format("progression_rank", 0, 3), 16, FontStyles.Normal);
                 rankLabel.rectTransform.anchoredPosition = new Vector2(10f, -35f);
                 skillRankLabels[skill] = rankLabel;
 
@@ -211,8 +226,8 @@ namespace DeliveryDriver.Quest.UI
                 y -= 102f;
             }
 
-            TextMeshProUGUI rewardsTitle = CreateText("RewardsTitle", skillTreeWindow.transform, "Seviye Odulleri", 20, FontStyles.Bold);
-            rewardsTitle.rectTransform.anchoredPosition = new Vector2(16f, y - 2f);
+            rewardsTitleText = CreateText("RewardsTitle", skillTreeWindow.transform, LocalizationTable.Get("progression_rewards_title"), 20, FontStyles.Bold);
+            rewardsTitleText.rectTransform.anchoredPosition = new Vector2(16f, y - 2f);
 
             rewardsText = CreateText("RewardsText", skillTreeWindow.transform, "-", 16, FontStyles.Normal);
             rewardsText.textWrappingMode = TextWrappingModes.Normal;
@@ -246,17 +261,17 @@ namespace DeliveryDriver.Quest.UI
             {
                 if (levelText != null)
                 {
-                    levelText.text = $"Seviye {progression.CurrentLevel}";
+                    levelText.text = LocalizationTable.Format("progression_level", progression.CurrentLevel);
                 }
 
                 if (moneyText != null)
                 {
-                    moneyText.text = $"Bakiye: ${progression.CurrentMoney:N0}";
+                    moneyText.text = LocalizationTable.Format("progression_balance", progression.CurrentMoney);
                 }
 
                 if (xpText != null)
                 {
-                    xpText.text = $"{progression.CurrentXP} / {progression.XPToNextLevel} XP";
+                    xpText.text = LocalizationTable.Format("progression_xp", progression.CurrentXP, progression.XPToNextLevel);
                 }
 
                 if (xpFillImage != null)
@@ -272,7 +287,7 @@ namespace DeliveryDriver.Quest.UI
 
             if (skillPointsText != null)
             {
-                skillPointsText.text = $"Yet. Puan: {driverProgression.UnspentSkillPoints}";
+                skillPointsText.text = LocalizationTable.Format("progression_skill_points", driverProgression.UnspentSkillPoints);
             }
 
             foreach (SkillNodeState node in driverProgression.Skills)
@@ -282,9 +297,14 @@ namespace DeliveryDriver.Quest.UI
                     continue;
                 }
 
+                if (skillNameLabels.TryGetValue(node.SkillType, out TextMeshProUGUI nameLabel) && nameLabel != null)
+                {
+                    nameLabel.text = GetSkillDisplayName(node.SkillType);
+                }
+
                 if (skillRankLabels.TryGetValue(node.SkillType, out TextMeshProUGUI rankLabel) && rankLabel != null)
                 {
-                    rankLabel.text = $"Rank {node.Rank}/{node.MaxRank}";
+                    rankLabel.text = LocalizationTable.Format("progression_rank", node.Rank, node.MaxRank);
                 }
 
                 if (skillButtons.TryGetValue(node.SkillType, out Button button) && button != null)
@@ -298,12 +318,23 @@ namespace DeliveryDriver.Quest.UI
                 IEnumerable<string> unlocked = driverProgression.LevelRewards
                     .Where(reward => reward != null && driverProgression.IsRewardUnlocked(reward.RewardId))
                     .OrderBy(reward => reward.RequiredLevel)
-                    .Select(reward => $"Lv.{reward.RequiredLevel} - {reward.Title}: {reward.Description}");
+                    .Select(reward => LocalizationTable.Format("progression_level_reward_entry", reward.RequiredLevel, reward.Title, reward.Description));
 
                 rewardsText.text = unlocked.Any()
                     ? string.Join("\n", unlocked)
-                    : "Henuz acilan odul yok.";
+                    : LocalizationTable.Get("progression_no_rewards");
             }
+        }
+
+        private static string GetSkillDisplayName(DriverSkillType skillType)
+        {
+            return skillType switch
+            {
+                DriverSkillType.FuelEfficiency => LocalizationTable.Get("progression_skill_fuel_efficiency"),
+                DriverSkillType.CargoDurability => LocalizationTable.Get("progression_skill_cargo_durability"),
+                DriverSkillType.RouteAssist => LocalizationTable.Get("progression_skill_route_assist"),
+                _ => skillType.ToString()
+            };
         }
 
         private static void EnsureEventSystem()

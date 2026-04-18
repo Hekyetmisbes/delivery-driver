@@ -90,18 +90,13 @@ internal static class DeliveryMissionRules
     {
         string missionLine = missionType switch
         {
-            DeliveryMissionType.Timed => IsEnglish()
-                ? "Timed delivery. You need to reach the destination quickly."
-                : "Süreli teslimat. Hedefe hızlı ulaşman gerekiyor.",
-            DeliveryMissionType.Fragile => IsEnglish()
-                ? "Fragile cargo. Avoid collisions while transporting it."
-                : "Kırılgan kargo. Çarpmalardan kaçınarak taşımalısın.",
-            DeliveryMissionType.MultiStop => IsEnglish()
-                ? $"Multi-stop route. Usually includes {Mathf.Max(2, multiStopMinStops)}-{Mathf.Max(multiStopMinStops, multiStopMaxStops)} delivery points."
-                : $"Çok duraklı rota. Genelde {Mathf.Max(2, multiStopMinStops)}-{Mathf.Max(multiStopMinStops, multiStopMaxStops)} teslim noktası olur.",
-            _ => IsEnglish()
-                ? "Standard package delivery."
-                : "Standart paket teslimatı."
+            DeliveryMissionType.Timed => LocalizationTable.Get("mission_line_timed"),
+            DeliveryMissionType.Fragile => LocalizationTable.Get("mission_line_fragile"),
+            DeliveryMissionType.MultiStop => LocalizationTable.Format(
+                "mission_line_multistop",
+                Mathf.Max(2, multiStopMinStops),
+                Mathf.Max(multiStopMinStops, multiStopMaxStops)),
+            _ => LocalizationTable.Get("mission_line_standard")
         };
 
         string conditionSummary = BuildMissionConditionSummary(rewardMultiplier, rushHourBonus, nightBonus, rainRiskBonus);
@@ -111,44 +106,29 @@ internal static class DeliveryMissionRules
     public static string BuildMissionRewardPreview(DeliveryMissionType missionType, float rewardMultiplier)
     {
         GetMissionRewardValues(missionType, rewardMultiplier, out int baseReward, out int bonusReward);
-        return IsEnglish()
-            ? $"Reward: ${baseReward} (+Bonus ${bonusReward})"
-            : $"Ödül: ${baseReward} (+Bonus ${bonusReward})";
+        return LocalizationTable.Format("mission_reward_preview", baseReward, bonusReward);
     }
 
     public static string BuildMissionConditionSummary(float rewardMultiplier, bool rushHourBonus, bool nightBonus, bool rainRiskBonus)
     {
         System.Collections.Generic.List<string> tags = new System.Collections.Generic.List<string>();
-        if (rushHourBonus) tags.Add(IsEnglish() ? "Rush Hour" : "Yoğun Trafik");
-        if (nightBonus) tags.Add(IsEnglish() ? "Night" : "Gece");
-        if (rainRiskBonus) tags.Add(IsEnglish() ? "Rain Risk" : "Yağmur Riski");
+        if (rushHourBonus) tags.Add(LocalizationTable.Get("mission_condition_rush_hour"));
+        if (nightBonus) tags.Add(LocalizationTable.Get("mission_condition_night"));
+        if (rainRiskBonus) tags.Add(LocalizationTable.Get("mission_condition_rain_risk"));
 
         return tags.Count == 0
             ? string.Empty
-            : IsEnglish()
-                ? $"{string.Join(", ", tags)} (x{Mathf.Max(1f, rewardMultiplier):F2} reward)"
-                : $"{string.Join(", ", tags)} (x{Mathf.Max(1f, rewardMultiplier):F2} ödül)";
+            : LocalizationTable.Format("mission_condition_summary", string.Join(", ", tags), Mathf.Max(1f, rewardMultiplier));
     }
 
     public static string GetMissionLabel(DeliveryMissionType missionType)
     {
-        if (!IsEnglish())
-        {
-            return missionType switch
-            {
-                DeliveryMissionType.Timed => "Süreli Teslimat",
-                DeliveryMissionType.Fragile => "Kırılgan Kargo",
-                DeliveryMissionType.MultiStop => "Çok Duraklı Rota",
-                _ => "Paket Teslimatı"
-            };
-        }
-
         return missionType switch
         {
-            DeliveryMissionType.Timed => "Timed Run",
-            DeliveryMissionType.Fragile => "Fragile Cargo",
-            DeliveryMissionType.MultiStop => "Multi-Stop Route",
-            _ => "Package Delivery"
+            DeliveryMissionType.Timed => LocalizationTable.Get("mission_label_timed"),
+            DeliveryMissionType.Fragile => LocalizationTable.Get("mission_label_fragile"),
+            DeliveryMissionType.MultiStop => LocalizationTable.Get("mission_label_multistop"),
+            _ => LocalizationTable.Get("mission_label_standard")
         };
     }
 
@@ -196,10 +176,5 @@ internal static class DeliveryMissionRules
     {
         int hour = System.DateTime.Now.Hour;
         return hour >= 22 || hour <= 5;
-    }
-
-    private static bool IsEnglish()
-    {
-        return LocalizationTable.CurrentLocale == LocalizationTable.EnglishLocale;
     }
 }

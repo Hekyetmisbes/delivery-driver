@@ -2,6 +2,7 @@ using UnityEngine;
 using System.Collections.Generic;
 using UnityEngine.UI;
 using TMPro;
+using DeliveryDriver.UI;
 
 namespace DeliveryDriver.City
 {
@@ -166,7 +167,7 @@ namespace DeliveryDriver.City
             textObject.transform.SetParent(panelObject.transform, false);
 
             TextMeshProUGUI text = textObject.AddComponent<TextMeshProUGUI>();
-            text.text = "Mahalle";
+            text.text = LocalizationTable.Get("neighborhood_title");
             text.fontSize = 36f;
             text.fontStyle = FontStyles.Bold;
             text.alignment = TextAlignmentOptions.Center;

@@ -105,7 +105,7 @@ namespace DeliveryDriver.Quest.UI
             TMP_Dropdown speedUnitDropdown = CreateLabeledDropdown(
                 graphicsSection,
                 LocalizationTable.Get("speed_unit"),
-                new List<string> { "KMH", "MPH" });
+                new List<string> { LocalizationTable.Get("unit_kmh"), LocalizationTable.Get("unit_mph") });
             TMP_Dropdown languageDropdown = CreateLabeledDropdown(
                 graphicsSection,
                 LocalizationTable.Get("language"),
@@ -615,12 +615,20 @@ namespace DeliveryDriver.Quest.UI
             captionRect.offsetMax = new Vector2(-40f, -6f);
             TextMeshProUGUI captionText = captionObject.GetComponent<TextMeshProUGUI>();
             captionText.fontSize = 18f;
-            captionText.color = Color.white;
+            captionText.fontStyle = FontStyles.Bold;
+            captionText.color = new Color(0.97f, 0.98f, 1f, 1f);
             captionText.alignment = TextAlignmentOptions.MidlineLeft;
+            captionText.textWrappingMode = TextWrappingModes.NoWrap;
+            captionText.overflowMode = TextOverflowModes.Ellipsis;
             if (TMP_Settings.defaultFontAsset != null)
             {
                 captionText.font = TMP_Settings.defaultFontAsset;
             }
+
+            Shadow captionShadow = captionObject.AddComponent<Shadow>();
+            captionShadow.effectColor = new Color(0f, 0f, 0f, 0.55f);
+            captionShadow.effectDistance = new Vector2(1.5f, -1.5f);
+            captionShadow.useGraphicAlpha = true;
 
             GameObject arrowObject = new GameObject("Arrow", typeof(RectTransform), typeof(TextMeshProUGUI));
             arrowObject.transform.SetParent(dropdownObject.transform, false);
@@ -664,7 +672,7 @@ namespace DeliveryDriver.Quest.UI
             viewportObject.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.001f);
             viewportObject.GetComponent<Mask>().showMaskGraphic = false;
 
-            GameObject contentObject = new GameObject("Content", typeof(RectTransform));
+            GameObject contentObject = new GameObject("Content", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
             contentObject.transform.SetParent(viewportObject.transform, false);
             RectTransform contentRect = contentObject.GetComponent<RectTransform>();
             contentRect.anchorMin = new Vector2(0f, 1f);
@@ -672,12 +680,30 @@ namespace DeliveryDriver.Quest.UI
             contentRect.pivot = new Vector2(0.5f, 1f);
             contentRect.sizeDelta = new Vector2(0f, 36f);
 
-            GameObject itemObject = new GameObject("Item", typeof(RectTransform), typeof(Toggle));
+            VerticalLayoutGroup contentLayout = contentObject.GetComponent<VerticalLayoutGroup>();
+            contentLayout.spacing = 2f;
+            contentLayout.padding = new RectOffset(4, 4, 4, 4);
+            contentLayout.childAlignment = TextAnchor.UpperCenter;
+            contentLayout.childControlWidth = true;
+            contentLayout.childControlHeight = true;
+            contentLayout.childForceExpandWidth = true;
+            contentLayout.childForceExpandHeight = false;
+
+            ContentSizeFitter contentFitter = contentObject.GetComponent<ContentSizeFitter>();
+            contentFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+            contentFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            GameObject itemObject = new GameObject("Item", typeof(RectTransform), typeof(Toggle), typeof(LayoutElement));
             itemObject.transform.SetParent(contentObject.transform, false);
             RectTransform itemRect = itemObject.GetComponent<RectTransform>();
             itemRect.anchorMin = new Vector2(0f, 0.5f);
             itemRect.anchorMax = new Vector2(1f, 0.5f);
             itemRect.sizeDelta = new Vector2(0f, 34f);
+
+            LayoutElement itemLayout = itemObject.GetComponent<LayoutElement>();
+            itemLayout.minHeight = 34f;
+            itemLayout.preferredHeight = 34f;
+            itemLayout.flexibleWidth = 1f;
 
             GameObject itemBgObject = new GameObject("Item Background", typeof(RectTransform), typeof(Image));
             itemBgObject.transform.SetParent(itemObject.transform, false);
@@ -696,21 +722,33 @@ namespace DeliveryDriver.Quest.UI
             itemLabelRect.offsetMax = new Vector2(-10f, -1f);
             TextMeshProUGUI itemLabelText = itemLabelObject.GetComponent<TextMeshProUGUI>();
             itemLabelText.fontSize = 17f;
-            itemLabelText.color = Color.white;
+            itemLabelText.fontStyle = FontStyles.Bold;
+            itemLabelText.color = new Color(0.97f, 0.98f, 1f, 1f);
             itemLabelText.alignment = TextAlignmentOptions.Left;
+            itemLabelText.textWrappingMode = TextWrappingModes.NoWrap;
+            itemLabelText.overflowMode = TextOverflowModes.Ellipsis;
             if (TMP_Settings.defaultFontAsset != null)
             {
                 itemLabelText.font = TMP_Settings.defaultFontAsset;
             }
 
+            Shadow itemLabelShadow = itemLabelObject.AddComponent<Shadow>();
+            itemLabelShadow.effectColor = new Color(0f, 0f, 0f, 0.55f);
+            itemLabelShadow.effectDistance = new Vector2(1.5f, -1.5f);
+            itemLabelShadow.useGraphicAlpha = true;
+
             Toggle itemToggle = itemObject.GetComponent<Toggle>();
             itemToggle.targetGraphic = itemBgImage;
+            itemToggle.graphic = null;
             
             ColorBlock toggleColors = itemToggle.colors;
             toggleColors.normalColor = new Color(0.20f, 0.25f, 0.34f, 1f);
             toggleColors.highlightedColor = new Color(0.30f, 0.35f, 0.44f, 1f);
             toggleColors.pressedColor = new Color(0.15f, 0.20f, 0.29f, 1f);
             toggleColors.selectedColor = new Color(0.25f, 0.30f, 0.39f, 1f);
+            toggleColors.disabledColor = new Color(0.18f, 0.22f, 0.28f, 0.96f);
+            toggleColors.colorMultiplier = 1f;
+            toggleColors.fadeDuration = 0.08f;
             itemToggle.colors = toggleColors;
             
             itemToggle.isOn = true;
@@ -731,6 +769,9 @@ namespace DeliveryDriver.Quest.UI
             dropdownColors.highlightedColor = new Color(0.32f, 0.36f, 0.42f, 1f);
             dropdownColors.pressedColor = new Color(0.12f, 0.16f, 0.22f, 1f);
             dropdownColors.selectedColor = new Color(0.27f, 0.31f, 0.37f, 1f);
+            dropdownColors.disabledColor = new Color(0.20f, 0.24f, 0.30f, 0.96f);
+            dropdownColors.colorMultiplier = 1f;
+            dropdownColors.fadeDuration = 0.08f;
             dropdown.colors = dropdownColors;
 
             dropdown.template = templateRect;

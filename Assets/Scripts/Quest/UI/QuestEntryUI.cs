@@ -1,6 +1,7 @@
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using DeliveryDriver.UI;
 
 namespace DeliveryDriver.Quest.UI
 {
@@ -122,7 +123,7 @@ namespace DeliveryDriver.Quest.UI
 
             if (lockedText != null && isLocked)
             {
-                lockedText.text = $"Requires Level {questData.RequiredLevel}";
+                lockedText.text = LocalizationTable.Format("quest_requires_level", questData.RequiredLevel);
             }
 
             if (questEntryCanvasGroup != null)
@@ -171,12 +172,12 @@ namespace DeliveryDriver.Quest.UI
 
             if (pickup != null && delivery == null)
             {
-                return $"Pickup: {FormatCoordinates(pickup.Position)}";
+                return LocalizationTable.Format("quest_pickup_coordinates", FormatCoordinates(pickup.Position));
             }
 
             if (delivery != null)
             {
-                return $"Deliver to: {FormatCoordinates(delivery.Position)}";
+                return LocalizationTable.Format("quest_deliver_coordinates", FormatCoordinates(delivery.Position));
             }
 
             return string.Empty;
@@ -252,7 +253,7 @@ namespace DeliveryDriver.Quest.UI
             }
 
             QuestManager.RewardPenaltyBreakdown preview = manager.GetQuestRewardPreview(quest);
-            return $"Tahmini: ${preview.FinalReward}\nCeza riski: -${preview.TotalPenalty}";
+            return $"{LocalizationTable.Format("quest_reward_estimated", preview.FinalReward)}\n{LocalizationTable.Format("quest_penalty_risk", preview.TotalPenalty)}";
         }
 
         private static Color GetDifficultyColor(QuestDifficulty difficulty)

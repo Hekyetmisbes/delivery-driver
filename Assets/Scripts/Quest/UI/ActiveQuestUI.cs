@@ -316,10 +316,8 @@ namespace DeliveryDriver.Quest.UI
 
             if (!quest.HasPickedUpCargo)
             {
-                string pickupName = quest.PickupLocation != null ? quest.PickupLocation.LocationName : "pickup";
-                objectiveBuilder.Clear();
-                objectiveBuilder.Append("Go to ").Append(pickupName).Append('\n').Append("Pick up cargo");
-                return objectiveBuilder.ToString();
+                string pickupName = quest.PickupLocation != null ? quest.PickupLocation.LocationName : LocalizationTable.Get("unknown");
+                return LocalizationTable.Format("activequest_go_to_pickup", pickupName);
             }
 
             QuestLocation delivery = GetCurrentDeliveryLocation(quest);
@@ -329,19 +327,10 @@ namespace DeliveryDriver.Quest.UI
 
             if (totalStops > 1)
             {
-                objectiveBuilder.Clear();
-                objectiveBuilder.Append("Deliver cargo (")
-                    .Append(currentStop)
-                    .Append('/')
-                    .Append(totalStops)
-                    .Append(")\n")
-                    .Append(deliveryName);
-                return objectiveBuilder.ToString();
+                return LocalizationTable.Format("activequest_deliver_progress", currentStop, totalStops, deliveryName);
             }
 
-            objectiveBuilder.Clear();
-            objectiveBuilder.Append("Deliver to ").Append(deliveryName);
-            return objectiveBuilder.ToString();
+            return LocalizationTable.Format("activequest_deliver_to", deliveryName);
         }
 
         private static QuestLocation GetCurrentDeliveryLocation(QuestData quest)

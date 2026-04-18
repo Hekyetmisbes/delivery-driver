@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using TMPro;
 using UnityEngine;
+using DeliveryDriver.UI;
 
 namespace DeliveryDriver.Quest.UI
 {
@@ -64,7 +65,7 @@ namespace DeliveryDriver.Quest.UI
             PlayerProgressionManager manager = PlayerProgressionManager.Instance;
             if (manager == null)
             {
-                statsText.text = "Statistics unavailable.";
+                statsText.text = LocalizationTable.Get("quest_stats_unavailable");
                 return;
             }
 
@@ -74,14 +75,14 @@ namespace DeliveryDriver.Quest.UI
 
             statsText.text = string.Join("\n", new[]
             {
-                $"Total Deliveries: {manager.TotalQuestsCompleted}",
-                $"Success Rate: {successRate:F1}%",
-                $"Total Money Earned: ${manager.TotalMoneyEarned}",
-                $"Distance Traveled: {manager.GetFormattedDistanceTraveled()}",
-                $"Average Delivery Time: {manager.FormatDuration(averageTime)}",
-                $"Fastest Delivery: {manager.FormatDuration(fastestTime)}",
-                $"Perfect Deliveries (S): {manager.SRanksAchieved}",
-                $"Favorite Cargo: {manager.GetFavoriteCargoType()}"
+                LocalizationTable.Format("stats_total_deliveries", manager.TotalQuestsCompleted),
+                LocalizationTable.Format("stats_success_rate", successRate),
+                LocalizationTable.Format("stats_total_money_earned", manager.TotalMoneyEarned),
+                LocalizationTable.Format("stats_distance_traveled", manager.GetFormattedDistanceTraveled()),
+                LocalizationTable.Format("stats_average_delivery_time", manager.FormatDuration(averageTime)),
+                LocalizationTable.Format("stats_fastest_delivery", manager.FormatDuration(fastestTime)),
+                LocalizationTable.Format("stats_perfect_deliveries", manager.SRanksAchieved),
+                LocalizationTable.Format("stats_favorite_cargo", manager.GetFavoriteCargoType())
             });
 
             UpdateCharts(manager);

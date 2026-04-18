@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using UnityEngine.SceneManagement;
+using DeliveryDriver.UI;
 
 namespace DeliveryDriver.Quest
 {
@@ -70,12 +71,12 @@ namespace DeliveryDriver.Quest
         {
             if (SaveManager.Instance == null)
             {
-                ShowStatus("Save Manager not found!", true);
+                ShowStatus(LocalizationTable.Get("save_manager_missing"), true);
                 return;
             }
 
             SaveManager.Instance.SaveGame();
-            ShowStatus("Game Saved!");
+            ShowStatus(LocalizationTable.Get("save_game_saved"));
             UpdateLastSaveDisplay();
             UpdateButtonStates();
 
@@ -89,13 +90,13 @@ namespace DeliveryDriver.Quest
         {
             if (SaveManager.Instance == null)
             {
-                ShowStatus("Save Manager not found!", true);
+                ShowStatus(LocalizationTable.Get("save_manager_missing"), true);
                 return;
             }
 
             if (!SaveManager.Instance.SaveFileExists())
             {
-                ShowStatus("No save file found!", true);
+                ShowStatus(LocalizationTable.Get("save_no_file"), true);
                 return;
             }
 
@@ -104,12 +105,12 @@ namespace DeliveryDriver.Quest
 
             if (saveData == null)
             {
-                ShowStatus("Failed to load save!", true);
+                ShowStatus(LocalizationTable.Get("save_load_failed"), true);
                 return;
             }
 
             // Reload the current scene to restart with loaded data
-            ShowStatus("Loading game...");
+            ShowStatus(LocalizationTable.Get("save_loading_game"));
             ReloadScene();
         }
 
@@ -120,7 +121,7 @@ namespace DeliveryDriver.Quest
         {
             if (SaveManager.Instance == null)
             {
-                ShowStatus("Save Manager not found!", true);
+                ShowStatus(LocalizationTable.Get("save_manager_missing"), true);
                 return;
             }
 
@@ -140,7 +141,7 @@ namespace DeliveryDriver.Quest
                 // You may want to add a ClearAllQuests method to QuestManager
             }
 
-            ShowStatus("New game started!");
+            ShowStatus(LocalizationTable.Get("save_new_game_started"));
             UpdateLastSaveDisplay();
             UpdateButtonStates();
 
@@ -193,12 +194,14 @@ namespace DeliveryDriver.Quest
 
             if (SaveManager.Instance == null)
             {
-                lastSaveText.text = "Last saved: N/A";
+                lastSaveText.text = LocalizationTable.Get("save_last_saved_none");
                 return;
             }
 
             string lastSaveDate = SaveManager.Instance.GetLastSaveDate();
-            lastSaveText.text = $"Last saved: {lastSaveDate}";
+            lastSaveText.text = string.IsNullOrWhiteSpace(lastSaveDate)
+                ? LocalizationTable.Get("save_last_saved_none")
+                : LocalizationTable.Format("save_last_saved_format", lastSaveDate);
         }
 
         /// <summary>

@@ -122,7 +122,7 @@ namespace DeliveryDriver.Quest.UI
             // Update title
             if (titleText != null)
             {
-                titleText.text = string.IsNullOrEmpty(step.title) ? "Tutorial" : step.title;
+                titleText.text = string.IsNullOrEmpty(step.title) ? LocalizationTable.Get("tutorial_title_default") : step.title;
             }
 
             // Update message
@@ -235,22 +235,22 @@ namespace DeliveryDriver.Quest.UI
             switch (step.triggerType)
             {
                 case TutorialTriggerType.KeyPress:
-                    waitingText = $"\n\n<i>Press {step.triggerKey} to continue...</i>";
+                    waitingText = LocalizationTable.Format("tutorial_wait_keypress", step.triggerKey);
                     break;
                 case TutorialTriggerType.QuestOpened:
-                    waitingText = "\n\n<i>Waiting for you to open the quest menu...</i>";
+                    waitingText = LocalizationTable.Get("tutorial_wait_open_quest");
                     break;
                 case TutorialTriggerType.QuestAccepted:
-                    waitingText = "\n\n<i>Waiting for you to accept a quest...</i>";
+                    waitingText = LocalizationTable.Get("tutorial_wait_accept_quest");
                     break;
                 case TutorialTriggerType.CargoPickedUp:
-                    waitingText = "\n\n<i>Waiting for you to pick up the cargo...</i>";
+                    waitingText = LocalizationTable.Get("tutorial_wait_pickup");
                     break;
                 case TutorialTriggerType.CargoDelivered:
-                    waitingText = "\n\n<i>Waiting for you to deliver the cargo...</i>";
+                    waitingText = LocalizationTable.Get("tutorial_wait_deliver");
                     break;
                 case TutorialTriggerType.QuestCompleted:
-                    waitingText = "\n\n<i>Waiting for quest completion...</i>";
+                    waitingText = LocalizationTable.Get("tutorial_wait_complete");
                     break;
             }
 

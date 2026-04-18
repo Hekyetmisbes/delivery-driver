@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using DeliveryDriver.UI;
 
 namespace DeliveryDriver.Quest.UI
 {
@@ -173,7 +174,7 @@ namespace DeliveryDriver.Quest.UI
             titleRect.sizeDelta = new Vector2(-20, 40);
 
             TextMeshProUGUI titleText = titleObj.AddComponent<TextMeshProUGUI>();
-            titleText.text = "GÖREVLER";
+            titleText.text = LocalizationTable.Get("quest_list_title");
             titleText.fontSize = 24;
             titleText.fontStyle = FontStyles.Bold;
             titleText.alignment = TextAlignmentOptions.Center;
@@ -258,7 +259,7 @@ namespace DeliveryDriver.Quest.UI
             objectiveRect.sizeDelta = new Vector2(-24, 90);
 
             TextMeshProUGUI objectiveText = objectiveObj.AddComponent<TextMeshProUGUI>();
-            objectiveText.text = "Teslimat Görevi";
+            objectiveText.text = LocalizationTable.Get("quest_active_delivery_title");
             objectiveText.fontSize = 26;
             objectiveText.fontStyle = FontStyles.Bold;
             objectiveText.alignment = TextAlignmentOptions.TopLeft;
@@ -354,7 +355,7 @@ namespace DeliveryDriver.Quest.UI
             resultRect.sizeDelta = new Vector2(-40, 60);
 
             TextMeshProUGUI resultText = resultObj.AddComponent<TextMeshProUGUI>();
-            resultText.text = "GÖREV TAMAMLANDI!";
+            resultText.text = LocalizationTable.Get("delivery_complete");
             resultText.fontSize = 36;
             resultText.fontStyle = FontStyles.Bold;
             resultText.alignment = TextAlignmentOptions.Center;
@@ -371,7 +372,7 @@ namespace DeliveryDriver.Quest.UI
             nameRect.sizeDelta = new Vector2(-40, 40);
 
             TextMeshProUGUI nameText = nameObj.AddComponent<TextMeshProUGUI>();
-            nameText.text = "Teslimat Tamamlandı";
+            nameText.text = LocalizationTable.Get("quest_complete_default_name");
             nameText.fontSize = 24;
             nameText.alignment = TextAlignmentOptions.Center;
             nameText.color = Color.white;
@@ -437,7 +438,7 @@ namespace DeliveryDriver.Quest.UI
             buttonTextRect.sizeDelta = Vector2.zero;
 
             TextMeshProUGUI buttonText = buttonTextObj.AddComponent<TextMeshProUGUI>();
-            buttonText.text = "Devam Et";
+            buttonText.text = LocalizationTable.Get("quest_complete_button");
             buttonText.fontSize = 20;
             buttonText.fontStyle = FontStyles.Bold;
             buttonText.alignment = TextAlignmentOptions.Center;

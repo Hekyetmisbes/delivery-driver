@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using DeliveryDriver.Company;
 using UnityEngine;
 
@@ -12,32 +13,49 @@ namespace DeliveryDriver.Navigation
         [SerializeField] private float bobAmplitude = 0.2f;
         [SerializeField] private float bobSpeed = 3f;
 
-        [Header("Arrow Shape")]
-        [SerializeField] private float shaftLength = 0.9f;
-        [SerializeField] private float shaftThickness = 0.12f;
-        [SerializeField] private float headLength = 0.55f;
-        [SerializeField] private float headThickness = 0.12f;
-        [SerializeField] private float headAngle = 36f;
-        [SerializeField] private float headWidth = 0.62f;
+        [Header("Arrow Model")]
+        [SerializeField] private bool preferLowPolyArrowPrefab = true;
+        [SerializeField] private GameObject lowPolyArrowPrefab;
+        [SerializeField] private string lowPolyArrowResourcePath = "Navigation/Arrow_3D_Icon_01";
+        [SerializeField] private float lowPolyArrowBaseScale = 0.92f;
+        [SerializeField] private Vector3 lowPolyArrowRotationOffset = Vector3.zero;
+
+        [Header("Arrow Shape (Fallback)")]
+        [SerializeField] private float shaftLength = 0.82f;
+        [SerializeField] private float shaftThickness = 0.2f;
+        [SerializeField] private float headLength = 0.56f;
+        [SerializeField] private float headThickness = 0.14f;
+        [SerializeField] private float headAngle = 52f;
+        [SerializeField] private float headWidth = 0.68f;
         [SerializeField] private float rotationLerpSpeed = 10f;
         [SerializeField] private float minTargetDistance = 0.25f;
 
         [Header("Arrow Feel")]
-        [SerializeField] private float minArrowScale = 0.95f;
-        [SerializeField] private float maxArrowScale = 1.45f;
-        [SerializeField] private float distanceScaleFactor = 0.009f;
-        [SerializeField] private float pulseScaleAmount = 0.05f;
+        [SerializeField] private float minArrowScale = 0.82f;
+        [SerializeField] private float maxArrowScale = 1.18f;
+        [SerializeField] private float distanceScaleFactor = 0.0055f;
+        [SerializeField] private float pulseScaleAmount = 0.035f;
         [SerializeField] private float pulseScaleSpeed = 3.2f;
-        [SerializeField] private float baseTilt = 6f;
-        [SerializeField] private float cameraTiltInfluence = 5f;
-        [SerializeField] private float swayAmount = 2.2f;
-        [SerializeField] private float swaySpeed = 2.1f;
+        [SerializeField] private float visualPitch = 9f;
+        [SerializeField] private float swayAmount = 1.8f;
+        [SerializeField] private float swaySpeed = 2.3f;
+        [SerializeField] private Color outlineColor = new Color(0.02f, 0.05f, 0.08f, 0.74f);
+        [SerializeField] private float outlineScaleMultiplier = 1.08f;
         [SerializeField] private Color pickupColor = new Color(0.1f, 1f, 1f, 1f);
         [SerializeField] private Color deliveryColor = new Color(1f, 0.9f, 0.05f, 1f);
         [SerializeField] private Color nearTargetColor = new Color(0.25f, 1f, 0.35f, 1f);
         [SerializeField] private float nearTargetBlendDistance = 28f;
         [SerializeField] private float farEmissionIntensity = 2.3f;
         [SerializeField] private float nearEmissionIntensity = 4.2f;
+
+        private static readonly string[] DefaultLowPolyArrowPrefabPaths =
+        {
+            "Assets/HQP Studios/Low Poly 3D Icons - Pack Lite/Prefabs/Arrow_3D_Icon_01.prefab",
+            "Assets/HQP Studios/Low Poly 3D Icons - Pack Lite/Prefabs/Arrow_3D_Icon_02.prefab",
+            "Assets/HQP Studios/Low Poly 3D Icons - Pack Lite/Prefabs/Arrow_3D_Icon_03.prefab",
+            "Assets/HQP Studios/Low Poly 3D Icons - Pack Lite/Prefabs/Arrow_3D_Icon_04.prefab",
+            "Assets/HQP Studios/Low Poly 3D Icons - Pack Lite/Prefabs/Arrow_3D_Icon_05.prefab"
+        };
 
         private static VehicleObjectiveArrow3D instance;
 
@@ -46,12 +64,16 @@ namespace DeliveryDriver.Navigation
         private Transform playerTransform;
         private Transform arrowRoot;
         private Transform arrowVisual;
+        private Transform arrowOutlineVisual;
+        private Mesh arrowMesh;
         private Material arrowMaterial;
+        private Material arrowOutlineMaterial;
         private Vector3 followVelocity;
         private float vehicleHeightOffset;
         private float nextPlayerResolveTime;
-        private Camera cachedCamera;
-        private float nextCameraResolveTime;
+        private float arrowVisualBaseScale = 1f;
+        private bool usingPrefabVisual;
+        private readonly List<Material> arrowRuntimeMaterials = new List<Material>();
 
         public static VehicleObjectiveArrow3D Instance => instance;
 
@@ -110,6 +132,27 @@ namespace DeliveryDriver.Navigation
                 arrowMaterial = null;
             }
 
+            if (arrowOutlineMaterial != null)
+            {
+                Destroy(arrowOutlineMaterial);
+                arrowOutlineMaterial = null;
+            }
+
+            if (arrowMesh != null)
+            {
+                Destroy(arrowMesh);
+                arrowMesh = null;
+            }
+
+            for (int i = 0; i < arrowRuntimeMaterials.Count; i++)
+            {
+                if (arrowRuntimeMaterials[i] != null)
+                {
+                    Destroy(arrowRuntimeMaterials[i]);
+                }
+            }
+            arrowRuntimeMaterials.Clear();
+
             if (instance == this)
             {
                 instance = null;
@@ -145,7 +188,6 @@ namespace DeliveryDriver.Navigation
 
             Vector3 targetDirection = currentObjective.WorldPosition - playerPosition;
             targetDirection.y = 0f;
-
             if (targetDirection.sqrMagnitude < minTargetDistance * minTargetDistance)
             {
                 targetDirection = playerTransform.forward;
@@ -275,113 +317,300 @@ namespace DeliveryDriver.Navigation
             arrowRoot = root.transform;
             arrowRoot.SetParent(transform, false);
 
+            if (TryCreateLowPolyArrowVisual())
+            {
+                UpdateArrowColor(1f);
+                arrowRoot.gameObject.SetActive(false);
+                return;
+            }
+
+            usingPrefabVisual = false;
+            arrowVisualBaseScale = 1f;
+
             GameObject visual = new GameObject("Visual");
             arrowVisual = visual.transform;
             arrowVisual.SetParent(arrowRoot, false);
 
-            GameObject shaft = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            shaft.name = "Shaft";
-            shaft.transform.SetParent(arrowVisual, false);
-            shaft.transform.localPosition = new Vector3(0f, 0f, -shaftLength * 0.12f);
-            shaft.transform.localScale = new Vector3(shaftThickness, shaftThickness, shaftLength);
-            RemoveCollider(shaft);
+            MeshFilter meshFilter = visual.AddComponent<MeshFilter>();
+            arrowMesh = CreateArrowMesh();
+            meshFilter.sharedMesh = arrowMesh;
 
-            GameObject tip = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            tip.name = "Tip";
-            tip.transform.SetParent(arrowVisual, false);
-            tip.transform.localPosition = new Vector3(0f, 0f, shaftLength * 0.5f + headLength * 0.12f);
-            tip.transform.localRotation = Quaternion.Euler(0f, 45f, 0f);
-            tip.transform.localScale = new Vector3(headWidth * 0.42f, headThickness, headWidth * 0.42f);
-            RemoveCollider(tip);
+            MeshRenderer renderer = visual.AddComponent<MeshRenderer>();
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            arrowMaterial = RuntimeColorMaterialHelper.CreateColorMaterial(pickupColor, renderer);
+            if (arrowMaterial != null)
+            {
+                renderer.sharedMaterial = arrowMaterial;
+            }
 
-            GameObject leftHead = CreateHeadArm("LeftHead", -headAngle, -headWidth * 0.18f);
-            leftHead.transform.SetParent(arrowVisual, false);
+            GameObject outline = new GameObject("Outline");
+            arrowOutlineVisual = outline.transform;
+            arrowOutlineVisual.SetParent(arrowRoot, false);
+            arrowOutlineVisual.localPosition = new Vector3(0f, -0.01f, -0.015f);
 
-            GameObject rightHead = CreateHeadArm("RightHead", headAngle, headWidth * 0.18f);
-            rightHead.transform.SetParent(arrowVisual, false);
+            MeshFilter outlineMeshFilter = outline.AddComponent<MeshFilter>();
+            outlineMeshFilter.sharedMesh = arrowMesh;
 
-            MeshRenderer referenceRenderer = shaft.GetComponent<MeshRenderer>();
-            arrowMaterial = RuntimeColorMaterialHelper.CreateColorMaterial(pickupColor, referenceRenderer);
-
-            ApplyMaterial(shaft.GetComponent<MeshRenderer>());
-            ApplyMaterial(tip.GetComponent<MeshRenderer>());
-            ApplyMaterialToChildren(leftHead.transform);
-            ApplyMaterialToChildren(rightHead.transform);
+            MeshRenderer outlineRenderer = outline.AddComponent<MeshRenderer>();
+            outlineRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            outlineRenderer.receiveShadows = false;
+            arrowOutlineMaterial = RuntimeColorMaterialHelper.CreateColorMaterial(outlineColor, outlineRenderer);
+            if (arrowOutlineMaterial != null)
+            {
+                outlineRenderer.sharedMaterial = arrowOutlineMaterial;
+            }
 
             UpdateArrowColor(1f);
 
             arrowRoot.gameObject.SetActive(false);
         }
 
-        private GameObject CreateHeadArm(string name, float yRotation, float xOffset)
+        private bool TryCreateLowPolyArrowVisual()
         {
-            GameObject armRoot = new GameObject(name);
-            armRoot.transform.localPosition = new Vector3(xOffset, 0f, shaftLength * 0.34f);
-            armRoot.transform.localRotation = Quaternion.identity;
-            armRoot.transform.localScale = Vector3.one;
-
-            GameObject arm = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            arm.name = "Arm";
-            arm.transform.SetParent(armRoot.transform, false);
-            arm.transform.localPosition = new Vector3(0f, 0f, headLength * 0.24f);
-            arm.transform.localRotation = Quaternion.Euler(0f, yRotation, 0f);
-            arm.transform.localScale = new Vector3(headThickness, headThickness, headLength);
-            RemoveCollider(arm);
-
-            return armRoot;
-        }
-
-        private void ApplyMaterial(MeshRenderer renderer)
-        {
-            if (renderer != null && arrowMaterial != null)
+            if (!preferLowPolyArrowPrefab)
             {
-                renderer.material = arrowMaterial;
+                return false;
             }
+
+            GameObject prefab = ResolveLowPolyArrowPrefab();
+            if (prefab == null)
+            {
+                return false;
+            }
+
+            GameObject visualInstance = Instantiate(prefab, arrowRoot);
+            visualInstance.name = "Visual";
+
+            arrowVisual = visualInstance.transform;
+            arrowVisual.localPosition = Vector3.zero;
+            arrowVisual.localRotation = Quaternion.Euler(lowPolyArrowRotationOffset);
+
+            usingPrefabVisual = true;
+            arrowVisualBaseScale = Mathf.Max(0.01f, lowPolyArrowBaseScale);
+            arrowVisual.localScale = Vector3.one * arrowVisualBaseScale;
+
+            MeshRenderer[] renderers = visualInstance.GetComponentsInChildren<MeshRenderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                RegisterRuntimeMaterials(renderers[i]);
+            }
+
+            return true;
         }
 
-        private void ApplyMaterialToChildren(Transform root)
+        private GameObject ResolveLowPolyArrowPrefab()
         {
-            if (root == null)
+            if (lowPolyArrowPrefab != null)
+            {
+                return lowPolyArrowPrefab;
+            }
+
+            if (!string.IsNullOrWhiteSpace(lowPolyArrowResourcePath))
+            {
+                GameObject resourcePrefab = Resources.Load<GameObject>(lowPolyArrowResourcePath);
+                if (resourcePrefab != null)
+                {
+                    return resourcePrefab;
+                }
+            }
+
+#if UNITY_EDITOR
+            return LoadDefaultLowPolyArrowPrefabFromEditorAssets();
+#else
+            return null;
+#endif
+        }
+
+#if UNITY_EDITOR
+        private static GameObject LoadDefaultLowPolyArrowPrefabFromEditorAssets()
+        {
+            for (int i = 0; i < DefaultLowPolyArrowPrefabPaths.Length; i++)
+            {
+                GameObject prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(DefaultLowPolyArrowPrefabPaths[i]);
+                if (prefab != null)
+                {
+                    return prefab;
+                }
+            }
+
+            return null;
+        }
+#endif
+
+        private void RegisterRuntimeMaterials(MeshRenderer renderer)
+        {
+            if (renderer == null)
             {
                 return;
             }
 
-            MeshRenderer[] renderers = root.GetComponentsInChildren<MeshRenderer>(true);
-            for (int i = 0; i < renderers.Length; i++)
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+
+            Material[] sharedMaterials = renderer.sharedMaterials;
+            if (sharedMaterials == null || sharedMaterials.Length == 0)
             {
-                ApplyMaterial(renderers[i]);
+                return;
             }
+
+            Material[] runtimeMaterials = new Material[sharedMaterials.Length];
+            for (int i = 0; i < sharedMaterials.Length; i++)
+            {
+                Material sourceMaterial = sharedMaterials[i];
+                Material runtimeMaterial = sourceMaterial != null
+                    ? new Material(sourceMaterial)
+                    : RuntimeColorMaterialHelper.CreateColorMaterial(pickupColor, renderer);
+
+                runtimeMaterials[i] = runtimeMaterial;
+                if (runtimeMaterial != null)
+                {
+                    arrowRuntimeMaterials.Add(runtimeMaterial);
+                }
+            }
+
+            renderer.sharedMaterials = runtimeMaterials;
         }
 
-        private void RemoveCollider(GameObject target)
+        private Mesh CreateArrowMesh()
         {
-            Collider collider = target.GetComponent<Collider>();
-            if (collider != null)
+            float bodyDepth = Mathf.Max(0.08f, headThickness);
+            float shaftHalfWidth = Mathf.Max(0.07f, shaftThickness * 0.5f);
+            float shaftLengthLocal = Mathf.Max(0.5f, shaftLength);
+            float headLengthLocal = Mathf.Max(0.34f, headLength);
+            float tailY = -shaftLengthLocal * 0.5f;
+            float headBaseY = tailY + shaftLengthLocal;
+            float tipY = headBaseY + headLengthLocal;
+            float angleHalfWidth = Mathf.Tan(Mathf.Clamp(headAngle, 18f, 75f) * 0.5f * Mathf.Deg2Rad) * headLengthLocal;
+            float headHalfWidth = Mathf.Max(shaftHalfWidth * 1.7f, Mathf.Max(headWidth * 0.5f, angleHalfWidth));
+
+            Vector2[] outline =
             {
-                Destroy(collider);
+                new Vector2(-shaftHalfWidth, tailY),
+                new Vector2(-shaftHalfWidth, headBaseY),
+                new Vector2(-headHalfWidth, headBaseY),
+                new Vector2(0f, tipY),
+                new Vector2(headHalfWidth, headBaseY),
+                new Vector2(shaftHalfWidth, headBaseY),
+                new Vector2(shaftHalfWidth, tailY)
+            };
+
+            List<Vector3> vertices = new List<Vector3>(outline.Length * 2);
+            List<int> triangles = new List<int>((outline.Length - 2) * 6 + outline.Length * 6);
+
+            float frontZ = bodyDepth * 0.5f;
+            float backZ = -frontZ;
+
+            for (int i = 0; i < outline.Length; i++)
+            {
+                vertices.Add(new Vector3(outline[i].x, outline[i].y, frontZ));
             }
+
+            for (int i = 0; i < outline.Length; i++)
+            {
+                vertices.Add(new Vector3(outline[i].x, outline[i].y, backZ));
+            }
+
+            for (int i = 1; i < outline.Length - 1; i++)
+            {
+                triangles.Add(0);
+                triangles.Add(i);
+                triangles.Add(i + 1);
+            }
+
+            int bottomOffset = outline.Length;
+            for (int i = 1; i < outline.Length - 1; i++)
+            {
+                triangles.Add(bottomOffset);
+                triangles.Add(bottomOffset + i + 1);
+                triangles.Add(bottomOffset + i);
+            }
+
+            for (int i = 0; i < outline.Length; i++)
+            {
+                int next = (i + 1) % outline.Length;
+                AddQuad(triangles, i, next, bottomOffset + next, bottomOffset + i);
+            }
+
+            Mesh mesh = new Mesh
+            {
+                name = "VehicleObjectiveArrowMesh"
+            };
+            mesh.SetVertices(vertices);
+            mesh.SetTriangles(triangles, 0);
+            RotateMeshVertices(mesh, Quaternion.Euler(90f, 0f, 0f));
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static void RotateMeshVertices(Mesh mesh, Quaternion rotation)
+        {
+            Vector3[] vertices = mesh.vertices;
+            for (int i = 0; i < vertices.Length; i++)
+            {
+                vertices[i] = rotation * vertices[i];
+            }
+
+            mesh.vertices = vertices;
+        }
+
+        private static void AddQuad(List<int> triangles, int a, int b, int c, int d)
+        {
+            triangles.Add(a);
+            triangles.Add(b);
+            triangles.Add(c);
+
+            triangles.Add(a);
+            triangles.Add(c);
+            triangles.Add(d);
         }
 
         private void UpdateArrowColor(float distanceToTarget)
         {
-            if (arrowMaterial == null)
-            {
-                return;
-            }
-
             Color baseColor = currentObjective.Type == ObjectiveType.Delivery ? deliveryColor : pickupColor;
             float normalizedDistance = nearTargetBlendDistance <= 0.01f
                 ? 1f
                 : Mathf.Clamp01(distanceToTarget / nearTargetBlendDistance);
             float highlightFactor = 1f - normalizedDistance;
             Color color = Color.Lerp(baseColor, nearTargetColor, highlightFactor);
-            arrowMaterial.color = color;
+            float emissionIntensity = Mathf.Lerp(farEmissionIntensity, nearEmissionIntensity, highlightFactor);
 
-            if (arrowMaterial.HasProperty("_EmissionColor"))
+            if (arrowMaterial != null)
             {
-                arrowMaterial.EnableKeyword("_EMISSION");
-                float emissionIntensity = Mathf.Lerp(farEmissionIntensity, nearEmissionIntensity, highlightFactor);
-                arrowMaterial.SetColor("_EmissionColor", color * emissionIntensity);
+                ApplyMaterialColor(arrowMaterial, color, emissionIntensity);
+            }
+
+            for (int i = 0; i < arrowRuntimeMaterials.Count; i++)
+            {
+                Material material = arrowRuntimeMaterials[i];
+                if (material != null)
+                {
+                    ApplyMaterialColor(material, color, emissionIntensity);
+                }
+            }
+        }
+
+        private static void ApplyMaterialColor(Material material, Color color, float emissionIntensity)
+        {
+            if (material == null)
+            {
+                return;
+            }
+
+            if (material.HasProperty("_BaseColor"))
+            {
+                material.SetColor("_BaseColor", color);
+            }
+            else if (material.HasProperty("_Color"))
+            {
+                material.SetColor("_Color", color);
+            }
+
+            if (material.HasProperty("_EmissionColor"))
+            {
+                material.EnableKeyword("_EMISSION");
+                material.SetColor("_EmissionColor", color * emissionIntensity);
             }
         }
 
@@ -472,44 +701,32 @@ namespace DeliveryDriver.Navigation
                 return;
             }
 
-            Camera camera = ResolveCamera();
             float distanceToTarget = Vector3.Distance(playerPosition, currentObjective.WorldPosition);
             UpdateArrowColor(distanceToTarget);
 
             float distanceScale = Mathf.Clamp(minArrowScale + distanceToTarget * distanceScaleFactor, minArrowScale, maxArrowScale);
             float pulse = 1f + Mathf.Sin(Time.time * pulseScaleSpeed) * pulseScaleAmount;
-            arrowVisual.localScale = Vector3.one * (distanceScale * pulse);
-
-            float cameraTilt = 0f;
-            if (camera != null)
+            float finalScale = distanceScale * pulse;
+            arrowVisual.localScale = Vector3.one * (arrowVisualBaseScale * finalScale);
+            if (arrowOutlineVisual != null)
             {
-                cameraTilt = -camera.transform.forward.y * cameraTiltInfluence;
+                float outlineScale = finalScale * outlineScaleMultiplier;
+                float outlineHeightScale = finalScale * Mathf.Lerp(1f, outlineScaleMultiplier, 0.25f);
+                arrowOutlineVisual.localScale = new Vector3(outlineScale, outlineHeightScale, outlineScale);
             }
 
             float sway = Mathf.Sin(Time.time * swaySpeed) * swayAmount;
-            arrowVisual.localRotation = Quaternion.Euler(baseTilt + cameraTilt, 0f, sway);
-        }
-
-        private Camera ResolveCamera()
-        {
-            if (cachedCamera != null)
+            Vector3 localEuler = new Vector3(visualPitch, 0f, sway);
+            if (usingPrefabVisual)
             {
-                return cachedCamera;
+                localEuler += lowPolyArrowRotationOffset;
             }
 
-            if (Time.time < nextCameraResolveTime)
+            arrowVisual.localRotation = Quaternion.Euler(localEuler);
+            if (arrowOutlineVisual != null)
             {
-                return null;
+                arrowOutlineVisual.localRotation = arrowVisual.localRotation;
             }
-
-            nextCameraResolveTime = Time.time + 1f;
-            cachedCamera = Camera.main;
-            if (cachedCamera == null)
-            {
-                cachedCamera = FindFirstObjectByType<Camera>();
-            }
-
-            return cachedCamera;
         }
     }
 }

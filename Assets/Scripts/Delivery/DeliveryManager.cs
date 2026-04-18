@@ -19,8 +19,8 @@ public class DeliveryManager : MonoBehaviour
 
     [Header("Prefabs")]
     [SerializeField] private GameObject boxPrefab;
-    [SerializeField] private GameObject pickupIndicatorPrefab;
     [SerializeField] private GameObject deliveryIndicatorPrefab;
+    [SerializeField] private bool showFloatingObjectiveMarkers = false;
 
     [Header("Spawn Settings")]
     [SerializeField] private Transform[] spawnPoints;
@@ -88,7 +88,6 @@ public class DeliveryManager : MonoBehaviour
     [SerializeField] private SpeedometerUI speedometerUI;
 
     private DeliveryBox currentBox;
-    private GameObject currentPickupIndicator;
     private GameObject currentDeliveryIndicator;
     private GameObject currentDeliveryPreview; // Ghost box at delivery location
     private Vector3 currentPickupPoint;
@@ -729,13 +728,6 @@ public class DeliveryManager : MonoBehaviour
             triggerCollider.size = new Vector3(3f, 3f, 3f); // Large pickup area
         }
 
-        // Spawn pickup indicator
-        if (pickupIndicatorPrefab != null)
-        {
-            currentPickupIndicator = Instantiate(pickupIndicatorPrefab, spawnPos + Vector3.up * 2f, Quaternion.identity);
-            currentPickupIndicator.transform.SetParent(currentBox.transform);
-        }
-
         // Create quest in quest system
         if (useQuestSystem)
         {
@@ -815,12 +807,13 @@ public class DeliveryManager : MonoBehaviour
 
         isDeliveryActive = true;
 
-        // Spawn delivery indicator
-        if (deliveryIndicatorPrefab != null)
+        // The physical box and ghost preview already communicate the objective clearly.
+        // Keep floating arrows opt-in so they do not overlap the delivery cargo.
+        if (showFloatingObjectiveMarkers && deliveryIndicatorPrefab != null)
         {
             currentDeliveryIndicator = Instantiate(deliveryIndicatorPrefab, currentDeliveryPoint + Vector3.up * 2f, Quaternion.identity);
         }
-        else
+        else if (showFloatingObjectiveMarkers)
         {
             // Create default delivery indicator
             CreateDefaultDeliveryIndicator();
@@ -1716,8 +1709,7 @@ public class DeliveryManager : MonoBehaviour
             currentMissionRewardMultiplier,
             BuildMissionConditionSummary(),
             cargoLibrary,
-            pickupIndicatorPrefab,
-            deliveryIndicatorPrefab,
+            showFloatingObjectiveMarkers ? deliveryIndicatorPrefab : null,
             deliveryRadius,
             showDebugInfo);
     }
@@ -1732,7 +1724,7 @@ public class DeliveryManager : MonoBehaviour
             deliveryStops,
             deliveryNeighborhoods,
             ResolveNeighborhoodName,
-            deliveryIndicatorPrefab,
+            showFloatingObjectiveMarkers ? deliveryIndicatorPrefab : null,
             deliveryRadius,
             showDebugInfo,
             null);
