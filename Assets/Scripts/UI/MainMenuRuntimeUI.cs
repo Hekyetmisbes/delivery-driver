@@ -218,7 +218,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
         fpsDropdown.onValueChanged.AddListener(OnFpsChanged);
 
         speedUnitDropdown = CreateLabeledDropdown(graphicsSection, LocalizationTable.Get("speed_unit"),
-            new[] { "KMH", "MPH" });
+            new[] { LocalizationTable.Get("unit_kmh"), LocalizationTable.Get("unit_mph") });
         speedUnitDropdown.onValueChanged.AddListener(OnSpeedUnitChanged);
 
         languageDropdown = CreateLabeledDropdown(graphicsSection, LocalizationTable.Get("language"),
@@ -832,12 +832,20 @@ public class MainMenuRuntimeUI : MonoBehaviour
         capRect.offsetMax = new Vector2(-32f, -6f);
         TextMeshProUGUI captionText = captionObj.GetComponent<TextMeshProUGUI>();
         captionText.fontSize = 18f;
-        captionText.color = Color.white;
+        captionText.fontStyle = FontStyles.Bold;
+        captionText.color = new Color(0.97f, 0.98f, 1f, 1f);
         captionText.alignment = TextAlignmentOptions.MidlineLeft;
+        captionText.textWrappingMode = TextWrappingModes.NoWrap;
+        captionText.overflowMode = TextOverflowModes.Ellipsis;
         if (TMP_Settings.defaultFontAsset != null)
         {
             captionText.font = TMP_Settings.defaultFontAsset;
         }
+
+        Shadow captionShadow = captionObj.AddComponent<Shadow>();
+        captionShadow.effectColor = new Color(0f, 0f, 0f, 0.55f);
+        captionShadow.effectDistance = new Vector2(1.5f, -1.5f);
+        captionShadow.useGraphicAlpha = true;
 
         GameObject templateObj = new GameObject("Template", typeof(RectTransform), typeof(Image), typeof(ScrollRect));
         templateObj.transform.SetParent(ddObj.transform, false);
@@ -861,7 +869,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
         viewportObj.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.001f);
         viewportObj.GetComponent<Mask>().showMaskGraphic = false;
 
-        GameObject contentObj = new GameObject("Content", typeof(RectTransform));
+        GameObject contentObj = new GameObject("Content", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
         contentObj.transform.SetParent(viewportObj.transform, false);
         RectTransform contentRect = contentObj.GetComponent<RectTransform>();
         contentRect.anchorMin = new Vector2(0f, 1f);
@@ -869,12 +877,30 @@ public class MainMenuRuntimeUI : MonoBehaviour
         contentRect.pivot = new Vector2(0.5f, 1f);
         contentRect.sizeDelta = new Vector2(0f, 36f);
 
-        GameObject itemObj = new GameObject("Item", typeof(RectTransform), typeof(Toggle));
+        VerticalLayoutGroup contentLayout = contentObj.GetComponent<VerticalLayoutGroup>();
+        contentLayout.spacing = 2f;
+        contentLayout.padding = new RectOffset(4, 4, 4, 4);
+        contentLayout.childAlignment = TextAnchor.UpperCenter;
+        contentLayout.childControlWidth = true;
+        contentLayout.childControlHeight = true;
+        contentLayout.childForceExpandWidth = true;
+        contentLayout.childForceExpandHeight = false;
+
+        ContentSizeFitter contentFitter = contentObj.GetComponent<ContentSizeFitter>();
+        contentFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        contentFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        GameObject itemObj = new GameObject("Item", typeof(RectTransform), typeof(Toggle), typeof(LayoutElement));
         itemObj.transform.SetParent(contentObj.transform, false);
         RectTransform itemRect = itemObj.GetComponent<RectTransform>();
         itemRect.anchorMin = new Vector2(0f, 0.5f);
         itemRect.anchorMax = new Vector2(1f, 0.5f);
         itemRect.sizeDelta = new Vector2(0f, 34f);
+
+        LayoutElement itemLayout = itemObj.GetComponent<LayoutElement>();
+        itemLayout.minHeight = 34f;
+        itemLayout.preferredHeight = 34f;
+        itemLayout.flexibleWidth = 1f;
 
         GameObject itemBgObj = new GameObject("Item Background", typeof(RectTransform), typeof(Image));
         itemBgObj.transform.SetParent(itemObj.transform, false);
@@ -895,22 +921,33 @@ public class MainMenuRuntimeUI : MonoBehaviour
         itemLabelRect.offsetMax = new Vector2(-10f, -2f);
         TextMeshProUGUI itemLabelText = itemLabelObj.GetComponent<TextMeshProUGUI>();
         itemLabelText.fontSize = 17f;
-        itemLabelText.color = Color.white;
+        itemLabelText.fontStyle = FontStyles.Bold;
+        itemLabelText.color = new Color(0.97f, 0.98f, 1f, 1f);
         itemLabelText.alignment = TextAlignmentOptions.MidlineLeft;
+        itemLabelText.textWrappingMode = TextWrappingModes.NoWrap;
+        itemLabelText.overflowMode = TextOverflowModes.Ellipsis;
         if (TMP_Settings.defaultFontAsset != null)
         {
             itemLabelText.font = TMP_Settings.defaultFontAsset;
         }
 
+        Shadow itemLabelShadow = itemLabelObj.AddComponent<Shadow>();
+        itemLabelShadow.effectColor = new Color(0f, 0f, 0f, 0.55f);
+        itemLabelShadow.effectDistance = new Vector2(1.5f, -1.5f);
+        itemLabelShadow.useGraphicAlpha = true;
+
         Toggle itemToggle = itemObj.GetComponent<Toggle>();
         itemToggle.targetGraphic = itemBgImage;
+        itemToggle.graphic = null;
         
         ColorBlock cb = itemToggle.colors;
         cb.normalColor = new Color(0.20f, 0.25f, 0.34f, 1f);
         cb.highlightedColor = new Color(0.30f, 0.35f, 0.44f, 1f);
         cb.pressedColor = new Color(0.15f, 0.20f, 0.29f, 1f);
         cb.selectedColor = new Color(0.25f, 0.30f, 0.39f, 1f);
+        cb.disabledColor = new Color(0.18f, 0.22f, 0.28f, 0.96f);
         cb.colorMultiplier = 1f;
+        cb.fadeDuration = 0.08f;
         itemToggle.colors = cb;
         
         itemToggle.isOn = true;
@@ -930,6 +967,9 @@ public class MainMenuRuntimeUI : MonoBehaviour
         dropdownColors.highlightedColor = new Color(0.32f, 0.36f, 0.42f, 1f);
         dropdownColors.pressedColor = new Color(0.12f, 0.16f, 0.22f, 1f);
         dropdownColors.selectedColor = new Color(0.27f, 0.31f, 0.37f, 1f);
+        dropdownColors.disabledColor = new Color(0.20f, 0.24f, 0.30f, 0.96f);
+        dropdownColors.colorMultiplier = 1f;
+        dropdownColors.fadeDuration = 0.08f;
         dropdown.colors = dropdownColors;
 
         dropdown.template = templateRect;

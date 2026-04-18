@@ -44,6 +44,24 @@ namespace DeliveryDriver.UI
             return key;
         }
 
+        public static string Format(string key, params object[] args)
+        {
+            string template = Get(key);
+            if (args == null || args.Length == 0)
+            {
+                return template;
+            }
+
+            try
+            {
+                return string.Format(template, args);
+            }
+            catch (FormatException)
+            {
+                return template;
+            }
+        }
+
         public static void SetLocale(string locale)
         {
             EnsureLoaded();

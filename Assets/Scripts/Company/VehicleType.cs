@@ -1,4 +1,5 @@
 using System;
+using DeliveryDriver.UI;
 
 namespace DeliveryDriver.Company
 {
@@ -17,7 +18,9 @@ namespace DeliveryDriver.Company
 
         public static string ToDisplayLabel(VehicleType vehicleType)
         {
-            return vehicleType == VehicleType.Truck ? "Tir" : "Kamyonet";
+            return vehicleType == VehicleType.Truck
+                ? LocalizationTable.Get("vehicle_truck")
+                : LocalizationTable.Get("vehicle_van");
         }
 
         public static int ToDropdownIndex(VehicleType vehicleType)

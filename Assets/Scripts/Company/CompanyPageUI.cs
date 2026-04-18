@@ -93,7 +93,7 @@ namespace DeliveryDriver.Company
         private IEnumerator InitializeRoutine()
         {
             EnsureUi();
-            SetLoadingState("Sirket verisi yukleniyor...");
+            SetLoadingState(LocalizationTable.Get("company_loading"));
 
             float timeoutAt = Time.realtimeSinceStartup + DatabaseReadyTimeoutSeconds;
             while ((QuestDatabaseService.Instance == null || !QuestDatabaseService.Instance.IsReady) &&
@@ -105,7 +105,7 @@ namespace DeliveryDriver.Company
             if (!TryLoadCompanyProfile(out CompanyProfileData profile))
             {
                 Debug.LogError("[CompanyPageUI] Company profile could not be resolved from the database.");
-                ShowFatalError("Sirket verisi yuklenemedi.\nVeritabani baglantisi hazir degil veya kayit okunamadi.");
+                ShowFatalError(LocalizationTable.Get("company_load_error"));
                 yield break;
             }
 
@@ -122,17 +122,17 @@ namespace DeliveryDriver.Company
 
             if (!ApplyVehicleSelection(profile.SelectedVehicleType, true))
             {
-                ShowFatalError("Sirket verisi yuklenemedi.\nArac tipi uygulanamadi.");
+                ShowFatalError(LocalizationTable.Get("company_apply_vehicle_error"));
                 yield break;
             }
 
             if (!preferredVehicleAvailable)
             {
-                SetWarningState($"Kayitli arac buildde hazir degildi. {VehicleTypeExtensions.ToDisplayLabel(resolvedVehicleType)} kullaniliyor.");
+                SetWarningState(LocalizationTable.Format("company_unavailable_saved_vehicle", VehicleTypeExtensions.ToDisplayLabel(resolvedVehicleType)));
                 yield break;
             }
 
-            SetReadyState("Oyun duraklatildi. Devam Et veya Enter / Space ile baslat.");
+            SetReadyState(LocalizationTable.Get("company_ready"));
         }
 
         private void EnsureUi()
@@ -192,15 +192,15 @@ namespace DeliveryDriver.Company
 
             CreateHeader(panelObject.transform);
             Transform infoSection = CreateSection(panelObject.transform, "SirketBilgileri");
-            companyNameValueText = CreateInfoRow(infoSection, "Sirket Adi");
-            balanceValueText = CreateInfoRow(infoSection, "Bakiye");
-            managerValueText = CreateInfoRow(infoSection, "Yonetici");
-            vehicleTypeDropdown = CreateVehicleDropdownRow(infoSection, "Arac Tipi");
+            companyNameValueText = CreateInfoRow(infoSection, LocalizationTable.Get("company_label_name"));
+            balanceValueText = CreateInfoRow(infoSection, LocalizationTable.Get("company_label_balance"));
+            managerValueText = CreateInfoRow(infoSection, LocalizationTable.Get("company_label_manager"));
+            vehicleTypeDropdown = CreateVehicleDropdownRow(infoSection, LocalizationTable.Get("company_label_vehicle_type"));
             vehicleTypeDropdown.onValueChanged.AddListener(OnVehicleTypeChanged);
 
             statusText = CreateStatusText(panelObject.transform);
             Transform footerRow = CreateFooterRow(panelObject.transform);
-            continueButton = CreateButton(footerRow, "Devam Et", UIThemeConstants.ButtonGreen);
+            continueButton = CreateButton(footerRow, LocalizationTable.Get("continue"), UIThemeConstants.ButtonGreen);
             continueButton.onClick.AddListener(OnContinueClicked);
 
             UIAnimationHelper.ScaleIn(this, panelRect, UIThemeConstants.PanelScaleDuration);
@@ -310,7 +310,7 @@ namespace DeliveryDriver.Company
             if (!TryPersistVehicleType(requestedVehicleType))
             {
                 RevertVehicleSelection();
-                SetWarningState("Arac tipi veritabanina kaydedilemedi. Secim geri alindi.");
+                SetWarningState(LocalizationTable.Get("company_save_vehicle_failed"));
                 return;
             }
 
@@ -318,12 +318,12 @@ namespace DeliveryDriver.Company
             {
                 TryPersistVehicleType(selectedVehicleType);
                 RevertVehicleSelection();
-                SetWarningState("Secilen arac buildde kullanilamiyor. Onceki arac korunuyor.");
+                SetWarningState(LocalizationTable.Get("company_vehicle_not_available"));
                 return;
             }
 
             selectedVehicleType = requestedVehicleType;
-            SetReadyState($"Arac tipi kaydedildi: {VehicleTypeExtensions.ToDisplayLabel(requestedVehicleType)}");
+            SetReadyState(LocalizationTable.Format("company_vehicle_saved", VehicleTypeExtensions.ToDisplayLabel(requestedVehicleType)));
         }
 
         private void RevertVehicleSelection()
@@ -595,8 +595,8 @@ namespace DeliveryDriver.Company
 
         private void CreateHeader(Transform parent)
         {
-            CreateText(parent, "Sirket Sayfasi", 42f, FontStyles.Bold, TextAlignmentOptions.Center, UIThemeConstants.TextHeader, 64f);
-            CreateText(parent, "Oyun duraklatildi. Arac tipinizi secin ve Devam Et, Enter veya Space ile oyunu baslatin.", 20f, FontStyles.Normal, TextAlignmentOptions.Center, UIThemeConstants.TextSecondary, 54f);
+            CreateText(parent, LocalizationTable.Get("company_page_title"), 42f, FontStyles.Bold, TextAlignmentOptions.Center, UIThemeConstants.TextHeader, 64f);
+            CreateText(parent, LocalizationTable.Get("company_page_subtitle"), 20f, FontStyles.Normal, TextAlignmentOptions.Center, UIThemeConstants.TextSecondary, 54f);
         }
 
         private Transform CreateSection(Transform parent, string name)
@@ -662,7 +662,7 @@ namespace DeliveryDriver.Company
             rowElement.minHeight = 52f;
 
             CreateLabeledText(rowObject.transform, label, 230f);
-            TMP_Dropdown dropdown = CreateDropdown(rowObject.transform, new List<string> { "Kamyonet", "Tir" });
+            TMP_Dropdown dropdown = CreateDropdown(rowObject.transform, new List<string> { LocalizationTable.Get("vehicle_van"), LocalizationTable.Get("vehicle_truck") });
             dropdown.interactable = false;
             return dropdown;
         }
@@ -817,12 +817,20 @@ namespace DeliveryDriver.Company
 
             TextMeshProUGUI captionText = captionObject.GetComponent<TextMeshProUGUI>();
             captionText.fontSize = 18f;
-            captionText.color = Color.white;
+            captionText.fontStyle = FontStyles.Bold;
+            captionText.color = new Color(0.97f, 0.98f, 1f, 1f);
             captionText.alignment = TextAlignmentOptions.Left;
+            captionText.textWrappingMode = TextWrappingModes.NoWrap;
+            captionText.overflowMode = TextOverflowModes.Ellipsis;
             if (TMP_Settings.defaultFontAsset != null)
             {
                 captionText.font = TMP_Settings.defaultFontAsset;
             }
+
+            Shadow captionShadow = captionObject.AddComponent<Shadow>();
+            captionShadow.effectColor = new Color(0f, 0f, 0f, 0.55f);
+            captionShadow.effectDistance = new Vector2(1.5f, -1.5f);
+            captionShadow.useGraphicAlpha = true;
 
             GameObject arrowObject = new GameObject("Arrow", typeof(RectTransform), typeof(TextMeshProUGUI));
             arrowObject.transform.SetParent(dropdownObject.transform, false);
@@ -872,7 +880,7 @@ namespace DeliveryDriver.Company
             viewportImage.color = new Color(1f, 1f, 1f, 0.001f);
             viewportObject.GetComponent<Mask>().showMaskGraphic = false;
 
-            GameObject contentObject = new GameObject("Content", typeof(RectTransform));
+            GameObject contentObject = new GameObject("Content", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
             contentObject.transform.SetParent(viewportObject.transform, false);
 
             RectTransform contentRect = contentObject.GetComponent<RectTransform>();
@@ -881,13 +889,31 @@ namespace DeliveryDriver.Company
             contentRect.pivot = new Vector2(0.5f, 1f);
             contentRect.sizeDelta = new Vector2(0f, 36f);
 
-            GameObject itemObject = new GameObject("Item", typeof(RectTransform), typeof(Toggle));
+            VerticalLayoutGroup contentLayout = contentObject.GetComponent<VerticalLayoutGroup>();
+            contentLayout.spacing = 2f;
+            contentLayout.padding = new RectOffset(4, 4, 4, 4);
+            contentLayout.childAlignment = TextAnchor.UpperCenter;
+            contentLayout.childControlWidth = true;
+            contentLayout.childControlHeight = true;
+            contentLayout.childForceExpandWidth = true;
+            contentLayout.childForceExpandHeight = false;
+
+            ContentSizeFitter contentFitter = contentObject.GetComponent<ContentSizeFitter>();
+            contentFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+            contentFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            GameObject itemObject = new GameObject("Item", typeof(RectTransform), typeof(Toggle), typeof(LayoutElement));
             itemObject.transform.SetParent(contentObject.transform, false);
 
             RectTransform itemRect = itemObject.GetComponent<RectTransform>();
             itemRect.anchorMin = new Vector2(0f, 0.5f);
             itemRect.anchorMax = new Vector2(1f, 0.5f);
             itemRect.sizeDelta = new Vector2(0f, 34f);
+
+            LayoutElement itemLayout = itemObject.GetComponent<LayoutElement>();
+            itemLayout.minHeight = 34f;
+            itemLayout.preferredHeight = 34f;
+            itemLayout.flexibleWidth = 1f;
 
             GameObject itemBackgroundObject = new GameObject("Item Background", typeof(RectTransform), typeof(Image));
             itemBackgroundObject.transform.SetParent(itemObject.transform, false);
@@ -912,22 +938,33 @@ namespace DeliveryDriver.Company
 
             TextMeshProUGUI itemLabelText = itemLabelObject.GetComponent<TextMeshProUGUI>();
             itemLabelText.fontSize = 17f;
-            itemLabelText.color = Color.white;
+            itemLabelText.fontStyle = FontStyles.Bold;
+            itemLabelText.color = new Color(0.97f, 0.98f, 1f, 1f);
             itemLabelText.alignment = TextAlignmentOptions.MidlineLeft;
+            itemLabelText.textWrappingMode = TextWrappingModes.NoWrap;
+            itemLabelText.overflowMode = TextOverflowModes.Ellipsis;
             if (TMP_Settings.defaultFontAsset != null)
             {
                 itemLabelText.font = TMP_Settings.defaultFontAsset;
             }
 
+            Shadow itemLabelShadow = itemLabelObject.AddComponent<Shadow>();
+            itemLabelShadow.effectColor = new Color(0f, 0f, 0f, 0.55f);
+            itemLabelShadow.effectDistance = new Vector2(1.5f, -1.5f);
+            itemLabelShadow.useGraphicAlpha = true;
+
             Toggle itemToggle = itemObject.GetComponent<Toggle>();
             itemToggle.targetGraphic = itemBackgroundImage;
+            itemToggle.graphic = null;
             
             ColorBlock cb = itemToggle.colors;
             cb.normalColor = new Color(0.20f, 0.25f, 0.34f, 1f);
             cb.highlightedColor = new Color(0.30f, 0.35f, 0.44f, 1f);
             cb.pressedColor = new Color(0.15f, 0.20f, 0.29f, 1f);
             cb.selectedColor = new Color(0.25f, 0.30f, 0.39f, 1f);
+            cb.disabledColor = new Color(0.18f, 0.22f, 0.28f, 0.96f);
             cb.colorMultiplier = 1f;
+            cb.fadeDuration = 0.08f;
             itemToggle.colors = cb;
             
             itemToggle.isOn = true;
@@ -949,6 +986,9 @@ namespace DeliveryDriver.Company
             dropdownColors.highlightedColor = new Color(0.32f, 0.36f, 0.42f, 1f);
             dropdownColors.pressedColor = new Color(0.12f, 0.16f, 0.22f, 1f);
             dropdownColors.selectedColor = new Color(0.27f, 0.31f, 0.37f, 1f);
+            dropdownColors.disabledColor = new Color(0.20f, 0.24f, 0.30f, 0.96f);
+            dropdownColors.colorMultiplier = 1f;
+            dropdownColors.fadeDuration = 0.08f;
             dropdown.colors = dropdownColors;
 
             dropdown.template = templateRect;

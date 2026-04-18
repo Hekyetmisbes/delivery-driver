@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using DeliveryDriver.UI;
 
 public class CreditsSceneRuntimeUI : MonoBehaviour
 {
@@ -43,10 +44,10 @@ public class CreditsSceneRuntimeUI : MonoBehaviour
         panelLayout.childForceExpandWidth = true;
         panelLayout.childForceExpandHeight = false;
 
-        CreateHeader(panelObject.transform, "CREDITS");
+        CreateHeader(panelObject.transform, LocalizationTable.Get("credits_title"));
         CreateCreditsText(panelObject.transform);
 
-        Button backButton = CreateButton(panelObject.transform, "Ana Menu", new Color(0.12f, 0.55f, 0.83f, 0.95f));
+        Button backButton = CreateButton(panelObject.transform, LocalizationTable.Get("credits_back_to_menu"), new Color(0.12f, 0.55f, 0.83f, 0.95f));
         backButton.onClick.AddListener(() => SceneManager.LoadScene(mainMenuSceneName));
     }
 
@@ -138,8 +139,8 @@ public class CreditsSceneRuntimeUI : MonoBehaviour
     private string BuildCreditsText()
     {
         return
-            "Game by: " + developerName + "\n\n" +
-            "Used Assets:\n" +
+            LocalizationTable.Get("credits_game_by") + ": " + developerName + "\n\n" +
+            LocalizationTable.Get("credits_used_assets") + ":\n" +
             "- Main Menu Artwork (Assets/Images/MainMenuImage.png)\n" +
             "- SimplePoly City - Low Poly Assets\n" +
             "- Nebula - Free low poly car pack\n" +
@@ -149,7 +150,7 @@ public class CreditsSceneRuntimeUI : MonoBehaviour
             "- HQP Studios Low Poly 3D Icons - Pack Lite\n" +
             "- Keypad\n" +
             "- TextMesh Pro\n\n" +
-            "Thanks for playing Delivery Driver.";
+            LocalizationTable.Get("credits_thanks");
     }
 
     private Button CreateButton(Transform parent, string label, Color color)
