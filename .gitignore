@@ -124,3 +124,19 @@ InitTestScene*.unity*
 
 # Third-party asset pack demo scenes
 /[Aa]ssets/FreeButtonSet/Scenes/
+
+# Local terrain/pipeline scratch content
+/[Aa]ssets/HDRPDefaultResources/
+/[Aa]ssets/HDRPDefaultResources.meta
+/[Aa]ssets/TerrainSampleAssets/
+/[Aa]ssets/TerrainSampleAssets.meta
+/[Aa]ssets/TerrainData_*.asset
+/[Aa]ssets/TerrainData_*.asset.meta
+/[Aa]ssets/New Terrain 3.asset
+/[Aa]ssets/New Terrain 3.asset.meta
+/[Aa]ssets/NewBrush.brush
+/[Aa]ssets/NewBrush.brush.meta
+
+# Third-party render pipeline conversion helper content
+/[Aa]ssets/HQP Studios/Low Poly 3D Icons - Pack Lite/URP/
+/[Aa]ssets/HQP Studios/Low Poly 3D Icons - Pack Lite/URP.meta
