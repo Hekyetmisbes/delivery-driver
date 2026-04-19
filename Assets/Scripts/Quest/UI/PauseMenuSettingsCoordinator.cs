@@ -50,6 +50,7 @@ namespace DeliveryDriver.Quest.UI
                 qualityTierOptions[2] = LocalizationTable.Get("quality_high");
                 view.QualityDropdown.ClearOptions();
                 view.QualityDropdown.AddOptions(qualityTierOptions);
+                view.QualityDropdown.RefreshShownValue();
             }
 
             if (view.ColorBlindDropdown != null)
@@ -62,12 +63,14 @@ namespace DeliveryDriver.Quest.UI
                     LocalizationTable.Get("color_blind_deuteranopia"),
                     LocalizationTable.Get("color_blind_tritanopia")
                 });
+                view.ColorBlindDropdown.RefreshShownValue();
             }
 
             if (view.FpsDropdown != null)
             {
                 view.FpsDropdown.ClearOptions();
                 view.FpsDropdown.AddOptions(new List<string> { "30", "60", "120", LocalizationTable.Get("fps_unlimited") });
+                view.FpsDropdown.RefreshShownValue();
             }
 
             if (view.LanguageDropdown != null)
@@ -78,6 +81,7 @@ namespace DeliveryDriver.Quest.UI
                     LocalizationTable.GetLocaleDisplayName(LocalizationTable.TurkishLocale),
                     LocalizationTable.GetLocaleDisplayName(LocalizationTable.EnglishLocale)
                 });
+                view.LanguageDropdown.RefreshShownValue();
             }
 
             RefreshAll();
@@ -123,11 +127,13 @@ namespace DeliveryDriver.Quest.UI
             {
                 int qualityLevel = settings.QualityLevel >= 0 ? settings.QualityLevel : QualitySettings.GetQualityLevel();
                 view.QualityDropdown.value = ConvertProjectQualityToTierIndex(qualityLevel);
+                view.QualityDropdown.RefreshShownValue();
             }
 
             if (view.ResolutionDropdown != null && settings.ResolutionIndex >= 0 && settings.ResolutionIndex < view.AvailableResolutions.Length)
             {
                 view.ResolutionDropdown.value = settings.ResolutionIndex;
+                view.ResolutionDropdown.RefreshShownValue();
             }
 
             if (view.FullScreenToggle != null)
@@ -138,16 +144,19 @@ namespace DeliveryDriver.Quest.UI
             if (view.FpsDropdown != null)
             {
                 SetFpsDropdownValue();
+                view.FpsDropdown.RefreshShownValue();
             }
 
             if (view.SpeedUnitDropdown != null)
             {
                 view.SpeedUnitDropdown.value = settings.SpeedUnitPreference == SpeedUnitPreference.Mph ? 1 : 0;
+                view.SpeedUnitDropdown.RefreshShownValue();
             }
 
             if (view.LanguageDropdown != null)
             {
                 view.LanguageDropdown.value = LocalizationTable.GetLocaleIndex(settings.Language);
+                view.LanguageDropdown.RefreshShownValue();
             }
 
             suppressGraphicsCallbacks = false;

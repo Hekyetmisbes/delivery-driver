@@ -1,6 +1,6 @@
-using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using DeliveryDriver.UI;
 
 namespace DeliveryDriver.Quest.UI
 {
@@ -11,13 +11,13 @@ namespace DeliveryDriver.Quest.UI
         public Slider MasterVolumeSlider { get; set; }
         public Slider MusicVolumeSlider { get; set; }
         public Slider SfxVolumeSlider { get; set; }
-        public TMP_Dropdown QualityDropdown { get; set; }
-        public TMP_Dropdown ResolutionDropdown { get; set; }
+        public RuntimeOptionSelector QualityDropdown { get; set; }
+        public RuntimeOptionSelector ResolutionDropdown { get; set; }
         public Toggle FullScreenToggle { get; set; }
-        public TMP_Dropdown FpsDropdown { get; set; }
-        public TMP_Dropdown SpeedUnitDropdown { get; set; }
-        public TMP_Dropdown LanguageDropdown { get; set; }
-        public TMP_Dropdown ColorBlindDropdown { get; set; }
+        public RuntimeOptionSelector FpsDropdown { get; set; }
+        public RuntimeOptionSelector SpeedUnitDropdown { get; set; }
+        public RuntimeOptionSelector LanguageDropdown { get; set; }
+        public RuntimeOptionSelector ColorBlindDropdown { get; set; }
         public Slider TextScaleSlider { get; set; }
         public Toggle HighContrastToggle { get; set; }
         public Button ResumeButton { get; set; }

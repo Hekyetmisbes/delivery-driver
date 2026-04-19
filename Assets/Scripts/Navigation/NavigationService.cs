@@ -21,7 +21,6 @@ namespace DeliveryDriver.Navigation
         {
             if (Instance != null)
             {
-                VehicleObjectiveArrow3D.EnsureInstance();
                 return Instance;
             }
 
@@ -29,7 +28,6 @@ namespace DeliveryDriver.Navigation
             if (existing != null)
             {
                 Instance = existing;
-                VehicleObjectiveArrow3D.EnsureInstance()?.BindNavigationService(Instance);
                 return Instance;
             }
 
@@ -144,7 +142,6 @@ namespace DeliveryDriver.Navigation
                 return;
             }
             Instance = this;
-            VehicleObjectiveArrow3D.EnsureInstance()?.BindNavigationService(this);
         }
 
         private void OnEnable()
@@ -183,7 +180,6 @@ namespace DeliveryDriver.Navigation
         {
             cachedPlayerTransform = player;
             nextPlayerResolveTime = 0f;
-            VehicleObjectiveArrow3D.EnsureInstance()?.SetPlayerTransform(player);
             if (CurrentObjective.IsValid)
                 TryImmediateRouteBuild();
         }

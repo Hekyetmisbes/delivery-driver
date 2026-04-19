@@ -7,36 +7,57 @@ namespace DeliveryDriver.UI
 {
     public class ConfirmationDialog : MonoBehaviour
     {
+        private static ConfirmationDialog activeDialog;
+
+        public static bool IsShowing => activeDialog != null;
+
         private CanvasGroup canvasGroup;
         private Action confirmAction;
         private Action cancelAction;
+        private bool isClosing;
 
         public static void Show(string title, string message, Action onConfirm, Action onCancel = null)
         {
-            Canvas canvas = GlobalUiCoordinator.PrimaryCanvas;
-            if (canvas == null)
+            if (activeDialog != null)
             {
-                canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
+                return;
             }
 
-            if (canvas == null) return;
+            GameObject dialogRoot = new GameObject(
+                "ConfirmationDialog",
+                typeof(RectTransform),
+                typeof(Canvas),
+                typeof(CanvasScaler),
+                typeof(GraphicRaycaster),
+                typeof(CanvasGroup));
 
-            GameObject dialogRoot = new GameObject("ConfirmationDialog", typeof(RectTransform), typeof(CanvasGroup));
-            dialogRoot.transform.SetParent(canvas.transform, false);
+            RectTransform rootRect = dialogRoot.GetComponent<RectTransform>();
+            rootRect.anchorMin = Vector2.zero;
+            rootRect.anchorMax = Vector2.one;
+            rootRect.offsetMin = Vector2.zero;
+            rootRect.offsetMax = Vector2.zero;
 
-            // Ensure it renders on top
-            Canvas dialogCanvas = dialogRoot.AddComponent<Canvas>();
+            Canvas dialogCanvas = dialogRoot.GetComponent<Canvas>();
+            dialogCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
             dialogCanvas.overrideSorting = true;
-            dialogCanvas.sortingOrder = 999;
-            dialogRoot.AddComponent<GraphicRaycaster>();
+            dialogCanvas.sortingOrder = 30000;
+
+            CanvasScaler scaler = dialogRoot.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+            scaler.matchWidthOrHeight = 0.5f;
 
             ConfirmationDialog dialog = dialogRoot.AddComponent<ConfirmationDialog>();
+            activeDialog = dialog;
             dialog.confirmAction = onConfirm;
             dialog.cancelAction = onCancel;
             dialog.canvasGroup = dialogRoot.GetComponent<CanvasGroup>();
             dialog.BuildUI(dialogRoot.transform, title, message);
 
             dialog.canvasGroup.alpha = 0f;
+            dialog.canvasGroup.interactable = true;
+            dialog.canvasGroup.blocksRaycasts = true;
             UIAnimationHelper.FadeIn(dialog, dialog.canvasGroup, 0.2f);
         }
 
@@ -109,12 +130,12 @@ namespace DeliveryDriver.UI
             buttonRow.GetComponent<LayoutElement>().minHeight = 54f;
 
             // Cancel button
-            Button cancelBtn = CreateDialogButton(buttonRow.transform, "Iptal", new Color(0.35f, 0.38f, 0.42f, 1f), buttonSprite);
+            Button cancelBtn = CreateDialogButton(buttonRow.transform, LocalizationTable.Get("cancel"), new Color(0.35f, 0.38f, 0.42f, 1f), buttonSprite);
             cancelBtn.onClick.AddListener(OnCancelClicked);
             UIButtonEnhancer.EnhanceButton(cancelBtn);
 
             // Confirm button
-            Button confirmBtn = CreateDialogButton(buttonRow.transform, "Onayla", new Color(0.16f, 0.62f, 0.3f, 1f), buttonSprite);
+            Button confirmBtn = CreateDialogButton(buttonRow.transform, LocalizationTable.Get("confirm"), new Color(0.16f, 0.62f, 0.3f, 1f), buttonSprite);
             confirmBtn.onClick.AddListener(OnConfirmClicked);
             UIButtonEnhancer.EnhanceButton(confirmBtn);
 
@@ -180,25 +201,57 @@ namespace DeliveryDriver.UI
 
         private void OnConfirmClicked()
         {
+            if (isClosing)
+            {
+                return;
+            }
+
             Close();
             confirmAction?.Invoke();
         }
 
         private void OnCancelClicked()
         {
+            if (isClosing)
+            {
+                return;
+            }
+
             Close();
             cancelAction?.Invoke();
         }
 
         private void Close()
         {
+            if (isClosing)
+            {
+                return;
+            }
+
+            isClosing = true;
+
+            if (activeDialog == this)
+            {
+                activeDialog = null;
+            }
+
             if (canvasGroup != null)
             {
+                canvasGroup.interactable = false;
+                canvasGroup.blocksRaycasts = false;
                 UIAnimationHelper.FadeOut(this, canvasGroup, 0.15f, () => Destroy(gameObject));
             }
             else
             {
                 Destroy(gameObject);
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (activeDialog == this)
+            {
+                activeDialog = null;
             }
         }
     }

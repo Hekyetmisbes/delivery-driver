@@ -75,6 +75,8 @@ public class GlobalUiCoordinator : MonoBehaviour
         BuildOrFindCanvasGroupRoot();
         EnsurePauseMenuComponent();
         EnsureBalanceHudComponent();
+        EnsureBorderRespawnGuardComponent();
+        EnsureMinimapComponent();
         RefreshSceneBindings();
     }
 
@@ -129,6 +131,8 @@ public class GlobalUiCoordinator : MonoBehaviour
         BuildOrFindCanvasGroupRoot();
         EnsurePauseMenuComponent();
         EnsureBalanceHudComponent();
+        EnsureBorderRespawnGuardComponent();
+        EnsureMinimapComponent();
         if (adoptExistingCanvases)
         {
             ReparentSceneCanvases();
@@ -219,6 +223,22 @@ public class GlobalUiCoordinator : MonoBehaviour
         if (GetComponent<BalanceHudUI>() == null)
         {
             gameObject.AddComponent<BalanceHudUI>();
+        }
+    }
+
+    private void EnsureBorderRespawnGuardComponent()
+    {
+        if (GetComponent<BorderRespawnGuard>() == null)
+        {
+            gameObject.AddComponent<BorderRespawnGuard>();
+        }
+    }
+
+    private void EnsureMinimapComponent()
+    {
+        if (GetComponent<MinimapUI>() == null)
+        {
+            gameObject.AddComponent<MinimapUI>();
         }
     }
 

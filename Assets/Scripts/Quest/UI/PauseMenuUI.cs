@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using DeliveryDriver.Quest;
 using DeliveryDriver.UI;
+using UnityEngine.SceneManagement;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -10,6 +11,8 @@ namespace DeliveryDriver.Quest.UI
 {
     public class PauseMenuUI : MonoBehaviour
     {
+        private const string MainMenuSceneName = "MainMenu";
+
         [SerializeField] private GameObject pausePanel;
         [SerializeField] private SettingsMenuUI settingsMenu;
         [SerializeField] private QuestStatisticsUI statisticsMenu;
@@ -72,7 +75,7 @@ namespace DeliveryDriver.Quest.UI
 
         private void HandlePauseInput()
         {
-            if (!enablePauseToggleInput)
+            if (!enablePauseToggleInput || IsMainMenuSceneActive())
             {
                 return;
             }
@@ -94,6 +97,11 @@ namespace DeliveryDriver.Quest.UI
 #endif
         }
 
+        private static bool IsMainMenuSceneActive()
+        {
+            return SceneManager.GetActiveScene().name.Equals(MainMenuSceneName, System.StringComparison.OrdinalIgnoreCase);
+        }
+
         public void TogglePause()
         {
             SetPaused(!isPaused);
@@ -112,6 +120,8 @@ namespace DeliveryDriver.Quest.UI
                     if (pausePanelCanvasGroup != null)
                     {
                         pausePanelCanvasGroup.alpha = 0f;
+                        pausePanelCanvasGroup.interactable = true;
+                        pausePanelCanvasGroup.blocksRaycasts = true;
                         UIAnimationHelper.FadeIn(this, pausePanelCanvasGroup, UIThemeConstants.PanelFadeDuration);
                         UIAnimationHelper.ScaleIn(this, pausePanel.GetComponent<RectTransform>(), UIThemeConstants.PanelScaleDuration);
                     }
@@ -120,6 +130,8 @@ namespace DeliveryDriver.Quest.UI
                 {
                     if (pausePanelCanvasGroup != null)
                     {
+                        pausePanelCanvasGroup.interactable = false;
+                        pausePanelCanvasGroup.blocksRaycasts = false;
                         UIAnimationHelper.FadeOut(this, pausePanelCanvasGroup, UIThemeConstants.PanelFadeDuration * 0.5f, () =>
                         {
                             pausePanel.SetActive(false);
@@ -130,6 +142,11 @@ namespace DeliveryDriver.Quest.UI
                         pausePanel.SetActive(false);
                     }
                 }
+            }
+
+            if (paused)
+            {
+                EnsureRuntimeControlsInteractable();
             }
 
             if (settingsMenu != null && !runtimePausePanelBuilt)
@@ -200,6 +217,7 @@ namespace DeliveryDriver.Quest.UI
             pausePanelCanvasGroup = runtimeView.PanelCanvasGroup;
             settingsCoordinator = new PauseMenuSettingsCoordinator(runtimeView);
             settingsCoordinator.BindCallbacks();
+            EnsureRuntimeControlsInteractable();
 
             if (runtimeView.ResumeButton != null)
             {
@@ -210,6 +228,11 @@ namespace DeliveryDriver.Quest.UI
             {
                 runtimeView.QuitButton.onClick.AddListener(() =>
                 {
+                    if (ConfirmationDialog.IsShowing)
+                    {
+                        return;
+                    }
+
                     ConfirmationDialog.Show(
                         LocalizationTable.Get("confirm_quit_title"),
                         LocalizationTable.Get("confirm_quit"),
@@ -365,6 +388,29 @@ namespace DeliveryDriver.Quest.UI
                 default:
                     return false;
             }
+        }
+
+        private void EnsureRuntimeControlsInteractable()
+        {
+            if (runtimeView == null)
+            {
+                return;
+            }
+
+            if (runtimeView.MasterVolumeSlider != null) runtimeView.MasterVolumeSlider.interactable = true;
+            if (runtimeView.MusicVolumeSlider != null) runtimeView.MusicVolumeSlider.interactable = true;
+            if (runtimeView.SfxVolumeSlider != null) runtimeView.SfxVolumeSlider.interactable = true;
+            if (runtimeView.QualityDropdown != null) runtimeView.QualityDropdown.interactable = true;
+            if (runtimeView.ResolutionDropdown != null) runtimeView.ResolutionDropdown.interactable = true;
+            if (runtimeView.FullScreenToggle != null) runtimeView.FullScreenToggle.interactable = true;
+            if (runtimeView.FpsDropdown != null) runtimeView.FpsDropdown.interactable = true;
+            if (runtimeView.SpeedUnitDropdown != null) runtimeView.SpeedUnitDropdown.interactable = true;
+            if (runtimeView.LanguageDropdown != null) runtimeView.LanguageDropdown.interactable = true;
+            if (runtimeView.ColorBlindDropdown != null) runtimeView.ColorBlindDropdown.interactable = true;
+            if (runtimeView.TextScaleSlider != null) runtimeView.TextScaleSlider.interactable = true;
+            if (runtimeView.HighContrastToggle != null) runtimeView.HighContrastToggle.interactable = true;
+            if (runtimeView.ResumeButton != null) runtimeView.ResumeButton.interactable = true;
+            if (runtimeView.QuitButton != null) runtimeView.QuitButton.interactable = true;
         }
     }
 }

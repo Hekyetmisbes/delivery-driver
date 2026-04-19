@@ -31,7 +31,7 @@ namespace DeliveryDriver.Company
         private TextMeshProUGUI balanceValueText;
         private TextMeshProUGUI managerValueText;
         private TextMeshProUGUI statusText;
-        private TMP_Dropdown vehicleTypeDropdown;
+        private RuntimeOptionSelector vehicleTypeDropdown;
         private Button continueButton;
         private bool suppressDropdownCallbacks;
         private bool profileLoaded;
@@ -645,7 +645,7 @@ namespace DeliveryDriver.Company
             return CreateValueText(rowObject.transform, "-");
         }
 
-        private TMP_Dropdown CreateVehicleDropdownRow(Transform parent, string label)
+        private RuntimeOptionSelector CreateVehicleDropdownRow(Transform parent, string label)
         {
             GameObject rowObject = new GameObject($"{label}Row", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
             rowObject.transform.SetParent(parent, false);
@@ -662,9 +662,9 @@ namespace DeliveryDriver.Company
             rowElement.minHeight = 52f;
 
             CreateLabeledText(rowObject.transform, label, 230f);
-            TMP_Dropdown dropdown = CreateDropdown(rowObject.transform, new List<string> { LocalizationTable.Get("vehicle_van"), LocalizationTable.Get("vehicle_truck") });
-            dropdown.interactable = false;
-            return dropdown;
+            RuntimeOptionSelector selector = CreateDropdown(rowObject.transform, new List<string> { LocalizationTable.Get("vehicle_van"), LocalizationTable.Get("vehicle_truck") });
+            selector.interactable = false;
+            return selector;
         }
 
         private TextMeshProUGUI CreateLabeledText(Transform parent, string label, float width)
@@ -782,6 +782,7 @@ namespace DeliveryDriver.Company
             text.fontStyle = FontStyles.Bold;
             text.alignment = TextAlignmentOptions.Center;
             text.color = Color.white;
+            text.raycastTarget = false;
             if (TMP_Settings.defaultFontAsset != null)
             {
                 text.font = TMP_Settings.defaultFontAsset;
@@ -791,9 +792,9 @@ namespace DeliveryDriver.Company
             return button;
         }
 
-        private TMP_Dropdown CreateDropdown(Transform parent, List<string> options)
+        private RuntimeOptionSelector CreateDropdown(Transform parent, List<string> options)
         {
-            GameObject dropdownObject = new GameObject("Dropdown", typeof(RectTransform), typeof(TMP_Dropdown), typeof(Image), typeof(LayoutElement));
+            GameObject dropdownObject = new GameObject("Dropdown", typeof(RectTransform), typeof(Image), typeof(LayoutElement));
             dropdownObject.transform.SetParent(parent, false);
 
             LayoutElement layoutElement = dropdownObject.GetComponent<LayoutElement>();
@@ -801,203 +802,10 @@ namespace DeliveryDriver.Company
             layoutElement.flexibleWidth = 1f;
             layoutElement.minHeight = 44f;
 
-            Image dropdownImage = dropdownObject.GetComponent<Image>();
-            dropdownImage.color = new Color(0.18f, 0.22f, 0.28f, 1f);
-            dropdownImage.sprite = DeliveryUiSpriteHelper.GetFallbackSprite();
-            dropdownImage.type = Image.Type.Sliced;
-
-            GameObject captionObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
-            captionObject.transform.SetParent(dropdownObject.transform, false);
-
-            RectTransform captionRect = captionObject.GetComponent<RectTransform>();
-            captionRect.anchorMin = Vector2.zero;
-            captionRect.anchorMax = Vector2.one;
-            captionRect.offsetMin = new Vector2(14f, 4f);
-            captionRect.offsetMax = new Vector2(-40f, -4f);
-
-            TextMeshProUGUI captionText = captionObject.GetComponent<TextMeshProUGUI>();
-            captionText.fontSize = 18f;
-            captionText.fontStyle = FontStyles.Bold;
-            captionText.color = new Color(0.97f, 0.98f, 1f, 1f);
-            captionText.alignment = TextAlignmentOptions.Left;
-            captionText.textWrappingMode = TextWrappingModes.NoWrap;
-            captionText.overflowMode = TextOverflowModes.Ellipsis;
-            if (TMP_Settings.defaultFontAsset != null)
-            {
-                captionText.font = TMP_Settings.defaultFontAsset;
-            }
-
-            Shadow captionShadow = captionObject.AddComponent<Shadow>();
-            captionShadow.effectColor = new Color(0f, 0f, 0f, 0.55f);
-            captionShadow.effectDistance = new Vector2(1.5f, -1.5f);
-            captionShadow.useGraphicAlpha = true;
-
-            GameObject arrowObject = new GameObject("Arrow", typeof(RectTransform), typeof(TextMeshProUGUI));
-            arrowObject.transform.SetParent(dropdownObject.transform, false);
-
-            RectTransform arrowRect = arrowObject.GetComponent<RectTransform>();
-            arrowRect.anchorMin = new Vector2(1f, 0f);
-            arrowRect.anchorMax = new Vector2(1f, 1f);
-            arrowRect.pivot = new Vector2(1f, 0.5f);
-            arrowRect.sizeDelta = new Vector2(32f, 0f);
-            arrowRect.anchoredPosition = new Vector2(-8f, 0f);
-
-            TextMeshProUGUI arrowText = arrowObject.GetComponent<TextMeshProUGUI>();
-            arrowText.text = "\u25BC";
-            arrowText.fontSize = 11f;
-            arrowText.color = Color.white;
-            arrowText.alignment = TextAlignmentOptions.Center;
-            if (TMP_Settings.defaultFontAsset != null)
-            {
-                arrowText.font = TMP_Settings.defaultFontAsset;
-            }
-
-            GameObject templateObject = new GameObject("Template", typeof(RectTransform), typeof(Image), typeof(ScrollRect));
-            templateObject.transform.SetParent(dropdownObject.transform, false);
-
-            RectTransform templateRect = templateObject.GetComponent<RectTransform>();
-            templateRect.anchorMin = new Vector2(0f, 1f);
-            templateRect.anchorMax = new Vector2(1f, 1f);
-            templateRect.pivot = new Vector2(0.5f, 0f);
-            templateRect.anchoredPosition = new Vector2(0f, 2f);
-            templateRect.sizeDelta = new Vector2(0f, 156f);
-
-            Image templateImage = templateObject.GetComponent<Image>();
-            templateImage.color = new Color(0.12f, 0.16f, 0.22f, 0.98f);
-            templateImage.sprite = DeliveryUiSpriteHelper.GetFallbackSprite();
-            templateImage.type = Image.Type.Sliced;
-
-            GameObject viewportObject = new GameObject("Viewport", typeof(RectTransform), typeof(Mask), typeof(Image));
-            viewportObject.transform.SetParent(templateObject.transform, false);
-
-            RectTransform viewportRect = viewportObject.GetComponent<RectTransform>();
-            viewportRect.anchorMin = Vector2.zero;
-            viewportRect.anchorMax = Vector2.one;
-            viewportRect.offsetMin = Vector2.zero;
-            viewportRect.offsetMax = Vector2.zero;
-
-            Image viewportImage = viewportObject.GetComponent<Image>();
-            viewportImage.color = new Color(1f, 1f, 1f, 0.001f);
-            viewportObject.GetComponent<Mask>().showMaskGraphic = false;
-
-            GameObject contentObject = new GameObject("Content", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
-            contentObject.transform.SetParent(viewportObject.transform, false);
-
-            RectTransform contentRect = contentObject.GetComponent<RectTransform>();
-            contentRect.anchorMin = new Vector2(0f, 1f);
-            contentRect.anchorMax = new Vector2(1f, 1f);
-            contentRect.pivot = new Vector2(0.5f, 1f);
-            contentRect.sizeDelta = new Vector2(0f, 36f);
-
-            VerticalLayoutGroup contentLayout = contentObject.GetComponent<VerticalLayoutGroup>();
-            contentLayout.spacing = 2f;
-            contentLayout.padding = new RectOffset(4, 4, 4, 4);
-            contentLayout.childAlignment = TextAnchor.UpperCenter;
-            contentLayout.childControlWidth = true;
-            contentLayout.childControlHeight = true;
-            contentLayout.childForceExpandWidth = true;
-            contentLayout.childForceExpandHeight = false;
-
-            ContentSizeFitter contentFitter = contentObject.GetComponent<ContentSizeFitter>();
-            contentFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-            contentFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-            GameObject itemObject = new GameObject("Item", typeof(RectTransform), typeof(Toggle), typeof(LayoutElement));
-            itemObject.transform.SetParent(contentObject.transform, false);
-
-            RectTransform itemRect = itemObject.GetComponent<RectTransform>();
-            itemRect.anchorMin = new Vector2(0f, 0.5f);
-            itemRect.anchorMax = new Vector2(1f, 0.5f);
-            itemRect.sizeDelta = new Vector2(0f, 34f);
-
-            LayoutElement itemLayout = itemObject.GetComponent<LayoutElement>();
-            itemLayout.minHeight = 34f;
-            itemLayout.preferredHeight = 34f;
-            itemLayout.flexibleWidth = 1f;
-
-            GameObject itemBackgroundObject = new GameObject("Item Background", typeof(RectTransform), typeof(Image));
-            itemBackgroundObject.transform.SetParent(itemObject.transform, false);
-
-            RectTransform itemBackgroundRect = itemBackgroundObject.GetComponent<RectTransform>();
-            itemBackgroundRect.anchorMin = Vector2.zero;
-            itemBackgroundRect.anchorMax = Vector2.one;
-            itemBackgroundRect.offsetMin = Vector2.zero;
-            itemBackgroundRect.offsetMax = Vector2.zero;
-
-            Image itemBackgroundImage = itemBackgroundObject.GetComponent<Image>();
-            itemBackgroundImage.color = new Color(0.20f, 0.25f, 0.34f, 1f);
-
-            GameObject itemLabelObject = new GameObject("Item Label", typeof(RectTransform), typeof(TextMeshProUGUI));
-            itemLabelObject.transform.SetParent(itemObject.transform, false);
-
-            RectTransform itemLabelRect = itemLabelObject.GetComponent<RectTransform>();
-            itemLabelRect.anchorMin = Vector2.zero;
-            itemLabelRect.anchorMax = Vector2.one;
-            itemLabelRect.offsetMin = new Vector2(10f, 1f);
-            itemLabelRect.offsetMax = new Vector2(-10f, -1f);
-
-            TextMeshProUGUI itemLabelText = itemLabelObject.GetComponent<TextMeshProUGUI>();
-            itemLabelText.fontSize = 17f;
-            itemLabelText.fontStyle = FontStyles.Bold;
-            itemLabelText.color = new Color(0.97f, 0.98f, 1f, 1f);
-            itemLabelText.alignment = TextAlignmentOptions.MidlineLeft;
-            itemLabelText.textWrappingMode = TextWrappingModes.NoWrap;
-            itemLabelText.overflowMode = TextOverflowModes.Ellipsis;
-            if (TMP_Settings.defaultFontAsset != null)
-            {
-                itemLabelText.font = TMP_Settings.defaultFontAsset;
-            }
-
-            Shadow itemLabelShadow = itemLabelObject.AddComponent<Shadow>();
-            itemLabelShadow.effectColor = new Color(0f, 0f, 0f, 0.55f);
-            itemLabelShadow.effectDistance = new Vector2(1.5f, -1.5f);
-            itemLabelShadow.useGraphicAlpha = true;
-
-            Toggle itemToggle = itemObject.GetComponent<Toggle>();
-            itemToggle.targetGraphic = itemBackgroundImage;
-            itemToggle.graphic = null;
-            
-            ColorBlock cb = itemToggle.colors;
-            cb.normalColor = new Color(0.20f, 0.25f, 0.34f, 1f);
-            cb.highlightedColor = new Color(0.30f, 0.35f, 0.44f, 1f);
-            cb.pressedColor = new Color(0.15f, 0.20f, 0.29f, 1f);
-            cb.selectedColor = new Color(0.25f, 0.30f, 0.39f, 1f);
-            cb.disabledColor = new Color(0.18f, 0.22f, 0.28f, 0.96f);
-            cb.colorMultiplier = 1f;
-            cb.fadeDuration = 0.08f;
-            itemToggle.colors = cb;
-            
-            itemToggle.isOn = true;
-
-            ScrollRect scrollRect = templateObject.GetComponent<ScrollRect>();
-            scrollRect.content = contentRect;
-            scrollRect.viewport = viewportRect;
-            scrollRect.horizontal = false;
-            scrollRect.vertical = true;
-            scrollRect.movementType = ScrollRect.MovementType.Clamped;
-
-            templateObject.SetActive(false);
-
-            TMP_Dropdown dropdown = dropdownObject.GetComponent<TMP_Dropdown>();
-            dropdown.targetGraphic = dropdownImage;
-
-            ColorBlock dropdownColors = dropdown.colors;
-            dropdownColors.normalColor = new Color(0.22f, 0.26f, 0.32f, 1f);
-            dropdownColors.highlightedColor = new Color(0.32f, 0.36f, 0.42f, 1f);
-            dropdownColors.pressedColor = new Color(0.12f, 0.16f, 0.22f, 1f);
-            dropdownColors.selectedColor = new Color(0.27f, 0.31f, 0.37f, 1f);
-            dropdownColors.disabledColor = new Color(0.20f, 0.24f, 0.30f, 0.96f);
-            dropdownColors.colorMultiplier = 1f;
-            dropdownColors.fadeDuration = 0.08f;
-            dropdown.colors = dropdownColors;
-
-            dropdown.template = templateRect;
-            dropdown.captionText = captionText;
-            dropdown.itemText = itemLabelText;
-            dropdown.ClearOptions();
-            dropdown.AddOptions(options);
-
-            return dropdown;
+            RuntimeOptionSelector selector = dropdownObject.AddComponent<RuntimeOptionSelector>();
+            selector.Initialize(options);
+            selector.interactable = options != null && options.Count > 1;
+            return selector;
         }
 
         private TextMeshProUGUI CreateText(Transform parent, string content, float fontSize, FontStyles fontStyle, TextAlignmentOptions alignment, Color color, float preferredHeight)
