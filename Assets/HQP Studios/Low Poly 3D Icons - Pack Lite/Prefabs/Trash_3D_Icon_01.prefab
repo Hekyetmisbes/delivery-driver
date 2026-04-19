@@ -48,6 +48,10 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: -7511558181221131132, guid: 5b0d477497b414a1e92ef9e5b6f5e00f, type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 2100000, guid: 68ba24fdb146d4ec692e3a736c8641a3, type: 2}
     - target: {fileID: 919132149155446097, guid: 5b0d477497b414a1e92ef9e5b6f5e00f, type: 3}
       propertyPath: m_Name
       value: Trash_3D_Icon_01
