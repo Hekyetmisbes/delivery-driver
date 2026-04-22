@@ -122,8 +122,28 @@ InitTestScene*.unity*
 # Unity auto-recovery files
 /[Aa]ssets/_Recovery/
 
-# Third-party asset pack demo scenes
+# Third-party asset pack docs, demos, and samples
 /[Aa]ssets/FreeButtonSet/Scenes/
+/[Aa]ssets/Awb-Free Low Poly Vehicles/Important!!!!.pdf
+/[Aa]ssets/Awb-Free Low Poly Vehicles/Important!!!!.pdf.meta
+/[Aa]ssets/Cardboard Box (Rigged)/ReadMe.txt
+/[Aa]ssets/Cardboard Box (Rigged)/ReadMe.txt.meta
+/[Aa]ssets/Cardboard Box (Rigged)/Demo/
+/[Aa]ssets/Cardboard Box (Rigged)/Demo.meta
+/[Aa]ssets/HQP Studios/Low Poly 3D Icons - Pack Lite/Document/
+/[Aa]ssets/HQP Studios/Low Poly 3D Icons - Pack Lite/Document.meta
+/[Aa]ssets/HQP Studios/Low Poly 3D Icons - Pack Lite/Demo/
+/[Aa]ssets/HQP Studios/Low Poly 3D Icons - Pack Lite/Demo.meta
+/[Aa]ssets/Keypad/ReadMe.rtf
+/[Aa]ssets/Keypad/ReadMe.rtf.meta
+/[Aa]ssets/Keypad/Scenes/
+/[Aa]ssets/Keypad/Scenes.meta
+/[Aa]ssets/kenney_ui-pack/Sample.png
+/[Aa]ssets/kenney_ui-pack/Sample.png.meta
+/[Aa]ssets/Nebula - Free low poly car pack/Textures/Custom colors.pdf
+/[Aa]ssets/Nebula - Free low poly car pack/Textures/Custom colors.pdf.meta
+/[Aa]ssets/SimplePoly City - Low Poly Assets/Demo/
+/[Aa]ssets/SimplePoly City - Low Poly Assets/Demo.meta
 
 # Local terrain/pipeline scratch content
 /[Aa]ssets/HDRPDefaultResources/
@@ -132,8 +152,8 @@ InitTestScene*.unity*
 /[Aa]ssets/TerrainSampleAssets.meta
 /[Aa]ssets/TerrainData_*.asset
 /[Aa]ssets/TerrainData_*.asset.meta
-/[Aa]ssets/New Terrain 3.asset
-/[Aa]ssets/New Terrain 3.asset.meta
+/[Aa]ssets/New Terrain*.asset
+/[Aa]ssets/New Terrain*.asset.meta
 /[Aa]ssets/NewBrush.brush
 /[Aa]ssets/NewBrush.brush.meta
 
