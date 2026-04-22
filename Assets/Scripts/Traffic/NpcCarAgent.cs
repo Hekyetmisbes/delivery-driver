@@ -157,6 +157,14 @@ namespace TrafficSystem
         [SerializeField] private float laneCenterOffset = 1.5f;
         [Tooltip("Choose random left/right lane at spawn")]
         [SerializeField] private bool randomizeInitialLane = false;
+        [Tooltip("Force NPC traffic to stay in a single right-hand lane")]
+        [SerializeField] private bool enforceRightHandSingleLane = true;
+
+        [Header("Intersection Navigation")]
+        [Tooltip("Treat near-aligned outgoing connections as straight continuation instead of a turn choice")]
+        [SerializeField] private float straightConnectionAngleThreshold = 30f;
+        [Tooltip("Fallback search radius for continuing onto the next aligned segment when no explicit connection exists")]
+        [SerializeField] private float nearbyContinuationSearchRadius = 7.5f;
 
         [Header("Environmental Awareness (Priority 3)")]
         [Tooltip("Enable weather-based behavior adjustments")]
@@ -452,6 +460,13 @@ namespace TrafficSystem
 
         private void Start()
         {
+            if (enforceRightHandSingleLane)
+            {
+                useFixedLaneCenters = true;
+                randomizeInitialLane = false;
+                enableLaneChange = false;
+            }
+
             // Priority 2: Initialize personality system
             InitializePersonality();
 
@@ -467,6 +482,12 @@ namespace TrafficSystem
             if (useFixedLaneCenters)
             {
                 float laneSign = randomizeInitialLane && Random.value < 0.5f ? -1f : 1f;
+                if (enforceRightHandSingleLane)
+                {
+                    // GetLookAheadPoint offsets by Cross(tangent, up), so negative keeps traffic on road-right.
+                    laneSign = -1f;
+                }
+
                 cruisingLaneOffset = laneSign * Mathf.Max(0.1f, laneCenterOffset);
                 lateralOffset = cruisingLaneOffset;
             }
@@ -837,7 +858,22 @@ namespace TrafficSystem
         /// </summary>
         private void UpdateLaneChange()
         {
-            if (!enableLaneChange || isReversing) return;
+            if (!enableLaneChange || isReversing)
+            {
+                if (enforceRightHandSingleLane)
+                {
+                    targetLateralOffset = cruisingLaneOffset;
+                    lateralOffset = Mathf.Lerp(lateralOffset, cruisingLaneOffset, Time.fixedDeltaTime * laneChangeSpeed);
+                    currentLateralOffset = lateralOffset;
+
+                    if (turnSignalController != null && !isChangingLanes)
+                    {
+                        turnSignalController.DeactivateAll();
+                    }
+                }
+
+                return;
+            }
 
             // Smoothly transition to target lateral offset
             lateralOffset = Mathf.Lerp(lateralOffset, targetLateralOffset, Time.fixedDeltaTime * laneChangeSpeed);
@@ -1074,10 +1110,10 @@ namespace TrafficSystem
                 RoadConnection connection = SelectBestConnection(endConnections);
                 if (connection == null || connection.toSegment == null)
                 {
-                    if (TryGetSequentialNextSegment(out RoadSegment fallbackSegment))
+                    if (TryGetNearbyContinuation(out RoadSegment fallbackSegment, out int fallbackWaypointIndex))
                     {
                         currentSegment = fallbackSegment;
-                        currentWaypointIndex = 0;
+                        currentWaypointIndex = fallbackWaypointIndex;
                     }
                     else
                     {
@@ -1096,15 +1132,15 @@ namespace TrafficSystem
             }
             else
             {
-                // No direct connection: continue with the next segment's first waypoint.
-                if (TryGetSequentialNextSegment(out RoadSegment nextSegment))
+                // No direct connection: only continue onto a nearby aligned segment.
+                if (TryGetNearbyContinuation(out RoadSegment nextSegment, out int nextWaypointIndex))
                 {
                     currentSegment = nextSegment;
-                    currentWaypointIndex = 0;
+                    currentWaypointIndex = nextWaypointIndex;
 
                     if (logPathChanges)
                     {
-                        Debug.Log($"[NpcCarAgent] {name} continuing to next segment '{currentSegment.name}' at waypoint 0");
+                        Debug.Log($"[NpcCarAgent] {name} continuing to aligned segment '{currentSegment.name}' at waypoint {currentWaypointIndex}");
                     }
                 }
                 else
@@ -1118,9 +1154,10 @@ namespace TrafficSystem
             }
         }
 
-        private bool TryGetSequentialNextSegment(out RoadSegment nextSegment)
+        private bool TryGetNearbyContinuation(out RoadSegment nextSegment, out int nextWaypointIndex)
         {
             nextSegment = null;
+            nextWaypointIndex = 0;
 
             if (roadGraphBuilder == null || roadGraphBuilder.RoadGraph == null)
                 return false;
@@ -1129,22 +1166,49 @@ namespace TrafficSystem
             if (segments == null || segments.Count == 0 || currentSegment == null)
                 return false;
 
-            int currentIndex = segments.IndexOf(currentSegment);
-            if (currentIndex < 0)
+            if (currentSegment.waypoints == null || currentSegment.waypoints.Count == 0)
                 return false;
 
-            for (int offset = 1; offset <= segments.Count; offset++)
+            int lastIndex = currentSegment.waypoints.Count - 1;
+            Vector3 exitPosition = currentSegment.waypoints[lastIndex].position;
+            Vector3 currentForward = GetConnectionTravelForward(currentSegment, Mathf.Max(0, lastIndex - 1));
+            float maxDistanceSqr = nearbyContinuationSearchRadius * nearbyContinuationSearchRadius;
+            float straightDotThreshold = Mathf.Cos(straightConnectionAngleThreshold * Mathf.Deg2Rad);
+            float bestScore = float.NegativeInfinity;
+
+            for (int i = 0; i < segments.Count; i++)
             {
-                int candidateIndex = (currentIndex + offset) % segments.Count;
-                RoadSegment candidate = segments[candidateIndex];
-                if (candidate != null && candidate.waypoints != null && candidate.waypoints.Count > 0)
+                RoadSegment candidate = segments[i];
+                if (candidate == null || candidate == currentSegment || candidate.waypoints == null || candidate.waypoints.Count < 2)
                 {
+                    continue;
+                }
+
+                Vector3 delta = candidate.waypoints[0].position - exitPosition;
+                delta.y = 0f;
+                float distanceSqr = delta.sqrMagnitude;
+                if (distanceSqr > maxDistanceSqr)
+                {
+                    continue;
+                }
+
+                Vector3 candidateForward = GetConnectionTravelForward(candidate, 0);
+                float dot = Vector3.Dot(currentForward, candidateForward);
+                if (dot < straightDotThreshold)
+                {
+                    continue;
+                }
+
+                float score = dot * 10f - Mathf.Sqrt(distanceSqr);
+                if (score > bestScore)
+                {
+                    bestScore = score;
                     nextSegment = candidate;
-                    return true;
+                    nextWaypointIndex = 0;
                 }
             }
 
-            return false;
+            return nextSegment != null;
         }
 
         private RoadConnection SelectBestConnection(List<RoadConnection> connections)
@@ -1155,98 +1219,142 @@ namespace TrafficSystem
             }
 
             // Filter to only valid, forward-facing connections (exclude U-turns)
-            Vector3 currentForward = GetWorldForward();
-            currentForward.y = 0f;
-            if (currentForward.sqrMagnitude < 0.0001f)
-            {
-                currentForward = Vector3.forward;
-            }
-            else
-            {
-                currentForward.Normalize();
-            }
-
-            List<RoadConnection> validConnections = new List<RoadConnection>();
-            List<float> weights = new List<float>();
+            Vector3 currentForward = GetCurrentExitForward();
+            float straightDotThreshold = Mathf.Cos(straightConnectionAngleThreshold * Mathf.Deg2Rad);
+            RoadConnection bestStraightConnection = null;
+            float bestStraightDot = float.NegativeInfinity;
+            List<RoadConnection> turnConnections = new List<RoadConnection>();
+            List<float> turnWeights = new List<float>();
 
             for (int i = 0; i < connections.Count; i++)
             {
                 RoadConnection connection = connections[i];
-                if (connection == null || connection.toSegment == null || connection.toSegment.waypoints == null || connection.toSegment.waypoints.Count == 0)
+                if (!TryGetConnectionAlignment(connection, currentForward, out float dot))
                 {
                     continue;
                 }
 
-                // Skip connections back to current segment (avoid immediate U-turn)
-                if (connection.toSegment == currentSegment)
+                if (dot >= straightDotThreshold)
                 {
+                    if (dot > bestStraightDot)
+                    {
+                        bestStraightDot = dot;
+                        bestStraightConnection = connection;
+                    }
                     continue;
                 }
 
-                int toIndex = Mathf.Clamp(connection.toWaypointIndex, 0, connection.toSegment.waypoints.Count - 1);
-                Vector3 candidateForward = connection.toSegment.waypoints[toIndex].forward;
-                candidateForward.y = 0f;
-
-                if (candidateForward.sqrMagnitude < 0.0001f && toIndex < connection.toSegment.waypoints.Count - 1)
-                {
-                    candidateForward = connection.toSegment.waypoints[toIndex + 1].position - connection.toSegment.waypoints[toIndex].position;
-                    candidateForward.y = 0f;
-                }
-
-                if (candidateForward.sqrMagnitude < 0.0001f)
-                {
-                    continue;
-                }
-
-                candidateForward.Normalize();
-                float dot = Vector3.Dot(currentForward, candidateForward);
-
-                // Reject sharp U-turns (> ~135 degrees)
-                if (dot < -0.7f)
-                {
-                    continue;
-                }
-
-                // Weight: forward-ish paths get higher weight, but turns are still viable
-                // Remap dot from [-0.7, 1] to a positive weight, with slight forward bias
-                float weight = Mathf.Max(0.1f, dot + 1f); // range ~[0.3, 2.0]
-                validConnections.Add(connection);
-                weights.Add(weight);
+                turnConnections.Add(connection);
+                turnWeights.Add(Mathf.Max(0.1f, dot + 1f));
             }
 
-            if (validConnections.Count == 0)
+            if (bestStraightConnection != null)
             {
-                // Fallback: pick any valid connection if all were filtered out
-                for (int i = 0; i < connections.Count; i++)
-                {
-                    RoadConnection c = connections[i];
-                    if (c != null && c.toSegment != null && c.toSegment.waypoints != null && c.toSegment.waypoints.Count > 0)
-                    {
-                        return c;
-                    }
-                }
+                return bestStraightConnection;
+            }
+
+            if (turnConnections.Count == 1)
+            {
+                return turnConnections[0];
+            }
+
+            if (turnConnections.Count == 0)
+            {
                 return null;
             }
 
-            // Weighted random selection among valid connections
+            // Only choose between turn options when no straight continuation exists.
             float totalWeight = 0f;
-            for (int i = 0; i < weights.Count; i++)
+            for (int i = 0; i < turnWeights.Count; i++)
             {
-                totalWeight += weights[i];
+                totalWeight += turnWeights[i];
             }
 
             float roll = Random.Range(0f, totalWeight);
             float cumulative = 0f;
-            for (int i = 0; i < validConnections.Count; i++)
+            for (int i = 0; i < turnConnections.Count; i++)
             {
-                cumulative += weights[i];
+                cumulative += turnWeights[i];
                 if (roll <= cumulative)
                 {
-                    return validConnections[i];
+                    return turnConnections[i];
                 }
             }
 
-            return validConnections[validConnections.Count - 1];
+            return turnConnections[turnConnections.Count - 1];
+        }
+
+        private Vector3 GetCurrentExitForward()
+        {
+            if (currentSegment == null || currentSegment.waypoints == null || currentSegment.waypoints.Count == 0)
+            {
+                Vector3 worldForward = GetWorldForward();
+                worldForward.y = 0f;
+                return worldForward.sqrMagnitude < 0.0001f ? Vector3.forward : worldForward.normalized;
+            }
+
+            int exitIndex = Mathf.Clamp(currentWaypointIndex, 0, currentSegment.waypoints.Count - 1);
+            if (exitIndex >= currentSegment.waypoints.Count - 1)
+            {
+                exitIndex = Mathf.Max(0, currentSegment.waypoints.Count - 2);
+            }
+
+            return GetConnectionTravelForward(currentSegment, exitIndex);
+        }
+
+        private bool TryGetConnectionAlignment(RoadConnection connection, Vector3 currentForward, out float dot)
+        {
+            dot = -1f;
+
+            if (connection == null || connection.toSegment == null || connection.toSegment == currentSegment)
+            {
+                return false;
+            }
+
+            if (connection.toSegment.waypoints == null || connection.toSegment.waypoints.Count < 2)
+            {
+                return false;
+            }
+
+            int toIndex = Mathf.Clamp(connection.toWaypointIndex, 0, connection.toSegment.waypoints.Count - 1);
+
+            // Avoid transitions that enter at the segment end. Those create immediate reroutes and steering jitter.
+            if (toIndex >= connection.toSegment.waypoints.Count - 1)
+            {
+                return false;
+            }
+
+            Vector3 candidateForward = GetConnectionTravelForward(connection.toSegment, toIndex);
+            dot = Vector3.Dot(currentForward, candidateForward);
+
+            // Reject immediate U-turns.
+            return dot >= -0.7f;
+        }
+
+        private Vector3 GetConnectionTravelForward(RoadSegment segment, int waypointIndex)
+        {
+            if (segment == null || segment.waypoints == null || segment.waypoints.Count == 0)
+            {
+                return Vector3.forward;
+            }
+
+            waypointIndex = Mathf.Clamp(waypointIndex, 0, segment.waypoints.Count - 1);
+            Vector3 forward = segment.waypoints[waypointIndex].forward;
+
+            if (forward.sqrMagnitude < 0.0001f)
+            {
+                if (waypointIndex < segment.waypoints.Count - 1)
+                {
+                    forward = segment.waypoints[waypointIndex + 1].position - segment.waypoints[waypointIndex].position;
+                }
+                else if (waypointIndex > 0)
+                {
+                    forward = segment.waypoints[waypointIndex].position - segment.waypoints[waypointIndex - 1].position;
+                }
+            }
+
+            forward.y = 0f;
+            return forward.sqrMagnitude < 0.0001f ? Vector3.forward : forward.normalized;
         }
 
         /// <summary>

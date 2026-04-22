@@ -172,7 +172,18 @@ namespace DeliveryDriver.Navigation
         {
             CurrentObjective = objective;
             ResetRouteState();
-            PublishUnavailable();
+            bool publishedImmediateFallback = false;
+            if (objective.IsValid && ResolvePlayer(out Transform player))
+            {
+                PublishFallback(player.position, objective.WorldPosition);
+                publishedImmediateFallback = CurrentRoute != null && CurrentRoute.IsRenderable;
+            }
+
+            if (!publishedImmediateFallback)
+            {
+                PublishUnavailable();
+            }
+
             OnObjectiveChanged?.Invoke(objective);
             TryImmediateRouteBuild();
         }
