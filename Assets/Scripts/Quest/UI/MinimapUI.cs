@@ -4,8 +4,10 @@ using DeliveryDriver.Company;
 using DeliveryDriver.Navigation;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using TrafficSystem;
 
 namespace DeliveryDriver.Quest.UI
 {
@@ -34,10 +36,14 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private float worldEdgePadding = 6f;
         [SerializeField] private int renderTextureSize = 512;
         [SerializeField] private LayerMask minimapCullingMask = ~0;
+        [SerializeField] private bool hideNpcVehiclesOnMinimap = true;
+        [SerializeField] private float npcRendererRefreshInterval = 1f;
 
         [Header("Route")]
         [SerializeField] private bool showRoutePreview = true;
         [SerializeField] private float routeThickness = 4f;
+        [SerializeField] private float routeSimplifyTolerance = 5f;
+        [SerializeField] private float routeMinSegmentScreenLength = 1.5f;
 
         [Header("Style")]
         [SerializeField] private Color frameColor = new Color(0.05f, 0.08f, 0.13f, 0.92f);
@@ -70,6 +76,10 @@ namespace DeliveryDriver.Quest.UI
         private RouteResult currentRoute = RouteResult.Unavailable;
 
         private readonly List<Image> routeSegmentImages = new List<Image>();
+        private readonly List<Vector2> projectedRoutePoints = new List<Vector2>();
+        private readonly List<Vector2> simplifiedRoutePoints = new List<Vector2>();
+        private readonly List<Renderer> cachedNpcRenderers = new List<Renderer>();
+        private readonly List<Renderer> temporarilyHiddenNpcRenderers = new List<Renderer>();
         [SerializeField] private int activeRouteSegmentCount;
         [SerializeField] private int peakRouteSegmentCount;
 
@@ -81,6 +91,8 @@ namespace DeliveryDriver.Quest.UI
         private Vector3 lastOverlayCameraPosition = Vector3.positiveInfinity;
         private Vector3 lastOverlayObjectiveWorldPosition = Vector3.positiveInfinity;
         private const float OverlayRefreshDistanceThreshold = 0.75f;
+        private float nextNpcRendererRefreshTime;
+        private bool npcRenderersHiddenForMinimap;
 
         private static Sprite whiteSprite;
         public int ActiveRouteSegmentCount => activeRouteSegmentCount;
@@ -95,6 +107,8 @@ namespace DeliveryDriver.Quest.UI
 
             SceneManager.sceneLoaded += OnSceneLoaded;
             PlayerVehicleManager.ActiveVehicleChanged += HandleActiveVehicleChanged;
+            RenderPipelineManager.beginCameraRendering += HandleBeginCameraRendering;
+            RenderPipelineManager.endCameraRendering += HandleEndCameraRendering;
 
             EnsureMinimap();
             ResolveMapBounds();
@@ -112,9 +126,12 @@ namespace DeliveryDriver.Quest.UI
 
             SceneManager.sceneLoaded -= OnSceneLoaded;
             PlayerVehicleManager.ActiveVehicleChanged -= HandleActiveVehicleChanged;
+            RenderPipelineManager.beginCameraRendering -= HandleBeginCameraRendering;
+            RenderPipelineManager.endCameraRendering -= HandleEndCameraRendering;
             UnbindNavigationService();
             SetMinimapVisible(false);
             DisableCamera();
+            RestoreNpcRenderersForMinimap();
         }
 
         private void OnDestroy()
@@ -585,14 +602,16 @@ namespace DeliveryDriver.Quest.UI
             }
 
             IReadOnlyList<Vector3> points = currentRoute.Points;
-            int segmentCount = Mathf.Max(0, points.Count - 1);
+            BuildRoutePolyline(points);
+
+            int segmentCount = Mathf.Max(0, simplifiedRoutePoints.Count - 1);
             SetRouteSegmentCount(segmentCount);
             int visibleSegmentCount = 0;
 
             for (int i = 0; i < segmentCount; i++)
             {
-                Vector2 from = WorldToMapPosition(points[i], clampToViewport: true);
-                Vector2 to = WorldToMapPosition(points[i + 1], clampToViewport: true);
+                Vector2 from = simplifiedRoutePoints[i];
+                Vector2 to = simplifiedRoutePoints[i + 1];
                 Vector2 delta = to - from;
                 float length = delta.magnitude;
 
@@ -616,6 +635,71 @@ namespace DeliveryDriver.Quest.UI
             }
 
             UpdateRouteSegmentDiagnostics(visibleSegmentCount);
+        }
+
+        private void BuildRoutePolyline(IReadOnlyList<Vector3> worldPoints)
+        {
+            projectedRoutePoints.Clear();
+            simplifiedRoutePoints.Clear();
+
+            if (worldPoints == null || worldPoints.Count == 0)
+            {
+                return;
+            }
+
+            float minSegmentLengthSqr = Mathf.Max(0.25f, routeMinSegmentScreenLength * routeMinSegmentScreenLength);
+            for (int i = 0; i < worldPoints.Count; i++)
+            {
+                Vector2 projected = WorldToMapPosition(worldPoints[i], clampToViewport: false);
+                if (projectedRoutePoints.Count > 0)
+                {
+                    Vector2 previous = projectedRoutePoints[projectedRoutePoints.Count - 1];
+                    if ((projected - previous).sqrMagnitude <= minSegmentLengthSqr)
+                    {
+                        projectedRoutePoints[projectedRoutePoints.Count - 1] = projected;
+                        continue;
+                    }
+                }
+
+                projectedRoutePoints.Add(projected);
+            }
+
+            if (projectedRoutePoints.Count <= 2)
+            {
+                simplifiedRoutePoints.AddRange(projectedRoutePoints);
+                return;
+            }
+
+            float simplifyTolerance = Mathf.Max(0.5f, routeSimplifyTolerance);
+            simplifiedRoutePoints.Add(projectedRoutePoints[0]);
+
+            for (int i = 1; i < projectedRoutePoints.Count - 1; i++)
+            {
+                Vector2 previousKept = simplifiedRoutePoints[simplifiedRoutePoints.Count - 1];
+                Vector2 current = projectedRoutePoints[i];
+                Vector2 next = projectedRoutePoints[i + 1];
+
+                float deviation = DistancePointToSegment(current, previousKept, next);
+                bool shouldKeep = deviation > simplifyTolerance;
+
+                if (!shouldKeep)
+                {
+                    continue;
+                }
+
+                simplifiedRoutePoints.Add(current);
+            }
+
+            Vector2 finalPoint = projectedRoutePoints[projectedRoutePoints.Count - 1];
+            if (simplifiedRoutePoints.Count == 0 ||
+                (finalPoint - simplifiedRoutePoints[simplifiedRoutePoints.Count - 1]).sqrMagnitude > minSegmentLengthSqr)
+            {
+                simplifiedRoutePoints.Add(finalPoint);
+            }
+            else
+            {
+                simplifiedRoutePoints[simplifiedRoutePoints.Count - 1] = finalPoint;
+            }
         }
 
         private void SetRouteSegmentCount(int count)
@@ -684,6 +768,20 @@ namespace DeliveryDriver.Quest.UI
             }
 
             return new Vector2(x, y);
+        }
+
+        private static float DistancePointToSegment(Vector2 point, Vector2 segmentStart, Vector2 segmentEnd)
+        {
+            Vector2 segment = segmentEnd - segmentStart;
+            float segmentLengthSqr = segment.sqrMagnitude;
+            if (segmentLengthSqr <= Mathf.Epsilon)
+            {
+                return Vector2.Distance(point, segmentStart);
+            }
+
+            float t = Mathf.Clamp01(Vector2.Dot(point - segmentStart, segment) / segmentLengthSqr);
+            Vector2 projection = segmentStart + segment * t;
+            return Vector2.Distance(point, projection);
         }
 
         private void TryBindNavigationService()
@@ -875,6 +973,102 @@ namespace DeliveryDriver.Quest.UI
             {
                 minimapCamera.enabled = false;
             }
+        }
+
+        private void HandleBeginCameraRendering(ScriptableRenderContext context, Camera camera)
+        {
+            if (!hideNpcVehiclesOnMinimap || minimapCamera == null || camera != minimapCamera)
+            {
+                return;
+            }
+
+            HideNpcRenderersForMinimap();
+        }
+
+        private void HandleEndCameraRendering(ScriptableRenderContext context, Camera camera)
+        {
+            if (minimapCamera == null || camera != minimapCamera)
+            {
+                return;
+            }
+
+            RestoreNpcRenderersForMinimap();
+        }
+
+        private void HideNpcRenderersForMinimap()
+        {
+            if (npcRenderersHiddenForMinimap)
+            {
+                return;
+            }
+
+            RefreshNpcRendererCacheIfNeeded();
+            temporarilyHiddenNpcRenderers.Clear();
+
+            for (int i = 0; i < cachedNpcRenderers.Count; i++)
+            {
+                Renderer renderer = cachedNpcRenderers[i];
+                if (renderer == null || !renderer.enabled)
+                {
+                    continue;
+                }
+
+                renderer.enabled = false;
+                temporarilyHiddenNpcRenderers.Add(renderer);
+            }
+
+            npcRenderersHiddenForMinimap = temporarilyHiddenNpcRenderers.Count > 0;
+        }
+
+        private void RestoreNpcRenderersForMinimap()
+        {
+            if (!npcRenderersHiddenForMinimap)
+            {
+                return;
+            }
+
+            for (int i = 0; i < temporarilyHiddenNpcRenderers.Count; i++)
+            {
+                Renderer renderer = temporarilyHiddenNpcRenderers[i];
+                if (renderer != null)
+                {
+                    renderer.enabled = true;
+                }
+            }
+
+            temporarilyHiddenNpcRenderers.Clear();
+            npcRenderersHiddenForMinimap = false;
+        }
+
+        private void RefreshNpcRendererCacheIfNeeded()
+        {
+            if (Time.unscaledTime < nextNpcRendererRefreshTime && cachedNpcRenderers.Count > 0)
+            {
+                return;
+            }
+
+            cachedNpcRenderers.Clear();
+            NpcCarAgent[] npcCars = FindObjectsByType<NpcCarAgent>(FindObjectsSortMode.None);
+            for (int i = 0; i < npcCars.Length; i++)
+            {
+                NpcCarAgent npcCar = npcCars[i];
+                if (npcCar == null)
+                {
+                    continue;
+                }
+
+                Renderer[] renderers = npcCar.GetComponentsInChildren<Renderer>(true);
+                for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
+                {
+                    Renderer renderer = renderers[rendererIndex];
+                    if (renderer != null)
+                    {
+                        cachedNpcRenderers.Add(renderer);
+                    }
+                }
+            }
+
+            nextNpcRendererRefreshTime = Time.unscaledTime + Mathf.Max(0.1f, npcRendererRefreshInterval);
         }
 
         private static Sprite GetWhiteSprite()
