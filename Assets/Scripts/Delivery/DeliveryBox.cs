@@ -50,6 +50,40 @@ public class DeliveryBox : MonoBehaviour
 
     }
 
+    public void PrepareForSpawn(DeliveryManager deliveryManager, Vector3 position, Quaternion rotation)
+    {
+        cachedDeliveryManager = deliveryManager;
+        if (rb == null)
+        {
+            rb = GetComponent<Rigidbody>();
+        }
+
+        isPickedUp = false;
+        spawnPosition = position;
+        transform.SetPositionAndRotation(position, rotation);
+        SnapSpawnToGround();
+        transform.position = spawnPosition;
+        runtimeFallThreshold = spawnPosition.y - Mathf.Abs(fallDistanceFromSpawn);
+
+        if (cachedPlayerTransform == null)
+        {
+            ResolvePlayerTransform();
+        }
+
+        if (rb != null)
+        {
+            rb.mass = 5f;
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.linearDamping = 0.5f;
+            rb.angularDamping = 0.5f;
+            rb.useGravity = false;
+            rb.isKinematic = true;
+        }
+
+        gameObject.SetActive(true);
+    }
+
     private void Update()
     {
         // Check for nearby player (distance-based pickup)
@@ -169,8 +203,7 @@ public class DeliveryBox : MonoBehaviour
             cachedDeliveryManager.OnBoxDelivered(this);
         }
 
-        // Destroy box
-        Destroy(gameObject);
+        gameObject.SetActive(false);
         Debug.Log("[DeliveryBox] Box delivered!");
     }
 

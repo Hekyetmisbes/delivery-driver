@@ -38,7 +38,6 @@ namespace DeliveryDriver.Quest.UI
         [Header("Route")]
         [SerializeField] private bool showRoutePreview = true;
         [SerializeField] private float routeThickness = 4f;
-        [SerializeField] private float routeRefreshInterval = 0.05f;
 
         [Header("Style")]
         [SerializeField] private Color frameColor = new Color(0.05f, 0.08f, 0.13f, 0.92f);
@@ -58,6 +57,7 @@ namespace DeliveryDriver.Quest.UI
         private RectTransform objectiveMarkerRect;
         private RawImage minimapImage;
         private TextMeshProUGUI titleText;
+        private Image objectiveMarkerImage;
 
         private Camera minimapCamera;
         private RenderTexture minimapTexture;
@@ -70,13 +70,21 @@ namespace DeliveryDriver.Quest.UI
         private RouteResult currentRoute = RouteResult.Unavailable;
 
         private readonly List<Image> routeSegmentImages = new List<Image>();
+        [SerializeField] private int activeRouteSegmentCount;
+        [SerializeField] private int peakRouteSegmentCount;
 
         private float nextNavigationBindTime;
         private float nextPlayerResolveTime;
-        private float nextRouteRefreshTime;
         private bool hasObjective;
+        private bool overlayDirty = true;
+        private bool objectiveMarkerDirty = true;
+        private Vector3 lastOverlayCameraPosition = Vector3.positiveInfinity;
+        private Vector3 lastOverlayObjectiveWorldPosition = Vector3.positiveInfinity;
+        private const float OverlayRefreshDistanceThreshold = 0.75f;
 
         private static Sprite whiteSprite;
+        public int ActiveRouteSegmentCount => activeRouteSegmentCount;
+        public int PeakRouteSegmentCount => peakRouteSegmentCount;
 
         private void OnEnable()
         {
@@ -122,7 +130,10 @@ namespace DeliveryDriver.Quest.UI
             }
 
             bool shouldDisplay = ShouldDisplayMinimap();
-            EnsureMinimap();
+            if (minimapCamera == null || panelRect == null || viewportRect == null || overlayRect == null)
+            {
+                EnsureMinimap();
+            }
             SetMinimapVisible(shouldDisplay);
             if (!shouldDisplay)
             {
@@ -142,13 +153,35 @@ namespace DeliveryDriver.Quest.UI
 
             UpdateCamera();
             UpdatePlayerMarker();
+            RefreshOverlayIfNeeded();
+        }
 
-            if (Time.unscaledTime >= nextRouteRefreshTime)
+        private void RefreshOverlayIfNeeded()
+        {
+            if (minimapCamera == null)
             {
-                nextRouteRefreshTime = Time.unscaledTime + Mathf.Max(0.02f, routeRefreshInterval);
-                UpdateObjectiveMarker();
-                UpdateRouteOverlay();
+                return;
             }
+
+            Vector3 cameraPosition = minimapCamera.transform.position;
+            bool cameraMovedEnough = lastOverlayCameraPosition.x == float.PositiveInfinity ||
+                (cameraPosition - lastOverlayCameraPosition).sqrMagnitude >= OverlayRefreshDistanceThreshold * OverlayRefreshDistanceThreshold;
+
+            bool objectiveMoved = hasObjective &&
+                (lastOverlayObjectiveWorldPosition.x == float.PositiveInfinity ||
+                 (currentObjective.WorldPosition - lastOverlayObjectiveWorldPosition).sqrMagnitude >= 0.01f);
+
+            if (!cameraMovedEnough && !overlayDirty && !objectiveMarkerDirty && !objectiveMoved)
+            {
+                return;
+            }
+
+            UpdateObjectiveMarker();
+            UpdateRouteOverlay();
+            lastOverlayCameraPosition = cameraPosition;
+            lastOverlayObjectiveWorldPosition = hasObjective ? currentObjective.WorldPosition : Vector3.positiveInfinity;
+            overlayDirty = false;
+            objectiveMarkerDirty = false;
         }
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
@@ -327,6 +360,7 @@ namespace DeliveryDriver.Quest.UI
             GameObject objectiveMarkerObject = new GameObject(ObjectiveMarkerName, typeof(RectTransform), typeof(Image));
             objectiveMarkerObject.transform.SetParent(overlayObject.transform, false);
             objectiveMarkerRect = objectiveMarkerObject.GetComponent<RectTransform>();
+            objectiveMarkerImage = objectiveMarkerObject.GetComponent<Image>();
         }
 
         private void ConfigureHud()
@@ -535,10 +569,9 @@ namespace DeliveryDriver.Quest.UI
             objectiveMarkerRect.gameObject.SetActive(true);
             objectiveMarkerRect.anchoredPosition = WorldToMapPosition(currentObjective.WorldPosition, clampToViewport: true);
 
-            Image objectiveImage = objectiveMarkerRect.GetComponent<Image>();
-            if (objectiveImage != null)
+            if (objectiveMarkerImage != null)
             {
-                objectiveImage.color = currentObjective.Type == ObjectiveType.Delivery ? deliveryMarkerColor : pickupMarkerColor;
+                objectiveMarkerImage.color = currentObjective.Type == ObjectiveType.Delivery ? deliveryMarkerColor : pickupMarkerColor;
             }
         }
 
@@ -547,12 +580,14 @@ namespace DeliveryDriver.Quest.UI
             if (!showRoutePreview || overlayRect == null || playerTransform == null || currentRoute == null || !currentRoute.IsRenderable)
             {
                 SetRouteSegmentCount(0);
+                UpdateRouteSegmentDiagnostics(0);
                 return;
             }
 
             IReadOnlyList<Vector3> points = currentRoute.Points;
             int segmentCount = Mathf.Max(0, points.Count - 1);
             SetRouteSegmentCount(segmentCount);
+            int visibleSegmentCount = 0;
 
             for (int i = 0; i < segmentCount; i++)
             {
@@ -569,6 +604,7 @@ namespace DeliveryDriver.Quest.UI
                 }
 
                 segmentImage.gameObject.SetActive(true);
+                visibleSegmentCount++;
                 RectTransform segmentRect = segmentImage.rectTransform;
                 segmentRect.anchorMin = new Vector2(0.5f, 0.5f);
                 segmentRect.anchorMax = new Vector2(0.5f, 0.5f);
@@ -578,6 +614,8 @@ namespace DeliveryDriver.Quest.UI
                 segmentRect.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg);
                 segmentImage.color = routeColor;
             }
+
+            UpdateRouteSegmentDiagnostics(visibleSegmentCount);
         }
 
         private void SetRouteSegmentCount(int count)
@@ -611,6 +649,15 @@ namespace DeliveryDriver.Quest.UI
             if (playerMarkerRect != null)
             {
                 playerMarkerRect.SetAsLastSibling();
+            }
+        }
+
+        private void UpdateRouteSegmentDiagnostics(int visibleCount)
+        {
+            activeRouteSegmentCount = Mathf.Max(0, visibleCount);
+            if (activeRouteSegmentCount > peakRouteSegmentCount)
+            {
+                peakRouteSegmentCount = activeRouteSegmentCount;
             }
         }
 
@@ -693,6 +740,8 @@ namespace DeliveryDriver.Quest.UI
         {
             currentObjective = objective;
             hasObjective = objective.IsValid;
+            objectiveMarkerDirty = true;
+            overlayDirty = true;
         }
 
         private void HandleNavigationCleared()
@@ -700,11 +749,14 @@ namespace DeliveryDriver.Quest.UI
             currentObjective = NavigationObjective.Empty;
             currentRoute = RouteResult.Unavailable;
             hasObjective = false;
+            objectiveMarkerDirty = true;
+            overlayDirty = true;
         }
 
         private void HandleRouteChanged(RouteResult route)
         {
             currentRoute = route ?? RouteResult.Unavailable;
+            overlayDirty = true;
         }
 
         private void ResolvePlayerTransform(bool forceRefresh = false)

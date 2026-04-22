@@ -90,6 +90,9 @@ public class DeliveryManager : MonoBehaviour
     private DeliveryBox currentBox;
     private GameObject currentDeliveryIndicator;
     private GameObject currentDeliveryPreview; // Ghost box at delivery location
+    private DeliveryBox pooledBox;
+    private GameObject pooledDeliveryIndicator;
+    private GameObject pooledDeliveryPreview;
     private Vector3 currentPickupPoint;
     private Vector3 currentDeliveryPoint;
     private string currentPickupNeighborhoodName = "";
@@ -681,51 +684,11 @@ public class DeliveryManager : MonoBehaviour
 
         // Spawn box with slight rotation variation
         Quaternion rotation = Quaternion.Euler(0, UnityEngine.Random.Range(0f, 360f), 0);
-        GameObject boxObj = Instantiate(boxPrefab, spawnPos, rotation);
-
-        // Ensure rigidbody exists before adding DeliveryBox (avoids RequireComponent auto-add log spam).
-        Rigidbody boxRb = boxObj.GetComponent<Rigidbody>();
-        if (boxRb == null)
-        {
-            boxRb = boxObj.AddComponent<Rigidbody>();
-        }
-        boxRb.mass = 5f;
-        boxRb.linearDamping = 0.5f;
-        boxRb.angularDamping = 0.5f;
-        boxRb.isKinematic = true; // Start kinematic
-
-        currentBox = boxObj.GetComponent<DeliveryBox>();
+        currentBox = AcquireDeliveryBox(spawnPos, rotation);
         if (currentBox == null)
         {
-            currentBox = boxObj.AddComponent<DeliveryBox>();
-        }
-
-        // Setup colliders
-        Collider[] existingColliders = boxObj.GetComponentsInChildren<Collider>();
-        bool hasMainCollider = false;
-        bool hasTriggerCollider = false;
-
-        foreach (Collider col in existingColliders)
-        {
-            if (col.isTrigger) hasTriggerCollider = true;
-            else hasMainCollider = true;
-        }
-
-        // Add main collider if missing
-        if (!hasMainCollider)
-        {
-            BoxCollider collider = boxObj.AddComponent<BoxCollider>();
-            collider.isTrigger = false;
-            collider.size = new Vector3(1f, 1f, 1f);
-        }
-
-        // Add trigger collider for pickup if missing
-        if (!hasTriggerCollider)
-        {
-            BoxCollider triggerCollider = boxObj.AddComponent<BoxCollider>();
-            triggerCollider.isTrigger = true;
-            triggerCollider.center = Vector3.zero;
-            triggerCollider.size = new Vector3(3f, 3f, 3f); // Large pickup area
+            Debug.LogError("[DeliveryManager] Failed to acquire delivery box.");
+            return;
         }
 
         // Create quest in quest system
@@ -811,12 +774,18 @@ public class DeliveryManager : MonoBehaviour
         // Keep floating arrows opt-in so they do not overlap the delivery cargo.
         if (showFloatingObjectiveMarkers && deliveryIndicatorPrefab != null)
         {
-            currentDeliveryIndicator = Instantiate(deliveryIndicatorPrefab, currentDeliveryPoint + Vector3.up * 2f, Quaternion.identity);
+            currentDeliveryIndicator = AcquireDeliveryIndicatorFromPrefab();
         }
         else if (showFloatingObjectiveMarkers)
         {
             // Create default delivery indicator
             CreateDefaultDeliveryIndicator();
+        }
+
+        if (currentDeliveryIndicator != null)
+        {
+            currentDeliveryIndicator.transform.SetPositionAndRotation(currentDeliveryPoint + Vector3.up * 2f, Quaternion.identity);
+            currentDeliveryIndicator.SetActive(true);
         }
 
         // Create ghost box preview at delivery location
@@ -848,27 +817,35 @@ public class DeliveryManager : MonoBehaviour
     /// </summary>
     private void CreateDefaultDeliveryIndicator()
     {
-        // Create a tall cylinder
-        GameObject indicator = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        indicator.name = "DeliveryIndicator";
-        indicator.transform.position = currentDeliveryPoint + Vector3.up * 2f;
-        indicator.transform.localScale = new Vector3(2f, 3f, 2f);
-
-        // Remove collider
-        Destroy(indicator.GetComponent<Collider>());
-
-        // Create glowing material
-        MeshRenderer indicatorRenderer = indicator.GetComponent<MeshRenderer>();
-                Material indicatorMat = RuntimeColorMaterialHelper.CreateColorMaterial(new Color(1f, 0.8f, 0f, 1f), indicatorRenderer);
-        if (indicatorMat != null && indicatorRenderer != null)
+        if (pooledDeliveryIndicator == null)
         {
-            indicatorRenderer.material = indicatorMat;
+            GameObject indicator = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            indicator.name = "DeliveryIndicator";
+            indicator.transform.localScale = new Vector3(2f, 3f, 2f);
+
+            Collider indicatorCollider = indicator.GetComponent<Collider>();
+            if (indicatorCollider != null)
+            {
+                indicatorCollider.enabled = false;
+            }
+
+            MeshRenderer indicatorRenderer = indicator.GetComponent<MeshRenderer>();
+            Material indicatorMat = RuntimeColorMaterialHelper.CreateColorMaterial(new Color(1f, 0.8f, 0f, 1f), indicatorRenderer);
+            if (indicatorMat != null && indicatorRenderer != null)
+            {
+                indicatorRenderer.material = indicatorMat;
+            }
+
+            if (indicator.GetComponent<DeliveryIndicator>() == null)
+            {
+                indicator.AddComponent<DeliveryIndicator>();
+            }
+
+            indicator.SetActive(false);
+            pooledDeliveryIndicator = indicator;
         }
 
-        // Add rotation script
-        DeliveryIndicator script = indicator.AddComponent<DeliveryIndicator>();
-
-        currentDeliveryIndicator = indicator;
+        currentDeliveryIndicator = pooledDeliveryIndicator;
     }
 
     /// <summary>
@@ -878,44 +855,56 @@ public class DeliveryManager : MonoBehaviour
     {
         if (boxPrefab == null || currentBox == null) return;
 
-        // Instantiate ghost box
-        currentDeliveryPreview = Instantiate(boxPrefab, currentDeliveryPoint, Quaternion.identity);
-        currentDeliveryPreview.name = "DeliveryPreview_GhostBox";
-
-        // Remove scripts and physics
-        DeliveryBox previewBox = currentDeliveryPreview.GetComponent<DeliveryBox>();
-        if (previewBox != null) Destroy(previewBox);
-
-        Rigidbody previewRb = currentDeliveryPreview.GetComponent<Rigidbody>();
-        if (previewRb != null) Destroy(previewRb);
-
-        Collider[] previewColliders = currentDeliveryPreview.GetComponentsInChildren<Collider>();
-        foreach (Collider col in previewColliders)
+        if (pooledDeliveryPreview == null)
         {
-            Destroy(col);
-        }
+            pooledDeliveryPreview = Instantiate(boxPrefab, currentDeliveryPoint, Quaternion.identity);
+            pooledDeliveryPreview.name = "DeliveryPreview_GhostBox";
 
-        // Make it transparent/ghost-like
-        MeshRenderer[] renderers = currentDeliveryPreview.GetComponentsInChildren<MeshRenderer>();
-        foreach (MeshRenderer renderer in renderers)
-        {
-            foreach (Material mat in renderer.materials)
+            DeliveryBox previewBox = pooledDeliveryPreview.GetComponent<DeliveryBox>();
+            if (previewBox != null)
             {
-                // Make transparent
-                mat.SetFloat("_Surface", 1); // Transparent mode
-                mat.SetFloat("_AlphaClip", 0);
-
-                Color color = mat.color;
-                color.a = 0.3f; // 30% opacity
-                mat.color = color;
-
-                // Enable transparency
-                mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-                mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-                mat.SetInt("_ZWrite", 0);
-                mat.renderQueue = 3000;
+                previewBox.enabled = false;
             }
+
+            Rigidbody previewRb = pooledDeliveryPreview.GetComponent<Rigidbody>();
+            if (previewRb != null)
+            {
+                previewRb.isKinematic = true;
+                previewRb.useGravity = false;
+                previewRb.detectCollisions = false;
+            }
+
+            Collider[] previewColliders = pooledDeliveryPreview.GetComponentsInChildren<Collider>();
+            foreach (Collider col in previewColliders)
+            {
+                col.enabled = false;
+            }
+
+            MeshRenderer[] renderers = pooledDeliveryPreview.GetComponentsInChildren<MeshRenderer>();
+            foreach (MeshRenderer renderer in renderers)
+            {
+                foreach (Material mat in renderer.materials)
+                {
+                    mat.SetFloat("_Surface", 1);
+                    mat.SetFloat("_AlphaClip", 0);
+
+                    Color color = mat.color;
+                    color.a = 0.3f;
+                    mat.color = color;
+
+                    mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                    mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                    mat.SetInt("_ZWrite", 0);
+                    mat.renderQueue = 3000;
+                }
+            }
+
+            pooledDeliveryPreview.SetActive(false);
         }
+
+        currentDeliveryPreview = pooledDeliveryPreview;
+        currentDeliveryPreview.transform.SetPositionAndRotation(currentDeliveryPoint, Quaternion.identity);
+        currentDeliveryPreview.SetActive(true);
 
         if (showDebugInfo)
         {
@@ -1807,19 +1796,19 @@ public class DeliveryManager : MonoBehaviour
 
         if (currentDeliveryIndicator != null)
         {
-            Destroy(currentDeliveryIndicator);
+            currentDeliveryIndicator.SetActive(false);
             currentDeliveryIndicator = null;
         }
 
         if (currentDeliveryPreview != null)
         {
-            Destroy(currentDeliveryPreview);
+            currentDeliveryPreview.SetActive(false);
             currentDeliveryPreview = null;
         }
 
         if (currentBox != null)
         {
-            Destroy(currentBox.gameObject);
+            currentBox.gameObject.SetActive(false);
             currentBox = null;
         }
 
@@ -1849,6 +1838,94 @@ public class DeliveryManager : MonoBehaviour
             Invoke(nameof(SpawnNewBox), success ? 2f : 2.5f);
         }
         isFinishingDeliveryLifecycle = false;
+    }
+
+    private DeliveryBox AcquireDeliveryBox(Vector3 spawnPos, Quaternion rotation)
+    {
+        if (boxPrefab == null)
+        {
+            return null;
+        }
+
+        if (pooledBox == null)
+        {
+            GameObject boxObj = Instantiate(boxPrefab, spawnPos, rotation);
+            pooledBox = boxObj.GetComponent<DeliveryBox>();
+            if (pooledBox == null)
+            {
+                pooledBox = boxObj.AddComponent<DeliveryBox>();
+            }
+        }
+
+        GameObject pooledBoxObject = pooledBox.gameObject;
+        EnsureDeliveryBoxComponents(pooledBoxObject);
+        pooledBox.PrepareForSpawn(this, spawnPos, rotation);
+        return pooledBox;
+    }
+
+    private static void EnsureDeliveryBoxComponents(GameObject boxObj)
+    {
+        Rigidbody boxRb = boxObj.GetComponent<Rigidbody>();
+        if (boxRb == null)
+        {
+            boxRb = boxObj.AddComponent<Rigidbody>();
+        }
+        boxRb.mass = 5f;
+        boxRb.linearDamping = 0.5f;
+        boxRb.angularDamping = 0.5f;
+        boxRb.isKinematic = true;
+
+        Collider[] existingColliders = boxObj.GetComponentsInChildren<Collider>();
+        bool hasMainCollider = false;
+        bool hasTriggerCollider = false;
+
+        foreach (Collider col in existingColliders)
+        {
+            if (col.isTrigger)
+            {
+                hasTriggerCollider = true;
+            }
+            else
+            {
+                hasMainCollider = true;
+            }
+        }
+
+        if (!hasMainCollider)
+        {
+            BoxCollider collider = boxObj.AddComponent<BoxCollider>();
+            collider.isTrigger = false;
+            collider.size = new Vector3(1f, 1f, 1f);
+        }
+
+        if (!hasTriggerCollider)
+        {
+            BoxCollider triggerCollider = boxObj.AddComponent<BoxCollider>();
+            triggerCollider.isTrigger = true;
+            triggerCollider.center = Vector3.zero;
+            triggerCollider.size = new Vector3(3f, 3f, 3f);
+        }
+    }
+
+    private GameObject AcquireDeliveryIndicatorFromPrefab()
+    {
+        if (deliveryIndicatorPrefab == null)
+        {
+            return null;
+        }
+
+        if (pooledDeliveryIndicator == null)
+        {
+            pooledDeliveryIndicator = Instantiate(deliveryIndicatorPrefab, currentDeliveryPoint + Vector3.up * 2f, Quaternion.identity);
+            Collider[] indicatorColliders = pooledDeliveryIndicator.GetComponentsInChildren<Collider>(true);
+            foreach (Collider indicatorCollider in indicatorColliders)
+            {
+                indicatorCollider.enabled = false;
+            }
+            pooledDeliveryIndicator.SetActive(false);
+        }
+
+        return pooledDeliveryIndicator;
     }
 
     private void SyncDeliveryTargetFromQuestProgress()

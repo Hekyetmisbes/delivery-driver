@@ -20,8 +20,6 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private int fontSize = 34;
 
         private const string BalancePanelName = "BalanceHudPanel";
-        private const float ProgressionBindingTimeoutSeconds = 5f;
-
         private TextMeshProUGUI balanceText;
         private PlayerProgressionManager subscribedManager;
         private int lastKnownBalance;
@@ -74,8 +72,7 @@ namespace DeliveryDriver.Quest.UI
         private IEnumerator RetryBindProgressionRoutine()
         {
             WaitForSeconds retryDelay = new WaitForSeconds(0.25f);
-            float timeoutAt = Time.unscaledTime + ProgressionBindingTimeoutSeconds;
-            while (Application.isPlaying && subscribedManager == null && Time.unscaledTime < timeoutAt)
+            while (Application.isPlaying && subscribedManager == null)
             {
                 if (!ShouldAttemptProgressionBinding())
                 {
@@ -92,12 +89,6 @@ namespace DeliveryDriver.Quest.UI
                 }
 
                 yield return retryDelay;
-            }
-
-            if (subscribedManager == null && ShouldAttemptProgressionBinding() && !loggedMissingManagerWarning)
-            {
-                Debug.LogWarning("[BalanceHudUI] PlayerProgressionManager zamaninda hazir olmadi. Balance HUD authoritative progression kaynagini bekliyor.");
-                loggedMissingManagerWarning = true;
             }
 
             bindingRetryCoroutine = null;

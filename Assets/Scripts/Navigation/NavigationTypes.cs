@@ -30,10 +30,10 @@ namespace DeliveryDriver.Navigation
     {
         public static readonly RouteResult Unavailable = new RouteResult(null, RouteKind.None, false);
 
-        public readonly IReadOnlyList<Vector3> Points;
-        public readonly RouteKind Kind;
-        public readonly float TotalDistance;
-        public readonly bool IsRenderable;
+        public IReadOnlyList<Vector3> Points { get; private set; }
+        public RouteKind Kind { get; private set; }
+        public float TotalDistance { get; private set; }
+        public bool IsRenderable { get; private set; }
 
         public bool IsValid => Points != null && Points.Count >= 2;
         public bool UsedRoadGraph => IsGraphRoute;
@@ -42,6 +42,11 @@ namespace DeliveryDriver.Navigation
         public bool IsStale => Kind == RouteKind.StaleGraph;
 
         public RouteResult(List<Vector3> points, RouteKind kind, bool isRenderable = true)
+        {
+            Update(points, kind, isRenderable);
+        }
+
+        internal void Update(List<Vector3> points, RouteKind kind, bool isRenderable = true)
         {
             Points = points;
             Kind = kind;

@@ -78,35 +78,14 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            frameCounter++;
-            bool fullUpdate = frameCounter % UpdateEveryNFrames == 0;
-
-            if (playerTransform == null)
-            {
-                ResolvePlayerTransform();
-            }
-
-            float distance = 0f;
-            if (playerTransform != null)
-            {
-                if (fullUpdate || cachedObjective == null)
-                {
-                    cachedObjective = GetCurrentObjective(currentQuest);
-                }
-                if (cachedObjective != null)
-                {
-                    distance = Vector3.Distance(playerTransform.position, cachedObjective.Position);
-                }
-            }
-
-            UpdateCompactTimerLine(currentQuest.TimeRemaining, currentQuest.TimeLimit, distance);
             TryExpireFeedback();
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (!hasLoggedRuntimeUpdater)
             {
                 hasLoggedRuntimeUpdater = true;
-                Debug.Log($"[ActiveQuestUI] Runtime update active. Player='{playerTransform.name}', Distance={distance:F1}, Time={currentQuest.TimeRemaining:F1}");
+                string playerName = playerTransform != null ? playerTransform.name : "UNRESOLVED";
+                Debug.Log($"[ActiveQuestUI] Runtime update active. Player='{playerName}', Time={currentQuest.TimeRemaining:F1}");
             }
 #endif
         }

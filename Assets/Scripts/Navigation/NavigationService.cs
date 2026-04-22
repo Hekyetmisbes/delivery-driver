@@ -67,6 +67,8 @@ namespace DeliveryDriver.Navigation
 
         public NavigationObjective CurrentObjective { get; private set; }
         public RouteResult CurrentRoute { get; private set; } = RouteResult.Unavailable;
+        public int RoutePublishCount => routePublishCount;
+        public int RouteAllocationCount => routeAllocationCount;
 
         public event Action<NavigationObjective> OnObjectiveChanged;
         public event Action<RouteResult> OnRouteChanged;
@@ -91,6 +93,11 @@ namespace DeliveryDriver.Navigation
         private readonly List<Vector3> routePoints = new List<Vector3>();
         private readonly List<Vector3> renderPoints = new List<Vector3>();
         private readonly List<Vector3> lastGoodRoute = new List<Vector3>();
+        private readonly List<Vector3> publishedRouteBufferA = new List<Vector3>();
+        private readonly List<Vector3> publishedRouteBufferB = new List<Vector3>();
+        private readonly RouteResult publishedRouteA = new RouteResult(null, RouteKind.None, false);
+        private readonly RouteResult publishedRouteB = new RouteResult(null, RouteKind.None, false);
+        private bool usePrimaryPublishedRouteBuffer = true;
 
         // Route state
         private Vector3 lastObjectivePosition;
@@ -121,6 +128,8 @@ namespace DeliveryDriver.Navigation
 
         // Diagnostics
         private string lastPlayerSource = string.Empty;
+        [SerializeField] private int routePublishCount;
+        [SerializeField] private int routeAllocationCount;
 
         // ────────────────────────────────────────────────────────────────────
         // Constants
@@ -420,8 +429,7 @@ namespace DeliveryDriver.Navigation
             lastPublishedSegmentIndex = segIdx;
             lastPublishedKind = kind;
 
-            CurrentRoute = new RouteResult(new List<Vector3>(renderPoints), kind);
-            OnRouteChanged?.Invoke(CurrentRoute);
+            PublishRouteResult(CreateRouteSnapshot(kind));
         }
 
         private void PublishFallback(Vector3 start, Vector3 end)
@@ -452,8 +460,7 @@ namespace DeliveryDriver.Navigation
             lastPublishedSegmentIndex = -1;
             lastPublishedKind = RouteKind.Fallback;
 
-            CurrentRoute = new RouteResult(new List<Vector3>(renderPoints), RouteKind.Fallback);
-            OnRouteChanged?.Invoke(CurrentRoute);
+            PublishRouteResult(CreateRouteSnapshot(RouteKind.Fallback));
         }
 
         private void PublishUnavailable()
@@ -465,9 +472,33 @@ namespace DeliveryDriver.Navigation
             }
 
             renderPoints.Clear();
-            CurrentRoute = RouteResult.Unavailable;
             lastPublishedKind = RouteKind.None;
             lastPublishedSegmentIndex = -1;
+            PublishRouteResult(RouteResult.Unavailable);
+        }
+
+        private RouteResult CreateRouteSnapshot(RouteKind kind)
+        {
+            List<Vector3> buffer = usePrimaryPublishedRouteBuffer ? publishedRouteBufferA : publishedRouteBufferB;
+            RouteResult snapshot = usePrimaryPublishedRouteBuffer ? publishedRouteA : publishedRouteB;
+            usePrimaryPublishedRouteBuffer = !usePrimaryPublishedRouteBuffer;
+
+            if (buffer.Capacity < renderPoints.Count)
+            {
+                buffer.Capacity = renderPoints.Count;
+                routeAllocationCount++;
+            }
+
+            buffer.Clear();
+            buffer.AddRange(renderPoints);
+            snapshot.Update(buffer, kind);
+            return snapshot;
+        }
+
+        private void PublishRouteResult(RouteResult routeResult)
+        {
+            CurrentRoute = routeResult;
+            routePublishCount++;
             OnRouteChanged?.Invoke(CurrentRoute);
         }
 

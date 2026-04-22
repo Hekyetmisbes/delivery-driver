@@ -38,6 +38,10 @@ namespace DeliveryDriver.Quest.UI
         private float nextNavigationBindTime;
         private float nextPlayerResolveTime;
         private PlayerVehicleManager cachedVehicleManager;
+        private Vector3 lastTextRefreshPosition = Vector3.positiveInfinity;
+        private float lastTextRefreshYaw = float.PositiveInfinity;
+        private const float TextRefreshDistanceThreshold = 1f;
+        private const float TextRefreshYawThreshold = 6f;
 
         private void Start()
         {
@@ -77,8 +81,10 @@ namespace DeliveryDriver.Quest.UI
 
             UpdateCompassDirection();
 
-            frameCounter++;
-            if (frameCounter % 3 != 0) return;
+            if (!ShouldRefreshSupplementaryText())
+            {
+                return;
+            }
 
             if (showDistance)
             {
@@ -89,6 +95,9 @@ namespace DeliveryDriver.Quest.UI
             {
                 UpdateCardinalDirection();
             }
+
+            lastTextRefreshPosition = playerTransform.position;
+            lastTextRefreshYaw = playerTransform.eulerAngles.y;
         }
 
         private void TryBindNavigationService()
@@ -145,6 +154,8 @@ namespace DeliveryDriver.Quest.UI
 
             currentObjectivePosition = objective.WorldPosition;
             hasObjective = true;
+            lastTextRefreshPosition = Vector3.positiveInfinity;
+            lastTextRefreshYaw = float.PositiveInfinity;
 
             if (cachedNeedleImage != null)
             {
@@ -322,6 +333,26 @@ namespace DeliveryDriver.Quest.UI
         private void HandleActiveVehicleChanged(CarController controller)
         {
             SetPlayerTransform(controller != null ? controller.transform : null);
+        }
+
+        private bool ShouldRefreshSupplementaryText()
+        {
+            if (playerTransform == null)
+            {
+                return false;
+            }
+
+            if (lastTextRefreshPosition.x == float.PositiveInfinity || float.IsPositiveInfinity(lastTextRefreshYaw))
+            {
+                return true;
+            }
+
+            if ((playerTransform.position - lastTextRefreshPosition).sqrMagnitude >= TextRefreshDistanceThreshold * TextRefreshDistanceThreshold)
+            {
+                return true;
+            }
+
+            return Mathf.Abs(Mathf.DeltaAngle(lastTextRefreshYaw, playerTransform.eulerAngles.y)) >= TextRefreshYawThreshold;
         }
     }
 }

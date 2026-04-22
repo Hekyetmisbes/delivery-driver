@@ -200,6 +200,10 @@ namespace TrafficSystem
         [SerializeField] private bool logCollisions = false;
         [SerializeField] private bool logOvertakes = false;  // Log overtaking behavior
 
+        [Header("Simulation Decimation")]
+        [Tooltip("Scale expensive perception checks using optimizer distance buckets")]
+        [SerializeField] private bool useAdaptiveSimulationDecimation = true;
+
         [Header("Grounding")]
         [Tooltip("Raycast mask for grounding the vehicle to the road surface")]
         [SerializeField] private LayerMask groundMask = ~0;
@@ -394,8 +398,8 @@ namespace TrafficSystem
 
             rb = GetComponent<Rigidbody>();
             wheelVisualService = new NpcCarWheelVisualService(autoSetupWheelVisuals, autoCreateWheelVisualsIfMissing);
-            cachedWeight = rb.mass * Mathf.Abs(Physics.gravity.y);
             SetupRigidbody();
+            cachedWeight = rb.mass * Mathf.Abs(Physics.gravity.y);
             AutoFixWheelAssignments();
             if (autoNormalizeWheelColliderHeights)
             {
@@ -578,9 +582,11 @@ namespace TrafficSystem
 
         private void FixedUpdate()
         {
+            TrafficSimulationOptimizer optimizer = TrafficSimulationOptimizer.Instance;
+
             // Performance optimization: Distance-based update throttling (single check)
-            if (TrafficSimulationOptimizer.Instance != null &&
-                !TrafficSimulationOptimizer.Instance.ShouldNPCUpdate(this))
+            if (optimizer != null &&
+                !optimizer.ShouldNPCUpdate(this))
             {
                 return;
             }
@@ -620,21 +626,19 @@ namespace TrafficSystem
             ReacquireWaypointIfNeeded();
             UpdatePath();
 
-            // Throttle expensive checks: off-road every 10 frames
-            if (fixedUpdateCounter % OffRoadCheckInterval == 0)
+            // Decimate expensive checks for distant, low-risk NPCs while keeping nearby traffic responsive.
+            if (ShouldRunAdaptiveCheck(OffRoadCheckInterval, optimizer))
             {
                 UpdateOffRoadStatus();
             }
 
-            // Priority 3: Environmental awareness (throttled - weather changes slowly)
-            if ((fixedUpdateCounter + npcId) % WeatherCheckInterval == 0)
+            if (ShouldRunAdaptiveCheck(WeatherCheckInterval, optimizer))
             {
                 UpdateWeatherEffects();
                 UpdateTimeOfDayEffects();
             }
 
-            // Priority 2: Predictive behavior (throttled with obstacles)
-            if ((fixedUpdateCounter + npcId) % ObstacleCheckInterval == 0)
+            if (ShouldRunAdaptiveCheck(ObstacleCheckInterval, optimizer))
             {
                 AnalyzeUpcomingPath();
                 DetectUpcomingTurn();
@@ -645,16 +649,71 @@ namespace TrafficSystem
 
             UpdateReverseRecoveryState();
 
-            // Throttle nearby vehicle checks to 25Hz (every 2 physics frames)
-            if ((fixedUpdateCounter + npcId) % NearbyVehicleCheckInterval == 0)
+            if (ShouldRunAdaptiveCheck(NearbyVehicleCheckInterval, optimizer))
             {
                 CheckNearbyVehicles();
             }
+            else if (!NeedsHighFrequencySimulation() && GetAdaptiveDecimationMultiplier(optimizer) > 1)
+            {
+                nearbyVehicles.Clear();
+                isColliding = false;
+            }
+
             ApplySeparationForce();
             UpdateLaneChange();
             ApplySteering();
             ApplyStability();
             ApplyThrottle();
+        }
+
+        private bool ShouldRunAdaptiveCheck(int baseInterval, TrafficSimulationOptimizer optimizer)
+        {
+            int interval = Mathf.Max(1, baseInterval * GetAdaptiveDecimationMultiplier(optimizer));
+            return (fixedUpdateCounter + npcId) % interval == 0;
+        }
+
+        private int GetAdaptiveDecimationMultiplier(TrafficSimulationOptimizer optimizer)
+        {
+            if (!useAdaptiveSimulationDecimation || optimizer == null || NeedsHighFrequencySimulation())
+            {
+                return 1;
+            }
+
+            float distance = optimizer.GetNPCDistance(this);
+            if (float.IsInfinity(distance) || float.IsNaN(distance) || distance == float.MaxValue)
+            {
+                return 1;
+            }
+
+            if (distance >= optimizer.veryFarDistance)
+            {
+                return 4;
+            }
+
+            if (distance >= optimizer.farDistance)
+            {
+                return 3;
+            }
+
+            if (distance >= optimizer.midDistance)
+            {
+                return 2;
+            }
+
+            return 1;
+        }
+
+        private bool NeedsHighFrequencySimulation()
+        {
+            return isObstacleDetected ||
+                   isFollowing ||
+                   imminentCollisionRisk ||
+                   isChangingLanes ||
+                   isOvertaking ||
+                   isReversing ||
+                   rearObstacleDetected ||
+                   isColliding ||
+                   CurrentSpeed >= 50f;
         }
 
         /// <summary>

@@ -19,6 +19,10 @@ namespace DeliveryDriver.Quest.UI
         private DeliveryManager deliveryManager;
         private bool isSubscribed;
         private QuestLocation lastObjective;
+        private float nextHudRefreshTime;
+        private Vector3 lastDistanceRefreshPosition = Vector3.positiveInfinity;
+        private const float HudRefreshInterval = 0.2f;
+        private const float DistanceRefreshThreshold = 1f;
 
         private void Awake()
         {
@@ -97,6 +101,12 @@ namespace DeliveryDriver.Quest.UI
                 activeQuestUI.UpdateTimer(currentQuest.TimeRemaining, currentQuest.TimeLimit);
             }
 
+            if (Time.unscaledTime < nextHudRefreshTime && !ShouldForceDistanceRefresh())
+            {
+                return;
+            }
+
+            nextHudRefreshTime = Time.unscaledTime + HudRefreshInterval;
             UpdateActiveQuestDistance(currentQuest);
             UpdateCargoHealth(currentQuest);
         }
@@ -303,6 +313,8 @@ namespace DeliveryDriver.Quest.UI
             activeQuestUI.Show();
             activeQuestUI.UpdateQuestDisplay(quest);
             lastObjective = null;
+            lastDistanceRefreshPosition = Vector3.positiveInfinity;
+            nextHudRefreshTime = 0f;
             UpdateActiveQuestDistance(quest);
             UpdateCargoHealth(quest);
         }
@@ -337,6 +349,7 @@ namespace DeliveryDriver.Quest.UI
             float distance = Mathf.Sqrt(distanceSqr);
             activeQuestUI.UpdateDistance(distance);
             lastObjective = target;
+            lastDistanceRefreshPosition = playerTransform.position;
         }
 
         private void UpdateCargoHealth(QuestData quest)
@@ -371,6 +384,21 @@ namespace DeliveryDriver.Quest.UI
 
             int index = Mathf.Clamp(quest.CurrentDeliveryIndex, 0, quest.DeliveryLocations.Count - 1);
             return quest.DeliveryLocations[index];
+        }
+
+        private bool ShouldForceDistanceRefresh()
+        {
+            if (playerTransform == null)
+            {
+                return true;
+            }
+
+            if (lastDistanceRefreshPosition.x == float.PositiveInfinity)
+            {
+                return true;
+            }
+
+            return (playerTransform.position - lastDistanceRefreshPosition).sqrMagnitude >= DistanceRefreshThreshold * DistanceRefreshThreshold;
         }
     }
 }

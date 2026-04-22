@@ -201,6 +201,7 @@ namespace DeliveryDriver.Optimization
                 float dx = npcPos.x - playerPos.x;
                 float dz = npcPos.z - playerPos.z;
                 float sqrDistance = dx * dx + dz * dz;
+                npcDistances[npc] = Mathf.Sqrt(sqrDistance);
 
                 // Determine update interval and state
                 int updateInterval = DetermineUpdateIntervalSqr(sqrDistance, nearSqr, midSqr, farSqr, veryFarSqr);

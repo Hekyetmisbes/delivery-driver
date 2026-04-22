@@ -147,6 +147,11 @@ namespace DeliveryDriver.Optimization
         {
             if (profile == null) return;
             activeProfile = profile;
+            enableDynamicQuality = profile.enableDynamicQuality;
+            downgradeThresholdFPS = profile.downgradeThresholdFPS;
+            upgradeThresholdFPS = profile.upgradeThresholdFPS;
+            memoryWarningThresholdMB = profile.memoryWarningThresholdMB;
+            monitoringInterval = profile.monitoringInterval;
 
             // Traffic
             if (trafficOptimizer != null)
@@ -156,6 +161,9 @@ namespace DeliveryDriver.Optimization
                 trafficOptimizer.farDistance = profile.farDistance;
                 trafficOptimizer.veryFarDistance = profile.veryFarDistance;
                 trafficOptimizer.stateUpdateInterval = profile.stateUpdateInterval;
+                trafficOptimizer.disableVeryFarAI = profile.disableVeryFarAI;
+                trafficOptimizer.simplifyDistantPhysics = profile.simplifyDistantPhysics;
+                trafficOptimizer.disableFarTurnSignals = profile.disableFarTurnSignals;
             }
 
             // World streaming
@@ -168,6 +176,9 @@ namespace DeliveryDriver.Optimization
                 worldChunkManager.updateInterval = profile.chunkUpdateInterval;
                 worldChunkManager.maxChunkUpdatesPerFrame = profile.maxChunkUpdatesPerFrame;
                 worldChunkManager.cacheRefreshInterval = profile.cacheRefreshInterval;
+                worldChunkManager.enableHardRadiusCulling = profile.enableHardRadiusCulling;
+                worldChunkManager.cullStaticRenderersOnly = profile.cullStaticRenderersOnly;
+                worldChunkManager.rendererCullingPadding = profile.rendererCullingPadding;
             }
 
             // Rendering
