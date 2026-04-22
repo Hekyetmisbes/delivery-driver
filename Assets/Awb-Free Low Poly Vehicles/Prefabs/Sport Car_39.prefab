@@ -12,6 +12,9 @@ GameObject:
   - component: {fileID: 1470947892622742945}
   - component: {fileID: 3714673755498455403}
   - component: {fileID: 7228155704673821258}
+  - component: {fileID: 565799738857497152}
+  - component: {fileID: 466477510701027904}
+  - component: {fileID: 521337804077523328}
   m_Layer: 0
   m_Name: Sport Car_39
   m_TagString: Untagged

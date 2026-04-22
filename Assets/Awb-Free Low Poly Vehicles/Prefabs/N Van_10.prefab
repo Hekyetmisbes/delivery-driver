@@ -12,6 +12,9 @@ GameObject:
   - component: {fileID: 3944660262881024029}
   - component: {fileID: 1250532667637607639}
   - component: {fileID: 605329296844647198}
+  - component: {fileID: 898967377909083392}
+  - component: {fileID: 372858888358826368}
+  - component: {fileID: 806427699186665088}
   m_Layer: 0
   m_Name: N Van_10
   m_TagString: Untagged

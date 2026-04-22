@@ -178,6 +178,9 @@ GameObject:
   - component: {fileID: 607899018693508329}
   - component: {fileID: 3425910720483035171}
   - component: {fileID: 2023311903206475556}
+  - component: {fileID: 523015333939794880}
+  - component: {fileID: 261537067033763712}
+  - component: {fileID: 727903525148119168}
   m_Layer: 0
   m_Name: Classic Car_9
   m_TagString: Untagged

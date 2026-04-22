@@ -95,6 +95,9 @@ GameObject:
   - component: {fileID: 681529590217781012}
   - component: {fileID: 3355657556495817694}
   - component: {fileID: 2018932346950822481}
+  - component: {fileID: 455251291395225792}
+  - component: {fileID: 500241756226930112}
+  - component: {fileID: 129324438309288576}
   m_Layer: 0
   m_Name: Pick Up_11
   m_TagString: Untagged

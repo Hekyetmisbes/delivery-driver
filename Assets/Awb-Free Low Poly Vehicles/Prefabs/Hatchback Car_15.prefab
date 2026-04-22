@@ -12,6 +12,9 @@ GameObject:
   - component: {fileID: 4028390160020439158}
   - component: {fileID: 1153837158124123324}
   - component: {fileID: 8190380500954381041}
+  - component: {fileID: 233963544196288192}
+  - component: {fileID: 607852419377344000}
+  - component: {fileID: 393724397486807552}
   m_Layer: 0
   m_Name: Hatchback Car_15
   m_TagString: Untagged
