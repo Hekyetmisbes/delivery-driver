@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections.Generic;
 
 namespace TrafficSystem
 {
@@ -24,8 +25,21 @@ namespace TrafficSystem
 
     internal sealed class NpcCarWheelVisualService
     {
+        private readonly struct WheelVisualOffset
+        {
+            public WheelVisualOffset(Vector3 localPositionOffset, Quaternion localRotationOffset)
+            {
+                LocalPositionOffset = localPositionOffset;
+                LocalRotationOffset = localRotationOffset;
+            }
+
+            public Vector3 LocalPositionOffset { get; }
+            public Quaternion LocalRotationOffset { get; }
+        }
+
         private readonly bool autoSetupWheelVisuals;
         private readonly bool autoCreateWheelVisualsIfMissing;
+        private readonly Dictionary<Transform, WheelVisualOffset> cachedOffsets = new Dictionary<Transform, WheelVisualOffset>();
 
         public NpcCarWheelVisualService(bool autoSetupWheelVisuals, bool autoCreateWheelVisualsIfMissing)
         {
@@ -45,6 +59,11 @@ namespace TrafficSystem
         {
             if (!autoSetupWheelVisuals)
             {
+                CacheWheelVisualOffset(frontLeftCollider, frontLeftWheelVisual);
+                CacheWheelVisualOffset(frontRightCollider, frontRightWheelVisual);
+                CacheWheelVisualOffset(rearLeftCollider, rearLeftWheelVisual);
+                CacheWheelVisualOffset(rearRightCollider, rearRightWheelVisual);
+
                 return new NpcCarWheelVisualSet(
                     frontLeftWheelVisual,
                     frontRightWheelVisual,
@@ -52,11 +71,21 @@ namespace TrafficSystem
                     rearRightWheelVisual);
             }
 
+            Transform resolvedFrontLeft = ResolveWheelVisual(frontLeftCollider, frontLeftWheelVisual);
+            Transform resolvedFrontRight = ResolveWheelVisual(frontRightCollider, frontRightWheelVisual);
+            Transform resolvedRearLeft = ResolveWheelVisual(rearLeftCollider, rearLeftWheelVisual);
+            Transform resolvedRearRight = ResolveWheelVisual(rearRightCollider, rearRightWheelVisual);
+
+            CacheWheelVisualOffset(frontLeftCollider, resolvedFrontLeft);
+            CacheWheelVisualOffset(frontRightCollider, resolvedFrontRight);
+            CacheWheelVisualOffset(rearLeftCollider, resolvedRearLeft);
+            CacheWheelVisualOffset(rearRightCollider, resolvedRearRight);
+
             return new NpcCarWheelVisualSet(
-                ResolveWheelVisual(frontLeftCollider, frontLeftWheelVisual),
-                ResolveWheelVisual(frontRightCollider, frontRightWheelVisual),
-                ResolveWheelVisual(rearLeftCollider, rearLeftWheelVisual),
-                ResolveWheelVisual(rearRightCollider, rearRightWheelVisual));
+                resolvedFrontLeft,
+                resolvedFrontRight,
+                resolvedRearLeft,
+                resolvedRearRight);
         }
 
         public void UpdateWheelVisuals(
@@ -69,10 +98,10 @@ namespace TrafficSystem
             WheelCollider rearRightCollider,
             Transform rearRightWheelVisual)
         {
-            UpdateSingleWheelVisual(frontLeftCollider, frontLeftWheelVisual);
-            UpdateSingleWheelVisual(frontRightCollider, frontRightWheelVisual);
-            UpdateSingleWheelVisual(rearLeftCollider, rearLeftWheelVisual);
-            UpdateSingleWheelVisual(rearRightCollider, rearRightWheelVisual);
+            UpdateSingleWheelVisual(frontLeftCollider, frontLeftWheelVisual, true);
+            UpdateSingleWheelVisual(frontRightCollider, frontRightWheelVisual, true);
+            UpdateSingleWheelVisual(rearLeftCollider, rearLeftWheelVisual, true);
+            UpdateSingleWheelVisual(rearRightCollider, rearRightWheelVisual, true);
         }
 
         private Transform ResolveWheelVisual(WheelCollider wheelCollider, Transform currentVisual)
@@ -124,7 +153,20 @@ namespace TrafficSystem
             return visual.transform;
         }
 
-        private static void UpdateSingleWheelVisual(WheelCollider wheelCollider, Transform wheelVisual)
+        private void CacheWheelVisualOffset(WheelCollider wheelCollider, Transform wheelVisual)
+        {
+            if (wheelCollider == null || wheelVisual == null)
+            {
+                return;
+            }
+
+            Transform wheelRoot = wheelCollider.transform;
+            Vector3 localPositionOffset = Quaternion.Inverse(wheelRoot.rotation) * (wheelVisual.position - wheelRoot.position);
+            Quaternion localRotationOffset = Quaternion.Inverse(wheelRoot.rotation) * wheelVisual.rotation;
+            cachedOffsets[wheelVisual] = new WheelVisualOffset(localPositionOffset, localRotationOffset);
+        }
+
+        private void UpdateSingleWheelVisual(WheelCollider wheelCollider, Transform wheelVisual, bool useCachedOffset)
         {
             if (wheelCollider == null || wheelVisual == null)
             {
@@ -132,8 +174,23 @@ namespace TrafficSystem
             }
 
             wheelCollider.GetWorldPose(out Vector3 position, out Quaternion rotation);
+
+            if (useCachedOffset && cachedOffsets.TryGetValue(wheelVisual, out WheelVisualOffset offset))
+            {
+                Quaternion offsetRotation = GetWheelOffsetRotation(wheelCollider);
+                wheelVisual.position = position + (offsetRotation * offset.LocalPositionOffset);
+                wheelVisual.rotation = rotation * offset.LocalRotationOffset;
+                return;
+            }
+
             wheelVisual.position = position;
             wheelVisual.rotation = rotation;
+        }
+
+        private static Quaternion GetWheelOffsetRotation(WheelCollider wheelCollider)
+        {
+            Transform wheelRoot = wheelCollider.transform;
+            return wheelRoot.rotation * Quaternion.Euler(0f, wheelCollider.steerAngle, 0f);
         }
     }
 }

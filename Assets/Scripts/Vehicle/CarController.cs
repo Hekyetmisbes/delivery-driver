@@ -130,6 +130,14 @@ public class CarController : MonoBehaviour
     private WheelFrictionCurve rearLeftSidewaysFrictionBase;
     private WheelFrictionCurve rearRightSidewaysFrictionBase;
     private bool rearFrictionCached;
+    private Vector3 frontLeftVisualOffset;
+    private Vector3 frontRightVisualOffset;
+    private Vector3 rearLeftVisualOffset;
+    private Vector3 rearRightVisualOffset;
+    private Quaternion frontLeftVisualRotationOffset = Quaternion.identity;
+    private Quaternion frontRightVisualRotationOffset = Quaternion.identity;
+    private Quaternion rearLeftVisualRotationOffset = Quaternion.identity;
+    private Quaternion rearRightVisualRotationOffset = Quaternion.identity;
     
     // Input Action References
     private InputAction moveAction;
@@ -145,6 +153,7 @@ public class CarController : MonoBehaviour
         rb = GetComponent<Rigidbody>();
         SetupRigidbody();
         ConfigureBodyCollidersForStability();
+        CacheWheelVisualOffsets();
         CacheRearSidewaysFriction();
         SetupInput();
     }
@@ -386,24 +395,56 @@ public class CarController : MonoBehaviour
 
     private void UpdateWheels()
     {
-        UpdateSingleWheel(frontLeftCollider, frontLeftMesh);
-        UpdateSingleWheel(frontRightCollider, frontRightMesh);
-        UpdateSingleWheel(rearLeftCollider, rearLeftMesh);
-        UpdateSingleWheel(rearRightCollider, rearRightMesh);
+        UpdateSingleWheel(frontLeftCollider, frontLeftMesh, frontLeftVisualOffset, frontLeftVisualRotationOffset);
+        UpdateSingleWheel(frontRightCollider, frontRightMesh, frontRightVisualOffset, frontRightVisualRotationOffset);
+        UpdateSingleWheel(rearLeftCollider, rearLeftMesh, rearLeftVisualOffset, rearLeftVisualRotationOffset);
+        UpdateSingleWheel(rearRightCollider, rearRightMesh, rearRightVisualOffset, rearRightVisualRotationOffset);
     }
 
-    private void UpdateSingleWheel(WheelCollider wheelCollider, Transform wheelTransform)
+    private void UpdateSingleWheel(WheelCollider wheelCollider, Transform wheelTransform, Vector3 localPositionOffset, Quaternion localRotationOffset)
     {
         if (wheelCollider == null || wheelTransform == null) return;
 
-        // WheelCollider'ın fiziksel pozisyonunu al
         Vector3 pos;
         Quaternion rot;
         wheelCollider.GetWorldPose(out pos, out rot);
 
-        // Görsel mesh'i bu pozisyona eşitle
-        wheelTransform.position = pos;
-        wheelTransform.rotation = rot;
+        Quaternion offsetRotation = GetWheelOffsetRotation(wheelCollider);
+        wheelTransform.position = pos + (offsetRotation * localPositionOffset);
+        wheelTransform.rotation = rot * localRotationOffset;
+    }
+
+    private void CacheWheelVisualOffsets()
+    {
+        CacheWheelVisualOffset(frontLeftCollider, frontLeftMesh, out frontLeftVisualOffset, out frontLeftVisualRotationOffset);
+        CacheWheelVisualOffset(frontRightCollider, frontRightMesh, out frontRightVisualOffset, out frontRightVisualRotationOffset);
+        CacheWheelVisualOffset(rearLeftCollider, rearLeftMesh, out rearLeftVisualOffset, out rearLeftVisualRotationOffset);
+        CacheWheelVisualOffset(rearRightCollider, rearRightMesh, out rearRightVisualOffset, out rearRightVisualRotationOffset);
+    }
+
+    private static void CacheWheelVisualOffset(
+        WheelCollider wheelCollider,
+        Transform wheelTransform,
+        out Vector3 localPositionOffset,
+        out Quaternion localRotationOffset)
+    {
+        localPositionOffset = Vector3.zero;
+        localRotationOffset = Quaternion.identity;
+
+        if (wheelCollider == null || wheelTransform == null)
+        {
+            return;
+        }
+
+        Transform wheelRoot = wheelCollider.transform;
+        localPositionOffset = Quaternion.Inverse(wheelRoot.rotation) * (wheelTransform.position - wheelRoot.position);
+        localRotationOffset = Quaternion.Inverse(wheelRoot.rotation) * wheelTransform.rotation;
+    }
+
+    private static Quaternion GetWheelOffsetRotation(WheelCollider wheelCollider)
+    {
+        Transform wheelRoot = wheelCollider.transform;
+        return wheelRoot.rotation * Quaternion.Euler(0f, wheelCollider.steerAngle, 0f);
     }
 
     private void ApplyDownforce()
