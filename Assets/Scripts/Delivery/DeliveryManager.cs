@@ -86,6 +86,7 @@ public class DeliveryManager : MonoBehaviour
 
     [Header("Extracted Components")]
     [SerializeField] private SpeedometerUI speedometerUI;
+    [SerializeField] private DeliveryUI deliveryUI;
 
     private DeliveryBox currentBox;
     private GameObject currentDeliveryIndicator;
@@ -117,7 +118,6 @@ public class DeliveryManager : MonoBehaviour
     private bool pendingNightBonus;
     private bool pendingRainRiskBonus;
     private List<Vector3> availableSpawnPoints = new List<Vector3>();
-    private DeliveryUI deliveryUI;
     private QuestData currentDeliveryQuest;
     private Transform cachedPlayerTransform;
     private Rigidbody cachedPlayerRigidbody;
@@ -156,7 +156,10 @@ public class DeliveryManager : MonoBehaviour
     private System.Collections.IEnumerator Start()
     {
         EnsureRoadSurfaceMask();
-        deliveryUI = FindFirstObjectByType<DeliveryUI>();
+        if (deliveryUI == null)
+        {
+            deliveryUI = FindFirstObjectByType<DeliveryUI>();
+        }
 
         // This project flow requires phone acceptance before showing delivery objective UI.
         // Force this at runtime so scene/prefab inspector mismatches cannot bypass it.
@@ -212,6 +215,54 @@ public class DeliveryManager : MonoBehaviour
         {
             phoneMissionUI.BindCallbacks(null, null);
         }
+    }
+
+    [ContextMenu("Auto Assign Startup References")]
+    private void AutoAssignStartupReferencesFromContextMenu()
+    {
+        AutoAssignStartupReferences();
+    }
+
+    public bool AutoAssignStartupReferences()
+    {
+        bool changed = false;
+
+        if (roadGraphBuilder == null)
+        {
+            roadGraphBuilder = FindSceneComponent<RoadGraphBuilder>();
+            changed |= roadGraphBuilder != null;
+        }
+
+        if (deliveryUI == null)
+        {
+            deliveryUI = FindSceneComponent<DeliveryUI>();
+            changed |= deliveryUI != null;
+        }
+
+        if (phoneMissionUI == null)
+        {
+            phoneMissionUI = FindSceneComponent<PhoneMissionUI>();
+            changed |= phoneMissionUI != null;
+        }
+
+        if (speedometerUI == null)
+        {
+            speedometerUI = GetComponent<SpeedometerUI>();
+            if (speedometerUI == null)
+            {
+                speedometerUI = FindSceneComponent<SpeedometerUI>();
+            }
+
+            changed |= speedometerUI != null;
+        }
+
+        if (cargoLibrary == null)
+        {
+            cargoLibrary = Resources.Load<CargoLibrary>("CargoLibrary");
+            changed |= cargoLibrary != null;
+        }
+
+        return changed;
     }
 
     private void CacheTerrainBounds()
@@ -304,6 +355,12 @@ public class DeliveryManager : MonoBehaviour
         }
 
         speedometerUI?.Initialize(cachedPlayerRigidbody);
+    }
+
+    private static T FindSceneComponent<T>() where T : Component
+    {
+        T[] components = FindObjectsByType<T>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        return components != null && components.Length > 0 ? components[0] : null;
     }
 
     private void SubscribeToQuestEvents()

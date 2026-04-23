@@ -344,6 +344,55 @@ namespace DeliveryDriver.Quest
             startupInitCoroutine = StartCoroutine(InitializeQuestStateWhenReady());
         }
 
+        [ContextMenu("Auto Assign Startup References")]
+        private void AutoAssignStartupReferencesFromContextMenu()
+        {
+            AutoAssignStartupReferences();
+        }
+
+        public bool AutoAssignStartupReferences()
+        {
+            bool changed = false;
+
+            if (roadGraphBuilder == null)
+            {
+                roadGraphBuilder = FindSceneComponent<RoadGraphBuilder>();
+                changed |= roadGraphBuilder != null;
+            }
+
+            if (playerController == null)
+            {
+                playerController = FindSceneComponent<CarController>();
+                changed |= playerController != null;
+            }
+
+            if (playerTransform == null && playerController != null)
+            {
+                playerTransform = playerController.transform;
+                changed = true;
+            }
+
+            if (cargoLibrary == null)
+            {
+                cargoLibrary = Resources.Load<CargoLibrary>("CargoLibrary");
+                changed |= cargoLibrary != null;
+            }
+
+            if (questDatabase == null)
+            {
+                questDatabase = Resources.Load<QuestDatabase>("QuestDatabase");
+                changed |= questDatabase != null;
+            }
+
+            if (markerPool == null)
+            {
+                markerPool = FindSceneComponent<QuestMarkerPool>();
+                changed |= markerPool != null;
+            }
+
+            return changed;
+        }
+
         private IEnumerator InitializeQuestStateWhenReady()
         {
             if (roadGraphBuilder == null)
@@ -527,6 +576,12 @@ namespace DeliveryDriver.Quest
         {
             playerController = controller;
             playerTransform = controller != null ? controller.transform : null;
+        }
+
+        private static T FindSceneComponent<T>() where T : Component
+        {
+            T[] components = UnityEngine.Object.FindObjectsByType<T>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            return components != null && components.Length > 0 ? components[0] : null;
         }
         
         /// <summary>
