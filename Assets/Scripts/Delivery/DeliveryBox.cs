@@ -15,7 +15,7 @@ public class DeliveryBox : MonoBehaviour
     [SerializeField] private LayerMask groundMask = ~0;
     [SerializeField] private float groundRayStartHeight = 200f;
     [SerializeField] private float groundRayDistance = 500f;
-    [SerializeField] private float respawnHeightOffset = 0.75f;
+    [SerializeField] private float respawnHeightOffset = 0.05f;
 
     private bool isPickedUp = false;
     private Rigidbody rb;
@@ -123,8 +123,36 @@ public class DeliveryBox : MonoBehaviour
         Vector3 rayStart = new Vector3(spawnPosition.x, spawnPosition.y + groundRayStartHeight, spawnPosition.z);
         if (Physics.Raycast(rayStart, Vector3.down, out RaycastHit hit, groundRayDistance, groundMask, QueryTriggerInteraction.Ignore))
         {
-            spawnPosition = hit.point + Vector3.up * respawnHeightOffset;
+            spawnPosition = hit.point + Vector3.up * GetGroundSnapOffset();
         }
+    }
+
+    private float GetGroundSnapOffset()
+    {
+        float clearance = Mathf.Clamp(respawnHeightOffset, 0.01f, 0.12f);
+        Collider[] colliders = GetComponentsInChildren<Collider>(true);
+        float lowestPoint = float.MaxValue;
+        bool foundSolidCollider = false;
+
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            Collider collider = colliders[i];
+            if (collider == null || collider.isTrigger || !collider.enabled)
+            {
+                continue;
+            }
+
+            foundSolidCollider = true;
+            lowestPoint = Mathf.Min(lowestPoint, collider.bounds.min.y);
+        }
+
+        if (!foundSolidCollider)
+        {
+            return clearance;
+        }
+
+        float colliderOffset = transform.position.y - lowestPoint;
+        return Mathf.Max(clearance, colliderOffset + clearance);
     }
 
     private void ResolvePlayerTransform()
