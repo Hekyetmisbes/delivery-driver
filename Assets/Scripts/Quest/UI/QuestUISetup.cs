@@ -74,6 +74,32 @@ namespace DeliveryDriver.Quest.UI
             Debug.Log("- Quest Complete UI: Created");
         }
 
+        [ContextMenu("Bake Quest UI To Scene")]
+        private void BakeQuestUiToSceneFromContextMenu()
+        {
+            BakeQuestUiToScene();
+        }
+
+        public bool BakeQuestUiToScene()
+        {
+            bool hadQuestUi = FindObjectsByType<QuestUIManager>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length > 0;
+            if (!hadQuestUi)
+            {
+                SetupQuestUI();
+            }
+
+            setupOnAwake = false;
+            destroyAfterSetup = false;
+
+            QuestUIManager existingManager = FindAnyObjectByType<QuestUIManager>();
+            if (existingManager != null)
+            {
+                existingManager.AutoAssignStartupReferences();
+            }
+
+            return !hadQuestUi;
+        }
+
         private Canvas CreateMainCanvas()
         {
             GameObject canvasObj = new GameObject("Quest UI Canvas");
@@ -317,7 +343,6 @@ namespace DeliveryDriver.Quest.UI
 
         private QuestCompleteUI CreateQuestCompleteUI(Transform parent)
         {
-            // Create full-screen overlay
             GameObject completeObj = new GameObject("QuestCompleteUI");
             RectTransform rectTransform = completeObj.AddComponent<RectTransform>();
             rectTransform.SetParent(parent, false);
@@ -325,107 +350,197 @@ namespace DeliveryDriver.Quest.UI
             rectTransform.anchorMax = Vector2.one;
             rectTransform.sizeDelta = Vector2.zero;
 
-            // Dark overlay background
             Image bgImage = completeObj.AddComponent<Image>();
-            bgImage.color = new Color(0, 0, 0, 0.7f);
+            bgImage.color = UIThemeConstants.OverlayBackground;
 
-            // NOTE: QuestCompleteUI component is added AFTER all children are created
-            // so that Awake -> EnsureReadableLayout() can find "ResultPanel" and child texts.
+            GameObject glowObj = new GameObject("ResultGlow");
+            RectTransform glowRect = glowObj.AddComponent<RectTransform>();
+            glowRect.SetParent(rectTransform, false);
+            glowRect.anchorMin = new Vector2(0.5f, 0.5f);
+            glowRect.anchorMax = new Vector2(0.5f, 0.5f);
+            glowRect.pivot = new Vector2(0.5f, 0.5f);
+            glowRect.sizeDelta = new Vector2(940f, 700f);
 
-            // Create result panel (center)
+            Image glowImage = glowObj.AddComponent<Image>();
+            glowImage.color = new Color(0.11f, 0.18f, 0.28f, 0.18f);
+            glowImage.raycastTarget = false;
+
             GameObject panelObj = new GameObject("ResultPanel");
             RectTransform panelRect = panelObj.AddComponent<RectTransform>();
             panelRect.SetParent(rectTransform, false);
             panelRect.anchorMin = new Vector2(0.5f, 0.5f);
             panelRect.anchorMax = new Vector2(0.5f, 0.5f);
             panelRect.pivot = new Vector2(0.5f, 0.5f);
-            panelRect.sizeDelta = new Vector2(600, 400);
+            panelRect.sizeDelta = new Vector2(860f, 620f);
 
             Image panelBg = panelObj.AddComponent<Image>();
-            panelBg.color = new Color(0.15f, 0.15f, 0.15f, 0.95f);
+            panelBg.color = UIThemeConstants.PanelBackground;
 
-            // Result text (GÖREV TAMAMLANDI!)
+            Outline panelOutline = panelObj.AddComponent<Outline>();
+            panelOutline.effectColor = new Color(0.35f, 0.48f, 0.62f, 0.4f);
+            panelOutline.effectDistance = new Vector2(1.5f, -1.5f);
+
+            Shadow panelShadow = panelObj.AddComponent<Shadow>();
+            panelShadow.effectColor = new Color(0f, 0f, 0f, 0.28f);
+            panelShadow.effectDistance = new Vector2(0f, -12f);
+
+            GameObject accentObj = new GameObject("AccentBar");
+            RectTransform accentRect = accentObj.AddComponent<RectTransform>();
+            accentRect.SetParent(panelRect, false);
+            accentRect.anchorMin = new Vector2(0f, 1f);
+            accentRect.anchorMax = new Vector2(1f, 1f);
+            accentRect.pivot = new Vector2(0.5f, 1f);
+            accentRect.anchoredPosition = Vector2.zero;
+            accentRect.sizeDelta = new Vector2(0f, 10f);
+
+            Image accentImage = accentObj.AddComponent<Image>();
+            accentImage.color = UIThemeConstants.Positive;
+
+            GameObject contentObj = new GameObject("Content");
+            RectTransform contentRect = contentObj.AddComponent<RectTransform>();
+            contentRect.SetParent(panelRect, false);
+            contentRect.anchorMin = Vector2.zero;
+            contentRect.anchorMax = Vector2.one;
+            contentRect.offsetMin = new Vector2(34f, 34f);
+            contentRect.offsetMax = new Vector2(-34f, -34f);
+
+            VerticalLayoutGroup contentLayout = contentObj.AddComponent<VerticalLayoutGroup>();
+            contentLayout.padding = new RectOffset(0, 0, 18, 0);
+            contentLayout.spacing = 18f;
+            contentLayout.childAlignment = TextAnchor.UpperCenter;
+            contentLayout.childControlWidth = true;
+            contentLayout.childControlHeight = false;
+            contentLayout.childForceExpandWidth = true;
+            contentLayout.childForceExpandHeight = false;
+
             GameObject resultObj = new GameObject("ResultText");
             RectTransform resultRect = resultObj.AddComponent<RectTransform>();
-            resultRect.SetParent(panelRect, false);
-            resultRect.anchorMin = new Vector2(0, 1);
-            resultRect.anchorMax = new Vector2(1, 1);
-            resultRect.pivot = new Vector2(0.5f, 1);
-            resultRect.anchoredPosition = new Vector2(0, -30);
-            resultRect.sizeDelta = new Vector2(-40, 60);
+            resultRect.SetParent(contentRect, false);
+
+            LayoutElement resultLayout = resultObj.AddComponent<LayoutElement>();
+            resultLayout.minHeight = 76f;
+            resultLayout.preferredHeight = 76f;
 
             TextMeshProUGUI resultText = resultObj.AddComponent<TextMeshProUGUI>();
             resultText.text = LocalizationTable.Get("delivery_complete");
-            resultText.fontSize = 36;
+            resultText.fontSize = UIThemeConstants.TitleFontSize + 4f;
             resultText.fontStyle = FontStyles.Bold;
             resultText.alignment = TextAlignmentOptions.Center;
-            resultText.color = new Color(0.2f, 1f, 0.2f); // Green
+            resultText.color = UIThemeConstants.Positive;
+            resultText.characterSpacing = 3f;
 
-            // Quest name
             GameObject nameObj = new GameObject("QuestName");
             RectTransform nameRect = nameObj.AddComponent<RectTransform>();
-            nameRect.SetParent(panelRect, false);
-            nameRect.anchorMin = new Vector2(0, 0.5f);
-            nameRect.anchorMax = new Vector2(1, 0.5f);
-            nameRect.pivot = new Vector2(0.5f, 0.5f);
-            nameRect.anchoredPosition = new Vector2(0, 50);
-            nameRect.sizeDelta = new Vector2(-40, 40);
+            nameRect.SetParent(contentRect, false);
+
+            LayoutElement nameLayout = nameObj.AddComponent<LayoutElement>();
+            nameLayout.minHeight = 42f;
+            nameLayout.preferredHeight = 42f;
 
             TextMeshProUGUI nameText = nameObj.AddComponent<TextMeshProUGUI>();
             nameText.text = LocalizationTable.Get("quest_complete_default_name");
-            nameText.fontSize = 24;
+            nameText.fontSize = UIThemeConstants.SubheadingFontSize + 2f;
             nameText.alignment = TextAlignmentOptions.Center;
-            nameText.color = Color.white;
+            nameText.color = UIThemeConstants.TextHeader;
 
-            // Stats text
+            GameObject statsCardObj = new GameObject("StatsCard");
+            RectTransform statsCardRect = statsCardObj.AddComponent<RectTransform>();
+            statsCardRect.SetParent(contentRect, false);
+
+            LayoutElement statsCardLayout = statsCardObj.AddComponent<LayoutElement>();
+            statsCardLayout.minHeight = 270f;
+            statsCardLayout.preferredHeight = 270f;
+            statsCardLayout.flexibleHeight = 1f;
+
+            Image statsCardImage = statsCardObj.AddComponent<Image>();
+            statsCardImage.color = UIThemeConstants.SectionBackground;
+
+            Shadow statsCardShadow = statsCardObj.AddComponent<Shadow>();
+            statsCardShadow.effectColor = new Color(0f, 0f, 0f, 0.14f);
+            statsCardShadow.effectDistance = new Vector2(0f, -5f);
+
             GameObject statsObj = new GameObject("Stats");
             RectTransform statsRect = statsObj.AddComponent<RectTransform>();
-            statsRect.SetParent(panelRect, false);
-            statsRect.anchorMin = new Vector2(0, 0.5f);
-            statsRect.anchorMax = new Vector2(1, 0.5f);
-            statsRect.pivot = new Vector2(0.5f, 0.5f);
-            statsRect.anchoredPosition = new Vector2(0, -20);
-            statsRect.sizeDelta = new Vector2(-40, 80);
+            statsRect.SetParent(statsCardRect, false);
+            statsRect.anchorMin = Vector2.zero;
+            statsRect.anchorMax = Vector2.one;
+            statsRect.offsetMin = new Vector2(26f, 22f);
+            statsRect.offsetMax = new Vector2(-26f, -22f);
 
             TextMeshProUGUI statsText = statsObj.AddComponent<TextMeshProUGUI>();
-            statsText.text = "";
-            statsText.fontSize = 18;
-            statsText.alignment = TextAlignmentOptions.Center;
-            statsText.color = new Color(0.8f, 0.8f, 0.8f);
+            statsText.text = string.Empty;
+            statsText.fontSize = UIThemeConstants.BodyFontSize;
+            statsText.alignment = TextAlignmentOptions.TopLeft;
+            statsText.color = UIThemeConstants.TextSecondary;
+            statsText.textWrappingMode = TextWrappingModes.Normal;
+            statsText.lineSpacing = 6f;
 
-            // Reward text
+            GameObject rewardCardObj = new GameObject("RewardCard");
+            RectTransform rewardCardRect = rewardCardObj.AddComponent<RectTransform>();
+            rewardCardRect.SetParent(contentRect, false);
+
+            LayoutElement rewardCardLayout = rewardCardObj.AddComponent<LayoutElement>();
+            rewardCardLayout.minHeight = 118f;
+            rewardCardLayout.preferredHeight = 118f;
+
+            Image rewardCardImage = rewardCardObj.AddComponent<Image>();
+            rewardCardImage.color = new Color(0.12f, 0.24f, 0.18f, 0.97f);
+
             GameObject rewardObj = new GameObject("Reward");
             RectTransform rewardRect = rewardObj.AddComponent<RectTransform>();
-            rewardRect.SetParent(panelRect, false);
-            rewardRect.anchorMin = new Vector2(0, 0);
-            rewardRect.anchorMax = new Vector2(1, 0);
-            rewardRect.pivot = new Vector2(0.5f, 0);
-            rewardRect.anchoredPosition = new Vector2(0, 80);
-            rewardRect.sizeDelta = new Vector2(-40, 40);
+            rewardRect.SetParent(rewardCardRect, false);
+            rewardRect.anchorMin = Vector2.zero;
+            rewardRect.anchorMax = Vector2.one;
+            rewardRect.offsetMin = new Vector2(18f, 12f);
+            rewardRect.offsetMax = new Vector2(-18f, -12f);
 
             TextMeshProUGUI rewardText = rewardObj.AddComponent<TextMeshProUGUI>();
             rewardText.text = "+ $100";
-            rewardText.fontSize = 28;
+            rewardText.fontSize = UIThemeConstants.HeadingFontSize;
             rewardText.fontStyle = FontStyles.Bold;
             rewardText.alignment = TextAlignmentOptions.Center;
-            rewardText.color = new Color(1f, 0.9f, 0.3f); // Gold
+            rewardText.color = UIThemeConstants.RewardText;
+            rewardText.lineSpacing = 8f;
 
-            // Continue button
+            GameObject buttonRowObj = new GameObject("ButtonRow");
+            RectTransform buttonRowRect = buttonRowObj.AddComponent<RectTransform>();
+            buttonRowRect.SetParent(contentRect, false);
+
+            LayoutElement buttonRowLayout = buttonRowObj.AddComponent<LayoutElement>();
+            buttonRowLayout.minHeight = 72f;
+            buttonRowLayout.preferredHeight = 72f;
+
+            HorizontalLayoutGroup buttonRowGroup = buttonRowObj.AddComponent<HorizontalLayoutGroup>();
+            buttonRowGroup.childAlignment = TextAnchor.MiddleCenter;
+            buttonRowGroup.childControlWidth = false;
+            buttonRowGroup.childControlHeight = false;
+            buttonRowGroup.childForceExpandWidth = false;
+            buttonRowGroup.childForceExpandHeight = false;
+
             GameObject buttonObj = new GameObject("ContinueButton");
             RectTransform buttonRect = buttonObj.AddComponent<RectTransform>();
-            buttonRect.SetParent(panelRect, false);
-            buttonRect.anchorMin = new Vector2(0.5f, 0);
-            buttonRect.anchorMax = new Vector2(0.5f, 0);
-            buttonRect.pivot = new Vector2(0.5f, 0);
-            buttonRect.anchoredPosition = new Vector2(0, 20);
-            buttonRect.sizeDelta = new Vector2(200, 50);
+            buttonRect.SetParent(buttonRowRect, false);
+            buttonRect.sizeDelta = new Vector2(280f, UIThemeConstants.ButtonHeight);
+
+            LayoutElement buttonLayout = buttonObj.AddComponent<LayoutElement>();
+            buttonLayout.minWidth = 280f;
+            buttonLayout.preferredWidth = 280f;
+            buttonLayout.minHeight = UIThemeConstants.ButtonHeight;
+            buttonLayout.preferredHeight = UIThemeConstants.ButtonHeight;
 
             Image buttonImage = buttonObj.AddComponent<Image>();
-            buttonImage.color = new Color(0.2f, 0.6f, 0.2f);
+            buttonImage.color = UIThemeConstants.ButtonGreen;
 
             Button continueButton = buttonObj.AddComponent<Button>();
+            continueButton.targetGraphic = buttonImage;
+            ColorBlock colors = continueButton.colors;
+            colors.normalColor = buttonImage.color;
+            colors.highlightedColor = Color.Lerp(buttonImage.color, Color.white, 0.1f);
+            colors.pressedColor = Color.Lerp(buttonImage.color, Color.black, 0.15f);
+            colors.selectedColor = colors.highlightedColor;
+            colors.disabledColor = new Color(buttonImage.color.r, buttonImage.color.g, buttonImage.color.b, 0.45f);
+            continueButton.colors = colors;
 
-            // Add button navigation
             var navigation = continueButton.navigation;
             navigation.mode = UnityEngine.UI.Navigation.Mode.None;
             continueButton.navigation = navigation;
@@ -439,16 +554,15 @@ namespace DeliveryDriver.Quest.UI
 
             TextMeshProUGUI buttonText = buttonTextObj.AddComponent<TextMeshProUGUI>();
             buttonText.text = LocalizationTable.Get("quest_complete_button");
-            buttonText.fontSize = 20;
+            buttonText.fontSize = UIThemeConstants.SubheadingFontSize;
             buttonText.fontStyle = FontStyles.Bold;
             buttonText.alignment = TextAlignmentOptions.Center;
             buttonText.color = Color.white;
 
-            // Add QuestCompleteUI component AFTER all children exist
-            // so Awake -> EnsureReadableLayout() can find ResultPanel and text components
+            UIButtonEnhancer.EnhanceButton(continueButton);
+
             QuestCompleteUI questCompleteUI = completeObj.AddComponent<QuestCompleteUI>();
 
-            // Wire references using reflection
             var rootPanelField = typeof(QuestCompleteUI).GetField("rootPanel",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var resultTextField = typeof(QuestCompleteUI).GetField("resultText",
@@ -469,29 +583,11 @@ namespace DeliveryDriver.Quest.UI
             rewardTextField?.SetValue(questCompleteUI, rewardText);
             continueButtonField?.SetValue(questCompleteUI, continueButton);
 
-            // Re-run EnsureReadableLayout now that reflection fields are set
-            // (Awake ran before reflection, so text fields were null at that point)
             var ensureLayoutMethod = typeof(QuestCompleteUI).GetMethod("EnsureReadableLayout",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             ensureLayoutMethod?.Invoke(questCompleteUI, null);
 
-            // Setup button click handler - CRITICAL: Must be done AFTER field is set
-            continueButton.onClick.RemoveAllListeners(); // Clear any existing listeners
-            continueButton.onClick.AddListener(() =>
-            {
-                Debug.Log("[QuestCompleteUI] Continue button clicked");
-                questCompleteUI.Hide();
-
-                // Refresh quest list if QuestUIManager exists
-                if (QuestUIManager.Instance != null)
-                {
-                    var refreshMethod = typeof(QuestUIManager).GetMethod("RefreshQuestList",
-                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                    refreshMethod?.Invoke(QuestUIManager.Instance, null);
-                }
-            });
-
-            completeObj.SetActive(false); // Start hidden
+            completeObj.SetActive(false);
 
             Debug.Log("[QuestUISetup] Created Quest Complete UI");
             return questCompleteUI;

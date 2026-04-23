@@ -14,9 +14,8 @@ namespace DeliveryDriver.Quest.UI
 
         [Header("Player")]
         [SerializeField] private Transform playerTransform;
-
-        private QuestManager questManager;
-        private DeliveryManager deliveryManager;
+        [SerializeField] private QuestManager questManager;
+        [SerializeField] private DeliveryManager deliveryManager;
         private bool isSubscribed;
         private QuestLocation lastObjective;
         private float nextHudRefreshTime;
@@ -37,7 +36,11 @@ namespace DeliveryDriver.Quest.UI
 
         private void OnEnable()
         {
-            questManager = QuestManager.Instance;
+            if (questManager == null)
+            {
+                questManager = QuestManager.Instance;
+            }
+
             SubscribeToQuestEvents();
         }
 
@@ -74,6 +77,67 @@ namespace DeliveryDriver.Quest.UI
         private void OnDisable()
         {
             UnsubscribeFromQuestEvents();
+        }
+
+        [ContextMenu("Auto Assign Startup References")]
+        private void AutoAssignStartupReferencesFromContextMenu()
+        {
+            AutoAssignStartupReferences();
+        }
+
+        public bool AutoAssignStartupReferences()
+        {
+            bool changed = false;
+
+            if (questManager == null)
+            {
+                questManager = QuestManager.Instance ?? FindSceneComponent<QuestManager>();
+                changed |= questManager != null;
+            }
+
+            if (deliveryManager == null)
+            {
+                deliveryManager = FindSceneComponent<DeliveryManager>();
+                changed |= deliveryManager != null;
+            }
+
+            if (questListUI == null)
+            {
+                questListUI = FindSceneComponent<QuestListUI>();
+                changed |= questListUI != null;
+            }
+
+            if (activeQuestUI == null)
+            {
+                activeQuestUI = FindSceneComponent<ActiveQuestUI>();
+                changed |= activeQuestUI != null;
+            }
+
+            if (questCompleteUI == null)
+            {
+                questCompleteUI = FindSceneComponent<QuestCompleteUI>();
+                changed |= questCompleteUI != null;
+            }
+
+            if (playerTransform == null)
+            {
+                if (questManager != null && questManager.PlayerTransform != null)
+                {
+                    playerTransform = questManager.PlayerTransform;
+                }
+                else
+                {
+                    CarController controller = FindSceneComponent<CarController>();
+                    if (controller != null)
+                    {
+                        playerTransform = controller.transform;
+                    }
+                }
+
+                changed |= playerTransform != null;
+            }
+
+            return changed;
         }
 
         private void Update()
@@ -399,6 +463,12 @@ namespace DeliveryDriver.Quest.UI
             }
 
             return (playerTransform.position - lastDistanceRefreshPosition).sqrMagnitude >= DistanceRefreshThreshold * DistanceRefreshThreshold;
+        }
+
+        private static T FindSceneComponent<T>() where T : Component
+        {
+            T[] components = FindObjectsByType<T>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            return components != null && components.Length > 0 ? components[0] : null;
         }
     }
 }
