@@ -11,8 +11,15 @@ namespace TrafficSystem
         /// parallel road pieces.
         /// </summary>
         private const int MaxMidSegmentConnectionsPerPair = 4;
+        private const float MaxConnectionTurnAngle = 92f;
+        private const float MinConnectorTravelDot = 0.05f;
+        private const float MinMidSegmentAlignmentDot = 0.7f;
 
-        public static void BuildConnections(RoadGraph roadGraph, float connectionThresholdMeters, float sampleStepMeters)
+        public static void BuildConnections(
+            RoadGraph roadGraph,
+            float connectionThresholdMeters,
+            float sampleStepMeters,
+            bool allowMidSegmentConnections = true)
         {
             if (roadGraph == null || roadGraph.roadSegments == null)
             {
@@ -30,53 +37,25 @@ namespace TrafficSystem
                 }
             }
 
-            // --- Pass 1: endpoint-to-endpoint connections (original logic) ---
+            // --- Pass 1: directional endpoint connections ---
             foreach (RoadSegment segment in roadGraph.roadSegments)
             {
-                if (segment == null || segment.waypoints.Count == 0)
+                if (segment == null || segment.waypoints.Count < 2)
                 {
                     continue;
                 }
 
-                Vector3 startPos = segment.waypoints[0].position;
-                Vector3 endPos = segment.waypoints[segment.waypoints.Count - 1].position;
                 int lastIdx = segment.waypoints.Count - 1;
-
-                if (Vector3.Distance(endPos, startPos) < threshold)
-                {
-                    AddConnectionIfMissing(segment, segment, lastIdx, 0);
-                }
+                TryAddDirectionalConnection(segment, segment, lastIdx, 0, threshold);
 
                 foreach (RoadSegment otherSegment in roadGraph.roadSegments)
                 {
-                    if (otherSegment == null || otherSegment == segment || otherSegment.waypoints.Count == 0)
+                    if (otherSegment == null || otherSegment == segment || otherSegment.waypoints.Count < 2)
                     {
                         continue;
                     }
 
-                    Vector3 otherStart = otherSegment.waypoints[0].position;
-                    Vector3 otherEnd = otherSegment.waypoints[otherSegment.waypoints.Count - 1].position;
-                    int otherLastIdx = otherSegment.waypoints.Count - 1;
-
-                    if (Vector3.Distance(endPos, otherStart) < threshold)
-                    {
-                        AddConnectionIfMissing(segment, otherSegment, lastIdx, 0);
-                    }
-
-                    if (Vector3.Distance(endPos, otherEnd) < threshold)
-                    {
-                        AddConnectionIfMissing(segment, otherSegment, lastIdx, otherLastIdx);
-                    }
-
-                    if (Vector3.Distance(startPos, otherStart) < threshold)
-                    {
-                        AddConnectionIfMissing(segment, otherSegment, 0, 0);
-                    }
-
-                    if (Vector3.Distance(startPos, otherEnd) < threshold)
-                    {
-                        AddConnectionIfMissing(segment, otherSegment, 0, otherLastIdx);
-                    }
+                    TryAddDirectionalConnection(segment, otherSegment, lastIdx, 0, threshold);
                 }
             }
 
@@ -85,56 +64,33 @@ namespace TrafficSystem
             {
                 foreach (RoadSegment segment in roadGraph.roadSegments)
                 {
-                    if (segment == null || segment.waypoints.Count == 0)
+                    if (segment == null || segment.waypoints.Count < 2)
                     {
                         continue;
                     }
 
-                    Vector3 startPos = segment.waypoints[0].position;
-                    Vector3 endPos = segment.waypoints[segment.waypoints.Count - 1].position;
                     int lastIdx = segment.waypoints.Count - 1;
 
                     foreach (RoadSegment otherSegment in roadGraph.roadSegments)
                     {
-                        if (otherSegment == null || otherSegment == segment || otherSegment.waypoints.Count == 0)
+                        if (otherSegment == null || otherSegment == segment || otherSegment.waypoints.Count < 2)
                         {
                             continue;
                         }
 
-                        Vector3 otherStart = otherSegment.waypoints[0].position;
-                        Vector3 otherEnd = otherSegment.waypoints[otherSegment.waypoints.Count - 1].position;
-                        int otherLastIdx = otherSegment.waypoints.Count - 1;
-
-                        if (ShouldCreateRecoveryConnection(endPos, otherStart, recoveryThreshold))
-                        {
-                            AddConnectionIfMissing(segment, otherSegment, lastIdx, 0);
-                        }
-
-                        if (ShouldCreateRecoveryConnection(endPos, otherEnd, recoveryThreshold))
-                        {
-                            AddConnectionIfMissing(segment, otherSegment, lastIdx, otherLastIdx);
-                        }
-
-                        if (ShouldCreateRecoveryConnection(startPos, otherStart, recoveryThreshold))
-                        {
-                            AddConnectionIfMissing(segment, otherSegment, 0, 0);
-                        }
-
-                        if (ShouldCreateRecoveryConnection(startPos, otherEnd, recoveryThreshold))
-                        {
-                            AddConnectionIfMissing(segment, otherSegment, 0, otherLastIdx);
-                        }
+                        TryAddDirectionalConnection(segment, otherSegment, lastIdx, 0, recoveryThreshold);
                     }
                 }
             }
 
-            // --- Pass 3: mid-segment proximity connections ---
-            // SimplePoly dual-lane road layouts produce many short segments whose
-            // mid-waypoints are spatially close but have no endpoint overlap.
-            // Link nearby mid-segment waypoints so the A* search can move between
-            // adjacent road pieces without relying solely on spatial transfers.
-            float midThreshold = Mathf.Max(connectionThresholdMeters, sampleStepMeters * 1.2f);
-            BuildMidSegmentProximityConnections(roadGraph, midThreshold);
+            if (allowMidSegmentConnections)
+            {
+                // --- Pass 3: parallel mid-segment proximity connections ---
+                // Only link strongly aligned mid-segment waypoints. This keeps the
+                // fallback mesh graph flexible without allowing cross-traffic jumps.
+                float midThreshold = Mathf.Max(connectionThresholdMeters, sampleStepMeters * 1.2f);
+                BuildMidSegmentProximityConnections(roadGraph, midThreshold);
+            }
         }
 
         /// <summary>
@@ -185,6 +141,13 @@ namespace TrafficSystem
 
                             delta.y = 0f;
                             if (delta.sqrMagnitude > thresholdSqr)
+                            {
+                                continue;
+                            }
+
+                            Vector3 forwardA = GetWaypointForward(a, wpA);
+                            Vector3 forwardB = GetWaypointForward(b, wpB);
+                            if (Vector3.Dot(forwardA, forwardB) < MinMidSegmentAlignmentDot)
                             {
                                 continue;
                             }
@@ -245,16 +208,102 @@ namespace TrafficSystem
             return true;
         }
 
-        private static bool ShouldCreateRecoveryConnection(Vector3 from, Vector3 to, float threshold)
+        private static bool TryAddDirectionalConnection(
+            RoadSegment fromSegment,
+            RoadSegment toSegment,
+            int fromWaypointIndex,
+            int toWaypointIndex,
+            float threshold)
         {
-            Vector3 delta = to - from;
+            if (!ShouldCreateDirectionalConnection(fromSegment, toSegment, fromWaypointIndex, toWaypointIndex, threshold))
+            {
+                return false;
+            }
+
+            return AddConnectionIfMissing(fromSegment, toSegment, fromWaypointIndex, toWaypointIndex);
+        }
+
+        private static bool ShouldCreateDirectionalConnection(
+            RoadSegment fromSegment,
+            RoadSegment toSegment,
+            int fromWaypointIndex,
+            int toWaypointIndex,
+            float threshold)
+        {
+            if (fromSegment == null || toSegment == null)
+            {
+                return false;
+            }
+
+            if (fromSegment.waypoints == null || toSegment.waypoints == null ||
+                fromSegment.waypoints.Count < 2 || toSegment.waypoints.Count < 2)
+            {
+                return false;
+            }
+
+            Vector3 fromPos = fromSegment.waypoints[fromWaypointIndex].position;
+            Vector3 toPos = toSegment.waypoints[toWaypointIndex].position;
+            Vector3 delta = toPos - fromPos;
             if (Mathf.Abs(delta.y) > 2.5f)
             {
                 return false;
             }
 
             delta.y = 0f;
-            return delta.sqrMagnitude <= threshold * threshold;
+            float thresholdSqr = threshold * threshold;
+            if (delta.sqrMagnitude > thresholdSqr)
+            {
+                return false;
+            }
+
+            Vector3 exitForward = GetWaypointForward(fromSegment, fromWaypointIndex);
+            Vector3 entryForward = GetWaypointForward(toSegment, toWaypointIndex);
+            float maxTurnDot = Mathf.Cos(MaxConnectionTurnAngle * Mathf.Deg2Rad);
+            if (Vector3.Dot(exitForward, entryForward) < maxTurnDot)
+            {
+                return false;
+            }
+
+            if (delta.sqrMagnitude > 0.0001f)
+            {
+                Vector3 travelDir = delta.normalized;
+                if (Vector3.Dot(exitForward, travelDir) < MinConnectorTravelDot)
+                {
+                    return false;
+                }
+
+                if (Vector3.Dot(entryForward, travelDir) < MinConnectorTravelDot)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static Vector3 GetWaypointForward(RoadSegment segment, int waypointIndex)
+        {
+            if (segment == null || segment.waypoints == null || segment.waypoints.Count == 0)
+            {
+                return Vector3.forward;
+            }
+
+            waypointIndex = Mathf.Clamp(waypointIndex, 0, segment.waypoints.Count - 1);
+            Vector3 forward = segment.waypoints[waypointIndex].forward;
+            if (forward.sqrMagnitude < 0.0001f)
+            {
+                if (waypointIndex < segment.waypoints.Count - 1)
+                {
+                    forward = segment.waypoints[waypointIndex + 1].position - segment.waypoints[waypointIndex].position;
+                }
+                else if (waypointIndex > 0)
+                {
+                    forward = segment.waypoints[waypointIndex].position - segment.waypoints[waypointIndex - 1].position;
+                }
+            }
+
+            forward.y = 0f;
+            return forward.sqrMagnitude < 0.0001f ? Vector3.forward : forward.normalized;
         }
     }
 }

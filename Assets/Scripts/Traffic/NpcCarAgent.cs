@@ -165,6 +165,10 @@ namespace TrafficSystem
         [SerializeField] private float straightConnectionAngleThreshold = 30f;
         [Tooltip("Fallback search radius for continuing onto the next aligned segment when no explicit connection exists")]
         [SerializeField] private float nearbyContinuationSearchRadius = 7.5f;
+        [Tooltip("Reject route changes that would require turns sharper than this angle")]
+        [SerializeField] private float maxConnectionTurnAngle = 90f;
+        [Tooltip("Let lookahead continue into the next chosen segment so vehicles begin turning before the segment ends")]
+        [SerializeField] private bool previewUpcomingConnections = true;
 
         [Header("Environmental Awareness (Priority 3)")]
         [Tooltip("Enable weather-based behavior adjustments")]
@@ -272,6 +276,7 @@ namespace TrafficSystem
         // Randomized behavior parameters
         private float lateralOffset; // Lateral offset from centerline (for lane variation)
         private float cruisingLaneOffset;
+        private float preferredCruiseLaneSign = 1f;
         private float personalityLookAhead; // Randomized lookahead distance
         private float personalityAcceleration; // Randomized acceleration
         private float personalitySteerSpeed; // Randomized steering speed
@@ -290,6 +295,7 @@ namespace TrafficSystem
         // Priority 1: Turn Signal System
         private TurnSignalController turnSignalController;
         private NpcCarWheelVisualService wheelVisualService;
+        private readonly List<RoadConnection> endConnectionBuffer = new List<RoadConnection>(8);
 
         private float nextReacquireTime = 0f;
 
@@ -299,6 +305,11 @@ namespace TrafficSystem
         // Priority 2: Predictive Behavior
         private LookaheadData currentLookaheadData;
         private TurnInfo currentTurnInfo;
+        private RoadConnection plannedConnection;
+        private RoadSegment plannedContinuationSegment;
+        private int plannedContinuationWaypointIndex = -1;
+        private int plannedContinuationSourceSegmentId = -1;
+        private bool hasPlannedContinuation;
 
         // Priority 3: Environmental Awareness
         private float weatherSpeedMultiplier = 1f;
@@ -478,26 +489,14 @@ namespace TrafficSystem
             targetSpeed += variation;
             targetSpeed = Mathf.Max(20f, targetSpeed); // Minimum 20 km/h
 
-            // Randomize driving personality
-            if (useFixedLaneCenters)
+            preferredCruiseLaneSign = randomizeInitialLane && Random.value < 0.5f ? -1f : 1f;
+            if (enforceRightHandSingleLane)
             {
-                float laneSign = randomizeInitialLane && Random.value < 0.5f ? -1f : 1f;
-                if (enforceRightHandSingleLane)
-                {
-                    // GetLookAheadPoint offsets by Cross(tangent, up), so negative keeps traffic on road-right.
-                    laneSign = -1f;
-                }
+                // GetLookAheadPoint offsets by Cross(tangent, up), so negative keeps traffic on road-right.
+                preferredCruiseLaneSign = -1f;
+            }
 
-                cruisingLaneOffset = laneSign * Mathf.Max(0.1f, laneCenterOffset);
-                lateralOffset = cruisingLaneOffset;
-            }
-            else
-            {
-                cruisingLaneOffset = 0f;
-                lateralOffset = 0f; // Follow lane center from road graph directly
-            }
-            targetLateralOffset = lateralOffset; // Initialize target
-            currentLateralOffset = lateralOffset;
+            ApplyLaneCenteringPolicyForCurrentSegment();
             personalityLookAhead = lookAheadDistance * Random.Range(0.9f, 1.1f); // Keep path progression stable
             personalityAcceleration = acceleration * Random.Range(0.9f, 1.1f);
             personalitySteerSpeed = steeringSmoothSpeed * Random.Range(0.9f, 1.1f);
@@ -558,6 +557,8 @@ namespace TrafficSystem
             roadGraphBuilder = builder;
             currentSegment = segment;
             currentWaypointIndex = Mathf.Clamp(waypointIndex, 0, segment.waypoints.Count - 1);
+            ClearPlannedContinuation();
+            ApplyLaneCenteringPolicyForCurrentSegment();
             isInitialized = true;
 
             // Always log initialization for debugging
@@ -1089,69 +1090,119 @@ namespace TrafficSystem
         /// </summary>
         private void HandleEndOfSegment()
         {
-            // Filter connections to those originating from the end of the segment
-            List<RoadConnection> endConnections = null;
-            if (currentSegment.connections != null && currentSegment.connections.Count > 0)
+            if (TryGetPlannedContinuation(out RoadSegment nextSegment, out int nextWaypointIndex))
             {
-                int lastIdx = currentSegment.waypoints.Count - 1;
-                endConnections = new List<RoadConnection>();
-                for (int i = 0; i < currentSegment.connections.Count; i++)
-                {
-                    if (currentSegment.connections[i].fromWaypointIndex >= lastIdx - 1)
-                    {
-                        endConnections.Add(currentSegment.connections[i]);
-                    }
-                }
-            }
-
-            // Check for connections (intersections)
-            if (endConnections != null && endConnections.Count > 0)
-            {
-                RoadConnection connection = SelectBestConnection(endConnections);
-                if (connection == null || connection.toSegment == null)
-                {
-                    if (TryGetNearbyContinuation(out RoadSegment fallbackSegment, out int fallbackWaypointIndex))
-                    {
-                        currentSegment = fallbackSegment;
-                        currentWaypointIndex = fallbackWaypointIndex;
-                    }
-                    else
-                    {
-                        currentWaypointIndex = 0;
-                    }
-                    return;
-                }
-
-                currentSegment = connection.toSegment;
-                currentWaypointIndex = Mathf.Clamp(connection.toWaypointIndex, 0, currentSegment.waypoints.Count - 1);
+                currentSegment = nextSegment;
+                currentWaypointIndex = Mathf.Clamp(nextWaypointIndex, 0, currentSegment.waypoints.Count - 1);
+                ApplyLaneCenteringPolicyForCurrentSegment();
 
                 if (logPathChanges)
                 {
-                    Debug.Log($"[NpcCarAgent] {name} transitioning to segment '{currentSegment.name}' at waypoint {currentWaypointIndex}");
+                    string transitionType = plannedConnection != null ? "transitioning" : "continuing";
+                    Debug.Log($"[NpcCarAgent] {name} {transitionType} to segment '{currentSegment.name}' at waypoint {currentWaypointIndex}");
                 }
-            }
-            else
-            {
-                // No direct connection: only continue onto a nearby aligned segment.
-                if (TryGetNearbyContinuation(out RoadSegment nextSegment, out int nextWaypointIndex))
-                {
-                    currentSegment = nextSegment;
-                    currentWaypointIndex = nextWaypointIndex;
 
-                    if (logPathChanges)
-                    {
-                        Debug.Log($"[NpcCarAgent] {name} continuing to aligned segment '{currentSegment.name}' at waypoint {currentWaypointIndex}");
-                    }
-                }
-                else
+                ClearPlannedContinuation();
+                return;
+            }
+
+            ClearPlannedContinuation();
+            currentWaypointIndex = 0;
+            if (logPathChanges)
+            {
+                Debug.Log($"[NpcCarAgent] {name} looping on segment '{currentSegment.name}' (no outgoing connection)");
+            }
+        }
+
+        private void CollectEndConnections(List<RoadConnection> buffer)
+        {
+            buffer.Clear();
+
+            if (currentSegment == null || currentSegment.connections == null || currentSegment.waypoints == null || currentSegment.waypoints.Count == 0)
+            {
+                return;
+            }
+
+            int lastIdx = currentSegment.waypoints.Count - 1;
+            for (int i = 0; i < currentSegment.connections.Count; i++)
+            {
+                RoadConnection connection = currentSegment.connections[i];
+                if (connection == null)
                 {
-                    currentWaypointIndex = 0;
-                    if (logPathChanges)
-                    {
-                        Debug.Log($"[NpcCarAgent] {name} looping on segment '{currentSegment.name}' (no outgoing connection)");
-                    }
+                    continue;
+                }
+
+                if (connection.fromWaypointIndex >= lastIdx - 1)
+                {
+                    buffer.Add(connection);
                 }
             }
+        }
+
+        private bool TryGetPlannedContinuation(out RoadSegment nextSegment, out int nextWaypointIndex)
+        {
+            nextSegment = null;
+            nextWaypointIndex = 0;
+
+            if (currentSegment == null || currentSegment.waypoints == null || currentSegment.waypoints.Count == 0)
+            {
+                ClearPlannedContinuation();
+                return false;
+            }
+
+            if (hasPlannedContinuation &&
+                plannedContinuationSourceSegmentId == currentSegment.id &&
+                plannedContinuationSegment != null &&
+                plannedContinuationSegment != currentSegment &&
+                plannedContinuationSegment.waypoints != null &&
+                plannedContinuationSegment.waypoints.Count > 0)
+            {
+                nextSegment = plannedContinuationSegment;
+                nextWaypointIndex = Mathf.Clamp(plannedContinuationWaypointIndex, 0, plannedContinuationSegment.waypoints.Count - 1);
+                return true;
+            }
+
+            ClearPlannedContinuation();
+            plannedContinuationSourceSegmentId = currentSegment.id;
+
+            CollectEndConnections(endConnectionBuffer);
+            if (endConnectionBuffer.Count > 0)
+            {
+                plannedConnection = SelectBestConnection(endConnectionBuffer);
+                if (plannedConnection != null && plannedConnection.toSegment != null && plannedConnection.toSegment.waypoints != null && plannedConnection.toSegment.waypoints.Count > 0)
+                {
+                    plannedContinuationSegment = plannedConnection.toSegment;
+                    plannedContinuationWaypointIndex = Mathf.Clamp(plannedConnection.toWaypointIndex, 0, plannedContinuationSegment.waypoints.Count - 1);
+                    hasPlannedContinuation = true;
+                }
+            }
+
+            if (!hasPlannedContinuation &&
+                TryGetNearbyContinuation(out RoadSegment fallbackSegment, out int fallbackWaypointIndex))
+            {
+                plannedConnection = null;
+                plannedContinuationSegment = fallbackSegment;
+                plannedContinuationWaypointIndex = fallbackWaypointIndex;
+                hasPlannedContinuation = true;
+            }
+
+            if (!hasPlannedContinuation || plannedContinuationSegment == null)
+            {
+                return false;
+            }
+
+            nextSegment = plannedContinuationSegment;
+            nextWaypointIndex = Mathf.Clamp(plannedContinuationWaypointIndex, 0, plannedContinuationSegment.waypoints.Count - 1);
+            return true;
+        }
+
+        private void ClearPlannedContinuation()
+        {
+            plannedConnection = null;
+            plannedContinuationSegment = null;
+            plannedContinuationWaypointIndex = -1;
+            plannedContinuationSourceSegmentId = -1;
+            hasPlannedContinuation = false;
         }
 
         private bool TryGetNearbyContinuation(out RoadSegment nextSegment, out int nextWaypointIndex)
@@ -1219,7 +1270,7 @@ namespace TrafficSystem
             }
 
             // Filter to only valid, forward-facing connections (exclude U-turns)
-            Vector3 currentForward = GetCurrentExitForward();
+            Vector3 currentForward = GetSegmentExitForward(currentSegment);
             float straightDotThreshold = Mathf.Cos(straightConnectionAngleThreshold * Mathf.Deg2Rad);
             RoadConnection bestStraightConnection = null;
             float bestStraightDot = float.NegativeInfinity;
@@ -1234,18 +1285,21 @@ namespace TrafficSystem
                     continue;
                 }
 
+                float lanePreference = GetLanePreferenceMultiplier(connection.toSegment);
+                float weightedDot = dot + ((lanePreference - 1f) * 0.25f);
+
                 if (dot >= straightDotThreshold)
                 {
-                    if (dot > bestStraightDot)
+                    if (weightedDot > bestStraightDot)
                     {
-                        bestStraightDot = dot;
+                        bestStraightDot = weightedDot;
                         bestStraightConnection = connection;
                     }
                     continue;
                 }
 
                 turnConnections.Add(connection);
-                turnWeights.Add(Mathf.Max(0.1f, dot + 1f));
+                turnWeights.Add(Mathf.Max(0.1f, (dot + 1f) * lanePreference));
             }
 
             if (bestStraightConnection != null)
@@ -1284,22 +1338,43 @@ namespace TrafficSystem
             return turnConnections[turnConnections.Count - 1];
         }
 
-        private Vector3 GetCurrentExitForward()
+        private float GetLanePreferenceMultiplier(RoadSegment segment)
         {
-            if (currentSegment == null || currentSegment.waypoints == null || currentSegment.waypoints.Count == 0)
+            if (!enforceRightHandSingleLane || segment == null || string.IsNullOrEmpty(segment.name))
+            {
+                return 1f;
+            }
+
+            string lowerName = segment.name.ToLowerInvariant();
+            if (lowerName.Contains("lane_right") || lowerName.Contains("right_lane"))
+            {
+                return 1.25f;
+            }
+
+            if (lowerName.Contains("lane_left") || lowerName.Contains("left_lane"))
+            {
+                return 0.75f;
+            }
+
+            return 1f;
+        }
+
+        private Vector3 GetSegmentExitForward(RoadSegment segment)
+        {
+            if (segment == null || segment.waypoints == null || segment.waypoints.Count == 0)
             {
                 Vector3 worldForward = GetWorldForward();
                 worldForward.y = 0f;
                 return worldForward.sqrMagnitude < 0.0001f ? Vector3.forward : worldForward.normalized;
             }
 
-            int exitIndex = Mathf.Clamp(currentWaypointIndex, 0, currentSegment.waypoints.Count - 1);
-            if (exitIndex >= currentSegment.waypoints.Count - 1)
+            int exitIndex = Mathf.Max(0, segment.waypoints.Count - 2);
+            if (exitIndex >= segment.waypoints.Count - 1)
             {
-                exitIndex = Mathf.Max(0, currentSegment.waypoints.Count - 2);
+                exitIndex = Mathf.Max(0, segment.waypoints.Count - 1);
             }
 
-            return GetConnectionTravelForward(currentSegment, exitIndex);
+            return GetConnectionTravelForward(segment, exitIndex);
         }
 
         private bool TryGetConnectionAlignment(RoadConnection connection, Vector3 currentForward, out float dot)
@@ -1327,8 +1402,8 @@ namespace TrafficSystem
             Vector3 candidateForward = GetConnectionTravelForward(connection.toSegment, toIndex);
             dot = Vector3.Dot(currentForward, candidateForward);
 
-            // Reject immediate U-turns.
-            return dot >= -0.7f;
+            float maxTurnDot = Mathf.Cos(Mathf.Clamp(maxConnectionTurnAngle, 0f, 180f) * Mathf.Deg2Rad);
+            return dot >= maxTurnDot;
         }
 
         private Vector3 GetConnectionTravelForward(RoadSegment segment, int waypointIndex)
@@ -1355,6 +1430,53 @@ namespace TrafficSystem
 
             forward.y = 0f;
             return forward.sqrMagnitude < 0.0001f ? Vector3.forward : forward.normalized;
+        }
+
+        private void ApplyLaneCenteringPolicyForCurrentSegment()
+        {
+            float nextCruiseOffset = GetCruisingLaneOffsetForCurrentSegment();
+            cruisingLaneOffset = nextCruiseOffset;
+
+            if (!isChangingLanes && !isOvertaking)
+            {
+                lateralOffset = cruisingLaneOffset;
+                targetLateralOffset = cruisingLaneOffset;
+                currentLateralOffset = cruisingLaneOffset;
+            }
+        }
+
+        private float GetCruisingLaneOffsetForCurrentSegment()
+        {
+            if (!useFixedLaneCenters)
+            {
+                return 0f;
+            }
+
+            if (SegmentProvidesLaneCenter(currentSegment))
+            {
+                return 0f;
+            }
+
+            return preferredCruiseLaneSign * Mathf.Max(0.1f, laneCenterOffset);
+        }
+
+        private static bool SegmentProvidesLaneCenter(RoadSegment segment)
+        {
+            if (segment == null || string.IsNullOrEmpty(segment.name))
+            {
+                return false;
+            }
+
+            string lowerName = segment.name.ToLowerInvariant();
+            if (lowerName.StartsWith("route_"))
+            {
+                return true;
+            }
+
+            return lowerName.Contains("lane_left") ||
+                   lowerName.Contains("lane_right") ||
+                   lowerName.Contains("right_lane") ||
+                   lowerName.Contains("left_lane");
         }
 
         /// <summary>
@@ -1507,48 +1629,45 @@ namespace TrafficSystem
 
             // FIX: Traverse path polyline distance instead of car-to-waypoint distances.
             float remaining = Mathf.Max(1f, personalityLookAhead);
-            Vector3 prev = currentSegment.waypoints[startIndex].position;
-            Vector3 targetPoint = prev;
+            Vector3 targetPoint = currentSegment.waypoints[startIndex].position;
             Vector3 targetTangent = flatForward;
-            bool targetFound = false;
+            bool targetFound = TryAdvanceLookAheadOnSegment(currentSegment, startIndex, ref remaining, ref targetPoint, ref targetTangent);
 
-            for (int i = startIndex; i < waypointCount - 1; i++)
+            if (!targetFound &&
+                previewUpcomingConnections &&
+                TryGetPlannedContinuation(out RoadSegment nextSegment, out int nextWaypointIndex))
             {
-                Vector3 next = currentSegment.waypoints[i + 1].position;
-                Vector3 segment = next - prev;
-                float segmentLength = segment.magnitude;
+                Vector3 continuationStart = nextSegment.waypoints[nextWaypointIndex].position;
+                Vector3 bridge = continuationStart - targetPoint;
+                float bridgeLength = bridge.magnitude;
 
-                if (segmentLength > 0.0001f)
+                if (bridgeLength > 0.0001f)
                 {
-                    Vector3 tangent = segment / segmentLength;
-                    if (remaining <= segmentLength)
+                    Vector3 bridgeTangent = bridge / bridgeLength;
+                    if (remaining <= bridgeLength)
                     {
-                        float t = remaining / segmentLength;
-                        targetPoint = Vector3.Lerp(prev, next, t);
-                        targetTangent = tangent;
+                        float t = remaining / bridgeLength;
+                        targetPoint = Vector3.Lerp(targetPoint, continuationStart, t);
+                        targetTangent = bridgeTangent;
                         targetFound = true;
-                        break;
                     }
-
-                    remaining -= segmentLength;
-                    targetTangent = tangent;
+                    else
+                    {
+                        remaining -= bridgeLength;
+                        targetPoint = continuationStart;
+                        targetTangent = bridgeTangent;
+                    }
                 }
 
-                prev = next;
+                if (!targetFound)
+                {
+                    targetFound = TryAdvanceLookAheadOnSegment(nextSegment, nextWaypointIndex, ref remaining, ref targetPoint, ref targetTangent);
+                }
             }
 
             if (!targetFound)
             {
-                targetPoint = currentSegment.waypoints[waypointCount - 1].position;
-
-                if (waypointCount >= 2)
-                {
-                    Vector3 lastSegment = currentSegment.waypoints[waypointCount - 1].position - currentSegment.waypoints[waypointCount - 2].position;
-                    if (lastSegment.sqrMagnitude > 0.0001f)
-                    {
-                        targetTangent = lastSegment.normalized;
-                    }
-                }
+                targetPoint += targetTangent * remaining;
             }
 
             if (Mathf.Abs(lateralOffset) > 0.1f)
@@ -1563,6 +1682,52 @@ namespace TrafficSystem
             }
 
             return targetPoint;
+        }
+
+        private bool TryAdvanceLookAheadOnSegment(
+            RoadSegment segment,
+            int startIndex,
+            ref float remaining,
+            ref Vector3 targetPoint,
+            ref Vector3 targetTangent)
+        {
+            if (segment == null || segment.waypoints == null || segment.waypoints.Count == 0)
+            {
+                return false;
+            }
+
+            int waypointCount = segment.waypoints.Count;
+            startIndex = Mathf.Clamp(startIndex, 0, waypointCount - 1);
+            Vector3 prev = segment.waypoints[startIndex].position;
+            targetPoint = prev;
+            targetTangent = GetConnectionTravelForward(segment, startIndex);
+
+            for (int i = startIndex; i < waypointCount - 1; i++)
+            {
+                Vector3 next = segment.waypoints[i + 1].position;
+                Vector3 pathSegment = next - prev;
+                float segmentLength = pathSegment.magnitude;
+
+                if (segmentLength > 0.0001f)
+                {
+                    Vector3 tangent = pathSegment / segmentLength;
+                    if (remaining <= segmentLength)
+                    {
+                        float t = remaining / segmentLength;
+                        targetPoint = Vector3.Lerp(prev, next, t);
+                        targetTangent = tangent;
+                        return true;
+                    }
+
+                    remaining -= segmentLength;
+                    targetPoint = next;
+                    targetTangent = tangent;
+                }
+
+                prev = next;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -3150,6 +3315,8 @@ namespace TrafficSystem
         {
             currentSegment = segment;
             currentWaypointIndex = waypointIndex;
+            ClearPlannedContinuation();
+            ApplyLaneCenteringPolicyForCurrentSegment();
             transform.position = GetGroundedPosition(position);
 
             // Align to road forward using model axes

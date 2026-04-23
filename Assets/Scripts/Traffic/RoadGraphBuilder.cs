@@ -40,6 +40,20 @@ namespace TrafficSystem
         [Tooltip("If graph build yields too few segments, auto-try SimplePoly dual-lane extraction as recovery")]
         [SerializeField] private bool autoRecoverSimplePolyLaneExtraction = true;
 
+        [Header("Scene Route Detection")]
+        [Tooltip("Use scene-authored Route_* lane objects as the primary road graph source when available")]
+        [SerializeField] private bool preferSceneRouteLanes = true;
+        [Tooltip("Prefix used by scene-authored route lane roots")]
+        [SerializeField] private string sceneRoutePrefix = "Route_";
+        [Tooltip("Resample distance used for scene-authored route lanes")]
+        [SerializeField] private float sceneRouteSampleStepMeters = 2f;
+        [Tooltip("Prune small disconnected route islands that confuse NPC traffic")]
+        [SerializeField] private bool pruneDisconnectedRouteIslands = true;
+        [Tooltip("Maximum segment count for a disconnected island to be removed")]
+        [SerializeField] private int maxDisconnectedIslandSegments = 2;
+        [Tooltip("Maximum total lane length for a disconnected island to be removed")]
+        [SerializeField] private float maxDisconnectedIslandLength = 45f;
+
         [Header("Startup")]
         [Tooltip("Build road graph automatically on Start")]
         [SerializeField] private bool buildOnStart = true;
@@ -97,8 +111,14 @@ namespace TrafficSystem
         public void BuildRoadGraph()
         {
             roadGraph = new RoadGraph();
+            bool builtFromSceneRoutes = false;
 
-            if (autoDetectRoads)
+            if (preferSceneRouteLanes)
+            {
+                builtFromSceneRoutes = ExtractSceneRouteLanes();
+            }
+
+            if (!builtFromSceneRoutes && autoDetectRoads)
             {
                 // Try to find EasyRoads3D network automatically
                 GameObject network = FindEasyRoadsNetwork();
@@ -112,20 +132,28 @@ namespace TrafficSystem
                     Debug.LogWarning("[RoadGraphBuilder] EasyRoads3D network not found. Assign roadNetworkRoot manually.");
                 }
             }
-            else if (roadNetworkRoot != null)
+            else if (!builtFromSceneRoutes && roadNetworkRoot != null)
             {
                 ExtractRoadsFromNetwork(roadNetworkRoot);
             }
 
-            if (includeSimplePolyRoads)
+            if (!builtFromSceneRoutes && includeSimplePolyRoads)
             {
                 ExtractSimplePolyRoadMeshes(generateDualLaneSegmentsForSimplePoly);
             }
 
-            TryAutoRecoverSimplePolyLanes();
+            if (!builtFromSceneRoutes)
+            {
+                TryAutoRecoverSimplePolyLanes();
+            }
 
             // Build connections between road segments
-            BuildConnections();
+            BuildConnections(builtFromSceneRoutes);
+
+            if (builtFromSceneRoutes && pruneDisconnectedRouteIslands)
+            {
+                PruneDisconnectedRouteIslands();
+            }
 
             // Pre-build the spatial index so the first FindPath call does not stall.
             // The pathfinder uses Mathf.Max(1f, transferMaxDistance) as cell size.
@@ -135,6 +163,347 @@ namespace TrafficSystem
 
             Debug.Log($"[RoadGraphBuilder] Built road graph: {roadGraph.roadSegments.Count} segments, " +
                      $"{GetTotalWaypointCount()} waypoints");
+        }
+
+        private void PruneDisconnectedRouteIslands()
+        {
+            if (roadGraph == null || roadGraph.roadSegments == null || roadGraph.roadSegments.Count == 0)
+            {
+                return;
+            }
+
+            Dictionary<int, RoadSegment> segmentById = new Dictionary<int, RoadSegment>(roadGraph.roadSegments.Count);
+            Dictionary<int, HashSet<int>> adjacency = new Dictionary<int, HashSet<int>>(roadGraph.roadSegments.Count);
+
+            for (int i = 0; i < roadGraph.roadSegments.Count; i++)
+            {
+                RoadSegment segment = roadGraph.roadSegments[i];
+                if (segment == null)
+                {
+                    continue;
+                }
+
+                segmentById[segment.id] = segment;
+                if (!adjacency.ContainsKey(segment.id))
+                {
+                    adjacency[segment.id] = new HashSet<int>();
+                }
+
+                if (segment.connections == null)
+                {
+                    continue;
+                }
+
+                for (int connectionIndex = 0; connectionIndex < segment.connections.Count; connectionIndex++)
+                {
+                    RoadConnection connection = segment.connections[connectionIndex];
+                    if (connection == null || connection.toSegment == null)
+                    {
+                        continue;
+                    }
+
+                    if (!adjacency.TryGetValue(connection.toSegment.id, out HashSet<int> targetNeighbors))
+                    {
+                        targetNeighbors = new HashSet<int>();
+                        adjacency[connection.toSegment.id] = targetNeighbors;
+                    }
+
+                    adjacency[segment.id].Add(connection.toSegment.id);
+                    targetNeighbors.Add(segment.id);
+                }
+            }
+
+            HashSet<int> visited = new HashSet<int>();
+            HashSet<int> segmentsToRemove = new HashSet<int>();
+            Queue<int> pending = new Queue<int>();
+
+            foreach (KeyValuePair<int, RoadSegment> pair in segmentById)
+            {
+                if (!visited.Add(pair.Key))
+                {
+                    continue;
+                }
+
+                pending.Enqueue(pair.Key);
+                List<int> componentSegmentIds = new List<int>();
+                float totalLength = 0f;
+
+                while (pending.Count > 0)
+                {
+                    int currentId = pending.Dequeue();
+                    componentSegmentIds.Add(currentId);
+
+                    if (segmentById.TryGetValue(currentId, out RoadSegment currentSegment))
+                    {
+                        totalLength += GetSegmentLength(currentSegment);
+                    }
+
+                    if (!adjacency.TryGetValue(currentId, out HashSet<int> neighbors))
+                    {
+                        continue;
+                    }
+
+                    foreach (int neighborId in neighbors)
+                    {
+                        if (visited.Add(neighborId))
+                        {
+                            pending.Enqueue(neighborId);
+                        }
+                    }
+                }
+
+                if (componentSegmentIds.Count <= Mathf.Max(1, maxDisconnectedIslandSegments) &&
+                    totalLength <= Mathf.Max(1f, maxDisconnectedIslandLength))
+                {
+                    for (int i = 0; i < componentSegmentIds.Count; i++)
+                    {
+                        segmentsToRemove.Add(componentSegmentIds[i]);
+                    }
+                }
+            }
+
+            if (segmentsToRemove.Count == 0)
+            {
+                return;
+            }
+
+            roadGraph.roadSegments.RemoveAll(segment => segment == null || segmentsToRemove.Contains(segment.id));
+
+            for (int i = 0; i < roadGraph.roadSegments.Count; i++)
+            {
+                RoadSegment segment = roadGraph.roadSegments[i];
+                if (segment?.connections == null)
+                {
+                    continue;
+                }
+
+                segment.connections.RemoveAll(connection =>
+                    connection == null ||
+                    connection.toSegment == null ||
+                    segmentsToRemove.Contains(connection.toSegment.id));
+            }
+
+            Debug.Log($"[RoadGraphBuilder] Pruned {segmentsToRemove.Count} disconnected route segment(s) that were too small for traffic use");
+        }
+
+        private static float GetSegmentLength(RoadSegment segment)
+        {
+            if (segment == null || segment.waypoints == null || segment.waypoints.Count < 2)
+            {
+                return 0f;
+            }
+
+            float length = 0f;
+            for (int i = 1; i < segment.waypoints.Count; i++)
+            {
+                length += Vector3.Distance(segment.waypoints[i - 1].position, segment.waypoints[i].position);
+            }
+
+            return length;
+        }
+
+        private bool ExtractSceneRouteLanes()
+        {
+            Transform[] sceneTransforms = FindObjectsByType<Transform>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            if (sceneTransforms == null || sceneTransforms.Length == 0)
+            {
+                return false;
+            }
+
+            int initialCount = roadGraph.roadSegments.Count;
+            float routeStep = sceneRouteSampleStepMeters > 0.01f
+                ? sceneRouteSampleStepMeters
+                : sampleStepMeters;
+
+            List<Vector3> routePoints = new List<Vector3>(32);
+            foreach (Transform candidate in sceneTransforms)
+            {
+                if (!IsSceneRouteLaneRoot(candidate))
+                {
+                    continue;
+                }
+
+                routePoints.Clear();
+                if (!TryGetSceneRoutePoints(candidate, routePoints))
+                {
+                    continue;
+                }
+
+                List<Vector3> sampled = RoadGraphMeshSampler.ResamplePolyline(routePoints, routeStep);
+                if (sampled.Count < 2)
+                {
+                    continue;
+                }
+
+                RoadSegment segment = new RoadSegment(roadGraph.roadSegments.Count, candidate.name);
+                for (int i = 0; i < sampled.Count; i++)
+                {
+                    Vector3 pos = sampled[i];
+                    Vector3 forward = Vector3.forward;
+
+                    if (i < sampled.Count - 1)
+                    {
+                        forward = (sampled[i + 1] - pos).normalized;
+                    }
+                    else if (i > 0)
+                    {
+                        forward = (pos - sampled[i - 1]).normalized;
+                    }
+
+                    if (forward.sqrMagnitude < 0.0001f)
+                    {
+                        forward = Vector3.forward;
+                    }
+
+                    segment.waypoints.Add(new Waypoint(pos, forward, segment.id));
+                }
+
+                RoadGraphMeshSampler.NormalizeWaypointForwards(segment);
+                roadGraph.roadSegments.Add(segment);
+            }
+
+            int added = roadGraph.roadSegments.Count - initialCount;
+            if (added > 0)
+            {
+                Debug.Log($"[RoadGraphBuilder] Added {added} scene-authored route lane segments");
+            }
+
+            return added > 0;
+        }
+
+        private bool IsSceneRouteLaneRoot(Transform candidate)
+        {
+            if (candidate == null || string.IsNullOrEmpty(candidate.name))
+            {
+                return false;
+            }
+
+            if (!candidate.name.StartsWith(sceneRoutePrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return candidate.name.IndexOf("lane", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private bool TryGetSceneRoutePoints(Transform routeRoot, List<Vector3> points)
+        {
+            if (routeRoot == null)
+            {
+                return false;
+            }
+
+            return TryGetSceneRouteLinePoints(routeRoot, points) ||
+                   TryGetSceneRouteWaypointPoints(routeRoot, points);
+        }
+
+        private static bool TryGetSceneRouteLinePoints(Transform routeRoot, List<Vector3> points)
+        {
+            LineRenderer[] lineRenderers = routeRoot.GetComponentsInChildren<LineRenderer>(true);
+            for (int i = 0; i < lineRenderers.Length; i++)
+            {
+                LineRenderer line = lineRenderers[i];
+                if (line == null || line.positionCount < 2)
+                {
+                    continue;
+                }
+
+                Vector3[] rawPoints = new Vector3[line.positionCount];
+                line.GetPositions(rawPoints);
+                for (int pointIndex = 0; pointIndex < rawPoints.Length; pointIndex++)
+                {
+                    Vector3 worldPoint = line.useWorldSpace
+                        ? rawPoints[pointIndex]
+                        : line.transform.TransformPoint(rawPoints[pointIndex]);
+
+                    AddUniquePoint(points, worldPoint);
+                }
+
+                if (points.Count >= 2)
+                {
+                    return true;
+                }
+
+                points.Clear();
+            }
+
+            return false;
+        }
+
+        private static bool TryGetSceneRouteWaypointPoints(Transform routeRoot, List<Vector3> points)
+        {
+            Transform[] transforms = routeRoot.GetComponentsInChildren<Transform>(true);
+            List<Transform> waypointTransforms = new List<Transform>(transforms.Length);
+
+            for (int i = 0; i < transforms.Length; i++)
+            {
+                Transform child = transforms[i];
+                if (child == null || child == routeRoot || string.IsNullOrEmpty(child.name))
+                {
+                    continue;
+                }
+
+                if (!child.name.StartsWith("Waypoint_", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                waypointTransforms.Add(child);
+            }
+
+            if (waypointTransforms.Count < 2)
+            {
+                return false;
+            }
+
+            waypointTransforms.Sort((a, b) => CompareWaypointNames(a.name, b.name));
+            for (int i = 0; i < waypointTransforms.Count; i++)
+            {
+                AddUniquePoint(points, waypointTransforms[i].position);
+            }
+
+            return points.Count >= 2;
+        }
+
+        private static int CompareWaypointNames(string left, string right)
+        {
+            int leftIndex = ParseWaypointIndex(left);
+            int rightIndex = ParseWaypointIndex(right);
+
+            if (leftIndex != rightIndex)
+            {
+                return leftIndex.CompareTo(rightIndex);
+            }
+
+            return string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int ParseWaypointIndex(string waypointName)
+        {
+            if (string.IsNullOrEmpty(waypointName))
+            {
+                return int.MaxValue;
+            }
+
+            int lastUnderscore = waypointName.LastIndexOf('_');
+            if (lastUnderscore < 0 || lastUnderscore >= waypointName.Length - 1)
+            {
+                return int.MaxValue;
+            }
+
+            return int.TryParse(waypointName.Substring(lastUnderscore + 1), out int index)
+                ? index
+                : int.MaxValue;
+        }
+
+        private static void AddUniquePoint(List<Vector3> points, Vector3 point)
+        {
+            if (points.Count > 0 && Vector3.Distance(points[points.Count - 1], point) <= 0.05f)
+            {
+                return;
+            }
+
+            points.Add(point);
         }
 
         /// <summary>
@@ -1154,9 +1523,13 @@ namespace TrafficSystem
         /// <summary>
         /// Build connections between road segments at intersections
         /// </summary>
-        private void BuildConnections()
+        private void BuildConnections(bool builtFromSceneRoutes)
         {
-            RoadGraphConnectionBuilder.BuildConnections(roadGraph, connectionThresholdMeters, sampleStepMeters);
+            RoadGraphConnectionBuilder.BuildConnections(
+                roadGraph,
+                connectionThresholdMeters,
+                sampleStepMeters,
+                allowMidSegmentConnections: !builtFromSceneRoutes);
 
             int totalConnections = 0;
             foreach (var segment in roadGraph.roadSegments)

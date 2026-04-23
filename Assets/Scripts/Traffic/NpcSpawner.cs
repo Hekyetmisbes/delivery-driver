@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
+using DeliveryDriver.Company;
+using DeliveryDriver.Optimization;
 
 namespace TrafficSystem
 {
@@ -47,6 +49,29 @@ namespace TrafficSystem
         [Tooltip("Pre-pool extra vehicles")]
         [SerializeField] private int poolExtraCount = 5;
 
+        [Header("Dynamic Traffic Ring")]
+        [Tooltip("Keep traffic centered around the player instead of filling the whole map at once")]
+        [SerializeField] private bool keepTrafficAroundPlayer = true;
+        [Tooltip("Desired active NPC count around the player")]
+        [SerializeField] private int targetActiveNpcCount = 12;
+        [Tooltip("Do not spawn traffic too close to the player")]
+        [SerializeField] private float playerSpawnMinDistance = 45f;
+        [Tooltip("Maximum distance from the player where new traffic can spawn")]
+        [SerializeField] private float playerSpawnMaxDistance = 120f;
+        [Tooltip("NPCs farther than this are recycled back into the pool")]
+        [SerializeField] private float playerDespawnDistance = 180f;
+        [Tooltip("How often to try filling missing nearby traffic")]
+        [SerializeField] private float dynamicSpawnInterval = 0.35f;
+        [Tooltip("How often to recycle distant traffic")]
+        [SerializeField] private float dynamicDespawnInterval = 1.0f;
+        [Tooltip("Max spawn attempts made in one maintenance tick")]
+        [SerializeField] private int maxSpawnAttemptsPerTick = 8;
+        [Tooltip("Max successful spawns performed in one maintenance tick")]
+        [SerializeField] private int maxSpawnsPerTick = 2;
+        [Tooltip("Resolve the player transform automatically when missing")]
+        [SerializeField] private bool autoFindPlayer = true;
+        [SerializeField] private Transform playerTransform;
+
         [Header("Debug")]
         [SerializeField] private bool showDebugInfo = false;
 
@@ -57,6 +82,9 @@ namespace TrafficSystem
         private Transform npcContainer;
         private Coroutine spawnCoroutine;
         public bool HasPendingOrActiveSpawn => spawnCoroutine != null || activeNpcs.Count > 0;
+        private float nextDynamicSpawnTime;
+        private float nextDynamicDespawnTime;
+        private float nextPlayerResolveTime;
 
         // Cached allocations to avoid GC pressure
         private static readonly Collider[] spawnOverlapBuffer = new Collider[32];
@@ -71,9 +99,53 @@ namespace TrafficSystem
             // Priority 2: Ensure traffic communication system exists
             EnsureTrafficCommunicationSystem();
 
+            if (enablePooling)
+            {
+                PrePoolVehicles(GetDesiredPoolSize());
+            }
+
             if (spawnOnStart)
             {
-                SpawnNpcsDeferred(0f);
+                if (keepTrafficAroundPlayer)
+                {
+                    float startDelay = Mathf.Max(0f, initialSpawnDelay);
+                    nextDynamicSpawnTime = Time.time + startDelay;
+                    nextDynamicDespawnTime = Time.time + startDelay;
+                }
+                else
+                {
+                    SpawnNpcsDeferred(0f);
+                }
+            }
+        }
+
+        private void Update()
+        {
+            if (!spawnOnStart || !keepTrafficAroundPlayer)
+            {
+                return;
+            }
+
+            if (roadGraphBuilder == null || roadGraphBuilder.RoadGraph == null || roadGraphBuilder.RoadGraph.roadSegments.Count == 0)
+            {
+                return;
+            }
+
+            if (!TryResolvePlayerTransform(out Transform player))
+            {
+                return;
+            }
+
+            if (Time.time >= nextDynamicDespawnTime)
+            {
+                nextDynamicDespawnTime = Time.time + Mathf.Max(0.25f, dynamicDespawnInterval);
+                RecycleFarTraffic(player.position);
+            }
+
+            if (Time.time >= nextDynamicSpawnTime)
+            {
+                nextDynamicSpawnTime = Time.time + Mathf.Max(0.1f, dynamicSpawnInterval);
+                MaintainTrafficRing(player.position);
             }
         }
 
@@ -155,7 +227,7 @@ namespace TrafficSystem
             // Pre-pool if enabled
             if (enablePooling)
             {
-                PrePoolVehicles(spawnCount + poolExtraCount);
+                EnsurePoolCapacity(GetDesiredPoolSize());
             }
 
             // Track spawn positions to enforce spacing
@@ -413,6 +485,16 @@ namespace TrafficSystem
             // Debug.Log($"[NpcSpawner] Pre-pooled {count} vehicles");
         }
 
+        private void EnsurePoolCapacity(int desiredCount)
+        {
+            int totalCount = activeNpcs.Count + pooledNpcs.Count;
+            int missingCount = desiredCount - totalCount;
+            if (missingCount > 0)
+            {
+                PrePoolVehicles(missingCount);
+            }
+        }
+
         /// <summary>
         /// Clear all spawned NPCs
         /// </summary>
@@ -438,8 +520,11 @@ namespace TrafficSystem
                     if (npc != null)
                     {
                         npc.SetActive(false);
-                        pooledNpcs.Add(npc);
-                        pooledNpcSet.Add(npc);
+                        if (!pooledNpcSet.Contains(npc))
+                        {
+                            pooledNpcs.Add(npc);
+                            pooledNpcSet.Add(npc);
+                        }
                     }
                 }
             }
@@ -561,6 +646,148 @@ namespace TrafficSystem
             return null;
         }
 
+        private void MaintainTrafficRing(Vector3 playerPosition)
+        {
+            int targetCount = Mathf.Max(0, targetActiveNpcCount);
+            if (activeNpcs.Count >= targetCount)
+            {
+                return;
+            }
+
+            EnsurePoolCapacity(GetDesiredPoolSize());
+
+            int successfulSpawns = 0;
+            int attemptBudget = Mathf.Max(maxSpawnAttemptsPerTick, maxSpawnsPerTick);
+
+            while (activeNpcs.Count < targetCount &&
+                   successfulSpawns < Mathf.Max(1, maxSpawnsPerTick) &&
+                   attemptBudget > 0)
+            {
+                attemptBudget--;
+
+                if (TrySpawnNpcNearPlayer(playerPosition))
+                {
+                    successfulSpawns++;
+                }
+            }
+        }
+
+        private void RecycleFarTraffic(Vector3 playerPosition)
+        {
+            float despawnDistance = Mathf.Max(playerSpawnMaxDistance + 10f, playerDespawnDistance);
+            float despawnDistanceSqr = despawnDistance * despawnDistance;
+
+            for (int i = activeNpcs.Count - 1; i >= 0; i--)
+            {
+                GameObject npc = activeNpcs[i];
+                if (npc == null)
+                {
+                    activeNpcs.RemoveAt(i);
+                    continue;
+                }
+
+                Vector3 npcPosition = GetVehicleReferencePosition(npc);
+                if (GetPlanarDistanceSqr(npcPosition, playerPosition) <= despawnDistanceSqr)
+                {
+                    continue;
+                }
+
+                DespawnNpc(npc);
+            }
+        }
+
+        private bool TrySpawnNpcNearPlayer(Vector3 playerPosition)
+        {
+            if (roadGraphBuilder == null || roadGraphBuilder.RoadGraph == null)
+            {
+                return false;
+            }
+
+            float minDistance = Mathf.Max(0f, playerSpawnMinDistance);
+            float maxDistance = Mathf.Max(minDistance + 5f, playerSpawnMaxDistance);
+            int attempts = Mathf.Max(1, maxSpawnAttemptsPerTick);
+
+            for (int attempt = 0; attempt < attempts; attempt++)
+            {
+                var (segment, waypointIndex) = roadGraphBuilder.RoadGraph.GetRandomWaypoint();
+                if (segment == null || segment.waypoints == null || segment.waypoints.Count == 0)
+                {
+                    continue;
+                }
+
+                Waypoint wp = segment.waypoints[waypointIndex];
+                Vector3 spawnPos = wp.position;
+                float playerDistance = GetPlanarDistance(spawnPos, playerPosition);
+                if (playerDistance < minDistance || playerDistance > maxDistance)
+                {
+                    continue;
+                }
+
+                GameObject npc = GetOrCreateNpc();
+                if (npc == null)
+                {
+                    continue;
+                }
+
+                NpcCarAgent carAgent = npc.GetComponent<NpcCarAgent>();
+                float heightOffset = carAgent != null ? carAgent.GetGroundClearanceOffset() : 0.2f;
+                Vector3 finalSpawnPos = GetGroundedSpawnPosition(spawnPos, heightOffset);
+
+                if (!IsSpawnCandidateValid(finalSpawnPos, playerPosition))
+                {
+                    ReturnNpcToPool(npc);
+                    continue;
+                }
+
+                Vector3 forward = ResolveSpawnForward(segment, waypointIndex, wp.forward);
+                Quaternion spawnRotation = Quaternion.LookRotation(forward);
+                float clearanceRadius = GetSpawnClearanceRadius();
+                if (!IsSpawnPositionClear(finalSpawnPos, clearanceRadius))
+                {
+                    ReturnNpcToPool(npc);
+                    continue;
+                }
+
+                npc.transform.position = finalSpawnPos;
+                npc.transform.rotation = spawnRotation;
+                if (!npc.activeSelf)
+                {
+                    npc.SetActive(true);
+                }
+
+                if (carAgent != null)
+                {
+                    carAgent.Initialize(roadGraphBuilder, segment, waypointIndex);
+
+                    Rigidbody rb = npc.GetComponent<Rigidbody>();
+                    if (rb != null)
+                    {
+                        float initialSpeed = Random.Range(8f, 12f);
+                        rb.linearVelocity = forward * initialSpeed;
+                        rb.angularVelocity = Vector3.zero;
+                    }
+                }
+
+                NpcRecovery recovery = npc.GetComponent<NpcRecovery>();
+                if (recovery != null)
+                {
+                    recovery.ConfigureForRuntime(false);
+                    recovery.Initialize(roadGraphBuilder);
+                }
+
+                activeNpcs.Add(npc);
+
+                if (showDebugInfo)
+                {
+                    Debug.Log($"[NpcSpawner] Dynamic spawn at {finalSpawnPos} ({activeNpcs.Count}/{targetActiveNpcCount})");
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+
         /// <summary>
         /// Despawn specific NPC
         /// </summary>
@@ -569,17 +796,7 @@ namespace TrafficSystem
             if (npc == null) return;
 
             activeNpcs.Remove(npc);
-
-            if (enablePooling)
-            {
-                npc.SetActive(false);
-                pooledNpcs.Add(npc);
-                pooledNpcSet.Add(npc);
-            }
-            else
-            {
-                Destroy(npc);
-            }
+            ReturnNpcToPool(npc);
         }
 
         /// <summary>
@@ -695,6 +912,29 @@ namespace TrafficSystem
             return Mathf.Clamp(scaledRadius, spawnCheckRadius, 9f);
         }
 
+        private bool IsSpawnCandidateValid(Vector3 candidatePosition, Vector3 playerPosition)
+        {
+            if (GetPlanarDistance(candidatePosition, playerPosition) < Mathf.Max(0f, playerSpawnMinDistance))
+            {
+                return false;
+            }
+
+            foreach (GameObject activeNpc in activeNpcs)
+            {
+                if (activeNpc == null)
+                {
+                    continue;
+                }
+
+                if (!IsFarEnough(candidatePosition, GetVehicleReferencePosition(activeNpc), minimumSpawnSpacing))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         private Vector3 GetVehicleReferencePosition(GameObject npc)
         {
             if (npc == null)
@@ -788,6 +1028,96 @@ namespace TrafficSystem
                 rb.linearVelocity = Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
             }
+        }
+
+        private int GetDesiredPoolSize()
+        {
+            int desiredActiveCount = keepTrafficAroundPlayer
+                ? Mathf.Max(0, targetActiveNpcCount)
+                : Mathf.Max(0, spawnCount);
+
+            return desiredActiveCount + Mathf.Max(0, poolExtraCount);
+        }
+
+        private bool TryResolvePlayerTransform(out Transform resolvedPlayer)
+        {
+            resolvedPlayer = playerTransform;
+            if (resolvedPlayer != null && resolvedPlayer.gameObject.activeInHierarchy)
+            {
+                SyncOptimizerPlayer(resolvedPlayer);
+                return true;
+            }
+
+            if (!autoFindPlayer && playerTransform == null)
+            {
+                return false;
+            }
+
+            if (Time.time < nextPlayerResolveTime)
+            {
+                return false;
+            }
+
+            nextPlayerResolveTime = Time.time + 1f;
+
+            if (PlayerVehicleManager.Instance != null && PlayerVehicleManager.Instance.ActiveVehicleController != null)
+            {
+                playerTransform = PlayerVehicleManager.Instance.ActiveVehicleController.transform;
+            }
+            else if (TrafficSimulationOptimizer.Instance != null && TrafficSimulationOptimizer.Instance.playerTransform != null)
+            {
+                playerTransform = TrafficSimulationOptimizer.Instance.playerTransform;
+            }
+            else
+            {
+                GameObject taggedPlayer = GameObject.FindGameObjectWithTag("Player");
+                if (taggedPlayer != null)
+                {
+                    playerTransform = taggedPlayer.transform;
+                }
+                else
+                {
+                    CarController carController = FindFirstObjectByType<CarController>();
+                    if (carController != null)
+                    {
+                        playerTransform = carController.transform;
+                    }
+                }
+            }
+
+            resolvedPlayer = playerTransform;
+            if (resolvedPlayer != null)
+            {
+                SyncOptimizerPlayer(resolvedPlayer);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static void SyncOptimizerPlayer(Transform resolvedPlayer)
+        {
+            if (resolvedPlayer == null || TrafficSimulationOptimizer.Instance == null)
+            {
+                return;
+            }
+
+            if (TrafficSimulationOptimizer.Instance.playerTransform != resolvedPlayer)
+            {
+                TrafficSimulationOptimizer.Instance.playerTransform = resolvedPlayer;
+            }
+        }
+
+        private static float GetPlanarDistance(Vector3 a, Vector3 b)
+        {
+            return Mathf.Sqrt(GetPlanarDistanceSqr(a, b));
+        }
+
+        private static float GetPlanarDistanceSqr(Vector3 a, Vector3 b)
+        {
+            float dx = a.x - b.x;
+            float dz = a.z - b.z;
+            return (dx * dx) + (dz * dz);
         }
     }
 }
