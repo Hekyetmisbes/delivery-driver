@@ -272,6 +272,7 @@ namespace DeliveryDriver.Quest
             }
 
             OnSpeedUnitChanged?.Invoke(speedUnitPreference);
+            OnAccessibilityChanged?.Invoke();
         }
 
         public void SaveSettings()
@@ -367,12 +368,12 @@ namespace DeliveryDriver.Quest
 
             if (PlayerPrefs.HasKey(ColorBlindModeKey))
             {
-                colorBlindMode = PlayerPrefs.GetInt(ColorBlindModeKey, colorBlindMode);
+                colorBlindMode = Mathf.Clamp(PlayerPrefs.GetInt(ColorBlindModeKey, colorBlindMode), 0, 3);
             }
 
             if (PlayerPrefs.HasKey(TextScaleMultiplierKey))
             {
-                textScaleMultiplier = PlayerPrefs.GetFloat(TextScaleMultiplierKey, textScaleMultiplier);
+                textScaleMultiplier = Mathf.Clamp(PlayerPrefs.GetFloat(TextScaleMultiplierKey, textScaleMultiplier), 0.8f, 1.5f);
             }
 
             if (PlayerPrefs.HasKey(HighContrastModeKey))
