@@ -22,8 +22,10 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private bool useKenneySkin = true;
         [SerializeField] private Vector2 pauseMenuSize = new Vector2(760f, 840f);
         [SerializeField] private string resumeButtonLabel = "";
+        [SerializeField] private string mainMenuButtonLabel = "";
         [SerializeField] private string quitButtonLabel = "";
         [SerializeField] private string resumeSceneName = "";
+        [SerializeField] private string mainMenuSceneName = MainMenuSceneName;
         [SerializeField] private string quitSceneName = "";
         [SerializeField] private bool enablePauseToggleInput = true;
         [SerializeField] private bool startPaused;
@@ -48,6 +50,7 @@ namespace DeliveryDriver.Quest.UI
         private void Awake()
         {
             LocalizationTable.OnLocaleChanged += HandleLocaleChanged;
+            SceneManager.activeSceneChanged += HandleActiveSceneChanged;
         }
 
         private void Start()
@@ -59,6 +62,7 @@ namespace DeliveryDriver.Quest.UI
         private void OnDestroy()
         {
             LocalizationTable.OnLocaleChanged -= HandleLocaleChanged;
+            SceneManager.activeSceneChanged -= HandleActiveSceneChanged;
         }
 
         private void Update()
@@ -193,6 +197,7 @@ namespace DeliveryDriver.Quest.UI
 
             runtimePausePanelBuilt = pausePanel != null;
             settingsCoordinator?.InitializeControlValues();
+            AccessibilityManager.ApplyTo(pausePanel);
         }
 
         private void BuildRuntimePausePanel()
@@ -209,6 +214,7 @@ namespace DeliveryDriver.Quest.UI
                 ToggleBackgroundSprite = toggleBackgroundSprite,
                 ToggleCheckmarkSprite = toggleCheckmarkSprite,
                 ResumeButtonLabel = GetResumeButtonLabel(),
+                MainMenuButtonLabel = GetMainMenuButtonLabel(),
                 QuitButtonLabel = GetQuitButtonLabel()
             });
 
@@ -222,6 +228,22 @@ namespace DeliveryDriver.Quest.UI
             if (runtimeView.ResumeButton != null)
             {
                 runtimeView.ResumeButton.onClick.AddListener(OnResumeButtonClicked);
+            }
+
+            if (runtimeView.MainMenuButton != null)
+            {
+                runtimeView.MainMenuButton.onClick.AddListener(() =>
+                {
+                    if (ConfirmationDialog.IsShowing)
+                    {
+                        return;
+                    }
+
+                    ConfirmationDialog.Show(
+                        LocalizationTable.Get("confirm_return_to_menu_title"),
+                        LocalizationTable.Get("confirm_return_to_menu"),
+                        OnMainMenuButtonClicked);
+                });
             }
 
             if (runtimeView.QuitButton != null)
@@ -251,6 +273,7 @@ namespace DeliveryDriver.Quest.UI
             startPaused = true;
             resumeButtonLabel = string.Empty;
             resumeSceneName = mainMenuSceneName;
+            mainMenuButtonLabel = string.Empty;
             quitButtonLabel = string.Empty;
             quitSceneName = string.Empty;
         }
@@ -266,6 +289,16 @@ namespace DeliveryDriver.Quest.UI
             return ResolveButtonLabel(quitButtonLabel, "quit_game");
         }
 
+        private string GetMainMenuButtonLabel()
+        {
+            if (!string.IsNullOrWhiteSpace(resumeSceneName))
+            {
+                return string.Empty;
+            }
+
+            return ResolveButtonLabel(mainMenuButtonLabel, "quit_to_menu");
+        }
+
         private void OnResumeButtonClicked()
         {
             if (!string.IsNullOrWhiteSpace(resumeSceneName))
@@ -276,6 +309,17 @@ namespace DeliveryDriver.Quest.UI
             }
 
             SetPaused(false);
+        }
+
+        private void OnMainMenuButtonClicked()
+        {
+            string targetSceneName = string.IsNullOrWhiteSpace(mainMenuSceneName)
+                ? MainMenuSceneName
+                : mainMenuSceneName;
+
+            ForceClosePauseMenu();
+            Time.timeScale = 1f;
+            SceneTransitionManager.TransitionToScene(targetSceneName);
         }
 
         private void OnQuitButtonClicked()
@@ -346,6 +390,32 @@ namespace DeliveryDriver.Quest.UI
             SetPaused(wasPaused);
         }
 
+        private void HandleActiveSceneChanged(Scene previous, Scene next)
+        {
+            if (next.name.Equals(MainMenuSceneName, System.StringComparison.OrdinalIgnoreCase))
+            {
+                ForceClosePauseMenu();
+            }
+        }
+
+        private void ForceClosePauseMenu()
+        {
+            isPaused = false;
+            Time.timeScale = 1f;
+
+            if (pausePanelCanvasGroup != null)
+            {
+                pausePanelCanvasGroup.alpha = 0f;
+                pausePanelCanvasGroup.interactable = false;
+                pausePanelCanvasGroup.blocksRaycasts = false;
+            }
+
+            if (pausePanel != null)
+            {
+                pausePanel.SetActive(false);
+            }
+        }
+
         private void DestroyRuntimePausePanel()
         {
             if (pausePanel != null)
@@ -410,6 +480,7 @@ namespace DeliveryDriver.Quest.UI
             if (runtimeView.TextScaleSlider != null) runtimeView.TextScaleSlider.interactable = true;
             if (runtimeView.HighContrastToggle != null) runtimeView.HighContrastToggle.interactable = true;
             if (runtimeView.ResumeButton != null) runtimeView.ResumeButton.interactable = true;
+            if (runtimeView.MainMenuButton != null) runtimeView.MainMenuButton.interactable = true;
             if (runtimeView.QuitButton != null) runtimeView.QuitButton.interactable = true;
         }
     }

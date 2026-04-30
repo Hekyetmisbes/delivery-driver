@@ -21,6 +21,7 @@ namespace DeliveryDriver.Quest.UI
         public Slider TextScaleSlider { get; set; }
         public Toggle HighContrastToggle { get; set; }
         public Button ResumeButton { get; set; }
+        public Button MainMenuButton { get; set; }
         public Button QuitButton { get; set; }
         public Resolution[] AvailableResolutions { get; set; }
     }

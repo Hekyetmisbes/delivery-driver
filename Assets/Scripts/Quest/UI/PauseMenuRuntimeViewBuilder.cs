@@ -22,6 +22,7 @@ namespace DeliveryDriver.Quest.UI
         public Sprite ToggleBackgroundSprite { get; set; }
         public Sprite ToggleCheckmarkSprite { get; set; }
         public string ResumeButtonLabel { get; set; }
+        public string MainMenuButtonLabel { get; set; }
         public string QuitButtonLabel { get; set; }
     }
 
@@ -180,8 +181,16 @@ namespace DeliveryDriver.Quest.UI
             buttonRow.GetComponent<LayoutElement>().minHeight = 62f;
 
             Button resumeButton = CreateButton(buttonRow.transform, "ResumeButton", config.ResumeButtonLabel, UIThemeConstants.ButtonGreen);
+            Button mainMenuButton = string.IsNullOrWhiteSpace(config.MainMenuButtonLabel)
+                ? null
+                : CreateButton(buttonRow.transform, "MainMenuButton", config.MainMenuButtonLabel, UIThemeConstants.ButtonBlue);
             Button quitButton = CreateButton(buttonRow.transform, "QuitButton", config.QuitButtonLabel, UIThemeConstants.ButtonRed);
             UIButtonEnhancer.EnhanceButton(resumeButton);
+            if (mainMenuButton != null)
+            {
+                UIButtonEnhancer.EnhanceButton(mainMenuButton);
+            }
+
             UIButtonEnhancer.EnhanceButton(quitButton);
 
             return new PauseMenuRuntimeView
@@ -201,6 +210,7 @@ namespace DeliveryDriver.Quest.UI
                 TextScaleSlider = textScaleSlider,
                 HighContrastToggle = highContrastToggle,
                 ResumeButton = resumeButton,
+                MainMenuButton = mainMenuButton,
                 QuitButton = quitButton,
                 AvailableResolutions = resolutionBuild.AvailableResolutions
             };
