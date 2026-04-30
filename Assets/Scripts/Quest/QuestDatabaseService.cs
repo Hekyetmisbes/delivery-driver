@@ -12,7 +12,7 @@ namespace DeliveryDriver.Quest
         public const string DefaultPlayerId = "local-player";
         public const string DefaultPlayerDisplayName = "Local Player";
         public const string DefaultCompanyId = "company-local-player";
-        public const string DefaultCompanyName = "Hekye Logistics";
+        public const string DefaultCompanyName = "Player Company";
         private static QuestDatabaseService instance;
         private static bool databaseInitializationCompleted;
         private static bool databaseInitializationSucceeded;
@@ -155,6 +155,76 @@ namespace DeliveryDriver.Quest
         public bool SetDefaultPlayerBalance(int balance)
         {
             return SetPlayerBalance(DefaultPlayerId, balance);
+        }
+
+        public bool TryGetDefaultCompanyName(out string companyName)
+        {
+            companyName = string.Empty;
+            if (!IsReady)
+            {
+                return false;
+            }
+
+            object result = ExecuteScalar(
+                "SELECT company_name FROM company_profiles WHERE player_id=@playerId LIMIT 1;",
+                new Dictionary<string, object> { ["@playerId"] = DefaultPlayerId });
+
+            companyName = Convert.ToString(result) ?? string.Empty;
+            return !string.IsNullOrWhiteSpace(companyName);
+        }
+
+        public bool ConfigureDefaultStartupProfile(string companyName)
+        {
+            if (!IsReady)
+            {
+                Debug.LogError("[QuestDatabaseService] Cannot configure startup profile because the database is not ready.");
+                return false;
+            }
+
+            string resolvedCompanyName = NormalizeCompanyName(companyName);
+            if (string.IsNullOrWhiteSpace(resolvedCompanyName))
+            {
+                Debug.LogError("[QuestDatabaseService] Cannot configure startup profile without a company name.");
+                return false;
+            }
+
+            if (!EnsurePlayer(DefaultPlayerId, DefaultPlayerDisplayName))
+            {
+                Debug.LogError("[QuestDatabaseService] Failed to ensure the default player before configuring startup profile.");
+                return false;
+            }
+
+            if (!SetDefaultPlayerBalance(0))
+            {
+                Debug.LogError("[QuestDatabaseService] Failed to reset default player balance for startup profile.");
+                return false;
+            }
+
+            if (!EnsureDefaultCompanyProfile(DefaultPlayerId, resolvedCompanyName))
+            {
+                Debug.LogError("[QuestDatabaseService] Failed to ensure company profile before applying startup company name.");
+                return false;
+            }
+
+            const string sql = @"UPDATE company_profiles
+            SET company_name=@companyName,
+                updated_at=datetime('now')
+            WHERE player_id=@playerId;";
+
+            bool saved = ExecuteNonQuery(sql, new Dictionary<string, object>
+            {
+                ["@playerId"] = DefaultPlayerId,
+                ["@companyName"] = resolvedCompanyName
+            });
+
+            if (!saved)
+            {
+                Debug.LogError("[QuestDatabaseService] Failed to save startup company name.");
+                return false;
+            }
+
+            Debug.Log($"[QuestDatabaseService] Startup profile configured. Company='{resolvedCompanyName}', Balance=0.");
+            return true;
         }
 
         public bool EnsureDefaultCompanyProfile()
@@ -747,6 +817,7 @@ namespace DeliveryDriver.Quest
         }
         private static string UtcNow() => DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
         private static object Db(object v) => v ?? DBNull.Value;
+        private static string NormalizeCompanyName(string value) => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
         private static int CvI(object v, int fb) { try { return v == null || v == DBNull.Value ? fb : Convert.ToInt32(v); } catch { return fb; } }
         private static string S(Dictionary<string, object> r, string k) => r.TryGetValue(k, out object v) && v != null ? Convert.ToString(v) ?? string.Empty : string.Empty;
         private static int I(Dictionary<string, object> r, string k, int fb) => r.TryGetValue(k, out object v) ? CvI(v, fb) : fb;

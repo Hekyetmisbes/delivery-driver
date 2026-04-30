@@ -16,7 +16,7 @@ namespace DeliveryDriver.Quest
         public static PlayerProgressionManager Instance { get; private set; }
 
         [Header("Currency")]
-        [SerializeField] private int currentMoney = 500; // Starting money
+        [SerializeField] private int currentMoney = 0; // Starting money
 
         [Header("Level & XP")]
         [SerializeField] private int currentLevel = 1;
@@ -507,7 +507,7 @@ namespace DeliveryDriver.Quest
         /// </summary>
         public void ResetProgression()
         {
-            currentMoney = 500;
+            currentMoney = 0;
             currentLevel = 1;
             currentXP = 0;
             xpToNextLevel = CalculateXPForLevel(2);
@@ -541,6 +541,25 @@ namespace DeliveryDriver.Quest
             OnLevelUp.Invoke(currentLevel);
 
             Debug.Log("[PlayerProgressionManager] Progression reset to defaults.");
+        }
+
+        public bool RefreshMoneyFromDatabase()
+        {
+            QuestDatabaseService database = QuestDatabaseService.Instance;
+            if (database == null || !database.IsReady)
+            {
+                return false;
+            }
+
+            int databaseBalance = database.GetDefaultPlayerBalance(currentMoney);
+            if (databaseBalance != currentMoney)
+            {
+                currentMoney = Mathf.Max(0, databaseBalance);
+                OnMoneyChanged.Invoke(currentMoney);
+            }
+
+            Debug.Log($"[PlayerProgressionManager] Active balance refreshed from database: ${currentMoney}");
+            return true;
         }
 
         #region Achievement System
@@ -774,6 +793,12 @@ namespace DeliveryDriver.Quest
             }
 
             currentMoney = data.Money;
+            QuestDatabaseService database = QuestDatabaseService.Instance;
+            if (database != null && database.IsReady)
+            {
+                currentMoney = database.GetDefaultPlayerBalance(currentMoney);
+            }
+
             currentLevel = data.Level;
             currentXP = data.XP;
             xpToNextLevel = data.XPToNextLevel;
@@ -803,7 +828,6 @@ namespace DeliveryDriver.Quest
                 }
             }
 
-            SyncMoneyToDatabase();
             // Invoke events to update UI
             OnMoneyChanged.Invoke(currentMoney);
             OnLevelUp.Invoke(currentLevel);
@@ -834,19 +858,16 @@ namespace DeliveryDriver.Quest
             }
 
             int databaseBalance = database.GetDefaultPlayerBalance(currentMoney);
-            bool shouldSeedDatabaseBalance = !playerExisted || (databaseBalance <= 0 && currentMoney > 0);
+            bool shouldSeedDatabaseBalance = !playerExisted && currentMoney > 0;
 
             if (shouldSeedDatabaseBalance)
             {
                 database.SetDefaultPlayerBalance(currentMoney);
             }
-            else if (databaseBalance != currentMoney)
+            else
             {
-                currentMoney = Mathf.Max(0, databaseBalance);
+                RefreshMoneyFromDatabase();
             }
-
-            OnMoneyChanged.Invoke(currentMoney);
-            Debug.Log($"[PlayerProgressionManager] Active balance synced from database: ${currentMoney}");
         }
 
         private void SyncMoneyToDatabase()

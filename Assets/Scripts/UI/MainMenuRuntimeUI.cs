@@ -1,3 +1,4 @@
+using System.Collections;
 using DeliveryDriver.Quest;
 using DeliveryDriver.UI;
 using TMPro;
@@ -10,6 +11,8 @@ public class MainMenuRuntimeUI : MonoBehaviour
 {
     private const float SettingsLabelColumnWidth = 260f;
     private const float SettingsRowHeight = 54f;
+    private const float DatabaseReadyTimeoutSeconds = 10f;
+    private const string CompanyNamePrefsKey = "delivery_driver_company_name";
 
     private enum MenuPanelState
     {
@@ -29,7 +32,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
     [SerializeField] private string developerName = "hekye";
 
     [Header("Main Panel Layout")]
-    [SerializeField] private Vector2 mainPanelSize = new Vector2(640f, 430f);
+    [SerializeField] private Vector2 mainPanelSize = new Vector2(640f, 560f);
     [SerializeField] private Vector2 mainPanelOffset = new Vector2(0f, -150f);
 
     [Header("Kenney Skin")]
@@ -64,6 +67,11 @@ public class MainMenuRuntimeUI : MonoBehaviour
     private RuntimeOptionSelector colorBlindDropdown;
     private Slider textScaleSlider;
     private Toggle highContrastToggle;
+    private TMP_InputField companyNameInput;
+    private TextMeshProUGUI startupStatusText;
+    private Button playButton;
+    private Coroutine startGameCoroutine;
+    private string lastCompanyNameInput = string.Empty;
 
     private bool suppressCallbacks;
     private int[] qualityTierToProjectQuality = { 0, 1, 2 };
@@ -86,6 +94,11 @@ public class MainMenuRuntimeUI : MonoBehaviour
     {
         SceneManager.activeSceneChanged -= HandleActiveSceneChanged;
         LocalizationTable.OnLocaleChanged -= HandleLocaleChanged;
+        if (startGameCoroutine != null)
+        {
+            StopCoroutine(startGameCoroutine);
+            startGameCoroutine = null;
+        }
         CleanupUi();
     }
 
@@ -100,9 +113,11 @@ public class MainMenuRuntimeUI : MonoBehaviour
     private void Start()
     {
         LocalizationTable.EnsureLoaded();
+        lastCompanyNameInput = PlayerPrefs.GetString(CompanyNamePrefsKey, string.Empty);
         BuildUi();
         ShowMainPanel();
         RefreshSettingsControls();
+        StartCoroutine(PopulateSavedCompanyNameRoutine());
     }
 
     private void BuildUi()
@@ -136,6 +151,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
         BuildMainPanel(mainPanel.transform);
         BuildSettingsPanel(settingsPanel.transform);
         BuildCreditsPanel(creditsPanel.transform);
+        AccessibilityManager.ApplyTo(overlayObject);
     }
 
     private void BuildMainPanel(Transform parent)
@@ -148,7 +164,10 @@ public class MainMenuRuntimeUI : MonoBehaviour
         layout.childForceExpandHeight = false;
         layout.childForceExpandWidth = true;
 
-        Button playButton = CreateMenuButton(parent, LocalizationTable.Get("play"), new Color(0.12f, 0.58f, 0.24f, 0.95f));
+        companyNameInput = CreateCompanyNameInput(parent);
+        startupStatusText = CreateStartupStatusText(parent);
+
+        playButton = CreateMenuButton(parent, LocalizationTable.Get("play"), new Color(0.12f, 0.58f, 0.24f, 0.95f));
         Button settingsButton = CreateMenuButton(parent, LocalizationTable.Get("settings"), new Color(0.13f, 0.43f, 0.72f, 0.95f));
         Button creditsButton = CreateMenuButton(parent, LocalizationTable.Get("credits"), new Color(0.64f, 0.45f, 0.1f, 0.95f));
         Button quitButton = CreateMenuButton(parent, LocalizationTable.Get("quit"), new Color(0.66f, 0.2f, 0.2f, 0.95f));
@@ -158,7 +177,13 @@ public class MainMenuRuntimeUI : MonoBehaviour
         UIButtonEnhancer.EnhanceButton(creditsButton);
         UIButtonEnhancer.EnhanceButton(quitButton);
 
-        playButton.onClick.AddListener(LoadGameScene);
+        companyNameInput.onValueChanged.AddListener(value =>
+        {
+            lastCompanyNameInput = value;
+            SetStartupStatus(string.Empty, UIThemeConstants.TextSecondary);
+        });
+        companyNameInput.onSubmit.AddListener(_ => BeginLoadGameScene());
+        playButton.onClick.AddListener(BeginLoadGameScene);
         settingsButton.onClick.AddListener(() =>
         {
             RefreshSettingsControls();
@@ -653,6 +678,135 @@ public class MainMenuRuntimeUI : MonoBehaviour
         }
     }
 
+    private TMP_InputField CreateCompanyNameInput(Transform parent)
+    {
+        GameObject groupObject = new GameObject("CompanyNameGroup", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(LayoutElement));
+        groupObject.transform.SetParent(parent, false);
+
+        LayoutElement groupLayout = groupObject.GetComponent<LayoutElement>();
+        groupLayout.preferredHeight = 112f;
+        groupLayout.minHeight = 112f;
+
+        VerticalLayoutGroup group = groupObject.GetComponent<VerticalLayoutGroup>();
+        group.spacing = 8f;
+        group.childControlWidth = true;
+        group.childControlHeight = true;
+        group.childForceExpandWidth = true;
+        group.childForceExpandHeight = false;
+
+        GameObject labelObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
+        labelObject.transform.SetParent(groupObject.transform, false);
+        LayoutElement labelLayout = labelObject.GetComponent<LayoutElement>();
+        labelLayout.preferredHeight = 30f;
+
+        TextMeshProUGUI labelText = labelObject.GetComponent<TextMeshProUGUI>();
+        labelText.text = LocalizationTable.Get("startup_company_name_label");
+        labelText.fontSize = 22f;
+        labelText.fontStyle = FontStyles.Bold;
+        labelText.alignment = TextAlignmentOptions.Left;
+        labelText.color = Color.white;
+        if (TMP_Settings.defaultFontAsset != null)
+        {
+            labelText.font = TMP_Settings.defaultFontAsset;
+        }
+
+        GameObject fieldObject = new GameObject("CompanyNameInput", typeof(RectTransform), typeof(Image), typeof(TMP_InputField), typeof(LayoutElement));
+        fieldObject.transform.SetParent(groupObject.transform, false);
+        LayoutElement fieldLayout = fieldObject.GetComponent<LayoutElement>();
+        fieldLayout.preferredHeight = 64f;
+        fieldLayout.minHeight = 64f;
+
+        Image fieldImage = fieldObject.GetComponent<Image>();
+        fieldImage.color = new Color(0.08f, 0.12f, 0.17f, 0.98f);
+        if (buttonBackgroundSprite != null)
+        {
+            fieldImage.sprite = buttonBackgroundSprite;
+            fieldImage.type = Image.Type.Sliced;
+        }
+
+        GameObject textAreaObject = new GameObject("Text Area", typeof(RectTransform), typeof(RectMask2D));
+        textAreaObject.transform.SetParent(fieldObject.transform, false);
+        RectTransform textAreaRect = textAreaObject.GetComponent<RectTransform>();
+        textAreaRect.anchorMin = Vector2.zero;
+        textAreaRect.anchorMax = Vector2.one;
+        textAreaRect.offsetMin = new Vector2(18f, 0f);
+        textAreaRect.offsetMax = new Vector2(-18f, 0f);
+
+        GameObject placeholderObject = new GameObject("Placeholder", typeof(RectTransform), typeof(TextMeshProUGUI));
+        placeholderObject.transform.SetParent(textAreaObject.transform, false);
+        RectTransform placeholderRect = placeholderObject.GetComponent<RectTransform>();
+        placeholderRect.anchorMin = Vector2.zero;
+        placeholderRect.anchorMax = Vector2.one;
+        placeholderRect.offsetMin = Vector2.zero;
+        placeholderRect.offsetMax = Vector2.zero;
+
+        TextMeshProUGUI placeholderText = placeholderObject.GetComponent<TextMeshProUGUI>();
+        placeholderText.text = LocalizationTable.Get("startup_company_name_placeholder");
+        placeholderText.fontSize = 24f;
+        placeholderText.color = new Color(1f, 1f, 1f, 0.42f);
+        placeholderText.alignment = TextAlignmentOptions.MidlineLeft;
+        placeholderText.raycastTarget = false;
+        if (TMP_Settings.defaultFontAsset != null)
+        {
+            placeholderText.font = TMP_Settings.defaultFontAsset;
+        }
+
+        GameObject textObject = new GameObject("Text", typeof(RectTransform), typeof(TextMeshProUGUI));
+        textObject.transform.SetParent(textAreaObject.transform, false);
+        RectTransform textRect = textObject.GetComponent<RectTransform>();
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = Vector2.zero;
+        textRect.offsetMax = Vector2.zero;
+
+        TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
+        text.fontSize = 24f;
+        text.color = Color.white;
+        text.alignment = TextAlignmentOptions.MidlineLeft;
+        text.textWrappingMode = TextWrappingModes.NoWrap;
+        if (TMP_Settings.defaultFontAsset != null)
+        {
+            text.font = TMP_Settings.defaultFontAsset;
+        }
+
+        TMP_InputField input = fieldObject.GetComponent<TMP_InputField>();
+        input.textViewport = textAreaRect;
+        input.textComponent = text;
+        input.placeholder = placeholderText;
+        input.targetGraphic = fieldImage;
+        input.characterLimit = 32;
+        input.lineType = TMP_InputField.LineType.SingleLine;
+        input.contentType = TMP_InputField.ContentType.Standard;
+        input.caretColor = Color.white;
+        input.selectionColor = new Color(0.2f, 0.6f, 1f, 0.45f);
+        input.text = lastCompanyNameInput;
+
+        return input;
+    }
+
+    private TextMeshProUGUI CreateStartupStatusText(Transform parent)
+    {
+        GameObject statusObject = new GameObject("StartupStatusText", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
+        statusObject.transform.SetParent(parent, false);
+
+        LayoutElement layout = statusObject.GetComponent<LayoutElement>();
+        layout.preferredHeight = 34f;
+        layout.minHeight = 34f;
+
+        TextMeshProUGUI text = statusObject.GetComponent<TextMeshProUGUI>();
+        text.fontSize = 18f;
+        text.alignment = TextAlignmentOptions.Center;
+        text.textWrappingMode = TextWrappingModes.Normal;
+        text.color = UIThemeConstants.TextSecondary;
+        text.text = string.Empty;
+        if (TMP_Settings.defaultFontAsset != null)
+        {
+            text.font = TMP_Settings.defaultFontAsset;
+        }
+
+        return text;
+    }
+
     private Button CreateMenuButton(Transform parent, string label, Color color)
     {
         GameObject buttonObject = new GameObject($"{label}Button", typeof(RectTransform), typeof(Image), typeof(Button), typeof(LayoutElement));
@@ -1086,6 +1240,9 @@ public class MainMenuRuntimeUI : MonoBehaviour
         colorBlindDropdown = null;
         textScaleSlider = null;
         highContrastToggle = null;
+        companyNameInput = null;
+        startupStatusText = null;
+        playButton = null;
         availableResolutions = null;
     }
 
@@ -1164,6 +1321,128 @@ public class MainMenuRuntimeUI : MonoBehaviour
 #else
         Application.Quit();
 #endif
+    }
+
+    private void BeginLoadGameScene()
+    {
+        if (startGameCoroutine != null)
+        {
+            return;
+        }
+
+        lastCompanyNameInput = companyNameInput != null ? companyNameInput.text.Trim() : string.Empty;
+        if (string.IsNullOrWhiteSpace(lastCompanyNameInput) &&
+            QuestDatabaseService.Instance != null &&
+            QuestDatabaseService.Instance.TryGetDefaultCompanyName(out string savedCompanyName))
+        {
+            lastCompanyNameInput = savedCompanyName.Trim();
+            if (companyNameInput != null)
+            {
+                companyNameInput.SetTextWithoutNotify(lastCompanyNameInput);
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(lastCompanyNameInput))
+        {
+            SetStartupStatus(LocalizationTable.Get("startup_company_name_required"), UIThemeConstants.Negative);
+            if (companyNameInput != null)
+            {
+                companyNameInput.ActivateInputField();
+            }
+            return;
+        }
+
+        startGameCoroutine = StartCoroutine(LoadGameSceneRoutine(lastCompanyNameInput));
+    }
+
+    private IEnumerator PopulateSavedCompanyNameRoutine()
+    {
+        if (!string.IsNullOrWhiteSpace(lastCompanyNameInput))
+        {
+            SetCompanyNameInputWithoutNotify(lastCompanyNameInput);
+        }
+
+        float timeoutAt = Time.realtimeSinceStartup + DatabaseReadyTimeoutSeconds;
+        while ((QuestDatabaseService.Instance == null || !QuestDatabaseService.Instance.IsReady) &&
+               Time.realtimeSinceStartup < timeoutAt)
+        {
+            yield return null;
+        }
+
+        QuestDatabaseService database = QuestDatabaseService.Instance;
+        if (database != null && database.IsReady && database.TryGetDefaultCompanyName(out string savedCompanyName))
+        {
+            lastCompanyNameInput = savedCompanyName.Trim();
+            PlayerPrefs.SetString(CompanyNamePrefsKey, lastCompanyNameInput);
+            PlayerPrefs.Save();
+            SetCompanyNameInputWithoutNotify(lastCompanyNameInput);
+        }
+    }
+
+    private IEnumerator LoadGameSceneRoutine(string companyName)
+    {
+        SetStartupInteractable(false);
+        SetStartupStatus(LocalizationTable.Get("startup_profile_saving"), UIThemeConstants.TextSecondary);
+
+        float timeoutAt = Time.realtimeSinceStartup + DatabaseReadyTimeoutSeconds;
+        while ((QuestDatabaseService.Instance == null || !QuestDatabaseService.Instance.IsReady) &&
+               Time.realtimeSinceStartup < timeoutAt)
+        {
+            yield return null;
+        }
+
+        QuestDatabaseService database = QuestDatabaseService.Instance;
+        if (database == null || !database.IsReady || !database.ConfigureDefaultStartupProfile(companyName))
+        {
+            SetStartupStatus(LocalizationTable.Get("startup_profile_save_failed"), UIThemeConstants.Negative);
+            SetStartupInteractable(true);
+            startGameCoroutine = null;
+            yield break;
+        }
+
+        PlayerPrefs.SetString(CompanyNamePrefsKey, companyName.Trim());
+        PlayerPrefs.Save();
+        if (PlayerProgressionManager.Instance != null)
+        {
+            PlayerProgressionManager.Instance.RefreshMoneyFromDatabase();
+        }
+
+        LoadGameScene();
+        startGameCoroutine = null;
+    }
+
+    private void SetCompanyNameInputWithoutNotify(string companyName)
+    {
+        if (companyNameInput == null)
+        {
+            return;
+        }
+
+        companyNameInput.SetTextWithoutNotify(companyName ?? string.Empty);
+    }
+
+    private void SetStartupInteractable(bool interactable)
+    {
+        if (companyNameInput != null)
+        {
+            companyNameInput.interactable = interactable;
+        }
+
+        if (playButton != null)
+        {
+            playButton.interactable = interactable;
+        }
+    }
+
+    private void SetStartupStatus(string message, Color color)
+    {
+        if (startupStatusText == null)
+        {
+            return;
+        }
+
+        startupStatusText.text = message ?? string.Empty;
+        startupStatusText.color = color;
     }
 
     private void LoadGameScene()

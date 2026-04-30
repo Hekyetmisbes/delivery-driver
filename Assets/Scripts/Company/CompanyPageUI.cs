@@ -29,7 +29,6 @@ namespace DeliveryDriver.Company
         private GameObject panelObject;
         private TextMeshProUGUI companyNameValueText;
         private TextMeshProUGUI balanceValueText;
-        private TextMeshProUGUI managerValueText;
         private TextMeshProUGUI statusText;
         private RuntimeOptionSelector vehicleTypeDropdown;
         private Button continueButton;
@@ -194,7 +193,6 @@ namespace DeliveryDriver.Company
             Transform infoSection = CreateSection(panelObject.transform, "SirketBilgileri");
             companyNameValueText = CreateInfoRow(infoSection, LocalizationTable.Get("company_label_name"));
             balanceValueText = CreateInfoRow(infoSection, LocalizationTable.Get("company_label_balance"));
-            managerValueText = CreateInfoRow(infoSection, LocalizationTable.Get("company_label_manager"));
             vehicleTypeDropdown = CreateVehicleDropdownRow(infoSection, LocalizationTable.Get("company_label_vehicle_type"));
             vehicleTypeDropdown.onValueChanged.AddListener(OnVehicleTypeChanged);
 
@@ -213,7 +211,6 @@ namespace DeliveryDriver.Company
 
             companyNameValueText.text = profile.CompanyName;
             balanceValueText.text = $"${profile.Balance:N0}";
-            managerValueText.text = profile.PlayerDisplayName;
 
             suppressDropdownCallbacks = true;
             vehicleTypeDropdown.SetValueWithoutNotify(GetDropdownIndexForVehicleType(profile.SelectedVehicleType));

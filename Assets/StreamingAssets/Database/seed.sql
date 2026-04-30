@@ -7,13 +7,8 @@ BEGIN TRANSACTION;
 INSERT OR IGNORE INTO players (
   player_id, display_name, created_at, last_login_at, level, xp, xp_to_next_level, money_balance, reputation_score
 ) VALUES
-('local-player', 'hekye', '2026-03-07 09:00:00', '2026-03-07 09:00:00', 4, 240, 300, 2500, 8),
+('local-player', 'hekye', '2026-03-07 09:00:00', '2026-03-07 09:00:00', 4, 240, 300, 0, 8),
 ('11111111-1111-1111-1111-111111111111', 'PlayerOne', '2026-02-14 10:00:00', '2026-02-14 10:00:00', 3, 120, 200, 1500, 5);
-
-INSERT OR IGNORE INTO company_profiles (
-  company_id, player_id, company_name, selected_vehicle_type, created_at, updated_at
-) VALUES
-('company-local-player', 'local-player', 'Hekye Logistics', 'Van', '2026-03-07 09:00:00', '2026-03-07 09:00:00');
 
 INSERT OR IGNORE INTO neighborhoods (neighborhood_id, name, risk_level, traffic_density_factor, is_active) VALUES
 (1, 'Downtown', 3, 1.30, 1),
@@ -36,7 +31,11 @@ INSERT OR IGNORE INTO cargo_types (
 (1, 'Standard Box', 80.0, 0, 100, 'Genel dagitim paketi', 'cargo_standard'),
 (2, 'Glassware', 40.0, 1, 100, 'Kirilmaya hassas cam urunler', 'cargo_glass'),
 (3, 'Medical Supplies', 25.0, 1, 100, 'Acil tibbi malzemeler', 'cargo_medical'),
-(4, 'Machine Parts', 140.0, 0, 100, 'Agir sanayi parcasi', 'cargo_parts');
+(4, 'Machine Parts', 140.0, 0, 100, 'Agir sanayi parcasi', 'cargo_parts'),
+(5, 'Hot Food', 15.0, 1, 100, 'Sicak teslim edilmesi gereken yemek siparisi', 'cargo_food'),
+(6, 'Steel Beams', 450.0, 0, 100, 'Agir insaat celigi yukleri', 'cargo_steel'),
+(7, 'Electronics', 55.0, 1, 100, 'Hassas elektronik cihazlar', 'cargo_electronics'),
+(8, 'Secure Documents', 5.0, 0, 100, 'Gizli ve onemli belge cantasi', 'cargo_documents');
 
 INSERT OR IGNORE INTO quest_templates (
   template_id, quest_name, quest_description, quest_type, difficulty,
@@ -47,7 +46,12 @@ INSERT OR IGNORE INTO quest_templates (
 ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Package Delivery', 'Pick up from Downtown and deliver to Old Town.', 'StandardDelivery', 'Easy', 1, 1, 1, 300, 120, 50, 0.50, 40, 1, 1, 100),
 ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Fragile Rush', 'Deliver fragile cargo without heavy collisions.', 'FragileDelivery', 'Medium', 2, 1, 1, 360, 180, 90, 0.45, 70, 2, 1, 80),
 ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'City Multi Drop', 'Complete two-stop delivery route.', 'MultiStopDelivery', 'Hard', 3, 1, 2, 540, 300, 150, 0.40, 120, 4, 1, 60),
-('dddddddd-dddd-dddd-dddd-dddddddddddd', 'Medical Express', 'Fast urgent delivery to Suburbs.', 'ExpressDelivery', 'Medium', 2, 1, 1, 240, 220, 120, 0.55, 85, 3, 1, 70);
+('dddddddd-dddd-dddd-dddd-dddddddddddd', 'Medical Express', 'Fast urgent delivery to Suburbs.', 'ExpressDelivery', 'Medium', 2, 1, 1, 240, 220, 120, 0.55, 85, 3, 1, 70),
+('1a1a1a1a-1a1a-1a1a-1a1a-1a1a1a1a1a1a', 'Hot Food Run', 'Rush hot food across town before it gets cold.', 'TimeTrial', 'Easy', 1, 1, 1, 180, 80, 40, 0.60, 30, 5, 1, 120),
+('2b2b2b2b-2b2b-2b2b-2b2b-2b2b2b2b2b2b', 'Electronics Haul', 'Carefully transport expensive gadgets.', 'FragileDelivery', 'Medium', 2, 1, 1, 400, 250, 120, 0.50, 90, 7, 1, 75),
+('3c3c3c3c-3c3c-3c3c-3c3c-3c3c3c3c3c3c', 'Heavy Steel Transport', 'Haul heavy construction materials from Harbor.', 'StandardDelivery', 'Hard', 3, 1, 1, 600, 400, 100, 0.30, 150, 6, 1, 50),
+('4d4d4d4d-4d4d-4d4d-4d4d-4d4d4d4d4d4d', 'Corporate Secrets', 'Deliver highly classified VIP documents quickly.', 'ExpressDelivery', 'Expert', 4, 1, 1, 200, 500, 300, 0.70, 200, 8, 1, 40),
+('5e5e5e5e-5e5e-5e5e-5e5e-5e5e5e5e5e5e', 'Grand City Tour', 'Long multi-stop delivery route spanning the city.', 'MultiStopDelivery', 'Expert', 5, 1, 4, 1200, 1200, 600, 0.40, 400, 1, 1, 30);
 
 INSERT OR IGNORE INTO quest_instances (
   quest_instance_id, player_id, template_id, quest_status,
