@@ -9,6 +9,8 @@ using UnityEngine.SceneManagement;
 /// </summary>
 public class RuntimeOptimizationBootstrap : MonoBehaviour
 {
+    private const string GameSceneName = "Game";
+
     [SerializeField] private float phaseTwoDelaySeconds = 2f;
     [SerializeField] private float npcExtraDelaySeconds = 1f;
     private static bool SupportsRuntimeDiagnostics => Application.isEditor || Debug.isDebugBuild;
@@ -18,6 +20,11 @@ public class RuntimeOptimizationBootstrap : MonoBehaviour
     {
         Scene activeScene = SceneManager.GetActiveScene();
         if (!activeScene.IsValid() || !activeScene.isLoaded)
+        {
+            return;
+        }
+
+        if (activeScene.name != GameSceneName)
         {
             return;
         }

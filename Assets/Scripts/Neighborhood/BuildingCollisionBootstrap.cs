@@ -1,6 +1,9 @@
 using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace DeliveryDriver.City
 {
@@ -53,6 +56,7 @@ namespace DeliveryDriver.City
 
         [SerializeField] private Vector3 colliderPadding = new Vector3(0.35f, 0.2f, 0.35f);
         [SerializeField] private Vector3 minimumColliderSize = new Vector3(1.6f, 2f, 1.6f);
+        [SerializeField] private bool assumeScenePreconfigured = false;
 
         private static bool sceneHookRegistered;
         private int cachedBuildingLayer = int.MinValue;
@@ -112,12 +116,40 @@ namespace DeliveryDriver.City
                 return;
             }
 
+            if (assumeScenePreconfigured)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
             RemoveUnusedSimplePolyRoots(activeScene);
-            EnsureBuildingColliders(activeScene);
+            int collidersAdded = EnsureBuildingColliders(activeScene);
+            Debug.Log($"[BuildingCollisionBootstrap] Added {collidersAdded} missing building colliders in scene '{activeScene.name}'.");
             Destroy(gameObject);
         }
 
-        private void RemoveUnusedSimplePolyRoots(Scene scene)
+        public void MarkScenePreconfigured(bool value)
+        {
+            assumeScenePreconfigured = value;
+        }
+
+#if UNITY_EDITOR
+        public int PreconfigureSceneForEditor(Scene scene, bool markPreconfigured)
+        {
+            if (!scene.IsValid() || !scene.isLoaded)
+            {
+                return 0;
+            }
+
+            RemoveUnusedSimplePolyRoots(scene, true);
+            int collidersAdded = EnsureBuildingColliders(scene, true);
+            MarkScenePreconfigured(markPreconfigured);
+            EditorUtility.SetDirty(this);
+            return collidersAdded;
+        }
+#endif
+
+        private void RemoveUnusedSimplePolyRoots(Scene scene, bool useEditorUndo = false)
         {
             GameObject[] roots = scene.GetRootGameObjects();
             int removed = 0;
@@ -129,7 +161,17 @@ namespace DeliveryDriver.City
                     continue;
                 }
 
-                Destroy(root);
+#if UNITY_EDITOR
+                if (!Application.isPlaying && useEditorUndo)
+                {
+                    Undo.DestroyObjectImmediate(root);
+                }
+                else
+#endif
+                {
+                    Destroy(root);
+                }
+
                 removed++;
             }
 
@@ -170,7 +212,7 @@ namespace DeliveryDriver.City
             return components == null || components.Length <= 1;
         }
 
-        private void EnsureBuildingColliders(Scene scene)
+        private int EnsureBuildingColliders(Scene scene, bool useEditorUndo = false)
         {
             cachedBuildingLayer = LayerMask.NameToLayer("Building");
             GameObject[] roots = scene.GetRootGameObjects();
@@ -178,20 +220,20 @@ namespace DeliveryDriver.City
 
             for (int i = 0; i < roots.Length; i++)
             {
-                collidersAdded += EnsureBuildingCollidersRecursive(roots[i].transform);
+                collidersAdded += EnsureBuildingCollidersRecursive(roots[i].transform, useEditorUndo);
             }
 
-            Debug.Log($"[BuildingCollisionBootstrap] Added {collidersAdded} missing building colliders in scene '{scene.name}'.");
+            return collidersAdded;
         }
 
-        private int EnsureBuildingCollidersRecursive(Transform current)
+        private int EnsureBuildingCollidersRecursive(Transform current, bool useEditorUndo = false)
         {
             if (current == null || !current.gameObject.activeInHierarchy)
             {
                 return 0;
             }
 
-            if (TryAddColliderToBuildingRoot(current.gameObject))
+            if (TryAddColliderToBuildingRoot(current.gameObject, useEditorUndo))
             {
                 return 1;
             }
@@ -199,13 +241,13 @@ namespace DeliveryDriver.City
             int added = 0;
             for (int i = 0; i < current.childCount; i++)
             {
-                added += EnsureBuildingCollidersRecursive(current.GetChild(i));
+                added += EnsureBuildingCollidersRecursive(current.GetChild(i), useEditorUndo);
             }
 
             return added;
         }
 
-        private bool TryAddColliderToBuildingRoot(GameObject candidate)
+        private bool TryAddColliderToBuildingRoot(GameObject candidate, bool useEditorUndo = false)
         {
             if (!IsLikelyBuildingRoot(candidate))
             {
@@ -231,8 +273,21 @@ namespace DeliveryDriver.City
             BoxCollider collider = candidate.GetComponent<BoxCollider>();
             if (collider == null)
             {
+#if UNITY_EDITOR
+                collider = !Application.isPlaying && useEditorUndo
+                    ? Undo.AddComponent<BoxCollider>(candidate)
+                    : candidate.AddComponent<BoxCollider>();
+#else
                 collider = candidate.AddComponent<BoxCollider>();
+#endif
             }
+
+#if UNITY_EDITOR
+            if (!Application.isPlaying && useEditorUndo)
+            {
+                Undo.RecordObject(collider, "Preconfigure Building Collider");
+            }
+#endif
 
             collider.isTrigger = false;
             collider.center = localBounds.center;
