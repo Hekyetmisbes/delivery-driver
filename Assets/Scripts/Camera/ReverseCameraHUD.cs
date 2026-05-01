@@ -8,32 +8,40 @@ using UnityEngine;
 /// </summary>
 public class ReverseCameraHUD : MonoBehaviour
 {
+    private const float MinViewportWidth = 0.14f;
+    private const float MaxViewportWidth = 0.30f;
+    private const float MinViewportHeight = 0.08f;
+    private const float MaxViewportHeight = 0.16f;
+    private const float DefaultViewportTop = 0.97f;
+    private const float MinFieldOfView = 45f;
+    private const float MaxFieldOfView = 70f;
+
     [Header("Hedef Araç")]
     [Tooltip("Takip edilecek araç. Boş bırakılırsa CarController olan objeyi bulur.")]
     [SerializeField] private Transform carTarget;
 
     [Header("Kamera Pozisyonu (Araç Üzerinde Lokal)")]
     [Tooltip("Arabanın arkasındaki kamera konumu (lokal). Z negatif = aracın arkası.")]
-    [SerializeField] private Vector3 cameraLocalOffset = new Vector3(0f, 1.1f, -2.0f);
+    [SerializeField] private Vector3 cameraLocalOffset = new Vector3(0f, 0.65f, -1.8f);
     [Tooltip("Kamera açısı (lokal). Y=180 geriye bakar, X pozitif = aşağı eğimli.")]
-    [SerializeField] private Vector3 cameraLocalEuler = new Vector3(12f, 180f, 0f);
-    [SerializeField] private float fieldOfView = 95f;
+    [SerializeField] private Vector3 cameraLocalEuler = new Vector3(15f, 180f, 0f);
+    [SerializeField] private float fieldOfView = 60f;
 
     [Header("Ekran Konumu (Viewport 0-1)")]
-    [SerializeField] private float vpX = 0.2f;
-    [SerializeField] private float vpY = 0.74f;
-    [SerializeField] private float vpWidth = 0.60f;
-    [SerializeField] private float vpHeight = 0.24f;
+    [SerializeField] private float vpX = 0.39f;
+    [SerializeField] private float vpY = 0.83f;
+    [SerializeField] private float vpWidth = 0.22f;
+    [SerializeField] private float vpHeight = 0.12f;
 
     [Header("Tetikleyici")]
     [SerializeField] private float reverseVelocityThreshold = -0.1f;
     [SerializeField] private float stationarySpeedThreshold = 1.0f;
 
     [Header("Frame Style")]
-    [SerializeField] private Color borderColor = new Color(0.1f, 0.9f, 1f, 0.85f);
-    [SerializeField] private float borderWidth = 2.5f;
-    [SerializeField] private float framePadding = 6f;
-    [SerializeField] private float fadeSpeed = 6f;
+    [SerializeField] private Color borderColor = new Color(0.15f, 0.15f, 0.15f, 0.95f);
+    [SerializeField] private float borderWidth = 2f;
+    [SerializeField] private float framePadding = 4f;
+    [SerializeField] private float fadeSpeed = 8f;
     [SerializeField] private float gradientHeight = 28f;
 
     private Camera gameplayCamera;
@@ -60,12 +68,15 @@ public class ReverseCameraHUD : MonoBehaviour
 
     void CreateCamera()
     {
+        ApplyViewport(CurrentViewport());
+        fieldOfView = Mathf.Clamp(fieldOfView, MinFieldOfView, MaxFieldOfView);
+
         var go = new GameObject("_ReverseCameraHUD");
         reverseCam = go.AddComponent<Camera>();
         reverseCam.nearClipPlane = 0.15f;
         reverseCam.farClipPlane = 300f;
         reverseCam.depth = 2f;
-        reverseCam.rect = new Rect(vpX, vpY, vpWidth, vpHeight);
+        reverseCam.rect = CurrentViewport();
         reverseCam.enabled = false;
         CopyGameplayCameraSettings();
     }
@@ -117,13 +128,10 @@ public class ReverseCameraHUD : MonoBehaviour
         float fadeSpeedValue,
         float gradientHeightValue)
     {
-        cameraLocalOffset = localOffset;
+        cameraLocalOffset = ClampReverseOffset(localOffset);
         cameraLocalEuler = localEuler;
-        fieldOfView = cameraFov;
-        vpX = viewport.x;
-        vpY = viewport.y;
-        vpWidth = viewport.width;
-        vpHeight = viewport.height;
+        fieldOfView = Mathf.Clamp(cameraFov, MinFieldOfView, MaxFieldOfView);
+        ApplyViewport(viewport);
         reverseVelocityThreshold = reverseThreshold;
         stationarySpeedThreshold = stationaryThresholdValue;
         borderColor = frameColor;
@@ -147,7 +155,9 @@ public class ReverseCameraHUD : MonoBehaviour
         }
 
         Camera source = gameplayCamera != null ? gameplayCamera : Camera.main;
+        fieldOfView = Mathf.Clamp(fieldOfView, MinFieldOfView, MaxFieldOfView);
         reverseCam.fieldOfView = fieldOfView;
+        reverseCam.rect = CurrentViewport();
         reverseCam.clearFlags = source != null ? source.clearFlags : CameraClearFlags.Skybox;
         reverseCam.backgroundColor = source != null ? source.backgroundColor : Color.black;
         reverseCam.cullingMask = source != null ? source.cullingMask : ~0;
@@ -229,7 +239,7 @@ public class ReverseCameraHUD : MonoBehaviour
         if (reverseAnchor != null)
         {
             reverseCam.transform.position = reverseAnchor.position;
-            reverseCam.transform.rotation = reverseAnchor.rotation * Quaternion.Euler(cameraLocalEuler);
+            reverseCam.transform.rotation = yaw * Quaternion.Euler(cameraLocalEuler);
             return;
         }
 
@@ -291,9 +301,52 @@ public class ReverseCameraHUD : MonoBehaviour
             return cameraLocalOffset;
         }
 
-        float height = Mathf.Max(max.y + 0.35f, 0.85f);
-        float rearZ = min.z - 0.45f;
-        return new Vector3((min.x + max.x) * 0.5f, height, rearZ);
+        float vehicleHeight = max.y - min.y;
+        float vehicleLength = max.z - min.z;
+        bool isTallVehicle = vehicleHeight > 1.8f || vehicleLength > 4.5f;
+
+        float heightRatio = isTallVehicle ? 0.55f : 0.45f;
+        float targetHeight = Mathf.Lerp(min.y, max.y, heightRatio);
+        float minH = isTallVehicle ? 0.9f : 0.55f;
+        float height = Mathf.Max(targetHeight, minH);
+        float rearZ = min.z - 0.02f;
+        return new Vector3(0f, height, rearZ);
+    }
+
+    Rect CurrentViewport()
+    {
+        return new Rect(vpX, vpY, vpWidth, vpHeight);
+    }
+
+    void ApplyViewport(Rect viewport)
+    {
+        Rect clamped = ClampViewport(viewport);
+        vpX = clamped.x;
+        vpY = clamped.y;
+        vpWidth = clamped.width;
+        vpHeight = clamped.height;
+    }
+
+    static Rect ClampViewport(Rect viewport)
+    {
+        float width = Mathf.Clamp(viewport.width, MinViewportWidth, MaxViewportWidth);
+        float height = Mathf.Clamp(viewport.height, MinViewportHeight, MaxViewportHeight);
+        float centeredX = viewport.x + (viewport.width - width) * 0.5f;
+
+        float originalTop = viewport.y + viewport.height;
+        float top = Mathf.Clamp(originalTop > 0f ? originalTop : DefaultViewportTop, height, 0.98f);
+        float x = Mathf.Clamp(centeredX, 0.02f, 0.98f - width);
+        float y = Mathf.Clamp(top - height, 0.02f, 0.98f - height);
+
+        return new Rect(x, y, width, height);
+    }
+
+    static Vector3 ClampReverseOffset(Vector3 offset)
+    {
+        return new Vector3(
+            Mathf.Clamp(offset.x, -0.1f, 0.1f),
+            Mathf.Clamp(offset.y, 0.4f, 1.5f),
+            Mathf.Min(offset.z, -0.3f));
     }
 
     void OnGUI()

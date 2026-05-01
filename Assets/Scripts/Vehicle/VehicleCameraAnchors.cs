@@ -8,11 +8,19 @@ namespace DeliveryDriver.Vehicle
         [SerializeField] private Transform reverseCameraAnchor;
         [SerializeField] private bool autoCreateReverseCameraAnchor = true;
         [SerializeField] private string preferredBoundsRootName = "LorryTrailer";
-        [SerializeField] private float reverseCameraHeightOffset = 0.35f;
-        [SerializeField] private float reverseCameraRearPadding = 0.45f;
-        [SerializeField] private float minimumAnchorHeight = 0.85f;
+
+        [Header("Van (Kamyonet) Kamera Ayarları")]
+        [SerializeField] private float vanHeightRatio = 0.45f;
+        [SerializeField] private float vanRearPadding = 0.02f;
+        [SerializeField] private float vanMinHeight = 0.55f;
+
+        [Header("Truck (Tır/Kamyon) Kamera Ayarları")]
+        [SerializeField] private float truckHeightRatio = 0.55f;
+        [SerializeField] private float truckRearPadding = 0.03f;
+        [SerializeField] private float truckMinHeight = 0.9f;
 
         private Transform runtimeReverseCameraAnchor;
+        private bool detectedAsTruck;
 
         public Transform ReverseCameraAnchor
         {
@@ -37,13 +45,18 @@ namespace DeliveryDriver.Vehicle
             }
         }
 
+        /// <summary>
+        /// Araç tipi tır/kamyon olarak algılandıysa true döner.
+        /// Anchor oluşturulduktan sonra geçerlidir.
+        /// </summary>
+        public bool IsTruck => detectedAsTruck;
+
         private void CreateRuntimeReverseCameraAnchor()
         {
-            Transform boundsRoot = FindPreferredBoundsRoot();
-            if (boundsRoot == null)
-            {
-                boundsRoot = transform;
-            }
+            Transform trailerRoot = FindPreferredBoundsRoot();
+            detectedAsTruck = trailerRoot != null && trailerRoot != transform;
+
+            Transform boundsRoot = detectedAsTruck ? trailerRoot : transform;
 
             if (!TryBuildLocalBounds(boundsRoot, out Bounds localBounds))
             {
@@ -55,12 +68,23 @@ namespace DeliveryDriver.Vehicle
             anchorObject.transform.SetParent(transform, false);
             anchorObject.transform.localRotation = Quaternion.identity;
 
+            float heightRatio = detectedAsTruck ? truckHeightRatio : vanHeightRatio;
+            float rearPadding = detectedAsTruck ? truckRearPadding : vanRearPadding;
+            float minHeight = detectedAsTruck ? truckMinHeight : vanMinHeight;
+
+            float targetHeight = Mathf.Lerp(localBounds.min.y, localBounds.max.y, heightRatio);
+            float anchorHeight = Mathf.Max(targetHeight, minHeight);
+
             Vector3 localPosition = new Vector3(
-                localBounds.center.x,
-                Mathf.Max(localBounds.center.y + reverseCameraHeightOffset, minimumAnchorHeight),
-                localBounds.min.z - reverseCameraRearPadding);
+                0f,
+                anchorHeight,
+                localBounds.min.z - rearPadding);
             anchorObject.transform.localPosition = localPosition;
             runtimeReverseCameraAnchor = anchorObject.transform;
+
+            Debug.Log($"[VehicleCameraAnchors] Reverse camera anchor created for '{name}': " +
+                      $"type={(detectedAsTruck ? "Truck" : "Van")}, " +
+                      $"pos={localPosition}, bounds.min.z={localBounds.min.z:F2}, bounds.max.y={localBounds.max.y:F2}");
         }
 
         private Transform FindPreferredBoundsRoot()

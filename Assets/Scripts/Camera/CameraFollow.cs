@@ -50,16 +50,16 @@ public class CameraFollow : MonoBehaviour
     [Tooltip("Araç geri giderken ekranın üstünde geri görüş kamerası göster")]
     [SerializeField] private bool enableReverseCamera = true;
     [Tooltip("Araç arkasındaki kamera konumu (lokal). Z negatif = aracın arkası.")]
-    [SerializeField] private Vector3 reverseCamOffset = new Vector3(0f, 1.1f, -2.0f);
+    [SerializeField] private Vector3 reverseCamOffset = new Vector3(0f, 0.8f, -1.4f);
     [Tooltip("Kamera açısı. Y=180 geriye bakar, X pozitif = aşağı eğimli.")]
-    [SerializeField] private Vector3 reverseCamEuler = new Vector3(12f, 180f, 0f);
-    [SerializeField] private float reverseCamFov = 95f;
+    [SerializeField] private Vector3 reverseCamEuler = new Vector3(8f, 180f, 0f);
+    [SerializeField] private float reverseCamFov = 72f;
     [Tooltip("Viewport sol kenarı (0-1)")]
-    [SerializeField] private float reverseCamVpX = 0.2f;
-    [Tooltip("Viewport alt kenarı (0=alt, 1=üst). 0.74 → ekranın üst kısmı.")]
-    [SerializeField] private float reverseCamVpY = 0.74f;
-    [SerializeField] private float reverseCamVpW = 0.60f;
-    [SerializeField] private float reverseCamVpH = 0.24f;
+    [SerializeField] private float reverseCamVpX = 0.32f;
+    [Tooltip("Viewport alt kenarı (0=alt, 1=üst). 0.79 -> ekranın üst kısmı.")]
+    [SerializeField] private float reverseCamVpY = 0.79f;
+    [SerializeField] private float reverseCamVpW = 0.36f;
+    [SerializeField] private float reverseCamVpH = 0.18f;
     [Tooltip("Bu hızın (m/s) altında araç durağan sayılır; geri tuşu kamerayı açar.")]
     [SerializeField] private float reverseCamStationaryThreshold = 1.0f;
 
