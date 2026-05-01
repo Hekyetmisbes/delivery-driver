@@ -417,6 +417,16 @@ namespace DeliveryDriver.Company
                 return;
             }
 
+            VehicleExhaustSmoke exhaustSmoke = controller.GetComponent<VehicleExhaustSmoke>();
+            if (exhaustSmoke == null)
+            {
+                exhaustSmoke = controller.gameObject.AddComponent<VehicleExhaustSmoke>();
+            }
+
+            exhaustSmoke.ConfigurePreset(vehicleType == VehicleType.Truck
+                ? VehicleExhaustSmokePreset.Truck
+                : VehicleExhaustSmokePreset.Van);
+
             if (vehicleType == VehicleType.Truck)
             {
                 TruckWheelVisuals truckWheelVisuals = controller.GetComponent<TruckWheelVisuals>();

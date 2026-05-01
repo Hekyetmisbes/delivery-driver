@@ -19,6 +19,14 @@ namespace DeliveryDriver.Company
         private const string TruckPrefabResourcePath = VehicleResourcesRoot + "/LorryCargo";
         private static bool sceneHookRegistered;
 
+        [Header("Scene References")]
+        [SerializeField] private PlayerVehicleManager vehicleManager;
+        [SerializeField] private CompanyPageUI companyPageUI;
+
+        [Header("Vehicle Prefabs")]
+        [SerializeField] private GameObject vanPrefab;
+        [SerializeField] private GameObject truckPrefab;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void RegisterSceneHook()
         {
@@ -72,27 +80,79 @@ namespace DeliveryDriver.Company
                 return;
             }
 
-            if (FindAnyObjectByType<PlayerVehicleManager>() == null)
+            if (vehicleManager == null)
+            {
+                vehicleManager = FindAnyObjectByType<PlayerVehicleManager>();
+            }
+
+            if (vehicleManager == null)
             {
                 GameObject vehicleManagerObject = new GameObject("PlayerVehicleManager");
-                vehicleManagerObject.AddComponent<PlayerVehicleManager>();
+                vehicleManager = vehicleManagerObject.AddComponent<PlayerVehicleManager>();
             }
 
-            PlayerVehicleManager vehicleManager = FindAnyObjectByType<PlayerVehicleManager>();
             if (vehicleManager != null)
             {
-                vehicleManager.SetVehiclePrefabs(
-                    LoadVehiclePrefab(VanPrefabAssetPath, "Van"),
-                    LoadVehiclePrefab(TruckPrefabAssetPath, "Truck"));
+                if (vanPrefab == null)
+                {
+                    vanPrefab = LoadVehiclePrefab(VanPrefabAssetPath, "Van");
+                }
+
+                if (truckPrefab == null)
+                {
+                    truckPrefab = LoadVehiclePrefab(TruckPrefabAssetPath, "Truck");
+                }
+
+                vehicleManager.SetVehiclePrefabs(vanPrefab, truckPrefab);
             }
 
-            if (FindAnyObjectByType<CompanyPageUI>() == null)
+            if (companyPageUI == null)
+            {
+                companyPageUI = FindAnyObjectByType<CompanyPageUI>();
+            }
+
+            if (companyPageUI == null)
             {
                 GameObject pageObject = new GameObject("CompanyPageUI");
-                pageObject.AddComponent<CompanyPageUI>();
+                companyPageUI = pageObject.AddComponent<CompanyPageUI>();
             }
 
             Destroy(gameObject);
+        }
+
+        public bool AutoAssignStartupReferences()
+        {
+            bool changed = false;
+
+            PlayerVehicleManager foundVehicleManager = FindAnyObjectByType<PlayerVehicleManager>();
+            if (vehicleManager != foundVehicleManager)
+            {
+                vehicleManager = foundVehicleManager;
+                changed = true;
+            }
+
+            CompanyPageUI foundCompanyPage = FindAnyObjectByType<CompanyPageUI>();
+            if (companyPageUI != foundCompanyPage)
+            {
+                companyPageUI = foundCompanyPage;
+                changed = true;
+            }
+
+            GameObject resolvedVanPrefab = LoadVehiclePrefab(VanPrefabAssetPath, "Van");
+            if (vanPrefab != resolvedVanPrefab)
+            {
+                vanPrefab = resolvedVanPrefab;
+                changed = true;
+            }
+
+            GameObject resolvedTruckPrefab = LoadVehiclePrefab(TruckPrefabAssetPath, "Truck");
+            if (truckPrefab != resolvedTruckPrefab)
+            {
+                truckPrefab = resolvedTruckPrefab;
+                changed = true;
+            }
+
+            return changed;
         }
 
         private static GameObject LoadVehiclePrefab(string assetPath, string label)
