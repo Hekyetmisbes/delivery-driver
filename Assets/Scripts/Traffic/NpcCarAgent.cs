@@ -105,6 +105,16 @@ namespace TrafficSystem
         [SerializeField] private float cautionTimeToCollision = 2.8f;
         [Tooltip("Extra clearance buffer added to safe gap calculations")]
         [SerializeField] private float collisionBufferDistance = 2f;
+        [Tooltip("Extra forward lookahead time for vehicle/player hard-stop checks")]
+        [SerializeField] private float vehicleStopLookaheadTime = 1.6f;
+        [Tooltip("Maximum forward cast distance used for vehicle/player hard-stop checks")]
+        [SerializeField] private float maxVehicleStopCastDistance = 45f;
+        [Tooltip("Gap where NPCs command a full stop before touching another vehicle")]
+        [SerializeField] private float fullStopGapDistance = 6f;
+        [Tooltip("Time-to-collision threshold that forces a full stop")]
+        [SerializeField] private float fullStopTimeToCollision = 1.5f;
+        [Tooltip("Assumed deceleration used to decide when a vehicle must stop")]
+        [SerializeField] private float assumedEmergencyDeceleration = 6f;
 
         [Header("Reverse Recovery")]
         [Tooltip("Enable short reverse maneuvers when blocked by obstacles ahead")]
@@ -201,6 +211,8 @@ namespace TrafficSystem
         [SerializeField] private RigidbodyInterpolation rbInterpolation = RigidbodyInterpolation.Interpolate;
         [Tooltip("Rigidbody collision detection mode")]
         [SerializeField] private CollisionDetectionMode rbCollisionDetection = CollisionDetectionMode.Discrete;
+        [Tooltip("Upgrade discrete collision detection to ContinuousDynamic for safer vehicle contacts")]
+        [SerializeField] private bool upgradeDiscreteCollisionDetection = true;
         [Tooltip("Solver iterations (higher = more stable)")]
         [SerializeField] private int solverIterations = 6;
         [Tooltip("Solver velocity iterations (higher = more stable)")]
@@ -244,6 +256,8 @@ namespace TrafficSystem
         private Vector3 currentLookAheadPoint;
         private bool isObstacleDetected;
         private float obstacleDistance;
+        private bool mustStopForVehicle;
+        private float vehicleStopDistance = float.MaxValue;
         private bool isPotentiallyOffRoad;
         private float wheelBase;
 
@@ -544,7 +558,9 @@ namespace TrafficSystem
             rb.sleepThreshold = 0.005f; // Allow very slow NPCs to sleep, saving physics CPU
 
             rb.interpolation = rbInterpolation;
-            rb.collisionDetectionMode = rbCollisionDetection;
+            rb.collisionDetectionMode = upgradeDiscreteCollisionDetection && rbCollisionDetection == CollisionDetectionMode.Discrete
+                ? CollisionDetectionMode.ContinuousDynamic
+                : rbCollisionDetection;
             if (solverIterations > 0) rb.solverIterations = solverIterations;
             if (solverVelocityIterations > 0) rb.solverVelocityIterations = solverVelocityIterations;
         }
@@ -1739,23 +1755,28 @@ namespace TrafficSystem
             leftLaneClear = true;
             rightLaneClear = true;
             obstacleDistance = float.MaxValue;
+            mustStopForVehicle = false;
+            vehicleStopDistance = float.MaxValue;
 
             if (!enableObstacleAvoidance) return;
 
             Vector3 rayOrigin = transform.position + Vector3.up * 0.5f;
             Vector3 forward = transform.forward;
             Vector3 right = transform.right;
+            float forwardCastDistance = GetForwardVehicleAwarenessDistance();
 
             // Priority 1: Detect vehicle ahead for following distance system
-            DetectVehicleAhead(rayOrigin, forward, out float distance, out float relativeSpeed);
+            DetectVehicleAhead(rayOrigin, forward, forwardCastDistance, out float distance, out float relativeSpeed);
+            DetectForwardVehicleThreat(rayOrigin, forward, forwardCastDistance);
 
             // Center raycast - main forward detection
-            if (Physics.Raycast(rayOrigin, forward, out RaycastHit centerHit, avoidanceRayDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore))
+            if (Physics.Raycast(rayOrigin, forward, out RaycastHit centerHit, forwardCastDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore))
             {
                 if (IsVehicleCollider(centerHit.collider))
                 {
                     isObstacleDetected = true;
-                    obstacleDistance = centerHit.distance;
+                    obstacleDistance = Mathf.Min(obstacleDistance, centerHit.distance);
+                    EvaluateVehicleStopThreat(centerHit.collider, centerHit.distance);
 
                     // Decide lane change direction if enabled
                     if (enableLaneChange && obstacleDistance < safeFollowingDistance)
@@ -1785,6 +1806,113 @@ namespace TrafficSystem
                     rightLaneClear = false;
                 }
             }
+        }
+
+        private float GetForwardVehicleAwarenessDistance()
+        {
+            float speedMs = rb != null ? Mathf.Max(0f, Vector3.Dot(rb.linearVelocity, GetWorldForward())) : 0f;
+            float dynamicDistance = safeFollowingDistance + speedMs * Mathf.Max(0.1f, vehicleStopLookaheadTime);
+            return Mathf.Clamp(Mathf.Max(avoidanceRayDistance, dynamicDistance), avoidanceRayDistance, Mathf.Max(avoidanceRayDistance, maxVehicleStopCastDistance));
+        }
+
+        private void DetectForwardVehicleThreat(Vector3 rayOrigin, Vector3 forward, float castDistance)
+        {
+            float radius = Mathf.Max(0.4f, vehicleDetectionRadius);
+            int hitCount = Physics.SphereCastNonAlloc(rayOrigin, radius, forward, sharedSphereCastBuffer, castDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore);
+            if (hitCount == 0)
+            {
+                return;
+            }
+
+            float cosAwareness = Mathf.Cos(forwardAwarenessAngle * Mathf.Deg2Rad);
+            float bestDistance = float.MaxValue;
+            Collider bestCollider = null;
+
+            for (int i = 0; i < hitCount; i++)
+            {
+                RaycastHit hit = sharedSphereCastBuffer[i];
+                Collider hitCollider = hit.collider;
+                if (hitCollider == null || hitCollider.transform.IsChildOf(transform)) continue;
+                if (!IsVehicleCollider(hitCollider)) continue;
+
+                Vector3 hitVector = hit.point - rayOrigin;
+                if (hitVector.sqrMagnitude < 0.001f) continue;
+                if (Vector3.Dot(forward, hitVector.normalized) < cosAwareness) continue;
+
+                float lateralOffsetFromLane = Mathf.Abs(Vector3.Dot((hit.point - transform.position), transform.right));
+                if (lateralOffsetFromLane > sideRayOffset + vehicleDetectionRadius + 1.5f) continue;
+
+                if (hit.distance < bestDistance)
+                {
+                    bestDistance = hit.distance;
+                    bestCollider = hitCollider;
+                }
+            }
+
+            if (bestCollider == null)
+            {
+                return;
+            }
+
+            isObstacleDetected = true;
+            obstacleDistance = Mathf.Min(obstacleDistance, bestDistance);
+            EvaluateVehicleStopThreat(bestCollider, bestDistance);
+        }
+
+        private void EvaluateVehicleStopThreat(Collider vehicleCollider, float distance)
+        {
+            if (vehicleCollider == null || rb == null)
+            {
+                return;
+            }
+
+            Rigidbody otherRigidbody = ResolveAttachedRigidbody(vehicleCollider);
+            Vector3 forward = GetWorldForward();
+            float currentForwardSpeed = Mathf.Max(0f, Vector3.Dot(rb.linearVelocity, forward));
+            float otherForwardSpeed = otherRigidbody != null ? Vector3.Dot(otherRigidbody.linearVelocity, forward) : 0f;
+            float closingSpeed = currentForwardSpeed - otherForwardSpeed;
+
+            float safeStopDistance = CalculateVehicleStopDistance(closingSpeed, currentForwardSpeed);
+            float timeToCollision = closingSpeed > 0.1f ? distance / closingSpeed : float.MaxValue;
+
+            bool shouldStop =
+                distance <= Mathf.Max(1f, fullStopGapDistance) ||
+                distance <= safeStopDistance ||
+                timeToCollision <= Mathf.Max(0.1f, fullStopTimeToCollision);
+
+            if (!shouldStop)
+            {
+                return;
+            }
+
+            mustStopForVehicle = true;
+            imminentCollisionRisk = true;
+            predictiveSpeedLimiter = Mathf.Min(predictiveSpeedLimiter, 0.1f);
+            vehicleStopDistance = Mathf.Min(vehicleStopDistance, distance);
+        }
+
+        private float CalculateVehicleStopDistance(float closingSpeed, float currentForwardSpeed)
+        {
+            float safeDeceleration = Mathf.Max(1f, assumedEmergencyDeceleration);
+            float positiveClosingSpeed = Mathf.Max(0f, closingSpeed);
+            float closingBrakingDistance = (positiveClosingSpeed * positiveClosingSpeed) / (2f * safeDeceleration);
+            float reactionDistance = Mathf.Max(0f, currentForwardSpeed) * 0.2f;
+            return Mathf.Max(fullStopGapDistance, fullStopGapDistance + collisionBufferDistance + reactionDistance + closingBrakingDistance);
+        }
+
+        private static Rigidbody ResolveAttachedRigidbody(Collider collider)
+        {
+            if (collider == null)
+            {
+                return null;
+            }
+
+            if (collider.attachedRigidbody != null)
+            {
+                return collider.attachedRigidbody;
+            }
+
+            return collider.GetComponentInParent<Rigidbody>();
         }
 
         private void CheckRearObstacles()
@@ -2150,14 +2278,14 @@ namespace TrafficSystem
         /// <summary>
         /// Detect vehicle ahead and calculate distance and relative speed
         /// </summary>
-        private bool DetectVehicleAhead(Vector3 rayOrigin, Vector3 forward, out float distance, out float relativeSpeed)
+        private bool DetectVehicleAhead(Vector3 rayOrigin, Vector3 forward, float castDistance, out float distance, out float relativeSpeed)
         {
             distance = float.MaxValue;
             relativeSpeed = 0f;
             vehicleAhead = null;
             isFollowing = false;
 
-            int hitCount = Physics.SphereCastNonAlloc(rayOrigin, vehicleDetectionRadius, forward, sharedSphereCastBuffer, avoidanceRayDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore);
+            int hitCount = Physics.SphereCastNonAlloc(rayOrigin, vehicleDetectionRadius, forward, sharedSphereCastBuffer, castDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore);
             if (hitCount == 0)
             {
                 return false;
@@ -3055,14 +3183,19 @@ namespace TrafficSystem
 
             // Predictive collision response (TTC and trajectory based)
             effectiveTargetSpeed *= predictiveSpeedLimiter;
+            if (mustStopForVehicle)
+            {
+                effectiveTargetSpeed = 0f;
+            }
+
             if (imminentCollisionRisk)
             {
-                effectiveTargetSpeed = Mathf.Min(effectiveTargetSpeed, 12f);
+                effectiveTargetSpeed = Mathf.Min(effectiveTargetSpeed, mustStopForVehicle ? 0f : 12f);
             }
 
             // Advanced obstacle-based speed adjustment
             // Be less aggressive when overtaking
-            if (isObstacleDetected && !isOvertaking)
+            if (isObstacleDetected && !isOvertaking && !mustStopForVehicle)
             {
                 if (obstacleDistance < criticalBrakingDistance)
                 {
@@ -3085,7 +3218,7 @@ namespace TrafficSystem
 
             // Enforce low minimum only in clear road conditions.
             bool trafficConstrained = isFollowing || isObstacleDetected || imminentCollisionRisk || isColliding;
-            float minAllowedSpeed = trafficConstrained ? trafficConstrainedMinSpeed : freeFlowMinSpeed;
+            float minAllowedSpeed = mustStopForVehicle ? 0f : (trafficConstrained ? trafficConstrainedMinSpeed : freeFlowMinSpeed);
             effectiveTargetSpeed = Mathf.Max(effectiveTargetSpeed, minAllowedSpeed);
 
             float speedDifference = effectiveTargetSpeed - currentSpeed;
@@ -3103,11 +3236,16 @@ namespace TrafficSystem
                 // Release brakes
                 SetBrakeTorque(0f);
             }
-            else if (speedDifference < -speedTolerance || isObstacleDetected || tooCloseToLead)
+            else if (speedDifference < -speedTolerance || isObstacleDetected || tooCloseToLead || mustStopForVehicle)
             {
                 // Need to slow down
                 float brakeTorque;
-                if (isObstacleDetected && obstacleDistance < criticalBrakingDistance)
+                if (mustStopForVehicle)
+                {
+                    float gapRatio = Mathf.Clamp01(vehicleStopDistance / Mathf.Max(0.1f, fullStopGapDistance + collisionBufferDistance));
+                    brakeTorque = braking * Mathf.Lerp(1.8f, 1.25f, gapRatio);
+                }
+                else if (isObstacleDetected && obstacleDistance < criticalBrakingDistance)
                 {
                     // Emergency braking
                     brakeTorque = braking * 1.2f;
@@ -3136,6 +3274,12 @@ namespace TrafficSystem
 
                 SetMotorTorque(0f);
                 SetBrakeTorque(brakeTorque);
+
+                if (mustStopForVehicle && vehicleStopDistance <= fullStopGapDistance && currentSpeed < 3f && rb != null)
+                {
+                    Vector3 forwardVelocity = Vector3.Project(rb.linearVelocity, GetWorldForward());
+                    rb.linearVelocity -= forwardVelocity;
+                }
             }
             else
             {
@@ -3564,15 +3708,11 @@ namespace TrafficSystem
             if (IsVehicleCollider(collision.collider))
             {
                 isColliding = true;
-
-                // Keep moving even during collision to allow natural separation
-                // Don't intervene too aggressively - let the separation force handle it
-                if (collisionTimer > 8f)
-                {
-                    // Only slow down if stuck for a very long time
-                    // Keep minimum speed of 15 km/h to ensure movement
-                    targetSpeed = Mathf.Max(15f, Mathf.Min(targetSpeed, 25f));
-                }
+                mustStopForVehicle = true;
+                imminentCollisionRisk = true;
+                vehicleStopDistance = 0f;
+                SetMotorTorque(0f);
+                SetBrakeTorque(braking * 1.8f);
             }
         }
 

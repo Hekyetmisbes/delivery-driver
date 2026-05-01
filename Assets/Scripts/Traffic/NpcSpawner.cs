@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using DeliveryDriver.Company;
 using DeliveryDriver.Optimization;
+using DeliveryDriver.Vehicle;
 
 namespace TrafficSystem
 {
@@ -362,6 +363,7 @@ namespace TrafficSystem
                 // Initialize NPC components
                 if (carAgent != null)
                 {
+                    ConfigureNpcExhaustSmoke(npcVehicle);
                     carAgent.Initialize(roadGraphBuilder, segment, waypointIndex);
 
                     // Give initial velocity to start moving
@@ -613,6 +615,7 @@ namespace TrafficSystem
 
                 if (carAgent != null)
                 {
+                    ConfigureNpcExhaustSmoke(npc);
                     carAgent.Initialize(roadGraphBuilder, segment, waypointIndex);
 
                     // Give initial velocity to start moving
@@ -757,6 +760,7 @@ namespace TrafficSystem
 
                 if (carAgent != null)
                 {
+                    ConfigureNpcExhaustSmoke(npc);
                     carAgent.Initialize(roadGraphBuilder, segment, waypointIndex);
 
                     Rigidbody rb = npc.GetComponent<Rigidbody>();
@@ -1028,6 +1032,30 @@ namespace TrafficSystem
                 rb.linearVelocity = Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
             }
+        }
+
+        private static void ConfigureNpcExhaustSmoke(GameObject npc)
+        {
+            if (npc == null)
+            {
+                return;
+            }
+
+            VehicleExhaustSmoke exhaustSmoke = npc.GetComponent<VehicleExhaustSmoke>();
+            if (exhaustSmoke == null)
+            {
+                exhaustSmoke = npc.AddComponent<VehicleExhaustSmoke>();
+            }
+
+            string normalizedName = npc.name.ToLowerInvariant();
+            bool isHeavyVehicle =
+                normalizedName.Contains("lorry") ||
+                normalizedName.Contains("truck") ||
+                normalizedName.Contains("cargo");
+
+            exhaustSmoke.ConfigurePreset(isHeavyVehicle
+                ? VehicleExhaustSmokePreset.NpcTruckLight
+                : VehicleExhaustSmokePreset.NpcLight);
         }
 
         private int GetDesiredPoolSize()
