@@ -28,7 +28,7 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private AudioSource failureSound;
 
         [Header("Layout")]
-        [SerializeField] private Vector2 minimumResultPanelSize = new Vector2(860f, 560f);
+        [SerializeField] private Vector2 minimumResultPanelSize = new Vector2(900f, 700f);
         [SerializeField] private int minimumResultFontSize = 48;
         [SerializeField] private int minimumTitleFontSize = 30;
         [SerializeField] private int minimumBodyFontSize = 24;
@@ -295,9 +295,25 @@ namespace DeliveryDriver.Quest.UI
             if (quest.DeliveryLocations != null && quest.DeliveryLocations.Count > 1)
             {
                 int totalStops = quest.DeliveryLocations.Count;
-                int completedStops = Mathf.Clamp(quest.CurrentDeliveryIndex, 0, totalStops);
+                int completedStops = quest.Status == QuestStatus.Completed
+                    ? totalStops
+                    : Mathf.Clamp(quest.CurrentDeliveryIndex, 0, totalStops);
                 stopsLine = BuildMetricLine(GetDisplayLabel("stops"), $"{completedStops}/{totalStops}", UIThemeConstants.TextPrimary);
             }
+
+            string distanceLine = BuildMetricLine(
+                GetDisplayLabel("distance"),
+                quest.GetFormattedDistance(),
+                UIThemeConstants.TextPrimary);
+
+            PerformanceRating rating = quest.CalculateRating();
+            Color ratingColor = rating == PerformanceRating.S || rating == PerformanceRating.A
+                ? UIThemeConstants.Positive
+                : rating == PerformanceRating.B || rating == PerformanceRating.C ? UIThemeConstants.Warning : UIThemeConstants.Negative;
+            string ratingLine = BuildMetricLine(
+                GetDisplayLabel("rating"),
+                quest.GetRatingDisplay(),
+                ratingColor);
 
             string cargoLine = string.Empty;
             if (quest.Cargo != null && quest.Cargo.IsFragile)
@@ -327,7 +343,27 @@ namespace DeliveryDriver.Quest.UI
                 quest.DriftScorePoints.ToString(),
                 quest.DriftScorePoints > 0 ? UIThemeConstants.Info : UIThemeConstants.TextPrimary);
 
-            string[] lines = { timeLine, stopsLine, cargoLine, collisionLine, hardBrakeLine, driftLine, reasonLine, penaltyLine };
+            string payoutLine = string.Empty;
+            if (breakdown.HasValue)
+            {
+                QuestManager.RewardPenaltyBreakdown payout = breakdown.Value;
+                int bonusTotal = payout.SpeedBonus + payout.DriftBonus;
+                string finalText = payout.FinalReward > 0 ? $" = ${payout.FinalReward}" : string.Empty;
+                payoutLine = BuildMetricLine(
+                    GetDisplayLabel("reward_breakdown"),
+                    $"${payout.GrossReward} + ${bonusTotal} - ${payout.TotalPenalty}{finalText}",
+                    payout.TotalPenalty > 0 ? UIThemeConstants.Warning : UIThemeConstants.Positive);
+            }
+
+            string[] lines =
+            {
+                BuildMetricPair(timeLine, distanceLine),
+                BuildMetricPair(stopsLine, ratingLine),
+                BuildMetricPair(cargoLine, collisionLine),
+                BuildMetricPair(hardBrakeLine, driftLine),
+                payoutLine,
+                BuildMetricPair(reasonLine, penaltyLine)
+            };
             return string.Join("\n", Array.FindAll(lines, line => !string.IsNullOrWhiteSpace(line)));
         }
 
@@ -351,18 +387,31 @@ namespace DeliveryDriver.Quest.UI
             }
 
             StringBuilder builder = new StringBuilder(96);
-            builder.Append("<size=18><color=#")
+            builder.Append("<color=#")
                 .Append(ColorUtility.ToHtmlStringRGB(UIThemeConstants.TextSubheader))
                 .Append("><b>")
                 .Append(label)
-                .Append("</b></color></size>  ")
-                .Append("<size=22><color=#")
+                .Append("</b></color> ")
+                .Append("<color=#")
                 .Append(ColorUtility.ToHtmlStringRGB(valueColor))
                 .Append("><b>")
                 .Append(value)
-                .Append("</b></color></size>");
+                .Append("</b></color>");
 
             return builder.ToString();
+        }
+
+        private static string BuildMetricPair(string left, string right)
+        {
+            bool hasLeft = !string.IsNullOrWhiteSpace(left);
+            bool hasRight = !string.IsNullOrWhiteSpace(right);
+
+            if (hasLeft && hasRight)
+            {
+                return $"{left}   |   {right}";
+            }
+
+            return hasLeft ? left : hasRight ? right : string.Empty;
         }
 
         private static string GetDisplayLabel(string key)
@@ -420,6 +469,19 @@ namespace DeliveryDriver.Quest.UI
 
             if (resultPanel != null)
             {
+                Transform content = resultPanel.Find("Content");
+                if (content != null && content.TryGetComponent(out VerticalLayoutGroup contentLayout))
+                {
+                    contentLayout.padding = new RectOffset(0, 0, 12, 0);
+                    contentLayout.spacing = 12f;
+                }
+
+                SetPreferredHeight(resultPanel.Find("Content/ResultText"), 64f);
+                SetPreferredHeight(resultPanel.Find("Content/QuestName"), 34f);
+                SetPreferredHeight(resultPanel.Find("Content/StatsCard"), 300f);
+                SetPreferredHeight(resultPanel.Find("Content/RewardCard"), 104f);
+                SetPreferredHeight(resultPanel.Find("Content/ButtonRow"), 64f);
+
                 Transform statsCard = resultPanel.Find("Content/StatsCard");
                 if (statsCard != null && statsCard.TryGetComponent(out Image statsImage))
                 {
@@ -455,10 +517,10 @@ namespace DeliveryDriver.Quest.UI
                 statsText.alignment = TextAlignmentOptions.TopLeft;
                 statsText.textWrappingMode = TextWrappingModes.Normal;
                 statsText.enableAutoSizing = true;
-                statsText.fontSizeMin = 18f;
-                statsText.fontSizeMax = minimumBodyFontSize;
-                statsText.overflowMode = TextOverflowModes.Ellipsis;
-                statsText.lineSpacing = 6f;
+                statsText.fontSizeMin = 13f;
+                statsText.fontSizeMax = 18f;
+                statsText.overflowMode = TextOverflowModes.Truncate;
+                statsText.lineSpacing = 2f;
                 statsText.color = UIThemeConstants.TextSecondary;
             }
 
@@ -479,6 +541,17 @@ namespace DeliveryDriver.Quest.UI
                     buttonRect.sizeDelta = new Vector2(Mathf.Max(buttonRect.sizeDelta.x, 260f), Mathf.Max(buttonRect.sizeDelta.y, 64f));
                 }
             }
+        }
+
+        private static void SetPreferredHeight(Transform transform, float height)
+        {
+            if (transform == null || !transform.TryGetComponent(out LayoutElement layout))
+            {
+                return;
+            }
+
+            layout.minHeight = height;
+            layout.preferredHeight = height;
         }
 
         private static void ApplyMinimumTextStyle(TextMeshProUGUI text, int minimumFontSize)

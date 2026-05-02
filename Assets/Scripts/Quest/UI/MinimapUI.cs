@@ -42,8 +42,9 @@ namespace DeliveryDriver.Quest.UI
         [Header("Route")]
         [SerializeField] private bool showRoutePreview = true;
         [SerializeField] private float routeThickness = 4f;
-        [SerializeField] private float routeSimplifyTolerance = 5f;
+        [SerializeField] private float routeSimplifyTolerance = 9f;
         [SerializeField] private float routeMinSegmentScreenLength = 1.5f;
+        [SerializeField] private int routeVisualSmoothingPasses = 2;
 
         [Header("Style")]
         [SerializeField] private Color frameColor = new Color(0.05f, 0.08f, 0.13f, 0.92f);
@@ -53,6 +54,7 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private Color pickupMarkerColor = new Color(0.22f, 0.72f, 1f, 1f);
         [SerializeField] private Color deliveryMarkerColor = new Color(0.25f, 0.98f, 0.48f, 1f);
         [SerializeField] private Color routeColor = new Color(1f, 0.86f, 0.22f, 0.9f);
+        [SerializeField] private Color pickupRouteColor = new Color(0.2f, 0.62f, 1f, 0.95f);
         [SerializeField] private Color labelColor = new Color(0.92f, 0.97f, 1f, 0.92f);
 
         private RectTransform panelRect;
@@ -594,7 +596,12 @@ namespace DeliveryDriver.Quest.UI
 
         private void UpdateRouteOverlay()
         {
-            if (!showRoutePreview || overlayRect == null || playerTransform == null || currentRoute == null || !currentRoute.IsRenderable)
+            if (!showRoutePreview ||
+                overlayRect == null ||
+                playerTransform == null ||
+                currentRoute == null ||
+                !currentRoute.IsRenderable ||
+                !currentRoute.IsGraphRoute)
             {
                 SetRouteSegmentCount(0);
                 UpdateRouteSegmentDiagnostics(0);
@@ -607,6 +614,7 @@ namespace DeliveryDriver.Quest.UI
             int segmentCount = Mathf.Max(0, simplifiedRoutePoints.Count - 1);
             SetRouteSegmentCount(segmentCount);
             int visibleSegmentCount = 0;
+            Color activeRouteColor = ResolveRouteColor();
 
             for (int i = 0; i < segmentCount; i++)
             {
@@ -631,10 +639,15 @@ namespace DeliveryDriver.Quest.UI
                 segmentRect.anchoredPosition = from;
                 segmentRect.sizeDelta = new Vector2(length, Mathf.Max(1f, routeThickness));
                 segmentRect.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg);
-                segmentImage.color = routeColor;
+                segmentImage.color = activeRouteColor;
             }
 
             UpdateRouteSegmentDiagnostics(visibleSegmentCount);
+        }
+
+        private Color ResolveRouteColor()
+        {
+            return currentObjective.Type == ObjectiveType.Pickup ? pickupRouteColor : routeColor;
         }
 
         private void BuildRoutePolyline(IReadOnlyList<Vector3> worldPoints)
@@ -663,6 +676,14 @@ namespace DeliveryDriver.Quest.UI
 
                 projectedRoutePoints.Add(projected);
             }
+
+            if (projectedRoutePoints.Count <= 2)
+            {
+                simplifiedRoutePoints.AddRange(projectedRoutePoints);
+                return;
+            }
+
+            RemoveRouteJitter(minSegmentLengthSqr);
 
             if (projectedRoutePoints.Count <= 2)
             {
@@ -699,6 +720,63 @@ namespace DeliveryDriver.Quest.UI
             else
             {
                 simplifiedRoutePoints[simplifiedRoutePoints.Count - 1] = finalPoint;
+            }
+        }
+
+        private void RemoveRouteJitter(float minSegmentLengthSqr)
+        {
+            int passCount = Mathf.Clamp(routeVisualSmoothingPasses, 0, 4);
+            if (passCount <= 0 || projectedRoutePoints.Count <= 3)
+            {
+                return;
+            }
+
+            float corridor = Mathf.Max(routeSimplifyTolerance * 1.45f, Mathf.Sqrt(minSegmentLengthSqr) * 4f);
+            float corridorSqr = corridor * corridor;
+
+            for (int pass = 0; pass < passCount; pass++)
+            {
+                bool removedAny = false;
+                for (int i = 1; i < projectedRoutePoints.Count - 1; i++)
+                {
+                    Vector2 previous = projectedRoutePoints[i - 1];
+                    Vector2 current = projectedRoutePoints[i];
+                    Vector2 next = projectedRoutePoints[i + 1];
+
+                    Vector2 incoming = current - previous;
+                    Vector2 outgoing = next - current;
+                    Vector2 chord = next - previous;
+
+                    if (incoming.sqrMagnitude <= minSegmentLengthSqr ||
+                        outgoing.sqrMagnitude <= minSegmentLengthSqr)
+                    {
+                        projectedRoutePoints.RemoveAt(i--);
+                        removedAny = true;
+                        continue;
+                    }
+
+                    if (chord.sqrMagnitude <= minSegmentLengthSqr)
+                    {
+                        continue;
+                    }
+
+                    float deviation = DistancePointToSegment(current, previous, next);
+                    float detour = incoming.magnitude + outgoing.magnitude - chord.magnitude;
+                    bool shallowDetour = deviation <= corridor && detour <= corridor * 2.2f;
+                    bool tightSawtooth = deviation * deviation <= corridorSqr * 1.8f &&
+                                         Mathf.Min(incoming.sqrMagnitude, outgoing.sqrMagnitude) <= corridorSqr * 1.1f;
+
+                    if (shallowDetour || tightSawtooth)
+                    {
+                        projectedRoutePoints.RemoveAt(i--);
+                        removedAny = true;
+                    }
+                }
+
+                if (!removedAny)
+                {
+                    break;
+                }
             }
         }
 

@@ -207,7 +207,14 @@ namespace DeliveryDriver.Quest
 
             if (PlayerProgressionManager.Instance != null)
             {
-                PlayerProgressionManager.Instance.SpendMoney(amount);
+                int availableMoney = Mathf.Max(0, PlayerProgressionManager.Instance.CurrentMoney);
+                int spendAmount = Mathf.Min(amount, availableMoney);
+                if (spendAmount <= 0)
+                {
+                    return;
+                }
+
+                PlayerProgressionManager.Instance.SpendMoney(spendAmount);
                 return;
             }
 

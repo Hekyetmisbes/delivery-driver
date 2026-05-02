@@ -44,6 +44,15 @@ public class DeliveryManager : MonoBehaviour
 
     [Header("Delivery Settings")]
     [SerializeField] private float deliveryRadius = 5f;
+    [SerializeField] private Vector2 deliveryParkingSize = new Vector2(6.5f, 9f);
+    [SerializeField] private float deliveryParkingCompletionTolerance = 0.75f;
+    [SerializeField] private float deliveryQuestTriggerRadius = 0.35f;
+    [SerializeField] private Color deliveryParkingFillColor = new Color(0.1f, 0.85f, 1f, 0.2f);
+    [SerializeField] private Color deliveryParkingLineColor = new Color(0.35f, 1f, 0.9f, 0.9f);
+    [SerializeField] private float deliveryParkingGroundOffset = 0.04f;
+    [SerializeField] private float deliveryParkingLineWidth = 0.08f;
+    [SerializeField] private float deliveryParkingPulseSpeed = 2.2f;
+    [SerializeField] private float deliveryParkingPulseScale = 0.035f;
     [SerializeField] private bool autoGenerateSpawnPoints = true;
     [SerializeField] private int numberOfAutoSpawnPoints = 10;
     [SerializeField] private Vector2 spawnAreaMin = new Vector2(-50, -50);
@@ -104,6 +113,7 @@ public class DeliveryManager : MonoBehaviour
     private readonly List<Vector3> currentDeliveryStops = new List<Vector3>();
     private readonly List<string> currentDeliveryStopNeighborhoods = new List<string>();
     private int currentDeliveryStopIndex;
+    private Quaternion currentDeliveryParkingRotation = Quaternion.identity;
     private int lastObservedQuestDeliveryIndex = -1;
     private float currentMissionRewardMultiplier = 1f;
     private bool hasRushHourBonus;
@@ -129,6 +139,11 @@ public class DeliveryManager : MonoBehaviour
     private readonly Dictionary<int, int> roadGraphComponentBySegmentId = new Dictionary<int, int>();
     private RoadGraph cachedRoadGraphConnectivitySource;
     private int cachedRoadGraphConnectivitySegmentCount = -1;
+    private Transform deliveryParkingFill;
+    private LineRenderer deliveryParkingBorder;
+    private LineRenderer deliveryParkingCenterLine;
+    private Material deliveryParkingFillMaterial;
+    private Material deliveryParkingLineMaterial;
 
     public bool IsDeliveryActive => isDeliveryActive;
     public bool HasBox => currentBox != null;
@@ -409,6 +424,14 @@ public class DeliveryManager : MonoBehaviour
         if (deliveryUI != null)
         {
             deliveryUI.UpdateDistance(distance);
+        }
+
+        UpdateDeliveryParkingHologramAnimation();
+
+        if (IsPlayerFullyInsideDeliveryParkingBay(player))
+        {
+            TryCompleteCurrentDeliveryStop();
+            return;
         }
 
         // Delivery success is already validated by the actual target point / quest trigger.
@@ -811,6 +834,7 @@ public class DeliveryManager : MonoBehaviour
         currentDeliveryStopIndex = 0;
         currentDeliveryPoint = currentDeliveryStops[currentDeliveryStopIndex];
         currentDeliveryNeighborhoodName = currentDeliveryStopNeighborhoods[currentDeliveryStopIndex];
+        currentDeliveryParkingRotation = ResolveDeliveryParkingRotation(currentDeliveryPoint);
 
         if (useQuestSystem && currentDeliveryQuest != null)
         {
@@ -906,67 +930,373 @@ public class DeliveryManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Create ghost box preview at delivery location
+    /// Create parking bay hologram at delivery location
     /// </summary>
     private void CreateDeliveryPreview()
     {
-        if (boxPrefab == null || currentBox == null) return;
-
         if (pooledDeliveryPreview == null)
         {
-            pooledDeliveryPreview = Instantiate(boxPrefab, currentDeliveryPoint, Quaternion.identity);
-            pooledDeliveryPreview.name = "DeliveryPreview_GhostBox";
-
-            DeliveryBox previewBox = pooledDeliveryPreview.GetComponent<DeliveryBox>();
-            if (previewBox != null)
-            {
-                previewBox.enabled = false;
-            }
-
-            Rigidbody previewRb = pooledDeliveryPreview.GetComponent<Rigidbody>();
-            if (previewRb != null)
-            {
-                previewRb.isKinematic = true;
-                previewRb.useGravity = false;
-                previewRb.detectCollisions = false;
-            }
-
-            Collider[] previewColliders = pooledDeliveryPreview.GetComponentsInChildren<Collider>();
-            foreach (Collider col in previewColliders)
-            {
-                col.enabled = false;
-            }
-
-            MeshRenderer[] renderers = pooledDeliveryPreview.GetComponentsInChildren<MeshRenderer>();
-            foreach (MeshRenderer renderer in renderers)
-            {
-                foreach (Material mat in renderer.materials)
-                {
-                    mat.SetFloat("_Surface", 1);
-                    mat.SetFloat("_AlphaClip", 0);
-
-                    Color color = mat.color;
-                    color.a = 0.3f;
-                    mat.color = color;
-
-                    mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-                    mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-                    mat.SetInt("_ZWrite", 0);
-                    mat.renderQueue = 3000;
-                }
-            }
+            pooledDeliveryPreview = new GameObject("DeliveryParkingHologram");
+            BuildDeliveryParkingHologram(pooledDeliveryPreview.transform);
 
             pooledDeliveryPreview.SetActive(false);
         }
 
         currentDeliveryPreview = pooledDeliveryPreview;
-        currentDeliveryPreview.transform.SetPositionAndRotation(currentDeliveryPoint, Quaternion.identity);
+        currentDeliveryParkingRotation = ResolveDeliveryParkingRotation(currentDeliveryPoint);
+        currentDeliveryPreview.transform.SetPositionAndRotation(currentDeliveryPoint, currentDeliveryParkingRotation);
+        UpdateDeliveryParkingHologramPose();
         currentDeliveryPreview.SetActive(true);
 
         if (showDebugInfo)
         {
-            Debug.Log($"[DeliveryManager] Created ghost box preview at {currentDeliveryPoint}");
+            Debug.Log($"[DeliveryManager] Created delivery parking hologram at {currentDeliveryPoint}");
         }
+    }
+
+    private void BuildDeliveryParkingHologram(Transform root)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        GameObject fillObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        fillObject.name = "DeliveryParkingBayFill";
+        fillObject.transform.SetParent(root, false);
+        Collider fillCollider = fillObject.GetComponent<Collider>();
+        if (fillCollider != null)
+        {
+            fillCollider.enabled = false;
+        }
+
+        MeshRenderer fillRenderer = fillObject.GetComponent<MeshRenderer>();
+        deliveryParkingFillMaterial = CreateTransparentDeliveryParkingMaterial(deliveryParkingFillColor, fillRenderer);
+        if (fillRenderer != null && deliveryParkingFillMaterial != null)
+        {
+            fillRenderer.material = deliveryParkingFillMaterial;
+            fillRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            fillRenderer.receiveShadows = false;
+        }
+
+        deliveryParkingFill = fillObject.transform;
+        deliveryParkingBorder = CreateDeliveryParkingLine(root, "DeliveryParkingBayBorder", true);
+        deliveryParkingCenterLine = CreateDeliveryParkingLine(root, "DeliveryParkingBayCenterLine", false);
+    }
+
+    private LineRenderer CreateDeliveryParkingLine(Transform parent, string objectName, bool loop)
+    {
+        GameObject lineObject = new GameObject(objectName);
+        lineObject.transform.SetParent(parent, false);
+
+        LineRenderer line = lineObject.AddComponent<LineRenderer>();
+        line.useWorldSpace = false;
+        line.loop = loop;
+        line.widthMultiplier = Mathf.Max(0.02f, deliveryParkingLineWidth);
+        line.numCapVertices = 4;
+        line.numCornerVertices = 4;
+        line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        line.receiveShadows = false;
+
+        if (deliveryParkingLineMaterial == null)
+        {
+            deliveryParkingLineMaterial = CreateTransparentDeliveryParkingMaterial(deliveryParkingLineColor, null);
+        }
+
+        if (deliveryParkingLineMaterial != null)
+        {
+            line.material = deliveryParkingLineMaterial;
+        }
+
+        return line;
+    }
+
+    private Material CreateTransparentDeliveryParkingMaterial(Color color, MeshRenderer fallbackRenderer)
+    {
+        Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+        if (shader == null) shader = Shader.Find("Sprites/Default");
+        if (shader == null) shader = Shader.Find("Unlit/Color");
+        if (shader == null && fallbackRenderer != null && fallbackRenderer.sharedMaterial != null)
+        {
+            shader = fallbackRenderer.sharedMaterial.shader;
+        }
+
+        if (shader == null)
+        {
+            return null;
+        }
+
+        Material material = new Material(shader);
+        material.color = color;
+        material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        material.SetInt("_ZWrite", 0);
+        material.SetFloat("_Surface", 1f);
+        material.renderQueue = 3000;
+        return material;
+    }
+
+    private void UpdateDeliveryParkingHologramPose()
+    {
+        if (currentDeliveryPreview == null)
+        {
+            return;
+        }
+
+        Vector3 groundPoint = ResolveGroundPoint(currentDeliveryPoint);
+        currentDeliveryPreview.transform.SetPositionAndRotation(
+            groundPoint + Vector3.up * Mathf.Max(0.005f, deliveryParkingGroundOffset),
+            currentDeliveryParkingRotation);
+
+        float width = Mathf.Max(1f, deliveryParkingSize.x);
+        float length = Mathf.Max(width, deliveryParkingSize.y);
+
+        if (deliveryParkingFill != null)
+        {
+            deliveryParkingFill.localPosition = Vector3.zero;
+            deliveryParkingFill.localRotation = Quaternion.identity;
+            deliveryParkingFill.localScale = new Vector3(width, 0.025f, length);
+        }
+
+        if (deliveryParkingBorder != null)
+        {
+            float halfWidth = width * 0.5f;
+            float halfLength = length * 0.5f;
+            deliveryParkingBorder.positionCount = 4;
+            deliveryParkingBorder.SetPosition(0, new Vector3(-halfWidth, 0.035f, -halfLength));
+            deliveryParkingBorder.SetPosition(1, new Vector3(-halfWidth, 0.035f, halfLength));
+            deliveryParkingBorder.SetPosition(2, new Vector3(halfWidth, 0.035f, halfLength));
+            deliveryParkingBorder.SetPosition(3, new Vector3(halfWidth, 0.035f, -halfLength));
+        }
+
+        if (deliveryParkingCenterLine != null)
+        {
+            float halfLength = length * 0.38f;
+            deliveryParkingCenterLine.positionCount = 2;
+            deliveryParkingCenterLine.SetPosition(0, new Vector3(0f, 0.04f, -halfLength));
+            deliveryParkingCenterLine.SetPosition(1, new Vector3(0f, 0.04f, halfLength));
+        }
+    }
+
+    private void UpdateDeliveryParkingHologramAnimation()
+    {
+        if (currentDeliveryPreview == null || !currentDeliveryPreview.activeSelf)
+        {
+            return;
+        }
+
+        float pulse = 1f + Mathf.Sin(Time.time * deliveryParkingPulseSpeed) * deliveryParkingPulseScale;
+        currentDeliveryPreview.transform.localScale = new Vector3(pulse, 1f, pulse);
+        float alphaPulse = 0.75f + Mathf.Sin(Time.time * deliveryParkingPulseSpeed) * 0.25f;
+        SetMaterialAlpha(deliveryParkingFillMaterial, deliveryParkingFillColor.a * alphaPulse);
+        SetMaterialAlpha(deliveryParkingLineMaterial, deliveryParkingLineColor.a * alphaPulse);
+    }
+
+    private static void SetMaterialAlpha(Material material, float alpha)
+    {
+        if (material == null)
+        {
+            return;
+        }
+
+        Color color = material.color;
+        color.a = Mathf.Clamp01(alpha);
+        material.color = color;
+    }
+
+    private Vector3 ResolveGroundPoint(Vector3 position)
+    {
+        Vector3 origin = position + Vector3.up * raycastStartHeight;
+        if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, raycastMaxDistance + raycastStartHeight, groundMask, QueryTriggerInteraction.Ignore))
+        {
+            return hit.point;
+        }
+
+        return position;
+    }
+
+    private Quaternion ResolveDeliveryParkingRotation(Vector3 point)
+    {
+        if (roadGraphBuilder != null && roadGraphBuilder.RoadGraph != null)
+        {
+            var (_, _, _, tangent) = roadGraphBuilder.RoadGraph.ProjectPointOnRoad(point);
+            tangent.y = 0f;
+            if (tangent.sqrMagnitude > 0.0001f)
+            {
+                return Quaternion.LookRotation(tangent.normalized, Vector3.up);
+            }
+        }
+
+        if (cachedPlayerTransform != null)
+        {
+            Vector3 forward = cachedPlayerTransform.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude > 0.0001f)
+            {
+                return Quaternion.LookRotation(forward.normalized, Vector3.up);
+            }
+        }
+
+        return Quaternion.identity;
+    }
+
+    private bool IsPlayerFullyInsideDeliveryParkingBay(Transform player)
+    {
+        if (!isDeliveryActive || player == null)
+        {
+            return false;
+        }
+
+        Quaternion parkingRotation = currentDeliveryParkingRotation == Quaternion.identity
+            ? ResolveDeliveryParkingRotation(currentDeliveryPoint)
+            : currentDeliveryParkingRotation;
+        Vector3 bayCenter = ResolveGroundPoint(currentDeliveryPoint);
+        Quaternion inverseRotation = Quaternion.Inverse(parkingRotation);
+        float halfWidth = Mathf.Max(1f, deliveryParkingSize.x) * 0.5f + Mathf.Max(0f, deliveryParkingCompletionTolerance);
+        float halfLength = Mathf.Max(deliveryParkingSize.x, deliveryParkingSize.y) * 0.5f + Mathf.Max(0f, deliveryParkingCompletionTolerance);
+
+        if (!TryGetVehicleFootprintCorners(player, out Vector3[] corners))
+        {
+            Vector3 local = inverseRotation * (player.position - bayCenter);
+            return Mathf.Abs(local.x) <= halfWidth && Mathf.Abs(local.z) <= halfLength;
+        }
+
+        for (int i = 0; i < corners.Length; i++)
+        {
+            Vector3 local = inverseRotation * (corners[i] - bayCenter);
+            if (Mathf.Abs(local.x) > halfWidth || Mathf.Abs(local.z) > halfLength)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryGetVehicleFootprintCorners(Transform player, out Vector3[] corners)
+    {
+        corners = null;
+        if (player == null)
+        {
+            return false;
+        }
+
+        float minX = float.MaxValue;
+        float maxX = float.MinValue;
+        float minZ = float.MaxValue;
+        float maxZ = float.MinValue;
+        bool hasBounds = false;
+
+        Collider[] colliders = player.GetComponentsInChildren<Collider>(false);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            Collider col = colliders[i];
+            if (col == null || col.isTrigger || col is WheelCollider)
+            {
+                continue;
+            }
+
+            EncapsulateBoundsInVehicleSpace(player, col.bounds, ref minX, ref maxX, ref minZ, ref maxZ, ref hasBounds);
+        }
+
+        if (!hasBounds)
+        {
+            Renderer[] renderers = player.GetComponentsInChildren<Renderer>(false);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                Renderer renderer = renderers[i];
+                if (renderer == null || ShouldIgnoreVehicleFootprintRenderer(renderer))
+                {
+                    continue;
+                }
+
+                EncapsulateBoundsInVehicleSpace(player, renderer.bounds, ref minX, ref maxX, ref minZ, ref maxZ, ref hasBounds);
+            }
+        }
+
+        if (!hasBounds)
+        {
+            return false;
+        }
+
+        corners = new[]
+        {
+            player.TransformPoint(new Vector3(minX, 0f, minZ)),
+            player.TransformPoint(new Vector3(minX, 0f, maxZ)),
+            player.TransformPoint(new Vector3(maxX, 0f, maxZ)),
+            player.TransformPoint(new Vector3(maxX, 0f, minZ))
+        };
+        return true;
+    }
+
+    private static bool ShouldIgnoreVehicleFootprintRenderer(Renderer renderer)
+    {
+        if (renderer is ParticleSystemRenderer || renderer is LineRenderer || renderer is TrailRenderer)
+        {
+            return true;
+        }
+
+        string lowerName = renderer.name.ToLowerInvariant();
+        return lowerName.Contains("smoke") ||
+               lowerName.Contains("exhaust") ||
+               lowerName.Contains("trail") ||
+               lowerName.Contains("effect") ||
+               lowerName.Contains("hologram") ||
+               lowerName.Contains("marker");
+    }
+
+    private static void EncapsulateBoundsInVehicleSpace(
+        Transform vehicle,
+        Bounds bounds,
+        ref float minX,
+        ref float maxX,
+        ref float minZ,
+        ref float maxZ,
+        ref bool hasBounds)
+    {
+        Vector3 min = bounds.min;
+        Vector3 max = bounds.max;
+        Vector3[] points =
+        {
+            new Vector3(min.x, min.y, min.z),
+            new Vector3(min.x, min.y, max.z),
+            new Vector3(min.x, max.y, min.z),
+            new Vector3(min.x, max.y, max.z),
+            new Vector3(max.x, min.y, min.z),
+            new Vector3(max.x, min.y, max.z),
+            new Vector3(max.x, max.y, min.z),
+            new Vector3(max.x, max.y, max.z)
+        };
+
+        for (int i = 0; i < points.Length; i++)
+        {
+            Vector3 local = vehicle.InverseTransformPoint(points[i]);
+            minX = Mathf.Min(minX, local.x);
+            maxX = Mathf.Max(maxX, local.x);
+            minZ = Mathf.Min(minZ, local.z);
+            maxZ = Mathf.Max(maxZ, local.z);
+        }
+
+        hasBounds = true;
+    }
+
+    private void TryCompleteCurrentDeliveryStop()
+    {
+        if (!isDeliveryActive)
+        {
+            return;
+        }
+
+        if (useQuestSystem && currentDeliveryQuest != null && QuestManager.Instance != null && currentDeliveryQuest.Status == QuestStatus.Active)
+        {
+            if (!QuestManager.Instance.CommitExternalDeliveryStop(currentDeliveryQuest))
+            {
+                HandleDeliveryFailure("Delivery parking handoff failed");
+            }
+            return;
+        }
+
+        CompleteDelivery();
     }
 
     /// <summary>
@@ -1155,6 +1485,14 @@ public class DeliveryManager : MonoBehaviour
             return true;
         }
 
+        if (preferReachableSpawn &&
+            reachabilityRejectCount > 0 &&
+            TryFindConnectedRoadGraphSpawnPoint(reachabilityReferencePoint, enforceMinDistance, out Vector3 connectedFallback))
+        {
+            orderedCandidates.Add(connectedFallback);
+            return true;
+        }
+
         if (preferReachableSpawn && reachabilityRejectCount > 0)
         {
             Debug.LogWarning($"[DeliveryManager] No graph-reachable spawn found after rejecting {reachabilityRejectCount} unreachable candidate(s). Falling back to legacy spawn selection.");
@@ -1174,6 +1512,79 @@ public class DeliveryManager : MonoBehaviour
         }
 
         return orderedCandidates.Count > 0;
+    }
+
+    private bool TryFindConnectedRoadGraphSpawnPoint(Vector3 referencePoint, bool enforceMinDistance, out Vector3 spawnPoint)
+    {
+        spawnPoint = Vector3.zero;
+        if (!HasRoadGraphData())
+        {
+            return false;
+        }
+
+        RoadGraph graph = roadGraphBuilder.RoadGraph;
+        if (!TryEnsureRoadGraphConnectivityCache(graph))
+        {
+            return false;
+        }
+
+        var (referenceSegment, _, _, _) = graph.ProjectPointOnRoad(referencePoint);
+        if (referenceSegment == null ||
+            !roadGraphComponentBySegmentId.TryGetValue(referenceSegment.id, out int referenceComponent))
+        {
+            return false;
+        }
+
+        const int attempts = 260;
+        for (int i = 0; i < attempts; i++)
+        {
+            var randomWp = graph.GetRandomWaypoint();
+            if (randomWp.segment == null ||
+                !roadGraphComponentBySegmentId.TryGetValue(randomWp.segment.id, out int candidateComponent) ||
+                candidateComponent != referenceComponent)
+            {
+                continue;
+            }
+
+            Waypoint wp = randomWp.segment.GetWaypoint(randomWp.waypointIndex);
+            if (wp == null)
+            {
+                continue;
+            }
+
+            Vector3 rayStart = wp.position + Vector3.up * 60f;
+            if (!Physics.Raycast(rayStart, Vector3.down, out RaycastHit hit, 140f, ~0, QueryTriggerInteraction.Ignore))
+            {
+                continue;
+            }
+
+            if (hit.collider == null || hit.collider.isTrigger || Vector3.Dot(hit.normal, Vector3.up) < 0.65f)
+            {
+                continue;
+            }
+
+            bool acceptedRoad = HasRoadMask ? (IsRoadCollider(hit.collider) || IsLikelyRoadCollider(hit.collider)) : true;
+            if (!acceptedRoad)
+            {
+                Vector3 wpDelta = hit.point - wp.position;
+                wpDelta.y = 0f;
+                if (wpDelta.sqrMagnitude > 12.25f)
+                {
+                    continue;
+                }
+            }
+
+            Vector3 candidate = hit.point + Vector3.up * spawnHeight;
+            if (!IsSpawnCandidateEligible(candidate, true, referencePoint, enforceMinDistance))
+            {
+                continue;
+            }
+
+            spawnPoint = candidate;
+            return true;
+        }
+
+        return false;
     }
 
     private bool IsSpawnCandidateEligible(Vector3 candidate, bool validateAsRoadGraph, Vector3 referencePoint, bool enforceMinDistance)
@@ -1773,7 +2184,8 @@ public class DeliveryManager : MonoBehaviour
             showFloatingObjectiveMarkers ? deliveryIndicatorPrefab : null,
             deliveryRadius,
             showDebugInfo,
-            null);
+            null,
+            Mathf.Max(0.05f, deliveryQuestTriggerRadius));
     }
 
     /// <summary>
@@ -2002,6 +2414,7 @@ public class DeliveryManager : MonoBehaviour
         currentDeliveryStopIndex = questIndex;
         currentDeliveryPoint = currentDeliveryStops[currentDeliveryStopIndex];
         currentDeliveryNeighborhoodName = currentDeliveryStopNeighborhoods[currentDeliveryStopIndex];
+        currentDeliveryParkingRotation = ResolveDeliveryParkingRotation(currentDeliveryPoint);
         RefreshDeliveryNeighborhoodLabel();
 
         if (currentDeliveryIndicator != null)
@@ -2011,7 +2424,8 @@ public class DeliveryManager : MonoBehaviour
 
         if (currentDeliveryPreview != null)
         {
-            currentDeliveryPreview.transform.position = currentDeliveryPoint;
+            currentDeliveryPreview.transform.SetPositionAndRotation(currentDeliveryPoint, currentDeliveryParkingRotation);
+            UpdateDeliveryParkingHologramPose();
         }
 
         if (currentDeliveryQuest != null)

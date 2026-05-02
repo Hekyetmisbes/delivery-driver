@@ -107,7 +107,8 @@ internal static class DeliveryQuestFlow
         GameObject deliveryIndicatorPrefab,
         float deliveryRadius,
         bool showDebugInfo,
-        string firstObjectiveDescription)
+        string firstObjectiveDescription,
+        float deliveryTriggerRadius = -1f)
     {
         if (quest == null || deliveryStops == null || deliveryStops.Count == 0)
         {
@@ -115,7 +116,9 @@ internal static class DeliveryQuestFlow
         }
 
         quest.DeliveryLocations.Clear();
-        float questTriggerRadius = Mathf.Max(2f, deliveryRadius * 0.65f);
+        float questTriggerRadius = deliveryTriggerRadius > 0f
+            ? Mathf.Max(0.05f, deliveryTriggerRadius)
+            : Mathf.Max(2f, deliveryRadius * 0.65f);
         for (int i = 0; i < deliveryStops.Count; i++)
         {
             Vector3 stop = deliveryStops[i];

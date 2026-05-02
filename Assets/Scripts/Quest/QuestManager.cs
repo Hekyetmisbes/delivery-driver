@@ -86,9 +86,14 @@ namespace DeliveryDriver.Quest
         [SerializeField] private float collisionDamageThreshold = 10000f;
         [SerializeField] private float collisionDamageDivider = 1000f;
         [SerializeField] private float collisionDamageCooldown = 0.25f;
+        [SerializeField] private float collisionDamageGraceAfterPickupSeconds = 2.5f;
+        [SerializeField] private float maxCargoDamagePerCollision = 25f;
+        [SerializeField] private int minDamagingCollisionsBeforeCargoFail = 2;
         [Tooltip("Teslimat iptali için gereken minimum toplam çarpışma sayısı.")]
         [SerializeField] private int maxCollisionsBeforeCancel = 10;
         private float lastCollisionTime;
+        private int damagingCollisionCount;
+        private float lastCargoPickupTime = -999f;
 
         [Header("Quest Lists")]
         [SerializeField] private int maxActiveQuests = 3;
@@ -519,9 +524,9 @@ namespace DeliveryDriver.Quest
             }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (!debugInvincibleCargo && currentQuest.HasPickedUpCargo && currentQuest.Cargo != null && currentQuest.Cargo.IsFragile && currentQuest.Cargo.IsDestroyed())
+            if (!debugInvincibleCargo && ShouldFailForCargoDestroyed(currentQuest))
 #else
-            if (currentQuest.HasPickedUpCargo && currentQuest.Cargo != null && currentQuest.Cargo.IsFragile && currentQuest.Cargo.IsDestroyed())
+            if (ShouldFailForCargoDestroyed(currentQuest))
 #endif
             {
                 FailQuest(currentQuest, "Cargo destroyed");
@@ -748,6 +753,8 @@ namespace DeliveryDriver.Quest
 #endif
 
             quest.StartQuest();
+            damagingCollisionCount = 0;
+            lastCargoPickupTime = -999f;
             GetZoneMarkerService().ClearAllZones();
             if (ShouldQuestUseWorldZoneMarkers(quest))
             {
@@ -1049,6 +1056,32 @@ namespace DeliveryDriver.Quest
             return true;
         }
 
+        public bool CommitExternalDeliveryStop(QuestData quest)
+        {
+            if (quest == null || quest.Status != QuestStatus.Active)
+            {
+                return false;
+            }
+
+            if (!ReferenceEquals(currentQuest, quest))
+            {
+                if (!activeQuests.Contains(quest))
+                {
+                    return false;
+                }
+
+                currentQuest = quest;
+            }
+
+            if (!quest.HasPickedUpCargo || quest.DeliveryLocations == null || quest.DeliveryLocations.Count == 0)
+            {
+                return false;
+            }
+
+            OnCargoDelivered();
+            return true;
+        }
+
         private void OnCargoPickedUp()
         {
             if (currentQuest == null || currentQuest.HasPickedUpCargo)
@@ -1057,6 +1090,8 @@ namespace DeliveryDriver.Quest
             }
 
             currentQuest.HasPickedUpCargo = true;
+            damagingCollisionCount = 0;
+            lastCargoPickupTime = Time.time;
             currentQuest.PickupLocation?.HideMarker();
             GetZoneMarkerService().ClearAllZones();
             GetAudioPresentationService().PlayQuestClip(pickupClip);
@@ -1135,7 +1170,7 @@ namespace DeliveryDriver.Quest
 
         public void OnCargoDestroyed()
         {
-            if (currentQuest == null)
+            if (!ShouldFailForCargoDestroyed(currentQuest))
             {
                 return;
             }
@@ -1189,16 +1224,31 @@ namespace DeliveryDriver.Quest
 
             // Apply damage to fragile cargo
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (currentQuest.Cargo != null && currentQuest.Cargo.IsFragile && !debugInvincibleCargo)
+            if (currentQuest.HasPickedUpCargo && currentQuest.Cargo != null && currentQuest.Cargo.IsFragile && !debugInvincibleCargo)
 #else
-            if (currentQuest.Cargo != null && currentQuest.Cargo.IsFragile)
+            if (currentQuest.HasPickedUpCargo && currentQuest.Cargo != null && currentQuest.Cargo.IsFragile)
 #endif
             {
+                if (Time.time - lastCargoPickupTime < Mathf.Max(0f, collisionDamageGraceAfterPickupSeconds))
+                {
+                    MarkQuestUiDirty();
+                    return;
+                }
+
                 float damage = (force - collisionDamageThreshold) / collisionDamageDivider;
+                damage = Mathf.Clamp(damage, 0f, Mathf.Max(0.1f, maxCargoDamagePerCollision));
                 if (DriverProgressionSystem.Instance != null)
                 {
                     damage *= DriverProgressionSystem.Instance.GetCargoDamageMultiplier();
                 }
+
+                if (damage <= 0.01f)
+                {
+                    MarkQuestUiDirty();
+                    return;
+                }
+
+                damagingCollisionCount++;
                 currentQuest.Cargo.TakeDamage(damage);
                 cargoVisual?.PlayDamageEffect();
                 GetAudioPresentationService().PlayQuestClip(damageClip);
@@ -1272,6 +1322,22 @@ namespace DeliveryDriver.Quest
             // CompareTag logs an error when the target tag does not exist in TagManager.
             // Direct string compare avoids console spam for optional tags like NPC/Traffic.
             return string.Equals(gameObject.tag, tag, System.StringComparison.Ordinal);
+        }
+
+        private bool ShouldFailForCargoDestroyed(QuestData quest)
+        {
+            if (quest == null || !quest.HasPickedUpCargo || quest.Cargo == null || !quest.Cargo.IsFragile)
+            {
+                return false;
+            }
+
+            if (!quest.Cargo.IsDestroyed())
+            {
+                return false;
+            }
+
+            int requiredDamagingCollisions = Mathf.Max(1, minDamagingCollisionsBeforeCargoFail);
+            return damagingCollisionCount >= requiredDamagingCollisions;
         }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -2518,6 +2584,8 @@ namespace DeliveryDriver.Quest
             // Set as current quest
             currentQuest = quest;
             quest.Status = QuestStatus.Active;
+            damagingCollisionCount = 0;
+            lastCargoPickupTime = -999f;
 
             // Add to active quests if not already there
             if (!activeQuests.Contains(quest))

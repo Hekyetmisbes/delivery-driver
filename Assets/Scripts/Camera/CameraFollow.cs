@@ -93,13 +93,7 @@ public class CameraFollow : MonoBehaviour
 
     void Awake()
     {
-        mainCamera = GetComponent<Camera>();
-        cinemachineBrain = GetComponent<CinemachineBrain>();
-        gameplayRig = new CameraFollowGameplayRig(mainCamera, baseFov);
-        externalControllerCoordinator = new CameraFollowExternalControllerCoordinator();
-
-        gameplayRig.ResolveRig();
-        EnsureExternalCameraControllers();
+        EnsureInitialized();
     }
 
     void Start()
@@ -120,14 +114,15 @@ public class CameraFollow : MonoBehaviour
 
     public void SetTarget(Transform newTarget)
     {
+        EnsureInitialized();
+
         VehicleCameraBinding binding = VehicleCameraTargetResolver.Resolve(newTarget);
         target = binding.Target;
         targetRb = binding.Rigidbody;
         carController = binding.CarController;
         vehicleCameraAnchors = binding.CameraAnchors;
 
-        gameplayRig.ResolveRig();
-        EnsureExternalCameraControllers();
+        RefreshCameraControllers();
 
         if (target == null)
         {
@@ -167,6 +162,11 @@ public class CameraFollow : MonoBehaviour
 
     void EnsureExternalCameraControllers()
     {
+        if (externalControllerCoordinator == null)
+        {
+            return;
+        }
+
         externalControllerCoordinator.EnsureControllers(
             mainCamera,
             gameObject,
@@ -183,6 +183,37 @@ public class CameraFollow : MonoBehaviour
                 reverseCamFramePadding,
                 reverseCamFadeSpeed,
                 reverseCamGradientHeight));
+    }
+
+    void EnsureInitialized()
+    {
+        if (mainCamera == null)
+        {
+            mainCamera = GetComponent<Camera>();
+        }
+
+        if (cinemachineBrain == null)
+        {
+            cinemachineBrain = GetComponent<CinemachineBrain>();
+        }
+
+        if (gameplayRig == null)
+        {
+            gameplayRig = new CameraFollowGameplayRig(mainCamera, baseFov);
+        }
+
+        if (externalControllerCoordinator == null)
+        {
+            externalControllerCoordinator = new CameraFollowExternalControllerCoordinator();
+        }
+
+        RefreshCameraControllers();
+    }
+
+    void RefreshCameraControllers()
+    {
+        gameplayRig?.ResolveRig();
+        EnsureExternalCameraControllers();
     }
 
     void BindGameplayRig()

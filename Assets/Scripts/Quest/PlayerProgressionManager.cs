@@ -13,6 +13,8 @@ namespace DeliveryDriver.Quest
     public class PlayerProgressionManager : MonoBehaviour
     {
         private const float DatabaseReadyWaitTimeoutSeconds = 5f;
+        private const string MoneyPrefsKey = "DeliveryDriver.Player.CurrentMoney";
+        private const string MoneyPrefsVersionKey = "DeliveryDriver.Player.MoneyPersisted";
         public static PlayerProgressionManager Instance { get; private set; }
 
         [Header("Currency")]
@@ -129,12 +131,14 @@ namespace DeliveryDriver.Quest
                 else
                 {
                     // No save found - use defaults (level 1, $500 starting money)
+                    LoadMoneyFromPrefsFallback();
                     Debug.Log("[PlayerProgressionManager] No save found. Starting with default values.");
                     // Default values are already set in the serialized fields
                 }
             }
             else
             {
+                LoadMoneyFromPrefsFallback();
                 Debug.Log("[PlayerProgressionManager] SaveManager not found. Starting with default values.");
             }
 
@@ -548,6 +552,11 @@ namespace DeliveryDriver.Quest
             QuestDatabaseService database = QuestDatabaseService.Instance;
             if (database == null || !database.IsReady)
             {
+                if (LoadMoneyFromPrefsFallback())
+                {
+                    OnMoneyChanged.Invoke(currentMoney);
+                }
+
                 return false;
             }
 
@@ -555,6 +564,7 @@ namespace DeliveryDriver.Quest
             if (databaseBalance != currentMoney)
             {
                 currentMoney = Mathf.Max(0, databaseBalance);
+                PersistMoneyPrefsFallback();
                 OnMoneyChanged.Invoke(currentMoney);
             }
 
@@ -793,10 +803,12 @@ namespace DeliveryDriver.Quest
             }
 
             currentMoney = data.Money;
+            LoadMoneyFromPrefsFallback(preferHigherBalance: true);
             QuestDatabaseService database = QuestDatabaseService.Instance;
             if (database != null && database.IsReady)
             {
                 currentMoney = database.GetDefaultPlayerBalance(currentMoney);
+                PersistMoneyPrefsFallback();
             }
 
             currentLevel = data.Level;
@@ -872,6 +884,8 @@ namespace DeliveryDriver.Quest
 
         private void SyncMoneyToDatabase()
         {
+            PersistMoneyPrefsFallback();
+
             QuestDatabaseService database = QuestDatabaseService.Instance;
             if (database == null || !database.IsReady)
             {
@@ -880,6 +894,37 @@ namespace DeliveryDriver.Quest
 
             database.EnsureDefaultPlayer();
             database.SetDefaultPlayerBalance(currentMoney);
+        }
+
+        private bool LoadMoneyFromPrefsFallback(bool preferHigherBalance = false)
+        {
+            if (!PlayerPrefs.HasKey(MoneyPrefsVersionKey))
+            {
+                return false;
+            }
+
+            int persistedMoney = Mathf.Max(0, PlayerPrefs.GetInt(MoneyPrefsKey, currentMoney));
+            if (preferHigherBalance)
+            {
+                if (persistedMoney <= currentMoney)
+                {
+                    return false;
+                }
+            }
+            else if (persistedMoney == currentMoney)
+            {
+                return false;
+            }
+
+            currentMoney = persistedMoney;
+            return true;
+        }
+
+        private void PersistMoneyPrefsFallback()
+        {
+            PlayerPrefs.SetInt(MoneyPrefsVersionKey, 1);
+            PlayerPrefs.SetInt(MoneyPrefsKey, Mathf.Max(0, currentMoney));
+            PlayerPrefs.Save();
         }
 
         #endregion

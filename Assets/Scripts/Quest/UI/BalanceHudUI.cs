@@ -20,6 +20,7 @@ namespace DeliveryDriver.Quest.UI
         [SerializeField] private int fontSize = 34;
 
         private const string BalancePanelName = "BalanceHudPanel";
+        private const float DatabaseBalanceWarmupSeconds = 6f;
         private TextMeshProUGUI balanceText;
         private PlayerProgressionManager subscribedManager;
         private int lastKnownBalance;
@@ -28,6 +29,7 @@ namespace DeliveryDriver.Quest.UI
         private bool loggedMissingManagerWarning;
         private bool loggedMissingTextWarning;
         private bool loggedMissingUiRootWarning;
+        private bool suppressNextBalanceDeltaAnimation;
         private static Sprite panelSprite;
 
         private void OnEnable()
@@ -72,7 +74,9 @@ namespace DeliveryDriver.Quest.UI
         private IEnumerator RetryBindProgressionRoutine()
         {
             WaitForSeconds retryDelay = new WaitForSeconds(0.25f);
-            while (Application.isPlaying && subscribedManager == null)
+            float warmupStartedAt = Time.unscaledTime;
+
+            while (Application.isPlaying)
             {
                 if (!ShouldAttemptProgressionBinding())
                 {
@@ -84,8 +88,14 @@ namespace DeliveryDriver.Quest.UI
                 TrySubscribeToProgression(false);
                 if (subscribedManager != null)
                 {
-                    bindingRetryCoroutine = null;
-                    yield break;
+                    RefreshMoneyFromDatabaseSilently();
+                    RefreshBalanceText(subscribedManager.CurrentMoney);
+
+                    if (Time.unscaledTime - warmupStartedAt >= DatabaseBalanceWarmupSeconds)
+                    {
+                        bindingRetryCoroutine = null;
+                        yield break;
+                    }
                 }
 
                 yield return retryDelay;
@@ -268,6 +278,8 @@ namespace DeliveryDriver.Quest.UI
 
             if (subscribedManager == manager)
             {
+                RefreshMoneyFromDatabaseSilently();
+
                 if (ShouldDisplayHud())
                 {
                     EnsureHud();
@@ -284,6 +296,8 @@ namespace DeliveryDriver.Quest.UI
 
             UnsubscribeFromProgression();
             subscribedManager = manager;
+            RefreshMoneyFromDatabaseSilently();
+            suppressNextBalanceDeltaAnimation = false;
             lastKnownBalance = subscribedManager.CurrentMoney;
             subscribedManager.OnMoneyChanged.AddListener(OnMoneyChanged);
             loggedMissingManagerWarning = false;
@@ -326,13 +340,32 @@ namespace DeliveryDriver.Quest.UI
             lastKnownBalance = newAmount;
             RefreshBalanceText(newAmount);
 
-            if (delta != 0 && Application.isPlaying)
+            bool shouldAnimateDelta = delta != 0 && !suppressNextBalanceDeltaAnimation && Application.isPlaying;
+            suppressNextBalanceDeltaAnimation = false;
+
+            if (shouldAnimateDelta)
             {
                 ShowBalanceDelta(delta);
                 if (balancePanelRect != null)
                 {
                     UIAnimationHelper.PulseScale(this, balancePanelRect, 1.08f, UIThemeConstants.PulseDuration);
                 }
+            }
+        }
+
+        private void RefreshMoneyFromDatabaseSilently()
+        {
+            if (subscribedManager == null)
+            {
+                return;
+            }
+
+            int balanceBeforeRefresh = subscribedManager.CurrentMoney;
+            suppressNextBalanceDeltaAnimation = true;
+            bool refreshed = subscribedManager.RefreshMoneyFromDatabase();
+            if (!refreshed || subscribedManager.CurrentMoney == balanceBeforeRefresh)
+            {
+                suppressNextBalanceDeltaAnimation = false;
             }
         }
 
@@ -454,7 +487,7 @@ namespace DeliveryDriver.Quest.UI
 
         private void StartBindingRetryIfNeeded()
         {
-            if (!Application.isPlaying || subscribedManager != null || bindingRetryCoroutine != null || !ShouldAttemptProgressionBinding())
+            if (!Application.isPlaying || bindingRetryCoroutine != null || !ShouldAttemptProgressionBinding())
             {
                 return;
             }
