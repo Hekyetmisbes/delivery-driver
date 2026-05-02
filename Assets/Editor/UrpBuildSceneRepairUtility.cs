@@ -14,6 +14,7 @@ namespace DeliveryDriver.EditorTools
     public static class UrpBuildSceneRepairUtility
     {
         private const string MenuPath = "Tools/Rendering/Repair Build Scenes For URP";
+        private const string ProjectMaterialsMenuPath = "Tools/Rendering/Repair All Project Materials For URP";
         private const string AutoRepairSessionKey = "DeliveryDriver.EditorTools.UrpBuildSceneRepairUtility.AutoRepairCompleted";
         private const MaterialUpgrader.UpgradeFlags UpgradeFlags =
             MaterialUpgrader.UpgradeFlags.LogMessageWhenNoUpgraderFound;
@@ -39,6 +40,17 @@ namespace DeliveryDriver.EditorTools
         public static void RepairBuildScenesForUrpBatchMode()
         {
             RunRepair(interactive: false);
+        }
+
+        [MenuItem(ProjectMaterialsMenuPath)]
+        public static void RepairAllProjectMaterialsForUrp()
+        {
+            RunProjectMaterialRepair(interactive: true);
+        }
+
+        public static void RepairAllProjectMaterialsForUrpBatchMode()
+        {
+            RunProjectMaterialRepair(interactive: false);
         }
 
         public static void WriteBuildSceneUrpReportBatchMode()
@@ -203,6 +215,68 @@ namespace DeliveryDriver.EditorTools
                 $"[URP Repair] Active pipeline: {pipelineAsset.name}. " +
                 $"Upgraded {upgradedMaterialAssets} material assets, {upgradedPrefabMaterials} prefab-scoped materials, " +
                 $"{upgradedSceneMaterials} scene-scoped materials across {buildScenePaths.Count} build scenes.");
+        }
+
+        private static void RunProjectMaterialRepair(bool interactive)
+        {
+            if (GraphicsSettings.currentRenderPipeline is not UniversalRenderPipelineAsset pipelineAsset)
+            {
+                Fail("Project material repair skipped because no active Universal Render Pipeline asset is assigned.", interactive);
+                return;
+            }
+
+            List<MaterialUpgrader> upgraders = MaterialUpgrader.FetchAllUpgradersForPipeline(typeof(UniversalRenderPipelineAsset));
+            if (upgraders.Count == 0)
+            {
+                Fail("Project material repair skipped because Unity did not expose any material upgraders for Universal Render Pipeline.", interactive);
+                return;
+            }
+
+            HashSet<string> legacyShaderNames = BuildLegacyShaderNameSet(upgraders);
+            var processedMaterials = new HashSet<int>();
+            List<string> materialPaths = AssetDatabase.FindAssets("t:Material", new[] { "Assets" })
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Where(path => path.EndsWith(".mat", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            int upgradedMaterialAssets = 0;
+
+            try
+            {
+                AssetDatabase.StartAssetEditing();
+
+                foreach (string materialPath in materialPaths)
+                {
+                    Material material = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+                    if (!TryUpgradeMaterial(material, upgraders, processedMaterials, legacyShaderNames))
+                    {
+                        continue;
+                    }
+
+                    EditorUtility.SetDirty(material);
+                    upgradedMaterialAssets++;
+                }
+            }
+            finally
+            {
+                AssetDatabase.StopAssetEditing();
+            }
+
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+
+            string summary =
+                $"[URP Repair] Active pipeline: {pipelineAsset.name}. " +
+                $"Upgraded {upgradedMaterialAssets} material asset(s) across {materialPaths.Count} project material asset(s).";
+
+            Debug.Log(summary);
+
+            if (interactive && !Application.isBatchMode)
+            {
+                EditorUtility.DisplayDialog("URP Project Material Repair", summary, "OK");
+            }
         }
 
         private static int UpgradeMaterialsInLoadedScenes(
