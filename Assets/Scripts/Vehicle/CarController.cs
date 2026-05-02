@@ -250,6 +250,20 @@ public class CarController : MonoBehaviour
     private void HandleMotor()
     {
         float accelInput = smoothedThrottleInput;
+
+        // Fuel check: engine blocked if out of fuel
+        FuelSystem fuelSystem = GetComponent<FuelSystem>();
+        if (fuelSystem != null && fuelSystem.ShouldBlockEngine())
+        {
+            rearLeftCollider.motorTorque = 0f;
+            rearRightCollider.motorTorque = 0f;
+            float stopBrake = coastBrakeTorque * 2f;
+            frontLeftCollider.brakeTorque = stopBrake;
+            frontRightCollider.brakeTorque = stopBrake;
+            rearLeftCollider.brakeTorque = stopBrake;
+            rearRightCollider.brakeTorque = stopBrake;
+            return;
+        }
         
         // BUG FIX: "Teker dönüyor ama gitmiyor" sorununun ana kaynaklarından biri:
         // Fren torku 0 değilse motor torku çalışmaz. Gaz veriyorsak freni kesinlikle 0 yapmalıyız.

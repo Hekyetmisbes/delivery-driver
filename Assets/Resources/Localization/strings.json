@@ -187,7 +187,20 @@
     {"key": "activequest_deliver_to", "value": "Teslim et: {0}"},
     {"key": "quest_list_title", "value": "G\u00d6REVLER"},
     {"key": "quest_active_delivery_title", "value": "Teslimat G\u00f6revi"},
-    {"key": "quest_complete_button", "value": "Devam Et"}
+    {"key": "quest_complete_button", "value": "Devam Et"},
+    {"key": "fuel_label", "value": "Yak\u0131t"},
+    {"key": "fuel_station_title", "value": "Benzin \u0130stasyonu"},
+    {"key": "fuel_info", "value": "Yak\u0131t: {0}L / {1}L ({2}%)"},
+    {"key": "fuel_cost_info", "value": "Tam depo: ${0} | Bakiye: ${1}"},
+    {"key": "fuel_full_tank", "value": "Tam Depo"},
+    {"key": "fuel_half_tank", "value": "Yar\u0131m Depo"},
+    {"key": "fuel_tank_full", "value": "Yak\u0131t deponuz zaten dolu!"},
+    {"key": "fuel_tank_full_title", "value": "Depo Dolu"},
+    {"key": "fuel_low_warning", "value": "[!] YAKIT AZALIYOR!"},
+    {"key": "fuel_empty_title", "value": "Yak\u0131t Bitti!"},
+    {"key": "fuel_empty_return_home", "value": "Arac\u0131n\u0131z\u0131n yak\u0131t\u0131 bitti!\n\u00c7ekici ile eve d\u00f6nmek i\u00e7in ${0} \u00f6deyin."},
+    {"key": "fuel_empty_return_home_free", "value": "Arac\u0131n\u0131z\u0131n yak\u0131t\u0131 bitti!\n\u00c7ekici ile \u00fccretsiz eve d\u00f6n\u00fcn."},
+    {"key": "fuel_press_e", "value": "[E] Benzin Al"}
   ],
   "en": [
     {"key": "play", "value": "Play"},
@@ -377,6 +390,19 @@
     {"key": "activequest_deliver_to", "value": "Deliver to {0}"},
     {"key": "quest_list_title", "value": "QUESTS"},
     {"key": "quest_active_delivery_title", "value": "Delivery Mission"},
-    {"key": "quest_complete_button", "value": "Continue"}
+    {"key": "quest_complete_button", "value": "Continue"},
+    {"key": "fuel_label", "value": "Fuel"},
+    {"key": "fuel_station_title", "value": "Gas Station"},
+    {"key": "fuel_info", "value": "Fuel: {0}L / {1}L ({2}%)"},
+    {"key": "fuel_cost_info", "value": "Full tank: ${0} | Balance: ${1}"},
+    {"key": "fuel_full_tank", "value": "Full Tank"},
+    {"key": "fuel_half_tank", "value": "Half Tank"},
+    {"key": "fuel_tank_full", "value": "Your fuel tank is already full!"},
+    {"key": "fuel_tank_full_title", "value": "Tank Full"},
+    {"key": "fuel_low_warning", "value": "[!] FUEL RUNNING LOW!"},
+    {"key": "fuel_empty_title", "value": "Out of Fuel!"},
+    {"key": "fuel_empty_return_home", "value": "Your vehicle ran out of fuel!\nPay ${0} for a tow truck to return home."},
+    {"key": "fuel_empty_return_home_free", "value": "Your vehicle ran out of fuel!\nReturn home for free with a tow truck."},
+    {"key": "fuel_press_e", "value": "[E] Refuel"}
   ]
 }

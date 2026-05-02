@@ -77,6 +77,7 @@ public class GlobalUiCoordinator : MonoBehaviour
         EnsureBalanceHudComponent();
         EnsureBorderRespawnGuardComponent();
         EnsureMinimapComponent();
+        EnsureFuelHudComponent();
         RefreshSceneBindings();
     }
 
@@ -133,6 +134,7 @@ public class GlobalUiCoordinator : MonoBehaviour
         EnsureBalanceHudComponent();
         EnsureBorderRespawnGuardComponent();
         EnsureMinimapComponent();
+        EnsureFuelHudComponent();
         if (adoptExistingCanvases)
         {
             ReparentSceneCanvases();
@@ -231,6 +233,14 @@ public class GlobalUiCoordinator : MonoBehaviour
         if (GetComponent<BorderRespawnGuard>() == null)
         {
             gameObject.AddComponent<BorderRespawnGuard>();
+        }
+    }
+
+    private void EnsureFuelHudComponent()
+    {
+        if (GetComponent<FuelHudUI>() == null)
+        {
+            gameObject.AddComponent<FuelHudUI>();
         }
     }
 
