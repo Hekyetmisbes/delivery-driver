@@ -132,6 +132,16 @@ namespace TrafficSystem
         [Tooltip("Rear obstacle check distance before reversing (meters)")]
         [SerializeField] private float reverseRearCheckDistance = 5f;
 
+        [Header("Static Obstacle Recovery")]
+        [Tooltip("Treat buildings and other static world colliders as blockers instead of trying to drive through them")]
+        [SerializeField] private bool enableStaticObstacleRecovery = true;
+        [Tooltip("Reverse duration used after touching a building/static obstacle")]
+        [SerializeField] private float staticObstacleReverseDuration = 1.5f;
+        [Tooltip("Seconds of continued static collision before snapping back to the road")]
+        [SerializeField] private float staticObstacleSnapDelay = 2.5f;
+        [Tooltip("Cooldown between static-obstacle snap recoveries")]
+        [SerializeField] private float staticObstacleSnapCooldown = 6f;
+
         [Header("Following Distance (Priority 1)")]
         [Tooltip("Following time in seconds (2-3 second rule)")]
         [SerializeField] private float followingTimeSeconds = 2.5f;
@@ -179,6 +189,12 @@ namespace TrafficSystem
         [SerializeField] private float maxConnectionTurnAngle = 90f;
         [Tooltip("Let lookahead continue into the next chosen segment so vehicles begin turning before the segment ends")]
         [SerializeField] private bool previewUpcomingConnections = true;
+        [Tooltip("Distance before an intersection where the next segment decision is locked")]
+        [SerializeField] private float intersectionCommitDistance = 18f;
+        [Tooltip("Extra lookahead multiplier while committed to an intersection path")]
+        [SerializeField] private float intersectionLookAheadBoost = 1.35f;
+        [Tooltip("Maximum target steering angle change per second")]
+        [SerializeField] private float maxSteerTargetDeltaPerSecond = 140f;
 
         [Header("Environmental Awareness (Priority 3)")]
         [Tooltip("Enable weather-based behavior adjustments")]
@@ -288,6 +304,7 @@ namespace TrafficSystem
         private float currentLateralOffset;
 
         // Randomized behavior parameters
+        private bool runtimeDrivingInitialized;
         private float lateralOffset; // Lateral offset from centerline (for lane variation)
         private float cruisingLaneOffset;
         private float preferredCruiseLaneSign = 1f;
@@ -324,6 +341,8 @@ namespace TrafficSystem
         private int plannedContinuationWaypointIndex = -1;
         private int plannedContinuationSourceSegmentId = -1;
         private bool hasPlannedContinuation;
+        private float smoothedTargetSteerAngle;
+        private bool hasSmoothedTargetSteerAngle;
 
         // Priority 3: Environmental Awareness
         private float weatherSpeedMultiplier = 1f;
@@ -337,6 +356,9 @@ namespace TrafficSystem
         private float blockedTimer;
         private bool rearObstacleDetected;
         private float rearObstacleDistance;
+        private bool isStaticObstacleCollision;
+        private float staticObstacleCollisionTimer;
+        private float lastStaticObstacleSnapTime;
 
         // Public accessors
         public RoadSegment CurrentSegment => currentSegment;
@@ -485,39 +507,7 @@ namespace TrafficSystem
 
         private void Start()
         {
-            if (enforceRightHandSingleLane)
-            {
-                useFixedLaneCenters = true;
-                randomizeInitialLane = false;
-                enableLaneChange = false;
-            }
-
-            // Priority 2: Initialize personality system
-            InitializePersonality();
-
-            // Random cruise speed for this NPC with larger variation
-            targetSpeed = Random.Range(cruiseSpeedRange.x, cruiseSpeedRange.y);
-
-            // Add 30% random variation to make each car more unique
-            float variation = targetSpeed * Random.Range(-0.3f, 0.3f);
-            targetSpeed += variation;
-            targetSpeed = Mathf.Max(20f, targetSpeed); // Minimum 20 km/h
-
-            preferredCruiseLaneSign = randomizeInitialLane && Random.value < 0.5f ? -1f : 1f;
-            if (enforceRightHandSingleLane)
-            {
-                // GetLookAheadPoint offsets by Cross(tangent, up), so negative keeps traffic on road-right.
-                preferredCruiseLaneSign = -1f;
-            }
-
-            ApplyLaneCenteringPolicyForCurrentSegment();
-            personalityLookAhead = lookAheadDistance * Random.Range(0.9f, 1.1f); // Keep path progression stable
-            personalityAcceleration = acceleration * Random.Range(0.9f, 1.1f);
-            personalitySteerSpeed = steeringSmoothSpeed * Random.Range(0.9f, 1.1f);
-
-            // Initialize overtaking flags
-            isOvertaking = false;
-            isChangingLanes = false;
+            EnsureDrivingRuntimeInitialized();
 
             if (logPathChanges)
             {
@@ -570,10 +560,14 @@ namespace TrafficSystem
         /// </summary>
         public void Initialize(RoadGraphBuilder builder, RoadSegment segment, int waypointIndex)
         {
+            EnsureDrivingRuntimeInitialized();
+
             roadGraphBuilder = builder;
             currentSegment = segment;
             currentWaypointIndex = Mathf.Clamp(waypointIndex, 0, segment.waypoints.Count - 1);
             ClearPlannedContinuation();
+            ResetTransientSpawnState();
+            hasSmoothedTargetSteerAngle = false;
             ApplyLaneCenteringPolicyForCurrentSegment();
             isInitialized = true;
 
@@ -663,6 +657,7 @@ namespace TrafficSystem
             // FIX: Periodically reacquire a valid nearby forward waypoint before progressing path.
             ReacquireWaypointIfNeeded();
             UpdatePath();
+            UpdateIntersectionCommitment();
 
             // Decimate expensive checks for distant, low-risk NPCs while keeping nearby traffic responsive.
             if (ShouldRunAdaptiveCheck(OffRoadCheckInterval, optimizer))
@@ -1058,7 +1053,8 @@ namespace TrafficSystem
                 flatForward = Vector3.forward;
             }
 
-            int start = Mathf.Clamp(currentWaypointIndex - reacquireSearchBehind, 0, waypointCount - 1);
+            int searchBehind = hasPlannedContinuation ? 0 : reacquireSearchBehind;
+            int start = Mathf.Clamp(currentWaypointIndex - searchBehind, 0, waypointCount - 1);
             int end = Mathf.Clamp(currentWaypointIndex + reacquireSearchAhead, 0, waypointCount - 1);
             if (end < start)
             {
@@ -1130,6 +1126,77 @@ namespace TrafficSystem
             }
         }
 
+        private void EnsureDrivingRuntimeInitialized()
+        {
+            if (runtimeDrivingInitialized)
+            {
+                return;
+            }
+
+            if (enforceRightHandSingleLane)
+            {
+                useFixedLaneCenters = true;
+                randomizeInitialLane = false;
+                enableLaneChange = false;
+            }
+
+            InitializePersonality();
+
+            targetSpeed = Random.Range(cruiseSpeedRange.x, cruiseSpeedRange.y);
+            float variation = targetSpeed * Random.Range(-0.3f, 0.3f);
+            targetSpeed = Mathf.Max(20f, targetSpeed + variation);
+
+            preferredCruiseLaneSign = randomizeInitialLane && Random.value < 0.5f ? -1f : 1f;
+            if (enforceRightHandSingleLane)
+            {
+                // GetLookAheadPoint offsets by Cross(tangent, up), so negative keeps traffic on road-right.
+                preferredCruiseLaneSign = -1f;
+            }
+
+            personalityLookAhead = Mathf.Max(2f, lookAheadDistance * Random.Range(0.9f, 1.1f));
+            personalityAcceleration = Mathf.Max(1f, acceleration * Random.Range(0.9f, 1.1f));
+            personalitySteerSpeed = Mathf.Max(1f, steeringSmoothSpeed * Random.Range(0.9f, 1.1f));
+            isOvertaking = false;
+            isChangingLanes = false;
+            runtimeDrivingInitialized = true;
+        }
+
+        private void ResetTransientSpawnState()
+        {
+            isObstacleDetected = false;
+            obstacleDistance = float.MaxValue;
+            mustStopForVehicle = false;
+            vehicleStopDistance = float.MaxValue;
+            predictiveSpeedLimiter = 1f;
+            imminentCollisionRisk = false;
+            isFollowing = false;
+            vehicleAhead = null;
+            distanceToVehicleAhead = 0f;
+            relativeSpeedToVehicleAhead = 0f;
+            isColliding = false;
+            collisionTimer = 0f;
+            separationDirection = Vector3.zero;
+            nearbyVehicles.Clear();
+            isReversing = false;
+            reverseTimer = 0f;
+            blockedTimer = 0f;
+            rearObstacleDetected = false;
+            rearObstacleDistance = float.MaxValue;
+            isStaticObstacleCollision = false;
+            staticObstacleCollisionTimer = 0f;
+            currentSteerAngle = 0f;
+            hasSmoothedTargetSteerAngle = false;
+
+            if (rb != null)
+            {
+                rb.isKinematic = false;
+                rb.WakeUp();
+            }
+
+            SetMotorTorque(0f);
+            SetBrakeTorque(0f);
+        }
+
         private void CollectEndConnections(List<RoadConnection> buffer)
         {
             buffer.Clear();
@@ -1175,6 +1242,7 @@ namespace TrafficSystem
             {
                 nextSegment = plannedContinuationSegment;
                 nextWaypointIndex = Mathf.Clamp(plannedContinuationWaypointIndex, 0, plannedContinuationSegment.waypoints.Count - 1);
+                UpdateCommittedTurnSignal();
                 return true;
             }
 
@@ -1209,7 +1277,33 @@ namespace TrafficSystem
 
             nextSegment = plannedContinuationSegment;
             nextWaypointIndex = Mathf.Clamp(plannedContinuationWaypointIndex, 0, plannedContinuationSegment.waypoints.Count - 1);
+            UpdateCommittedTurnSignal();
             return true;
+        }
+
+        private void UpdateIntersectionCommitment()
+        {
+            if (!previewUpcomingConnections ||
+                currentSegment == null ||
+                currentSegment.waypoints == null ||
+                currentSegment.waypoints.Count < 2)
+            {
+                return;
+            }
+
+            if (hasPlannedContinuation &&
+                plannedContinuationSourceSegmentId == currentSegment.id &&
+                plannedContinuationSegment != null)
+            {
+                return;
+            }
+
+            float distanceToEnd = GetDistanceFromWaypointToSegmentEnd(currentSegment, currentWaypointIndex);
+            float commitDistance = Mathf.Max(intersectionCommitDistance, personalityLookAhead * intersectionLookAheadBoost);
+            if (distanceToEnd <= commitDistance)
+            {
+                TryGetPlannedContinuation(out _, out _);
+            }
         }
 
         private void ClearPlannedContinuation()
@@ -1219,6 +1313,11 @@ namespace TrafficSystem
             plannedContinuationWaypointIndex = -1;
             plannedContinuationSourceSegmentId = -1;
             hasPlannedContinuation = false;
+
+            if (turnSignalController != null && !isChangingLanes && !isOvertaking)
+            {
+                turnSignalController.DeactivateAll();
+            }
         }
 
         private bool TryGetNearbyContinuation(out RoadSegment nextSegment, out int nextWaypointIndex)
@@ -1278,6 +1377,23 @@ namespace TrafficSystem
             return nextSegment != null;
         }
 
+        private float GetDistanceFromWaypointToSegmentEnd(RoadSegment segment, int startIndex)
+        {
+            if (segment == null || segment.waypoints == null || segment.waypoints.Count < 2)
+            {
+                return float.MaxValue;
+            }
+
+            startIndex = Mathf.Clamp(startIndex, 0, segment.waypoints.Count - 1);
+            float distance = 0f;
+            for (int i = startIndex; i < segment.waypoints.Count - 1; i++)
+            {
+                distance += Vector3.Distance(segment.waypoints[i].position, segment.waypoints[i + 1].position);
+            }
+
+            return distance;
+        }
+
         private RoadConnection SelectBestConnection(List<RoadConnection> connections)
         {
             if (connections == null || connections.Count == 0)
@@ -1288,10 +1404,8 @@ namespace TrafficSystem
             // Filter to only valid, forward-facing connections (exclude U-turns)
             Vector3 currentForward = GetSegmentExitForward(currentSegment);
             float straightDotThreshold = Mathf.Cos(straightConnectionAngleThreshold * Mathf.Deg2Rad);
-            RoadConnection bestStraightConnection = null;
-            float bestStraightDot = float.NegativeInfinity;
-            List<RoadConnection> turnConnections = new List<RoadConnection>();
-            List<float> turnWeights = new List<float>();
+            RoadConnection bestConnection = null;
+            float bestScore = float.NegativeInfinity;
 
             for (int i = 0; i < connections.Count; i++)
             {
@@ -1302,56 +1416,87 @@ namespace TrafficSystem
                 }
 
                 float lanePreference = GetLanePreferenceMultiplier(connection.toSegment);
-                float weightedDot = dot + ((lanePreference - 1f) * 0.25f);
+                float score = ScoreConnection(connection, currentForward, dot, lanePreference, straightDotThreshold);
 
-                if (dot >= straightDotThreshold)
+                if (score > bestScore)
                 {
-                    if (weightedDot > bestStraightDot)
-                    {
-                        bestStraightDot = weightedDot;
-                        bestStraightConnection = connection;
-                    }
-                    continue;
-                }
-
-                turnConnections.Add(connection);
-                turnWeights.Add(Mathf.Max(0.1f, (dot + 1f) * lanePreference));
-            }
-
-            if (bestStraightConnection != null)
-            {
-                return bestStraightConnection;
-            }
-
-            if (turnConnections.Count == 1)
-            {
-                return turnConnections[0];
-            }
-
-            if (turnConnections.Count == 0)
-            {
-                return null;
-            }
-
-            // Only choose between turn options when no straight continuation exists.
-            float totalWeight = 0f;
-            for (int i = 0; i < turnWeights.Count; i++)
-            {
-                totalWeight += turnWeights[i];
-            }
-
-            float roll = Random.Range(0f, totalWeight);
-            float cumulative = 0f;
-            for (int i = 0; i < turnConnections.Count; i++)
-            {
-                cumulative += turnWeights[i];
-                if (roll <= cumulative)
-                {
-                    return turnConnections[i];
+                    bestScore = score;
+                    bestConnection = connection;
                 }
             }
 
-            return turnConnections[turnConnections.Count - 1];
+            return bestConnection;
+        }
+
+        private float ScoreConnection(RoadConnection connection, Vector3 currentForward, float dot, float lanePreference, float straightDotThreshold)
+        {
+            float score = dot * 8f;
+            score += lanePreference;
+
+            if (dot >= straightDotThreshold)
+            {
+                score += 8f;
+            }
+
+            if (connection == null || connection.toSegment == null)
+            {
+                return score;
+            }
+
+            Vector3 fromPos = currentSegment.waypoints[Mathf.Clamp(connection.fromWaypointIndex, 0, currentSegment.waypoints.Count - 1)].position;
+            Vector3 toPos = connection.toSegment.waypoints[Mathf.Clamp(connection.toWaypointIndex, 0, connection.toSegment.waypoints.Count - 1)].position;
+            Vector3 delta = toPos - fromPos;
+            delta.y = 0f;
+            score -= delta.magnitude * 0.15f;
+
+            Vector3 right = Vector3.Cross(Vector3.up, currentForward);
+            if (right.sqrMagnitude > 0.0001f)
+            {
+                right.Normalize();
+                float side = Vector3.Dot(delta, right);
+                if (enforceRightHandSingleLane && side > 0f)
+                {
+                    score += 0.5f;
+                }
+            }
+
+            return score;
+        }
+
+        private void UpdateCommittedTurnSignal()
+        {
+            if (turnSignalController == null ||
+                isChangingLanes ||
+                isOvertaking ||
+                !hasPlannedContinuation ||
+                plannedContinuationSegment == null)
+            {
+                return;
+            }
+
+            Vector3 currentForward = GetSegmentExitForward(currentSegment);
+            Vector3 nextForward = GetConnectionTravelForward(plannedContinuationSegment, plannedContinuationWaypointIndex);
+            float turnAngle = Vector3.Angle(currentForward, nextForward);
+            if (turnAngle <= 15f)
+            {
+                return;
+            }
+
+            Vector3 right = Vector3.Cross(Vector3.up, currentForward);
+            if (right.sqrMagnitude < 0.0001f)
+            {
+                return;
+            }
+
+            float side = Vector3.Dot(nextForward, right.normalized);
+            if (side >= 0f)
+            {
+                turnSignalController.ActivateRight();
+            }
+            else
+            {
+                turnSignalController.ActivateLeft();
+            }
         }
 
         private float GetLanePreferenceMultiplier(RoadSegment segment)
@@ -1578,12 +1723,24 @@ namespace TrafficSystem
 
             // Calculate steering angle using Pure Pursuit
             Vector3 localTarget = Quaternion.Inverse(GetVehicleRotation()) * (flatLookAhead - transform.position);
+            float safeMaxSteerAngle = Mathf.Max(1f, maxSteerAngle);
             float targetSteerAngle = Mathf.Atan2(localTarget.x, localTarget.z) * Mathf.Rad2Deg;
-            targetSteerAngle = Mathf.Clamp(targetSteerAngle, -maxSteerAngle, maxSteerAngle);
+            targetSteerAngle = Mathf.Clamp(targetSteerAngle, -safeMaxSteerAngle, safeMaxSteerAngle);
+
+            if (!hasSmoothedTargetSteerAngle)
+            {
+                smoothedTargetSteerAngle = targetSteerAngle;
+                hasSmoothedTargetSteerAngle = true;
+            }
+            else
+            {
+                float maxDelta = Mathf.Max(1f, maxSteerTargetDeltaPerSecond) * Time.fixedDeltaTime;
+                smoothedTargetSteerAngle = Mathf.MoveTowards(smoothedTargetSteerAngle, targetSteerAngle, maxDelta);
+            }
 
             // Smooth steering with adaptive speed based on turn sharpness and personality
-            float steerSpeed = personalitySteerSpeed * (1f + Mathf.Abs(targetSteerAngle) / maxSteerAngle);
-            currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteerAngle, Time.fixedDeltaTime * steerSpeed);
+            float steerSpeed = personalitySteerSpeed * (1f + Mathf.Abs(smoothedTargetSteerAngle) / safeMaxSteerAngle);
+            currentSteerAngle = Mathf.Lerp(currentSteerAngle, smoothedTargetSteerAngle, Time.fixedDeltaTime * steerSpeed);
 
             // Reduce steering when off-road to prevent wild maneuvers
             float finalSteerAngle = currentSteerAngle;
@@ -1644,7 +1801,20 @@ namespace TrafficSystem
             }
 
             // FIX: Traverse path polyline distance instead of car-to-waypoint distances.
+            bool previewCommittedPath =
+                previewUpcomingConnections &&
+                hasPlannedContinuation &&
+                plannedContinuationSourceSegmentId == currentSegment.id &&
+                plannedContinuationSegment != null;
             float remaining = Mathf.Max(1f, personalityLookAhead);
+            if (previewCommittedPath)
+            {
+                float distanceToEnd = GetDistanceFromWaypointToSegmentEnd(currentSegment, startIndex);
+                float nextSegmentPreviewDistance = Mathf.Max(2f, personalityLookAhead * 0.35f);
+                float boostedLookAhead = personalityLookAhead * Mathf.Max(1f, intersectionLookAheadBoost);
+                remaining = Mathf.Max(boostedLookAhead, distanceToEnd + nextSegmentPreviewDistance);
+            }
+
             Vector3 targetPoint = currentSegment.waypoints[startIndex].position;
             Vector3 targetTangent = flatForward;
             bool targetFound = TryAdvanceLookAheadOnSegment(currentSegment, startIndex, ref remaining, ref targetPoint, ref targetTangent);
@@ -1785,13 +1955,27 @@ namespace TrafficSystem
                         DecideLaneChange();
                     }
                 }
+                else if (IsStaticWorldObstacle(centerHit.collider))
+                {
+                    isObstacleDetected = true;
+                    obstacleDistance = Mathf.Min(obstacleDistance, centerHit.distance);
+                    imminentCollisionRisk = centerHit.distance < safeFollowingDistance;
+                    mustStopForVehicle = centerHit.distance < criticalBrakingDistance;
+                    predictiveSpeedLimiter = Mathf.Min(predictiveSpeedLimiter, centerHit.distance < criticalBrakingDistance ? 0f : 0.35f);
+
+                    if (enableLaneChange && obstacleDistance < safeFollowingDistance)
+                    {
+                        CheckLaneAvailability(rayOrigin, forward, right);
+                        DecideLaneChange();
+                    }
+                }
             }
 
             // Left raycast - check left lane
             Vector3 leftOrigin = rayOrigin - right * sideRayOffset;
             if (Physics.Raycast(leftOrigin, forward, out RaycastHit leftHit, sideRayDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore))
             {
-                if (IsVehicleCollider(leftHit.collider))
+                if (IsVehicleCollider(leftHit.collider) || IsStaticWorldObstacle(leftHit.collider))
                 {
                     leftLaneClear = false;
                 }
@@ -1801,7 +1985,7 @@ namespace TrafficSystem
             Vector3 rightOrigin = rayOrigin + right * sideRayOffset;
             if (Physics.Raycast(rightOrigin, forward, out RaycastHit rightHit, sideRayDistance, obstacleLayerMask, QueryTriggerInteraction.Ignore))
             {
-                if (IsVehicleCollider(rightHit.collider))
+                if (IsVehicleCollider(rightHit.collider) || IsStaticWorldObstacle(rightHit.collider))
                 {
                     rightLaneClear = false;
                 }
@@ -1963,6 +2147,7 @@ namespace TrafficSystem
 
             bool frontBlocked = isObstacleDetected && obstacleDistance < Mathf.Max(criticalBrakingDistance + 1f, safeFollowingDistance * 0.45f);
             if (isColliding) frontBlocked = true;
+            if (isStaticObstacleCollision) frontBlocked = true;
 
             float signedSpeed = Vector3.Dot(rb.linearVelocity, GetWorldForward()) * 3.6f;
             bool nearlyStopped = Mathf.Abs(signedSpeed) <= Mathf.Max(0.1f, reverseStuckSpeedThreshold);
@@ -1982,14 +2167,15 @@ namespace TrafficSystem
             bool rearClearEnough = !rearObstacleDetected || rearObstacleDistance > Mathf.Max(1.5f, reverseRearCheckDistance * 0.7f);
             if (rearClearEnough)
             {
-                StartReverse();
+                StartReverse(isStaticObstacleCollision ? staticObstacleReverseDuration : reverseDuration);
             }
         }
 
-        private void StartReverse()
+        private void StartReverse(float durationOverride = -1f)
         {
             isReversing = true;
-            reverseTimer = Mathf.Max(0.2f, reverseDuration);
+            float duration = durationOverride > 0f ? durationOverride : reverseDuration;
+            reverseTimer = Mathf.Max(0.2f, duration);
             blockedTimer = 0f;
 
             if (turnSignalController != null)
@@ -2019,6 +2205,51 @@ namespace TrafficSystem
 
             return HasVehicleController(collider) ||
                    (collider.attachedRigidbody != null && !collider.attachedRigidbody.isKinematic);
+        }
+
+        private bool IsStaticWorldObstacle(Collider collider)
+        {
+            if (!enableStaticObstacleRecovery || collider == null)
+            {
+                return false;
+            }
+
+            if (collider.isTrigger || collider.transform.IsChildOf(transform) || HasVehicleController(collider))
+            {
+                return false;
+            }
+
+            Rigidbody attachedRigidbody = collider.attachedRigidbody;
+            if (attachedRigidbody != null && !attachedRigidbody.isKinematic)
+            {
+                return false;
+            }
+
+            if (collider.GetComponent<Terrain>() != null)
+            {
+                return false;
+            }
+
+            int layer = collider.gameObject.layer;
+            int roadLayer = LayerMask.NameToLayer("Road");
+            int groundLayer = LayerMask.NameToLayer("Ground");
+            if ((roadLayer >= 0 && layer == roadLayer) || (groundLayer >= 0 && layer == groundLayer))
+            {
+                return false;
+            }
+
+            string lowerName = collider.name.ToLowerInvariant();
+            if (lowerName.Contains("road") ||
+                lowerName.Contains("street") ||
+                lowerName.Contains("asphalt") ||
+                lowerName.Contains("sidewalk") ||
+                lowerName.Contains("terrain") ||
+                lowerName.Contains("ground"))
+            {
+                return false;
+            }
+
+            return true;
         }
 
         // ============================================================================
@@ -2681,19 +2912,31 @@ namespace TrafficSystem
         /// </summary>
         private void DetectUpcomingTurn()
         {
-            if (currentSegment == null || currentWaypointIndex >= currentSegment.waypoints.Count - 3)
+            if (currentSegment == null || currentSegment.waypoints == null || currentSegment.waypoints.Count < 2)
             {
                 currentTurnInfo = new TurnInfo();
                 return;
             }
 
             TurnInfo turnInfo = new TurnInfo();
+            Vector3 currentPos = transform.position;
+
+            if (TryGetCommittedTurnInfo(currentPos, out turnInfo))
+            {
+                currentTurnInfo = turnInfo;
+                return;
+            }
+
+            if (currentWaypointIndex >= currentSegment.waypoints.Count - 3)
+            {
+                currentTurnInfo = new TurnInfo();
+                return;
+            }
 
             // Look ahead 5-10 waypoints
             int lookAheadCount = 10;
             int endIndex = Mathf.Min(currentWaypointIndex + lookAheadCount, currentSegment.waypoints.Count - 1);
 
-            Vector3 currentPos = transform.position;
             float distanceToTurn = 0f;
             float maxAngle = 0f;
 
@@ -2720,6 +2963,36 @@ namespace TrafficSystem
             }
 
             currentTurnInfo = turnInfo;
+        }
+
+        private bool TryGetCommittedTurnInfo(Vector3 currentPos, out TurnInfo turnInfo)
+        {
+            turnInfo = new TurnInfo();
+
+            if (!hasPlannedContinuation ||
+                plannedContinuationSourceSegmentId != currentSegment.id ||
+                plannedContinuationSegment == null ||
+                plannedContinuationSegment.waypoints == null ||
+                plannedContinuationSegment.waypoints.Count < 2)
+            {
+                return false;
+            }
+
+            Vector3 currentForward = GetSegmentExitForward(currentSegment);
+            Vector3 nextForward = GetConnectionTravelForward(plannedContinuationSegment, plannedContinuationWaypointIndex);
+            float turnAngle = Vector3.Angle(currentForward, nextForward);
+            if (turnAngle <= 15f)
+            {
+                return false;
+            }
+
+            int lastIndex = currentSegment.waypoints.Count - 1;
+            Vector3 turnPoint = currentSegment.waypoints[lastIndex].position;
+            turnInfo.isTurn = true;
+            turnInfo.distanceToTurn = Vector3.Distance(currentPos, turnPoint);
+            turnInfo.turnAngle = turnAngle;
+            turnInfo.recommendedSpeed = CalculateTurnSpeed(turnAngle);
+            return true;
         }
 
         /// <summary>
@@ -3460,6 +3733,7 @@ namespace TrafficSystem
             currentSegment = segment;
             currentWaypointIndex = waypointIndex;
             ClearPlannedContinuation();
+            hasSmoothedTargetSteerAngle = false;
             ApplyLaneCenteringPolicyForCurrentSegment();
             transform.position = GetGroundedPosition(position);
 
@@ -3672,7 +3946,7 @@ namespace TrafficSystem
         }
 
         /// <summary>
-        /// Handle collision with other vehicles
+        /// Handle collision with other vehicles and static world obstacles
         /// </summary>
         private void OnCollisionEnter(Collision collision)
         {
@@ -3698,6 +3972,22 @@ namespace TrafficSystem
                     separationDirection = collisionNormal.normalized;
                 }
             }
+            else if (IsStaticWorldObstacle(collision.collider))
+            {
+                isColliding = true;
+                isStaticObstacleCollision = true;
+                staticObstacleCollisionTimer = 0f;
+                obstacleDistance = 0f;
+                isObstacleDetected = true;
+                imminentCollisionRisk = true;
+                mustStopForVehicle = true;
+                SetCollisionSeparationDirection(collision);
+
+                if (logCollisions)
+                {
+                    Debug.LogWarning($"[NpcCarAgent] {name} hit static obstacle {collision.collider.name}");
+                }
+            }
         }
 
         /// <summary>
@@ -3713,6 +4003,27 @@ namespace TrafficSystem
                 vehicleStopDistance = 0f;
                 SetMotorTorque(0f);
                 SetBrakeTorque(braking * 1.8f);
+            }
+            else if (IsStaticWorldObstacle(collision.collider))
+            {
+                isColliding = true;
+                isStaticObstacleCollision = true;
+                staticObstacleCollisionTimer += Time.fixedDeltaTime;
+                obstacleDistance = 0f;
+                isObstacleDetected = true;
+                imminentCollisionRisk = true;
+                mustStopForVehicle = true;
+                predictiveSpeedLimiter = 0f;
+                vehicleStopDistance = 0f;
+                SetCollisionSeparationDirection(collision);
+
+                bool rearClearEnough = !rearObstacleDetected || rearObstacleDistance > Mathf.Max(1.5f, reverseRearCheckDistance * 0.55f);
+                if (!isReversing && reverseCooldownTimer <= 0f && rearClearEnough)
+                {
+                    StartReverse(staticObstacleReverseDuration);
+                }
+
+                TrySnapAfterStaticObstacleCollision();
             }
         }
 
@@ -3743,6 +4054,50 @@ namespace TrafficSystem
                     isColliding = false;
                 }
             }
+            else if (IsStaticWorldObstacle(collision.collider))
+            {
+                isStaticObstacleCollision = false;
+                staticObstacleCollisionTimer = 0f;
+                isColliding = false;
+            }
+        }
+
+        private void SetCollisionSeparationDirection(Collision collision)
+        {
+            Vector3 collisionNormal = Vector3.zero;
+            foreach (ContactPoint contact in collision.contacts)
+            {
+                collisionNormal += contact.normal;
+            }
+
+            if (collisionNormal.sqrMagnitude > 0.01f)
+            {
+                separationDirection = collisionNormal.normalized;
+            }
+        }
+
+        private void TrySnapAfterStaticObstacleCollision()
+        {
+            if (staticObstacleCollisionTimer < Mathf.Max(0.1f, staticObstacleSnapDelay))
+            {
+                return;
+            }
+
+            if (Time.time - lastStaticObstacleSnapTime < Mathf.Max(0f, staticObstacleSnapCooldown))
+            {
+                return;
+            }
+
+            NpcRecovery recovery = GetComponent<NpcRecovery>();
+            if (recovery == null)
+            {
+                return;
+            }
+
+            lastStaticObstacleSnapTime = Time.time;
+            staticObstacleCollisionTimer = 0f;
+            isStaticObstacleCollision = false;
+            recovery.ForceRecovery();
         }
 
         private void OnDrawGizmos()

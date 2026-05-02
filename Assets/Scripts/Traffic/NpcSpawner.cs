@@ -25,6 +25,8 @@ namespace TrafficSystem
         [SerializeField] private float minimumSpawnSpacing = 30f;  // Increased to prevent overlaps
         [Tooltip("Check radius for existing vehicles/obstacles at spawn point (meters)")]
         [SerializeField] private float spawnCheckRadius = 8f;  // Increased for better detection
+        [Tooltip("Small radius used to reject static obstacles directly overlapping the spawn pose")]
+        [SerializeField] private float staticSpawnObstacleRadius = 2.4f;
         [Tooltip("Layer mask for checking obstacles at spawn point")]
         [SerializeField] private LayerMask spawnObstacleCheckMask = ~0;
         [Tooltip("Spawn vehicles on Start()")]
@@ -43,10 +45,24 @@ namespace TrafficSystem
         [SerializeField] private float spawnRaycastHeight = 5f;
         [Tooltip("Raycast distance downward for grounding")]
         [SerializeField] private float spawnRaycastDistance = 10f;
+        [Tooltip("Reject spawn points that are currently visible in the player's camera")]
+        [SerializeField] private bool avoidSpawningInCameraView = true;
+        [Tooltip("Viewport padding used when rejecting visible spawn points")]
+        [SerializeField, Range(0f, 0.35f)] private float cameraSpawnViewportMargin = 0.08f;
+        [Tooltip("Only reject visible spawn points within this camera distance")]
+        [SerializeField] private float cameraVisibleSpawnRejectDistance = 160f;
+        [Tooltip("Line of sight mask for visible spawn rejection")]
+        [SerializeField] private LayerMask cameraVisibilityMask = ~0;
 
         [Header("Pooling")]
         [Tooltip("Enable object pooling (disable/enable instead of destroy/instantiate)")]
         [SerializeField] private bool enablePooling = true;
+        [Tooltip("Warm the NPC pool gradually after scene start. Disabled by default to avoid startup freezes.")]
+        [SerializeField] private bool warmPoolOnStart = false;
+        [Tooltip("Delay before optional gradual pool warmup starts")]
+        [SerializeField] private float poolWarmupDelay = 1.5f;
+        [Tooltip("How many NPC prefabs may be instantiated per warmup frame")]
+        [SerializeField] private int poolWarmupPerFrame = 1;
         [Tooltip("Pre-pool extra vehicles")]
         [SerializeField] private int poolExtraCount = 5;
 
@@ -82,6 +98,7 @@ namespace TrafficSystem
         private HashSet<GameObject> pooledNpcSet = new HashSet<GameObject>();
         private Transform npcContainer;
         private Coroutine spawnCoroutine;
+        private Coroutine poolWarmupCoroutine;
         public bool HasPendingOrActiveSpawn => spawnCoroutine != null || activeNpcs.Count > 0;
         private float nextDynamicSpawnTime;
         private float nextDynamicDespawnTime;
@@ -100,9 +117,9 @@ namespace TrafficSystem
             // Priority 2: Ensure traffic communication system exists
             EnsureTrafficCommunicationSystem();
 
-            if (enablePooling)
+            if (enablePooling && warmPoolOnStart)
             {
-                PrePoolVehicles(GetDesiredPoolSize());
+                poolWarmupCoroutine = StartCoroutine(WarmPoolGradually(GetDesiredPoolSize()));
             }
 
             if (spawnOnStart)
@@ -307,6 +324,12 @@ namespace TrafficSystem
 
                 Vector3 finalSpawnPos = GetGroundedSpawnPosition(spawnPos, heightOffset);
 
+                if (IsSpawnVisibleToPlayer(finalSpawnPos))
+                {
+                    ReturnNpcToPool(npcVehicle);
+                    continue;
+                }
+
                 // Check spacing with previously spawned vehicles in this batch
                 if (!IsSpacingValid(finalSpawnPos, spawnPositions))
                 {
@@ -487,6 +510,24 @@ namespace TrafficSystem
             // Debug.Log($"[NpcSpawner] Pre-pooled {count} vehicles");
         }
 
+        private System.Collections.IEnumerator WarmPoolGradually(int desiredCount)
+        {
+            if (poolWarmupDelay > 0f)
+            {
+                yield return new WaitForSeconds(poolWarmupDelay);
+            }
+
+            int perFrame = Mathf.Max(1, poolWarmupPerFrame);
+            while (enablePooling && activeNpcs.Count + pooledNpcs.Count < desiredCount)
+            {
+                int missing = desiredCount - (activeNpcs.Count + pooledNpcs.Count);
+                PrePoolVehicles(Mathf.Min(perFrame, missing));
+                yield return null;
+            }
+
+            poolWarmupCoroutine = null;
+        }
+
         private void EnsurePoolCapacity(int desiredCount)
         {
             int totalCount = activeNpcs.Count + pooledNpcs.Count;
@@ -577,6 +618,12 @@ namespace TrafficSystem
                 if (carAgent != null)
                     heightOffset = carAgent.GetGroundClearanceOffset();
                 Vector3 finalSpawnPos = GetGroundedSpawnPosition(wp.position, heightOffset);
+
+                if (IsSpawnVisibleToPlayer(finalSpawnPos))
+                {
+                    ReturnNpcToPool(npc);
+                    continue;
+                }
 
                 // Check spacing with all active vehicles using final grounded position.
                 bool validSpacing = true;
@@ -726,6 +773,11 @@ namespace TrafficSystem
                     continue;
                 }
 
+                if (IsSpawnVisibleToPlayer(spawnPos))
+                {
+                    continue;
+                }
+
                 GameObject npc = GetOrCreateNpc();
                 if (npc == null)
                 {
@@ -832,6 +884,7 @@ namespace TrafficSystem
             {
                 Collider col = spawnOverlapBuffer[i];
                 if (col == null) continue;
+                if (IsNonBlockingSpawnCollider(col)) continue;
 
                 // Check if it's a vehicle (NPC or player)
                 if (HasVehicleController(col))
@@ -846,6 +899,13 @@ namespace TrafficSystem
                     // Exclude ground/terrain rigidbodies
                     if (col.gameObject.layer != LayerMask.NameToLayer("Road") &&
                         col.gameObject.layer != LayerMask.NameToLayer("Ground"))
+                    {
+                        return false;
+                    }
+                }
+                else
+                {
+                    if (IsStaticColliderTooCloseToSpawn(col, position))
                     {
                         return false;
                     }
@@ -869,14 +929,129 @@ namespace TrafficSystem
                 Collider col = spawnOverlapBuffer[i];
                 if (col == null) continue;
                 if (col.transform.IsChildOf(transform)) continue;
+                if (IsNonBlockingSpawnCollider(col)) continue;
 
                 if (HasVehicleController(col))
+                {
+                    return false;
+                }
+
+                if (IsStaticColliderTooCloseToSpawn(col, position))
                 {
                     return false;
                 }
             }
 
             return true;
+        }
+
+        private bool IsSpawnVisibleToPlayer(Vector3 worldPosition)
+        {
+            if (!avoidSpawningInCameraView)
+            {
+                return false;
+            }
+
+            Camera camera = Camera.main;
+            if (camera == null || !camera.isActiveAndEnabled)
+            {
+                return false;
+            }
+
+            Vector3 cameraPosition = camera.transform.position;
+            if (Vector3.Distance(cameraPosition, worldPosition) > Mathf.Max(1f, cameraVisibleSpawnRejectDistance))
+            {
+                return false;
+            }
+
+            Vector3 viewportPoint = camera.WorldToViewportPoint(worldPosition + Vector3.up * 1.2f);
+            if (viewportPoint.z <= 0f)
+            {
+                return false;
+            }
+
+            float margin = Mathf.Clamp01(cameraSpawnViewportMargin);
+            bool inView =
+                viewportPoint.x >= -margin &&
+                viewportPoint.x <= 1f + margin &&
+                viewportPoint.y >= -margin &&
+                viewportPoint.y <= 1f + margin;
+
+            if (!inView)
+            {
+                return false;
+            }
+
+            Vector3 direction = (worldPosition + Vector3.up * 1.2f) - cameraPosition;
+            float distance = direction.magnitude;
+            if (distance <= 0.01f)
+            {
+                return true;
+            }
+
+            if (Physics.Raycast(cameraPosition, direction / distance, out RaycastHit hit, distance, cameraVisibilityMask, QueryTriggerInteraction.Ignore))
+            {
+                if (!IsNonBlockingVisibilityCollider(hit.collider))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool IsNonBlockingSpawnCollider(Collider collider)
+        {
+            if (collider == null)
+            {
+                return true;
+            }
+
+            if (collider.isTrigger || collider.GetComponent<Terrain>() != null)
+            {
+                return true;
+            }
+
+            int layer = collider.gameObject.layer;
+            int roadLayer = LayerMask.NameToLayer("Road");
+            int groundLayer = LayerMask.NameToLayer("Ground");
+            if ((roadLayer >= 0 && layer == roadLayer) || (groundLayer >= 0 && layer == groundLayer))
+            {
+                return true;
+            }
+
+            string lowerName = collider.name.ToLowerInvariant();
+            return lowerName.Contains("road") ||
+                   lowerName.Contains("street") ||
+                   lowerName.Contains("asphalt") ||
+                   lowerName.Contains("sidewalk") ||
+                   lowerName.Contains("terrain") ||
+                   lowerName.Contains("ground");
+        }
+
+        private static bool IsNonBlockingVisibilityCollider(Collider collider)
+        {
+            if (collider == null || collider.isTrigger)
+            {
+                return true;
+            }
+
+            return HasVehicleController(collider) || IsNonBlockingSpawnCollider(collider);
+        }
+
+        private bool IsStaticColliderTooCloseToSpawn(Collider collider, Vector3 spawnPosition)
+        {
+            if (collider == null)
+            {
+                return false;
+            }
+
+            Vector3 closestPoint = collider.ClosestPoint(spawnPosition);
+            float dx = closestPoint.x - spawnPosition.x;
+            float dz = closestPoint.z - spawnPosition.z;
+            float planarDistanceSqr = (dx * dx) + (dz * dz);
+            float radius = Mathf.Max(0.25f, staticSpawnObstacleRadius);
+            return planarDistanceSqr <= radius * radius;
         }
 
         private static bool HasVehicleController(Collider collider)
@@ -918,6 +1093,11 @@ namespace TrafficSystem
 
         private bool IsSpawnCandidateValid(Vector3 candidatePosition, Vector3 playerPosition)
         {
+            if (IsSpawnVisibleToPlayer(candidatePosition))
+            {
+                return false;
+            }
+
             if (GetPlanarDistance(candidatePosition, playerPosition) < Mathf.Max(0f, playerSpawnMinDistance))
             {
                 return false;
