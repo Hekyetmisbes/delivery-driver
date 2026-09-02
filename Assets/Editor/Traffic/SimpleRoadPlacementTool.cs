@@ -149,7 +149,6 @@ namespace DeliveryDriver.EditorTools
             LoadDefaultAssets();
             CleanOrphanRoadIntersections();
             CleanOrphanIntersectionVisuals();
-            SimplifyAllDenseRoads();
             RebuildAllIntersections();
             TryLoadSelectedRoad();
         }
@@ -614,7 +613,14 @@ namespace DeliveryDriver.EditorTools
 
         private bool TryFindNearbyRoadEndpoint(Vector3 point, out Vector3 closestEndpoint)
         {
+            return TryFindNearbyRoadEndpoint(point, out closestEndpoint, out _, out _);
+        }
+
+        private bool TryFindNearbyRoadEndpoint(Vector3 point, out Vector3 closestEndpoint, out SplineRoad closestRoad, out bool isStart)
+        {
             closestEndpoint = Vector3.zero;
+            closestRoad = null;
+            isStart = false;
             float dynamicSnapDist = Mathf.Max(connectionSnapDistance, roadWidth * 0.5f + (sidewalkWidth > 0.01f ? sidewalkWidth : 2.2f) + 3f);
             float bestDistanceSqr = dynamicSnapDist * dynamicSnapDist;
 
@@ -635,6 +641,8 @@ namespace DeliveryDriver.EditorTools
                 {
                     bestDistanceSqr = d0;
                     closestEndpoint = start;
+                    closestRoad = road;
+                    isStart = true;
                 }
 
                 float d1 = FlatDistanceSqr(point, end);
@@ -642,10 +650,12 @@ namespace DeliveryDriver.EditorTools
                 {
                     bestDistanceSqr = d1;
                     closestEndpoint = end;
+                    closestRoad = road;
+                    isStart = false;
                 }
             }
 
-            return bestDistanceSqr < (dynamicSnapDist * dynamicSnapDist);
+            return closestRoad != null;
         }
 
         private void DuringSceneGUI(SceneView sceneView)
@@ -783,6 +793,13 @@ namespace DeliveryDriver.EditorTools
 
             if (placementMode == PlacementMode.SmoothMesh)
             {
+                // If no road is currently active/being drawn, clicking on an existing road's endpoint continues that road!
+                if (smoothPath.Count == 0 && TryFindNearbyRoadEndpoint(point, out Vector3 endpointSnap, out SplineRoad targetRoad, out bool isStart))
+                {
+                    LoadRoadIntoTool(targetRoad, selectPointIndex: isStart ? 0 : -1);
+                    return;
+                }
+
                 if (connectToExistingRoads)
                 {
                     point = ResolveConnectionPoint(point);
@@ -1123,7 +1140,7 @@ namespace DeliveryDriver.EditorTools
                 }
 
                 splineRoad.laneWidth = splineLaneWidth;
-                splineRoad.SetLinearPath(smoothPath.Count >= 2 ? smoothPath : samples);
+                splineRoad.SetSmoothPath(smoothPath.Count >= 2 ? smoothPath : samples);
                 if (createRoadNetworkLinks)
                 {
                     AssignRoadNetworkEndpoints(splineRoad, samples, scene);
@@ -2104,10 +2121,10 @@ namespace DeliveryDriver.EditorTools
 
             for (int i = 0; i < points.Count - 1; i++)
             {
-                Vector3 p0 = i > 0 ? points[i - 1] : points[i];
+                Vector3 p0 = i > 0 ? points[i - 1] : (points[0] * 2f - points[1]);
                 Vector3 p1 = points[i];
                 Vector3 p2 = points[i + 1];
-                Vector3 p3 = i + 2 < points.Count ? points[i + 2] : p2;
+                Vector3 p3 = i + 2 < points.Count ? points[i + 2] : (points[points.Count - 1] * 2f - points[points.Count - 2]);
 
                 float segmentDist = Vector3.Distance(p1, p2);
                 int steps = Mathf.Max(samplesPerSegment, Mathf.CeilToInt(segmentDist / 2.0f));
@@ -2985,16 +3002,7 @@ namespace DeliveryDriver.EditorTools
                 Handles.color = new Color(0.2f, 0.9f, 1f, 0.9f);
                 if (Handles.Button(startPoint, Quaternion.identity, startSize, startSize * 1.5f, Handles.SphereHandleCap))
                 {
-                    if (Event.current.shift || smoothPath.Count == 0)
-                    {
-                        StartNewSmoothRoad();
-                        smoothPath.Add(startPoint);
-                        selectedJunctionPointIndex = 0;
-                    }
-                    else
-                    {
-                        LoadRoadIntoTool(road, selectPointIndex: 0);
-                    }
+                    LoadRoadIntoTool(road, selectPointIndex: 0);
                     handledSceneClick = true;
                     Event.current.Use();
                     Repaint();
@@ -3007,16 +3015,7 @@ namespace DeliveryDriver.EditorTools
                 Handles.color = new Color(1f, 0.85f, 0.2f, 0.9f);
                 if (Handles.Button(endPoint, Quaternion.identity, endSize, endSize * 1.5f, Handles.SphereHandleCap))
                 {
-                    if (Event.current.shift || smoothPath.Count == 0)
-                    {
-                        StartNewSmoothRoad();
-                        smoothPath.Add(endPoint);
-                        selectedJunctionPointIndex = 0;
-                    }
-                    else
-                    {
-                        LoadRoadIntoTool(road, selectPointIndex: -1);
-                    }
+                    LoadRoadIntoTool(road, selectPointIndex: -1);
                     handledSceneClick = true;
                     Event.current.Use();
                     Repaint();
@@ -3920,7 +3919,7 @@ namespace DeliveryDriver.EditorTools
                     }
 
                     Undo.RecordObject(road, "Simplify Dense Spline Road");
-                    road.SetLinearPath(simplifiedAnchors);
+                    road.SetSmoothPath(simplifiedAnchors);
                     EditorUtility.SetDirty(road);
                     fixedCount++;
                 }
@@ -3988,6 +3987,17 @@ namespace DeliveryDriver.EditorTools
             {
                 SplineRoad road = roads[i];
                 if (road == null || !road.IsUsable) continue;
+
+                if (road.ControlPointCount >= 4)
+                {
+                    List<Vector3> anchors = new List<Vector3>((road.ControlPointCount - 1) / 3 + 1);
+                    for (int c = 0; c < road.ControlPointCount; c += 3)
+                    {
+                        anchors.Add(road.GetControlPoint(c));
+                    }
+                    road.SetSmoothPath(anchors);
+                }
+
                 RebuildRoadVisuals(road.gameObject, SampleRoadPath(road, 0f, 1f));
                 EditorUtility.SetDirty(road.gameObject);
             }
