@@ -72,12 +72,15 @@ public class CarController : MonoBehaviour
     [Tooltip("Hiz arttikca direksiyon etkinligini azaltir.")]
     [SerializeField] private bool speedSensitiveSteering = true;
     [Tooltip("Direksiyon acisinin kisilmaya baslayacagi minimum hiz (km/s). Bu hizin altinda tam donus acisi korunur.")]
-    [SerializeField] private float steeringReductionStartSpeedKmh = 50f;
+    [SerializeField] private float steeringReductionStartSpeedKmh = 20f;
     [Tooltip("Bu hizda (km/s) direksiyon azaltmasi maksimuma ulasir.")]
-    [SerializeField] private float steeringReductionFullSpeedKmh = 140f;
+    [SerializeField] private float steeringReductionFullSpeedKmh = 95f;
     [Tooltip("Maksimum hizda direksiyon acisinin korunacak orani.")]
     [Range(0.3f, 1f)]
-    [SerializeField] private float steeringAtHighSpeedFactor = 0.72f;
+    [SerializeField] private float steeringAtHighSpeedFactor = 0.52f;
+    [Tooltip("Viraj icindeki tekerlegin donus acisi carpani (Ackermann). 1.05 - 1.08 arasi dogal ve yumusak donus saglar.")]
+    [Range(1f, 1.25f)]
+    [SerializeField] private float ackermannSteerMultiplier = 1.06f;
     [Tooltip("On aks anti-roll sertligi.")]
     [SerializeField] private float frontAntiRollStiffness = 6000f;
     [Tooltip("Arka aks anti-roll sertligi.")]
@@ -95,6 +98,12 @@ public class CarController : MonoBehaviour
     [Tooltip("Normal suruste aracin yana sabun gibi kaymasini onleyen yanal tutus onleyici (0=kapali, 1=tam rayda tutus).")]
     [Range(0f, 1f)]
     [SerializeField] private float antiSlideGripFactor = 0.85f;
+    [Tooltip("Virajlarda donerken hiz ve momentum kaybini onleyen katsayi (0=kapali, 1=tam momentum koruma).")]
+    [Range(0f, 1f)]
+    [SerializeField] private float corneringSpeedRetention = 0.90f;
+    [Tooltip("Viraj alirken gaza basiliyorsa motor gucune uygulanan cekis ve tork destegi.")]
+    [Range(0f, 1f)]
+    [SerializeField] private float corneringPowerAssist = 0.30f;
     [Tooltip("Oyuncu direksiyon cevirdiginde aracin viraji rahat ve cevik almasi icin yaw donus destegi.")]
     [Range(0f, 1f)]
     [SerializeField] private float agileTurnAssist = 0.35f;
@@ -186,6 +195,14 @@ public class CarController : MonoBehaviour
         if (autoNormalizeWheelColliderHeights)
         {
             NormalizeWheelColliderHeightsRuntime();
+        }
+
+        // Eski yuksek esik degerleri varsa (prefab serilestirmesinden gelebilir) daha dengeli varsayilanlara guncelle
+        if (steeringReductionStartSpeedKmh >= 48f && steeringReductionFullSpeedKmh >= 135f)
+        {
+            steeringReductionStartSpeedKmh = 20f;
+            steeringReductionFullSpeedKmh = 95f;
+            steeringAtHighSpeedFactor = 0.52f;
         }
 
         rb = GetComponent<Rigidbody>();
@@ -289,12 +306,56 @@ public class CarController : MonoBehaviour
 
     private void HandleInput()
     {
-        moveInput = moveAction != null ? moveAction.ReadValue<Vector2>() : Vector2.zero;
-        isHandbraking = handbrakeAction != null && handbrakeAction.IsPressed();
+        Vector2 input = Vector2.zero;
+        if (moveAction != null)
+        {
+            input = moveAction.ReadValue<Vector2>();
+        }
+
+        // Direct Keyboard Fallback (Input Action bir şekilde sinyal vermezse veya focus kaybolursa asla durmasın)
+        if (UnityEngine.InputSystem.Keyboard.current != null)
+        {
+            var kb = UnityEngine.InputSystem.Keyboard.current;
+            float y = 0f;
+            if (kb.wKey.isPressed || kb.upArrowKey.isPressed) y += 1f;
+            if (kb.sKey.isPressed || kb.downArrowKey.isPressed) y -= 1f;
+
+            float x = 0f;
+            if (kb.dKey.isPressed || kb.rightArrowKey.isPressed) x += 1f;
+            if (kb.aKey.isPressed || kb.leftArrowKey.isPressed) x -= 1f;
+
+            if (Mathf.Abs(y) > 0.01f || Mathf.Abs(x) > 0.01f)
+            {
+                input = new Vector2(x, y);
+            }
+        }
+
+        moveInput = input;
+
+        bool handbrake = handbrakeAction != null && handbrakeAction.IsPressed();
+        if (UnityEngine.InputSystem.Keyboard.current != null)
+        {
+            handbrake = handbrake || UnityEngine.InputSystem.Keyboard.current.spaceKey.isPressed;
+        }
+
+        // Gaz veriliyorsa ve el freni tuşuna basılmıyorsa el frenini serbest bırak
+        if (Mathf.Abs(input.y) > 0.1f && !handbrake)
+        {
+            isHandbraking = false;
+        }
+        else
+        {
+            isHandbraking = handbrake;
+        }
     }
 
     private void HandleMotor()
     {
+        if (rb != null && rb.isKinematic)
+        {
+            rb.isKinematic = false;
+        }
+
         float accelInput = smoothedThrottleInput;
 
         // Fuel check: engine blocked if out of fuel
@@ -303,10 +364,10 @@ public class CarController : MonoBehaviour
         {
             ApplyMotorTorque(0f);
             float stopBrake = coastBrakeTorque * 2f;
-            frontLeftCollider.brakeTorque = stopBrake;
-            frontRightCollider.brakeTorque = stopBrake;
-            rearLeftCollider.brakeTorque = stopBrake;
-            rearRightCollider.brakeTorque = stopBrake;
+            if (frontLeftCollider != null) frontLeftCollider.brakeTorque = stopBrake;
+            if (frontRightCollider != null) frontRightCollider.brakeTorque = stopBrake;
+            if (rearLeftCollider != null) rearLeftCollider.brakeTorque = stopBrake;
+            if (rearRightCollider != null) rearRightCollider.brakeTorque = stopBrake;
             return;
         }
 
@@ -337,7 +398,12 @@ public class CarController : MonoBehaviour
             float speedKmh = rb.linearVelocity.magnitude * 3.6f;
             float topSpeedRatio = maxForwardSpeedKmh > 1f ? Mathf.Clamp01(speedKmh / maxForwardSpeedKmh) : 0f;
             float speedTorqueFactor = Mathf.Lerp(1f, topSpeedMinTorqueFactor, topSpeedRatio);
-            float appliedTorque = accelInput * motorTorque * speedTorqueFactor;
+
+            // Virajda direksiyon donmusken tekerlek surtunme direncini yenmek icin ek tork destegi
+            float steerRatio = maxSteeringAngle > 0.1f ? Mathf.Clamp01(Mathf.Abs(currentSteerAngle) / maxSteeringAngle) : 0f;
+            float corneringBoost = 1f + (steerRatio * corneringPowerAssist);
+
+            float appliedTorque = accelInput * motorTorque * speedTorqueFactor * corneringBoost;
 
             if (accelInput > 0f && speedKmh >= maxForwardSpeedKmh)
             {
@@ -345,7 +411,13 @@ public class CarController : MonoBehaviour
             }
 
             ApplyMotorTorque(appliedTorque);
+
+            // Gaz verilirken tekerleklerin frenini KESİNLİKLE anında sıfırla
             currentBrakeTorque = 0f;
+            if (frontLeftCollider != null) frontLeftCollider.brakeTorque = 0f;
+            if (frontRightCollider != null) frontRightCollider.brakeTorque = 0f;
+            if (rearLeftCollider != null) rearLeftCollider.brakeTorque = 0f;
+            if (rearRightCollider != null) rearRightCollider.brakeTorque = 0f;
         }
         else
         {
@@ -357,28 +429,28 @@ public class CarController : MonoBehaviour
         {
             currentBrakeTorque = brakeTorque * handbrakeFrictionMultiplier; // El freni daha sert
             // Ön tekerler el freninde kilitlenmez (yön kontrolü korunur)
-            frontLeftCollider.brakeTorque = 0f;
-            frontRightCollider.brakeTorque = 0f;
+            if (frontLeftCollider != null) frontLeftCollider.brakeTorque = 0f;
+            if (frontRightCollider != null) frontRightCollider.brakeTorque = 0f;
             // Arka tekerler kilitlenir
-            rearLeftCollider.brakeTorque = currentBrakeTorque;
-            rearRightCollider.brakeTorque = currentBrakeTorque;
+            if (rearLeftCollider != null) rearLeftCollider.brakeTorque = currentBrakeTorque;
+            if (rearRightCollider != null) rearRightCollider.brakeTorque = currentBrakeTorque;
         }
         else if (isBraking || Mathf.Abs(accelInput) < 0.05f) // Gaz verilmiyorsa da hafif süzülme freni (drag)
         {
             currentBrakeTorque = isBraking ? brakeTorque : coastBrakeTorque;
 
-            frontLeftCollider.brakeTorque = currentBrakeTorque;
-            frontRightCollider.brakeTorque = currentBrakeTorque;
-            rearLeftCollider.brakeTorque = currentBrakeTorque;
-            rearRightCollider.brakeTorque = currentBrakeTorque;
+            if (frontLeftCollider != null) frontLeftCollider.brakeTorque = currentBrakeTorque;
+            if (frontRightCollider != null) frontRightCollider.brakeTorque = currentBrakeTorque;
+            if (rearLeftCollider != null) rearLeftCollider.brakeTorque = currentBrakeTorque;
+            if (rearRightCollider != null) rearRightCollider.brakeTorque = currentBrakeTorque;
         }
         else
         {
             // Normal hareket halindeyiz - frenler tamamen serbest
-            frontLeftCollider.brakeTorque = 0f;
-            frontRightCollider.brakeTorque = 0f;
-            rearLeftCollider.brakeTorque = 0f;
-            rearRightCollider.brakeTorque = 0f;
+            if (frontLeftCollider != null) frontLeftCollider.brakeTorque = 0f;
+            if (frontRightCollider != null) frontRightCollider.brakeTorque = 0f;
+            if (rearLeftCollider != null) rearLeftCollider.brakeTorque = 0f;
+            if (rearRightCollider != null) rearRightCollider.brakeTorque = 0f;
         }
     }
 
@@ -433,7 +505,7 @@ public class CarController : MonoBehaviour
 
         // --- ACKERMANN STEERING APPROXIMATION ---
         // Viraj icindeki tekerlek biraz daha fazla donerek daha keskin ve temiz donus saglar
-        float ackermannFactor = 1.15f;
+        float ackermannFactor = ackermannSteerMultiplier;
         if (currentSteerAngle > 0) // Turning Right
         {
             frontRightCollider.steerAngle = currentSteerAngle * ackermannFactor;
@@ -635,6 +707,7 @@ public class CarController : MonoBehaviour
 
         Vector3 localVelocity = transform.InverseTransformDirection(rb.linearVelocity);
         float lateralSpeed = localVelocity.x;
+        float forwardSpeed = localVelocity.z;
 
         if (Mathf.Abs(lateralSpeed) < 0.05f)
         {
@@ -645,6 +718,39 @@ public class CarController : MonoBehaviour
         float dampingAcceleration = -lateralSpeed * (antiSlideGripFactor * 22f);
         Vector3 worldForce = transform.right * (dampingAcceleration * groundedRatio * rb.mass);
         rb.AddForce(worldForce, ForceMode.Force);
+
+        // --- VIRAJDA HIZ KORUMA (Cornering Speed Retention) ---
+        // Yanal kayma sonumlenirken kinetik enerjinin yok olmasini onler;
+        // Yanal momentumu aracin hareket dogrultusuna aktararak virajda yigilmayi engeller.
+        float absForwardSpeed = Mathf.Abs(forwardSpeed);
+        if (corneringSpeedRetention > 0f && absForwardSpeed > 0.5f)
+        {
+            float speedKmh = rb.linearVelocity.magnitude * 3.6f;
+            if (speedKmh < maxForwardSpeedKmh)
+            {
+                float planeSpeed = Mathf.Sqrt(lateralSpeed * lateralSpeed + forwardSpeed * forwardSpeed);
+
+                // Gaza basiliyorsa hizi tam olarak koru, basili degilse ayarli oranda koru
+                float effectiveRetention = corneringSpeedRetention;
+                if (Mathf.Abs(smoothedThrottleInput) > 0.05f)
+                {
+                    effectiveRetention = Mathf.Lerp(effectiveRetention, 0.98f, Mathf.Abs(smoothedThrottleInput));
+                }
+
+                float targetSpeed = Mathf.Lerp(absForwardSpeed, planeSpeed, effectiveRetention);
+                float speedDeficit = targetSpeed - absForwardSpeed;
+
+                if (speedDeficit > 0.01f)
+                {
+                    float forwardAccel = (speedDeficit / Time.fixedDeltaTime) * (antiSlideGripFactor * 0.95f);
+                    forwardAccel = Mathf.Min(forwardAccel, 28f);
+
+                    Vector3 forwardDir = forwardSpeed >= 0f ? transform.forward : -transform.forward;
+                    Vector3 forwardForce = forwardDir * (forwardAccel * groundedRatio * rb.mass);
+                    rb.AddForce(forwardForce, ForceMode.Force);
+                }
+            }
+        }
     }
 
     private void ApplySteerAssist()
@@ -932,7 +1038,8 @@ public class CarController : MonoBehaviour
 
         // Handling improvements
         downforcePerSpeed = 35f * (1f + (handlingLevel * 0.2f));
-        steeringAtHighSpeedFactor = Mathf.Min(1f, 0.85f + (handlingLevel * 0.03f));
+        steeringAtHighSpeedFactor = Mathf.Min(0.75f, 0.52f + (handlingLevel * 0.04f));
+        corneringSpeedRetention = Mathf.Min(0.98f, 0.90f + (handlingLevel * 0.02f));
 
         Debug.Log($"[CarController] Upgrades Applied - Engine: {engineLevel}, Brake: {brakeLevel}, Handling: {handlingLevel}");
     }

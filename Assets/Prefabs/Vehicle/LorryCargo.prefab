@@ -1717,9 +1717,10 @@ MonoBehaviour:
   maxDownforceWeightFraction: 0.3
   autoNormalizeWheelColliderHeights: 1
   speedSensitiveSteering: 1
-  steeringReductionStartSpeedKmh: 45
-  steeringReductionFullSpeedKmh: 140
-  steeringAtHighSpeedFactor: 0.68
+  steeringReductionStartSpeedKmh: 18
+  steeringReductionFullSpeedKmh: 90
+  steeringAtHighSpeedFactor: 0.50
+  ackermannSteerMultiplier: 1.05
   frontAntiRollStiffness: 6000
   rearAntiRollStiffness: 6500
   useContinuousCollisionDetection: 1
@@ -1728,6 +1729,8 @@ MonoBehaviour:
   simpleBodyColliderCenter: {x: 0, y: 0.75, z: 0.05}
   simpleBodyColliderSize: {x: 1.85, y: 1.35, z: 4.35}
   antiSlideGripFactor: 0.85
+  corneringSpeedRetention: 0.88
+  corneringPowerAssist: 0.35
   agileTurnAssist: 0.3
   antiSpinStability: 0.7
   accelerationSquatTorque: 3400
