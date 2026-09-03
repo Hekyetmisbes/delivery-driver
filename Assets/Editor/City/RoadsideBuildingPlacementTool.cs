@@ -30,7 +30,7 @@ namespace DeliveryDriver.EditorTools
         [Header("Lot & Road Layout")]
         [SerializeField] private float roadHalfWidth = 4.25f;
         [SerializeField] private float sidewalkWidth = 2.2f;
-        [SerializeField] private float buildingSetback = 1.2f;
+        [SerializeField] private float buildingSetback = 1.5f;
         [SerializeField] private float lotGap = 0.05f;
         [SerializeField] private float startMargin = 8f;
         [SerializeField] private float endMargin = 8f;
@@ -45,8 +45,8 @@ namespace DeliveryDriver.EditorTools
 
         [Header("Building Colliders")]
         [SerializeField] private bool autoAddBoxColliders = true;
-        [SerializeField] private Vector3 colliderPadding = new Vector3(0.1f, 0.1f, 0.1f);
-        [SerializeField] private Vector3 minimumColliderSize = new Vector3(1.5f, 2f, 1.5f);
+        [SerializeField] private Vector3 colliderPadding = Vector3.zero;
+        [SerializeField] private Vector3 minimumColliderSize = new Vector3(1.0f, 1.5f, 1.0f);
 
         [Header("Trees & Greenery")]
         [SerializeField] private bool placeTrees = true;
@@ -279,7 +279,7 @@ namespace DeliveryDriver.EditorTools
             while (distance < maxDistance)
             {
                 GameObject prefab = buildingPrefabs[Random.Range(0, buildingPrefabs.Count)];
-                Vector2 footprint = GetPrefabFootprint(prefab);
+                Vector2 footprint = GetPrefabFootprint(prefab, out float frontOffset);
                 float frontage = Mathf.Clamp(footprint.x * footprintPadding, minFrontage, maxFrontage);
                 float depth = Mathf.Max(footprint.y * footprintPadding, minFrontage);
                 float centerDistance = distance + frontage * 0.5f;
@@ -303,8 +303,8 @@ namespace DeliveryDriver.EditorTools
                     continue;
                 }
 
-                // 2. Pozisyon oluşturma
-                if (TryBuildPose(road, centerDistance, side, depth, out Vector3 position, out Quaternion rotation))
+                // 2. Pozisyon oluşturma (frontOffset ile ön cephe yoldan tam güvenli mesafede tutulur)
+                if (TryBuildPose(road, centerDistance, side, depth, frontOffset, out Vector3 position, out Quaternion rotation))
                 {
                     // 3. Dünya koordinatı seviyesinde kavşak ve diğer yollarla çakışma testi
                     if (IsPositionBlockedByIntersectionsOrRoads(road, position, frontage, depth))
@@ -551,7 +551,7 @@ namespace DeliveryDriver.EditorTools
             return false;
         }
 
-        private bool TryBuildPose(SplineRoad road, float distance, float side, float buildingDepth, out Vector3 position, out Quaternion rotation)
+        private bool TryBuildPose(SplineRoad road, float distance, float side, float buildingDepth, float frontOffset, out Vector3 position, out Quaternion rotation)
         {
             position = Vector3.zero;
             rotation = Quaternion.identity;
@@ -567,7 +567,11 @@ namespace DeliveryDriver.EditorTools
 
             Vector3 right = Vector3.Cross(Vector3.up, tangent.normalized).normalized;
             Vector3 faceDirection = -right * side;
-            float lateralOffset = roadHalfWidth + sidewalkWidth + buildingSetback + buildingDepth * 0.5f;
+
+            // Ön cephenin yol kenarindan (asfalttan) uzakligi: sidewalkWidth + buildingSetback
+            // Model pivotunun yol merkezine mesafesi: roadHalfWidth + sidewalkWidth + buildingSetback + frontOffset
+            float forwardExtent = frontOffset > 0.01f ? frontOffset : (buildingDepth * 0.5f);
+            float lateralOffset = roadHalfWidth + sidewalkWidth + buildingSetback + forwardExtent;
             position = center + right * side * lateralOffset;
 
             if (!TrySnapToGround(position, out position))
@@ -757,20 +761,23 @@ namespace DeliveryDriver.EditorTools
             return instance as GameObject;
         }
 
-        private Vector2 GetPrefabFootprint(GameObject prefab)
+        private Vector2 GetPrefabFootprint(GameObject prefab, out float frontOffset)
         {
+            frontOffset = 0f;
             if (prefab == null)
             {
                 return new Vector2(minFrontage, minFrontage);
             }
 
-            if (TryCalculateLocalRendererBounds(prefab.transform, out Bounds localBounds))
+            if (TryCalculatePreciseLocalBounds(prefab.transform, out Bounds localBounds))
             {
                 // Unity LookRotation faceDirection: Yerel X cephe genisligi (frontage), yerel Z derinlik (depth)
                 float width = Mathf.Abs(localBounds.size.x);
                 float length = Mathf.Abs(localBounds.size.z);
                 float frontage = Mathf.Max(minFrontage, width);
                 float depth = Mathf.Max(minFrontage, length);
+                // frontOffset: objenin yerel +Z ekseninde pivot'tan öne (yola) doğru uzandığı maksimum mesafe
+                frontOffset = Mathf.Max(0f, localBounds.max.z);
                 return new Vector2(frontage, depth);
             }
 
@@ -788,33 +795,35 @@ namespace DeliveryDriver.EditorTools
 
             float bWidth = Mathf.Max(minFrontage, bounds.size.x);
             float bDepth = Mathf.Max(minFrontage, bounds.size.z);
+            frontOffset = bDepth * 0.5f;
             return new Vector2(bWidth, bDepth);
         }
 
         #region Building Collider Support
-        private void EnsureBuildingCollider(GameObject instance)
+        private void EnsureBuildingCollider(GameObject instance, bool forceUpdate = false)
         {
             if (instance == null)
             {
                 return;
             }
 
-            if (HasSolidColliderInHierarchy(instance.transform))
+            BoxCollider box = instance.GetComponent<BoxCollider>();
+            if (!forceUpdate && box != null)
             {
                 return;
             }
 
-            if (TryCalculateLocalRendererBounds(instance.transform, out Bounds localBounds))
+            if (TryCalculatePreciseLocalBounds(instance.transform, out Bounds localBounds))
             {
-                BoxCollider box = instance.GetComponent<BoxCollider>();
                 if (box == null)
                 {
                     box = Undo.AddComponent<BoxCollider>(instance);
                 }
 
-                Undo.RecordObject(box, "Add Building BoxCollider");
+                Undo.RecordObject(box, "Configure Building BoxCollider");
                 box.isTrigger = false;
                 box.center = localBounds.center;
+                // Şişirme yapmadan modelin gerçek sınırlarına tam oturur
                 box.size = Vector3.Max(localBounds.size + colliderPadding, minimumColliderSize);
             }
         }
@@ -847,16 +856,14 @@ namespace DeliveryDriver.EditorTools
                         continue;
                     }
 
-                    if (!HasSolidColliderInHierarchy(b))
-                    {
-                        EnsureBuildingCollider(b.gameObject);
-                        count++;
-                    }
+                    // forceUpdate = true vererek sahnede daha önce oluşturulmuş şişmiş/taşmış collider'ları da tam duvar sınırlarına çekiyoruz!
+                    EnsureBuildingCollider(b.gameObject, true);
+                    count++;
                 }
             }
 
             EditorSceneManager.MarkSceneDirty(scene);
-            EditorUtility.DisplayDialog("Building Colliders", $"{count} binaya BoxCollider basariyla eklendi.", "OK");
+            EditorUtility.DisplayDialog("Building Colliders", $"{count} binanin BoxCollider'i tam model sinirlarina gore guncellendi ve duzeltildi.", "OK");
         }
 
         private static bool HasSolidColliderInHierarchy(Transform root)
@@ -874,32 +881,91 @@ namespace DeliveryDriver.EditorTools
             return false;
         }
 
-        private static bool TryCalculateLocalRendererBounds(Transform root, out Bounds localBounds)
+        private static bool TryCalculatePreciseLocalBounds(Transform root, out Bounds localBounds)
         {
             localBounds = default;
-            Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+            if (root == null)
+            {
+                return false;
+            }
+
             bool hasBounds = false;
             Matrix4x4 worldToLocal = root.worldToLocalMatrix;
 
+            // 1. MeshFilter'ların sharedMesh orijinal yerel bounds'larını kullan (Dünya rotasyonundan asla etkilenmez)
+            MeshFilter[] meshFilters = root.GetComponentsInChildren<MeshFilter>(true);
+            if (meshFilters != null && meshFilters.Length > 0)
+            {
+                for (int i = 0; i < meshFilters.Length; i++)
+                {
+                    MeshFilter mf = meshFilters[i];
+                    if (mf == null || mf.sharedMesh == null)
+                    {
+                        continue;
+                    }
+
+                    Bounds mb = mf.sharedMesh.bounds;
+                    if (mb.size.sqrMagnitude < 0.001f)
+                    {
+                        continue;
+                    }
+
+                    // child transform'unu root'un yerel uzayına dönüştüren matris
+                    Matrix4x4 localMatrix = worldToLocal * mf.transform.localToWorldMatrix;
+                    Vector3 min = mb.min;
+                    Vector3 max = mb.max;
+                    Vector3[] corners =
+                    {
+                        new Vector3(min.x, min.y, min.z),
+                        new Vector3(min.x, min.y, max.z),
+                        new Vector3(min.x, max.y, min.z),
+                        new Vector3(min.x, max.y, max.z),
+                        new Vector3(max.x, min.y, min.z),
+                        new Vector3(max.x, min.y, max.z),
+                        new Vector3(max.x, max.y, min.z),
+                        new Vector3(max.x, max.y, max.z)
+                    };
+
+                    for (int c = 0; c < corners.Length; c++)
+                    {
+                        Vector3 p = localMatrix.MultiplyPoint3x4(corners[c]);
+                        if (!hasBounds)
+                        {
+                            localBounds = new Bounds(p, Vector3.zero);
+                            hasBounds = true;
+                        }
+                        else
+                        {
+                            localBounds.Encapsulate(p);
+                        }
+                    }
+                }
+            }
+
+            if (hasBounds)
+            {
+                return true;
+            }
+
+            // 2. MeshFilter yoksa Renderer.localBounds kullan
+            Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
             for (int i = 0; i < renderers.Length; i++)
             {
-                Renderer renderer = renderers[i];
-                if (renderer == null ||
-                    renderer is ParticleSystemRenderer ||
-                    renderer is TrailRenderer ||
-                    renderer is LineRenderer)
+                Renderer r = renderers[i];
+                if (r == null || r is ParticleSystemRenderer || r is TrailRenderer || r is LineRenderer)
                 {
                     continue;
                 }
 
-                Bounds rendererBounds = renderer.bounds;
-                if (rendererBounds.size.sqrMagnitude < 0.01f)
+                Bounds lb = r.localBounds;
+                if (lb.size.sqrMagnitude < 0.001f)
                 {
                     continue;
                 }
 
-                Vector3 min = rendererBounds.min;
-                Vector3 max = rendererBounds.max;
+                Matrix4x4 localMatrix = worldToLocal * r.transform.localToWorldMatrix;
+                Vector3 min = lb.min;
+                Vector3 max = lb.max;
                 Vector3[] corners =
                 {
                     new Vector3(min.x, min.y, min.z),
@@ -914,15 +980,15 @@ namespace DeliveryDriver.EditorTools
 
                 for (int c = 0; c < corners.Length; c++)
                 {
-                    Vector3 localPoint = worldToLocal.MultiplyPoint3x4(corners[c]);
+                    Vector3 p = localMatrix.MultiplyPoint3x4(corners[c]);
                     if (!hasBounds)
                     {
-                        localBounds = new Bounds(localPoint, Vector3.zero);
+                        localBounds = new Bounds(p, Vector3.zero);
                         hasBounds = true;
                     }
                     else
                     {
-                        localBounds.Encapsulate(localPoint);
+                        localBounds.Encapsulate(p);
                     }
                 }
             }
