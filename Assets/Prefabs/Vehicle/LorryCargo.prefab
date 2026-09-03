@@ -1730,10 +1730,13 @@ MonoBehaviour:
   antiSlideGripFactor: 0.85
   agileTurnAssist: 0.3
   antiSpinStability: 0.7
+  accelerationSquatTorque: 2500
+  brakeDiveTorque: 3400
+  pitchDamping: 7
   throttleRiseRate: 10
   throttleFallRate: 14
-  steeringInputRate: 15
-  steeringFallRate: 20
+  steeringInputRate: 6.5
+  steeringFallRate: 9.5
   handbrakeRearSidewaysGripFactor: 0.55
   handbrakeDriftAssistTorque: 1100
   handbrakeDriftMinSpeedKmh: 15

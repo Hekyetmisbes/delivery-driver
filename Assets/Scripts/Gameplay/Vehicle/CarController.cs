@@ -102,15 +102,23 @@ public class CarController : MonoBehaviour
     [Range(0f, 1f)]
     [SerializeField] private float antiSpinStability = 0.6f;
 
+    [Header("--- BODY PITCH DYNAMICS (Squat & Dive) ---")]
+    [Tooltip("Gaza basildiginda aracin onunun havaya kalkmasi (squat) kuvveti.")]
+    [SerializeField] private float accelerationSquatTorque = 1800f;
+    [Tooltip("Frene basildiginda aracin onunun yere basilmasi (brake dive) kuvveti.")]
+    [SerializeField] private float brakeDiveTorque = 2600f;
+    [Tooltip("Pitch dinamiginin tepki ve yumusama hizi.")]
+    [SerializeField] private float pitchDamping = 8f;
+
     [Header("--- INPUT SMOOTHING ---")]
     [Tooltip("Gaz/fren girdisinin ne kadar hizli artacagi (birim/s).")]
     [SerializeField] private float throttleRiseRate = 12f;
     [Tooltip("Gaz/fren girdisinin ne kadar hizli azalacagi (birim/s).")]
     [SerializeField] private float throttleFallRate = 16f;
-    [Tooltip("Direksiyon girdisinin ne kadar hizli hedefe ulasacagi (birim/s).")]
-    [SerializeField] private float steeringInputRate = 18f;
+    [Tooltip("Direksiyon girdisinin ne kadar hizli hedefe ulasacagi (birim/s). Dusuk deger daha yumusak donus saglar.")]
+    [SerializeField] private float steeringInputRate = 7.5f;
     [Tooltip("Direksiyon birakildiginda merkeze donus hizi (birim/s).")]
-    [SerializeField] private float steeringFallRate = 24f;
+    [SerializeField] private float steeringFallRate = 11f;
 
     [Header("--- HANDBRAKE DRIFT ---")]
     [Tooltip("El freni aktifken arka teker yan tutusunun korunacak orani.")]
@@ -152,6 +160,7 @@ public class CarController : MonoBehaviour
     private float currentCargoWeight;
     private float smoothedThrottleInput;
     private float smoothedSteerInput;
+    private float currentPitchTorque;
     private float previousSpeedMetersPerSec;
     private float lastHardBrakeNotifyTime = -999f;
     private float accumulatedDriftScore;
@@ -253,6 +262,7 @@ public class CarController : MonoBehaviour
         ApplyAntiRollBars();
         UpdateWheels();
         ApplyDownforce(); // Yuksek hizda yol tutusu icin
+        ApplyBodyPitchDynamics(Time.fixedDeltaTime); // Gaza basinca kalkma (squat), frende basilma (dive)
         ApplyAntiSlideDamping(); // Cozy yanal tutus / kayma onleyici
         ApplySteerAssist(); // Akilli viraj yonlendirme ve spin onleme
         EvaluateDriftFeedback(Time.fixedDeltaTime);
@@ -556,6 +566,57 @@ public class CarController : MonoBehaviour
         }
 
         rb.AddForce(-transform.up * requested, ForceMode.Force);
+    }
+
+    private void ApplyBodyPitchDynamics(float deltaTime)
+    {
+        if (rb == null || deltaTime <= 0f)
+        {
+            return;
+        }
+
+        float groundedRatio = GetGroundedWheelsRatio();
+        if (groundedRatio <= 0.25f)
+        {
+            // Havada takla atmayi onlemek icin sadece tekerlekler yere basiyorken calisir
+            currentPitchTorque = Mathf.MoveTowards(currentPitchTorque, 0f, pitchDamping * 1000f * deltaTime);
+            return;
+        }
+
+        float targetPitchTorque = 0f;
+        float forwardSpeed = Vector3.Dot(transform.forward, rb.linearVelocity);
+
+        if (isHandbraking)
+        {
+            // El freni: arka kilitlenir, on basilir
+            targetPitchTorque = -brakeDiveTorque * 0.75f;
+        }
+        else if (isBraking)
+        {
+            // Normal frenleme: on guclu bir sekilde yere basilir (brake dive)
+            targetPitchTorque = -brakeDiveTorque;
+        }
+        else if (smoothedThrottleInput > 0.05f)
+        {
+            // Gaza basiliyor: burun havaya kalkar, arka basilir (acceleration squat)
+            targetPitchTorque = smoothedThrottleInput * accelerationSquatTorque;
+        }
+        else if (smoothedThrottleInput < -0.05f && forwardSpeed < 0.2f)
+        {
+            // Geri viteste gaza basiliyor: burun hafifce basilir
+            targetPitchTorque = smoothedThrottleInput * accelerationSquatTorque * 0.6f;
+        }
+
+        currentPitchTorque = Mathf.MoveTowards(currentPitchTorque, targetPitchTorque, pitchDamping * 2000f * deltaTime);
+
+        if (Mathf.Abs(currentPitchTorque) > 1f)
+        {
+            // transform.right ekseninde tork:
+            // Pozitif tork burnu yukari kaldirir (Squat)
+            // Negatif tork burnu asagi basar (Dive)
+            Vector3 pitchTorqueVec = transform.right * (currentPitchTorque * groundedRatio);
+            rb.AddTorque(pitchTorqueVec, ForceMode.Force);
+        }
     }
 
     private void ApplyAntiSlideDamping()
