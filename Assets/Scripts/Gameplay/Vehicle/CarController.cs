@@ -588,23 +588,23 @@ public class CarController : MonoBehaviour
 
         if (isHandbraking)
         {
-            // El freni: arka kilitlenir, on basilir
-            targetPitchTorque = -brakeDiveTorque * 0.75f;
+            // El freni: on yere basilir (dive) -> pozitif X torku Unity'de burnu asagi eger
+            targetPitchTorque = brakeDiveTorque * 0.75f;
         }
         else if (isBraking)
         {
-            // Normal frenleme: on guclu bir sekilde yere basilir (brake dive)
-            targetPitchTorque = -brakeDiveTorque;
+            // Normal frenleme: on guclu bir sekilde yere basilir (brake dive) -> pozitif X torku
+            targetPitchTorque = brakeDiveTorque;
         }
         else if (smoothedThrottleInput > 0.05f)
         {
-            // Gaza basiliyor: burun havaya kalkar, arka basilir (acceleration squat)
-            targetPitchTorque = smoothedThrottleInput * accelerationSquatTorque;
+            // Gaza basiliyor: burun havaya kalkar, arka basilir (acceleration squat) -> negatif X torku Unity'de burnu yukari kaldirir
+            targetPitchTorque = -smoothedThrottleInput * accelerationSquatTorque;
         }
         else if (smoothedThrottleInput < -0.05f && forwardSpeed < 0.2f)
         {
-            // Geri viteste gaza basiliyor: burun hafifce basilir
-            targetPitchTorque = smoothedThrottleInput * accelerationSquatTorque * 0.6f;
+            // Geri viteste gaza basiliyor: burun hafifce basilir, arka kalkar
+            targetPitchTorque = -smoothedThrottleInput * accelerationSquatTorque * 0.6f;
         }
 
         currentPitchTorque = Mathf.MoveTowards(currentPitchTorque, targetPitchTorque, pitchDamping * 2000f * deltaTime);
@@ -612,8 +612,8 @@ public class CarController : MonoBehaviour
         if (Mathf.Abs(currentPitchTorque) > 1f)
         {
             // transform.right ekseninde tork:
-            // Pozitif tork burnu yukari kaldirir (Squat)
-            // Negatif tork burnu asagi basar (Dive)
+            // Negatif tork burnu YUKARI kaldirir (Squat)
+            // Pozitif tork burnu ASAGI basar (Dive)
             Vector3 pitchTorqueVec = transform.right * (currentPitchTorque * groundedRatio);
             rb.AddTorque(pitchTorqueVec, ForceMode.Force);
         }

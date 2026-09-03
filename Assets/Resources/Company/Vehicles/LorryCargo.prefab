@@ -1730,8 +1730,8 @@ MonoBehaviour:
   antiSlideGripFactor: 0.85
   agileTurnAssist: 0.3
   antiSpinStability: 0.7
-  accelerationSquatTorque: 2500
-  brakeDiveTorque: 3400
+  accelerationSquatTorque: 3400
+  brakeDiveTorque: 4500
   pitchDamping: 7
   throttleRiseRate: 10
   throttleFallRate: 14
