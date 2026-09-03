@@ -172,6 +172,53 @@ namespace TrafficSystem.Spline
             CalculateDistances();
         }
 
+        /// <summary>
+        /// Simplifies a dense spline down to clean, well-spaced anchor points (like newly drawn roads)
+        /// while preserving the overall curve shape, start/end connections, and smoothness.
+        /// </summary>
+        public bool Simplify(float targetSpacingMeters = 15f)
+        {
+            if (controlPoints == null || controlPoints.Count < 4)
+            {
+                return false;
+            }
+
+            float totalLength = GetTotalLength();
+            if (totalLength < 1f)
+            {
+                return false;
+            }
+
+            targetSpacingMeters = Mathf.Max(4f, targetSpacingMeters);
+            int targetSegments = Mathf.Max(2, Mathf.RoundToInt(totalLength / targetSpacingMeters));
+            int currentAnchors = (controlPoints.Count - 1) / 3 + 1;
+
+            if (currentAnchors <= targetSegments + 1 && controlPoints.Count <= 16)
+            {
+                return false;
+            }
+
+            List<Vector3> newAnchors = new List<Vector3>(targetSegments + 1);
+
+            Vector3 startPoint = GetPoint(0f);
+            Vector3 endPoint = GetPoint(1f);
+
+            newAnchors.Add(startPoint);
+
+            for (int i = 1; i < targetSegments; i++)
+            {
+                float targetDist = i * (totalLength / targetSegments);
+                float t = DistanceToT(targetDist);
+                newAnchors.Add(GetPoint(t));
+            }
+
+            newAnchors.Add(endPoint);
+
+            SetSmoothPath(newAnchors);
+            CalculateDistances();
+            return true;
+        }
+
         public void CalculateDistances()
         {
             int resolution = SegmentCount * 10;

@@ -9,9 +9,6 @@ namespace DeliveryDriver.EditorTools
 {
     public class SimpleRoadPlacementTool : EditorWindow
     {
-        private const string DefaultRoadPrefabPath = "Assets/ThirdParty/LowPolyCity/Prefab/Roads/Road Lane_01.prefab";
-        private const string FallbackRoadPrefabPath = "Assets/ThirdParty/LowPolyCity/Prefab/Roads/Road Tile.prefab";
-        private const string DefaultRoadMaterialPath = "Assets/ThirdParty/LowPolyCity/Materials/Road.mat";
         private const string DefaultSidewalkMaterialPath = "Assets/ThirdParty/LowPolyCity/Materials/Road Concrete Tile.mat";
         private const string GeneratedMaterialFolderPath = "Assets/Art/Materials/RoadTools";
         private const string GeneratedAsphaltMaterialPath = GeneratedMaterialFolderPath + "/Generated_Asphalt.mat";
@@ -58,7 +55,7 @@ namespace DeliveryDriver.EditorTools
         [SerializeField] private float laneMarkingWidth = 0.22f;
         [SerializeField] private float laneDashLength = 3.2f;
         [SerializeField] private float laneDashGap = 4.4f;
-        [SerializeField] private float laneMarkingYOffset = 0.025f;
+        [SerializeField] private float laneMarkingYOffset = 0.006f;
         [SerializeField] private bool snapToGround = true;
         [SerializeField] private float groundOffset = 0.12f;
         [SerializeField] private float groundProbeHeight = 80f;
@@ -140,6 +137,21 @@ namespace DeliveryDriver.EditorTools
             window.Show();
         }
 
+        [MenuItem("Tools/Delivery Driver/City/Rebuild All Intersections")]
+        public static void RebuildAllIntersectionsMenu()
+        {
+            SimpleRoadPlacementTool window = GetWindow<SimpleRoadPlacementTool>("Road Placement");
+            window.RebuildAllIntersections();
+            Debug.Log("[SimpleRoadPlacementTool] All intersection visuals rebuilt successfully.");
+        }
+
+        [MenuItem("Tools/Delivery Driver/City/Simplify All Dense Roads in Scene")]
+        public static void SimplifyAllDenseRoadsMenu()
+        {
+            int count = SimplifyAllDenseRoadsStatic(14f);
+            Debug.Log($"[SimpleRoadPlacementTool] {count} adet aşırı noktalı yol optimize edildi, yeni yollar gibi hafifletildi.");
+        }
+
         private void OnEnable()
         {
             SceneView.duringSceneGui -= DuringSceneGUI;
@@ -175,8 +187,12 @@ namespace DeliveryDriver.EditorTools
             }
         }
 
+        private Vector2 scrollPos;
+
         private void OnGUI()
         {
+            scrollPos = EditorGUILayout.BeginScrollView(scrollPos);
+
             EditorGUILayout.LabelField("Simple Road Placement", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("Smooth Mesh modu: Shift + Left Click ile noktalar ekle, yol tek parca mesh olarak yumusak baglanir. Prefab Tiles modu eski duz prefab doseme davranisidir.", MessageType.Info);
 
@@ -209,6 +225,8 @@ namespace DeliveryDriver.EditorTools
                     createSideEdgeLines = false;
                 }
             }
+
+            EditorGUILayout.EndScrollView();
         }
 
         private void DrawSmoothMeshSettings()
@@ -270,7 +288,7 @@ namespace DeliveryDriver.EditorTools
                 laneMarkingWidth = Mathf.Max(0.03f, EditorGUILayout.FloatField("Line Width", laneMarkingWidth));
                 laneDashLength = Mathf.Max(MinDashDistance, EditorGUILayout.FloatField("Dash Length", laneDashLength));
                 laneDashGap = Mathf.Max(MinDashDistance, EditorGUILayout.FloatField("Dash Gap", laneDashGap));
-                laneMarkingYOffset = Mathf.Max(0.001f, EditorGUILayout.FloatField("Line Y Offset", laneMarkingYOffset));
+                laneMarkingYOffset = Mathf.Max(0.001f, EditorGUILayout.FloatField("Line Y Offset (Above Road)", laneMarkingYOffset));
             }
 
             EditorGUILayout.Space(6f);
@@ -793,13 +811,6 @@ namespace DeliveryDriver.EditorTools
 
             if (placementMode == PlacementMode.SmoothMesh)
             {
-                // If no road is currently active/being drawn, clicking on an existing road's endpoint continues that road!
-                if (smoothPath.Count == 0 && TryFindNearbyRoadEndpoint(point, out Vector3 endpointSnap, out SplineRoad targetRoad, out bool isStart))
-                {
-                    LoadRoadIntoTool(targetRoad, selectPointIndex: isStart ? 0 : -1);
-                    return;
-                }
-
                 if (connectToExistingRoads)
                 {
                     point = ResolveConnectionPoint(point);
@@ -932,6 +943,7 @@ namespace DeliveryDriver.EditorTools
 
             if (TryFindNearbyRoadPoint(point, out SplineRoad road, out float t, out Vector3 roadPoint))
             {
+                Vector3 tangent = road.GetTangent(t);
                 if (t > 0.03f && t < 0.97f)
                 {
                     SplitExistingRoadAtConnection(road, t, roadPoint);
@@ -939,9 +951,9 @@ namespace DeliveryDriver.EditorTools
                 else
                 {
                     roadPoint = t <= 0.03f ? road.GetPoint(0f) : road.GetPoint(1f);
+                    CreateOrUpdateIntersectionVisual(roadPoint, tangent);
                 }
 
-                CreateOrUpdateIntersectionVisual(roadPoint, road.GetTangent(t));
                 return roadPoint;
             }
 
@@ -1196,7 +1208,10 @@ namespace DeliveryDriver.EditorTools
 
             if (visualSamples.Count >= 2)
             {
-                ApplyStripMesh(asphalt, visualSamples, -roadWidth * 0.5f, roadWidth * 0.5f, roadMaterial, "Smooth Road Asphalt");
+                Material mat = roadMaterial != null && !AssetDatabase.GetAssetPath(roadMaterial).Contains("LowPolyCity")
+                    ? roadMaterial
+                    : GetOrCreatePlainAsphaltMaterial();
+                ApplyStripMesh(asphalt, visualSamples, -roadWidth * 0.5f, roadWidth * 0.5f, mat, "Smooth Road Asphalt");
                 asphalt.SetActive(true);
             }
             else
@@ -1383,10 +1398,11 @@ namespace DeliveryDriver.EditorTools
             bool skipGroundSnap = autoCreateBridges && (IsBridgeSample(start) || IsBridgeSample(end));
             int index = vertices.Count;
 
-            vertices.Add(AdjustRoadVertexToGround(start + offset - halfWidth, laneMarkingYOffset, skipGroundSnap));
-            vertices.Add(AdjustRoadVertexToGround(start + offset + halfWidth, laneMarkingYOffset, skipGroundSnap));
-            vertices.Add(AdjustRoadVertexToGround(end + offset - halfWidth, laneMarkingYOffset, skipGroundSnap));
-            vertices.Add(AdjustRoadVertexToGround(end + offset + halfWidth, laneMarkingYOffset, skipGroundSnap));
+            float lineY = roadYOffset + Mathf.Max(0.002f, laneMarkingYOffset);
+            vertices.Add(AdjustRoadVertexToGround(start + offset - halfWidth, lineY, skipGroundSnap));
+            vertices.Add(AdjustRoadVertexToGround(start + offset + halfWidth, lineY, skipGroundSnap));
+            vertices.Add(AdjustRoadVertexToGround(end + offset - halfWidth, lineY, skipGroundSnap));
+            vertices.Add(AdjustRoadVertexToGround(end + offset + halfWidth, lineY, skipGroundSnap));
 
             uvs.Add(new Vector2(0f, 0f));
             uvs.Add(new Vector2(1f, 0f));
@@ -2227,13 +2243,16 @@ namespace DeliveryDriver.EditorTools
 
             List<float> distances = BuildCumulativeDistances(samples);
             float totalDistance = distances[distances.Count - 1];
-            if (totalDistance <= startTrim + endTrim + 0.5f)
+            if (totalDistance <= startTrim + endTrim + 1f)
             {
-                return new List<Vector3>(samples);
+                float available = Mathf.Max(0.5f, totalDistance - 1f);
+                float scale = available / Mathf.Max(0.01f, startTrim + endTrim);
+                startTrim *= scale;
+                endTrim *= scale;
             }
 
             float fromDistance = Mathf.Clamp(startTrim, 0f, totalDistance);
-            float toDistance = Mathf.Clamp(totalDistance - endTrim, fromDistance + 0.5f, totalDistance);
+            float toDistance = Mathf.Clamp(totalDistance - endTrim, fromDistance + 0.2f, totalDistance);
             List<Vector3> trimmed = new List<Vector3>(samples.Count);
             trimmed.Add(SampleByDistance(samples, distances, fromDistance));
 
@@ -2274,13 +2293,12 @@ namespace DeliveryDriver.EditorTools
                 return 0f;
             }
 
-            // Only 4 or more connections (4-way crossroad) get trimmed for the square intersection tile
-            if (branchCount >= 4)
+            if (branchCount >= 3)
             {
-                return intersectionRoadTrimDistance > 0f ? intersectionRoadTrimDistance : (intersectionSize * 0.5f);
+                float minTrim = roadWidth * 0.5f + (sidewalkWidth > 0.01f ? sidewalkWidth : 0f) + 0.5f;
+                return intersectionRoadTrimDistance > 0f ? Mathf.Max(minTrim, intersectionRoadTrimDistance) : minTrim;
             }
 
-            // 3 or fewer connections -> 0 trim so roads connect directly to each other!
             return 0f;
         }
 
@@ -2612,8 +2630,10 @@ namespace DeliveryDriver.EditorTools
 
             if (closest != null)
             {
-                Undo.RecordObject(closest.transform, "Move Road Intersection");
-                closest.transform.position = Vector3.Lerp(closest.transform.position, position, 0.5f);
+                if (closest.connectedRoads == null)
+                {
+                    closest.connectedRoads = new List<SplineRoad>();
+                }
                 return closest;
             }
 
@@ -2624,6 +2644,10 @@ namespace DeliveryDriver.EditorTools
 
             RoadIntersection created = Undo.AddComponent<RoadIntersection>(intersectionObject);
             created.isStopSignControlled = true;
+            if (created.connectedRoads == null)
+            {
+                created.connectedRoads = new List<SplineRoad>();
+            }
             return created;
         }
 
@@ -3315,21 +3339,31 @@ namespace DeliveryDriver.EditorTools
             GameObject savedActiveRoad = activeSmoothRoad;
             int savedSelectedIndex = selectedJunctionPointIndex;
             Transform savedRoadParent = roadParent;
-            Transform targetParent = road.transform.parent != null ? road.transform.parent : savedRoadParent;
+            GameObject roadObject = road.gameObject;
+            Vector3 roadTangent = road.GetTangent(t);
+            Transform targetParent = roadObject.transform.parent != null ? roadObject.transform.parent : savedRoadParent;
 
             Undo.IncrementCurrentGroup();
             Undo.SetCurrentGroupName("Split Road For Connection");
-            Vector3 roadTangent = road.GetTangent(t);
-            Undo.DestroyObjectImmediate(road.gameObject);
+            Undo.DestroyObjectImmediate(roadObject);
 
             roadParent = targetParent;
             CreateSmoothRoadFromPath(firstPath);
             CreateSmoothRoadFromPath(secondPath);
 
             roadParent = savedRoadParent;
-            smoothPath = savedSmoothPath;
-            activeSmoothRoad = savedActiveRoad;
-            selectedJunctionPointIndex = savedSelectedIndex;
+            if (savedActiveRoad == roadObject)
+            {
+                smoothPath.Clear();
+                activeSmoothRoad = null;
+                selectedJunctionPointIndex = -1;
+            }
+            else
+            {
+                smoothPath = savedSmoothPath;
+                activeSmoothRoad = savedActiveRoad;
+                selectedJunctionPointIndex = savedSelectedIndex;
+            }
 
             CreateOrUpdateIntersectionVisual(connectionPoint, roadTangent);
         }
@@ -3341,7 +3375,7 @@ namespace DeliveryDriver.EditorTools
             float startDistance = road.TToDistance(startT);
             float endDistance = road.TToDistance(endT);
             float range = Mathf.Abs(endDistance - startDistance);
-            int sampleCount = Mathf.Max(2, Mathf.CeilToInt(range / 2.0f));
+            int sampleCount = Mathf.Max(2, Mathf.CeilToInt(range / 14.0f));
 
             for (int i = 0; i <= sampleCount; i++)
             {
@@ -3597,6 +3631,26 @@ namespace DeliveryDriver.EditorTools
                 return;
             }
 
+            // Always anchor origin to the exact mathematical center of the connected road endpoints
+            Vector3 trueCenter = Vector3.zero;
+            for (int b = 0; b < branches.Count; b++)
+            {
+                trueCenter += branches[b].Endpoint;
+            }
+            trueCenter /= branches.Count;
+            origin = trueCenter;
+
+            // Snap nearby RoadIntersection to the true center so runtime logic and Gizmos stay perfectly aligned
+            RoadIntersection[] nearbyIntersections = Object.FindObjectsByType<RoadIntersection>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            for (int ni = 0; ni < nearbyIntersections.Length; ni++)
+            {
+                if (nearbyIntersections[ni] != null && FlatDistanceSqr(nearbyIntersections[ni].transform.position, origin) <= findRadiusSqr)
+                {
+                    Undo.RecordObject(nearbyIntersections[ni].transform, "Snap Intersection Center");
+                    nearbyIntersections[ni].transform.position = origin;
+                }
+            }
+
             if (visual == null)
             {
                 visual = new GameObject(BuildIntersectionVisualName(origin));
@@ -3610,16 +3664,7 @@ namespace DeliveryDriver.EditorTools
 
             visual.transform.position = Vector3.zero;
 
-            if (branches.Count >= 4)
-            {
-                // Truly 4 or more distinct directions -> 4-Way Crossroad Square Intersection
-                Build4WayCrossIntersection(visual, origin, branches, forward);
-            }
-            else // branches.Count == 3
-            {
-                // Exactly 3 connections -> 3-Way T-Junction: Direct connection, NO SQUARE, clean crosswalks at connections
-                Build3WayTIntersection(visual, origin, branches);
-            }
+            BuildProceduralIntersection(visual, origin, branches);
 
             EditorUtility.SetDirty(visual);
             EditorSceneManager.MarkSceneDirty(scene);
@@ -3642,127 +3687,446 @@ namespace DeliveryDriver.EditorTools
             }
         }
 
-        private void Build3WayTIntersection(GameObject visual, Vector3 origin, List<RoadBranchInfo> branches)
+        private void BuildProceduralIntersection(GameObject visual, Vector3 origin, List<RoadBranchInfo> branches)
         {
             GameObject sidewalkBase = EnsureChild(visual.transform, "SidewalkBase");
             GameObject asphalt = EnsureChild(visual.transform, "Asphalt");
             GameObject crosswalks = EnsureChild(visual.transform, "Crosswalks");
-
-            // Absolutely NO square asphalt and NO square sidewalk for 3-way junctions!
-            // Roads meet directly at center with 0 trim.
-            if (sidewalkBase != null)
-            {
-                MeshFilter sf = sidewalkBase.GetComponent<MeshFilter>();
-                if (sf != null) sf.sharedMesh = null;
-                sidewalkBase.SetActive(false);
-            }
-            if (asphalt != null)
-            {
-                MeshFilter af = asphalt.GetComponent<MeshFilter>();
-                if (af != null) af.sharedMesh = null;
-                asphalt.SetActive(false);
-            }
 
             if (branches == null || branches.Count < 3)
             {
-                crosswalks.SetActive(false);
+                if (sidewalkBase != null) sidewalkBase.SetActive(false);
+                if (asphalt != null) asphalt.SetActive(false);
+                if (crosswalks != null) crosswalks.SetActive(false);
                 return;
             }
 
+            // 1. Sort branches by angle around Y axis (counter-clockwise)
+            List<RoadBranchInfo> sortedBranches = new List<RoadBranchInfo>(branches);
+            sortedBranches.Sort((a, b) =>
+            {
+                Vector3 da = a.OutgoingDirection;
+                da.y = 0f;
+                Vector3 db = b.OutgoingDirection;
+                db.y = 0f;
+                float angleA = Mathf.Atan2(da.z, da.x);
+                float angleB = Mathf.Atan2(db.z, db.x);
+                return angleA.CompareTo(angleB);
+            });
+
+            int N = sortedBranches.Count;
             float halfRoad = roadWidth * 0.5f;
-            float crosswalkDist = halfRoad + 0.8f;
+            float sw = sidewalkWidth > 0.01f ? sidewalkWidth : 0f;
+            float defaultTrim = halfRoad + sw + 0.5f;
+            float trimDist = intersectionRoadTrimDistance > 0f ? Mathf.Max(defaultTrim, intersectionRoadTrimDistance) : defaultTrim;
 
-            // Crosswalks: place zebra stripes cleanly at the 3 road connection mouths
-            Mesh cwMesh = new Mesh { name = "3Way T-Junction Crosswalks" };
-            List<Vector3> cwVerts = new List<Vector3>();
-            List<Vector2> cwUvs = new List<Vector2>();
-            List<int> cwTris = new List<int>();
+            Vector3[] dirs = new Vector3[N];
+            Vector3[] rights = new Vector3[N];
+            Vector3[] mouthCenters = new Vector3[N];
+            Vector3[] mouthL = new Vector3[N];
+            Vector3[] mouthR = new Vector3[N];
+            Vector3[] swL = new Vector3[N];
+            Vector3[] swR = new Vector3[N];
 
-            for (int i = 0; i < branches.Count && i < 3; i++)
+            for (int i = 0; i < N; i++)
             {
-                Vector3 dir = branches[i].OutgoingDirection;
+                Vector3 dir = sortedBranches[i].OutgoingDirection;
                 dir.y = 0f;
-                if (dir.sqrMagnitude < 0.001f) continue;
-                dir.Normalize();
+                if (dir.sqrMagnitude < 0.001f) dir = Vector3.forward;
+                dirs[i] = dir.normalized;
+                rights[i] = Vector3.Cross(Vector3.up, dirs[i]).normalized;
+                mouthCenters[i] = origin + dirs[i] * trimDist;
 
-                Vector3 mouthCenter = origin + dir * crosswalkDist;
-                Vector3 across = Vector3.Cross(Vector3.up, dir).normalized;
-                AppendCrosswalkAtBoundary(cwVerts, cwUvs, cwTris, mouthCenter, dir, across);
-            }
-
-            cwMesh.SetVertices(cwVerts);
-            cwMesh.SetUVs(0, cwUvs);
-            cwMesh.SetTriangles(cwTris, 0);
-            cwMesh.RecalculateNormals();
-            cwMesh.RecalculateBounds();
-
-            MeshFilter cwf = EnsureComponent<MeshFilter>(crosswalks);
-            MeshRenderer cwr = EnsureComponent<MeshRenderer>(crosswalks);
-            cwf.sharedMesh = cwMesh;
-            cwr.sharedMaterial = laneMarkingMaterial != null ? laneMarkingMaterial : GetOrCreateLaneMarkingMaterial();
-            crosswalks.SetActive(true);
-        }
-
-        private void Build4WayCrossIntersection(GameObject visual, Vector3 origin, List<RoadBranchInfo> branches, Vector3 fallbackForward)
-        {
-            Vector3 flatForward = fallbackForward;
-            flatForward.y = 0f;
-            if (flatForward.sqrMagnitude < 0.0001f)
-            {
-                flatForward = Vector3.forward;
-            }
-            flatForward.Normalize();
-            Vector3 right = Vector3.Cross(Vector3.up, flatForward).normalized;
-
-            GameObject sidewalkBase = EnsureChild(visual.transform, "SidewalkBase");
-            GameObject asphalt = EnsureChild(visual.transform, "Asphalt");
-            GameObject crosswalks = EnsureChild(visual.transform, "Crosswalks");
-
-            ApplyIntersectionSquare(
-                sidewalkBase,
-                origin,
-                flatForward,
-                right,
-                intersectionSize + intersectionSidewalkWidth * 2f,
-                sidewalkMaterial != null ? sidewalkMaterial : roadMaterial,
-                "Intersection Sidewalk Mesh",
-                -0.01f);
-            sidewalkBase.SetActive(true);
-
-            ApplyIntersectionSquare(
-                asphalt,
-                origin,
-                flatForward,
-                right,
-                intersectionSize,
-                roadMaterial,
-                "Intersection Asphalt Mesh",
-                0.015f);
-            asphalt.SetActive(true);
-
-            Mesh cwMesh = new Mesh { name = "4Way Crossroad Crosswalks" };
-            List<Vector3> cwVerts = new List<Vector3>();
-            List<Vector2> cwUvs = new List<Vector2>();
-            List<int> cwTris = new List<int>();
-
-            float halfIntersection = intersectionSize * 0.5f;
-
-            if (branches != null && branches.Count >= 4)
-            {
-                for (int i = 0; i < branches.Count; i++)
+                SplineRoad branchRoad = sortedBranches[i].Road;
+                if (branchRoad != null && branchRoad.IsUsable)
                 {
-                    Vector3 dir = branches[i].OutgoingDirection;
-                    Vector3 boundaryCenter = origin + dir * (halfIntersection - crosswalkStripeLength * 0.65f);
-                    Vector3 across = Vector3.Cross(Vector3.up, dir).normalized;
-                    AppendCrosswalkAtBoundary(cwVerts, cwUvs, cwTris, boundaryCenter, dir, across);
+                    bool isStart = sortedBranches[i].IsStart;
+                    float totalLen = branchRoad.GetTotalLength();
+                    float trim = Mathf.Min(trimDist, totalLen * 0.45f);
+                    float targetDist = isStart ? trim : Mathf.Max(0.01f, totalLen - trim);
+                    float t = branchRoad.DistanceToT(targetDist);
+                    Vector3 roadPt = branchRoad.GetPoint(t);
+                    Vector3 roadTan = branchRoad.GetTangent(t);
+                    roadTan.y = 0f;
+                    Vector3 roadOutDir = isStart ? roadTan : -roadTan;
+                    if (roadOutDir.sqrMagnitude > 0.001f)
+                    {
+                        dirs[i] = roadOutDir.normalized;
+                        rights[i] = Vector3.Cross(Vector3.up, dirs[i]).normalized;
+                        mouthCenters[i] = roadPt;
+                    }
+                }
+
+                mouthL[i] = mouthCenters[i] - rights[i] * halfRoad;
+                mouthR[i] = mouthCenters[i] + rights[i] * halfRoad;
+                swL[i] = mouthCenters[i] - rights[i] * (halfRoad + sw);
+                swR[i] = mouthCenters[i] + rights[i] * (halfRoad + sw);
+            }
+
+            // 2. Build Asphalt Perimeter Points & Corner Sidewalks
+            List<Vector3> asphaltPerimeter = new List<Vector3>();
+            List<(List<Vector3> inner, List<Vector3> outer)> cornerSidewalks = new List<(List<Vector3> inner, List<Vector3> outer)>();
+
+            for (int i = 0; i < N; i++)
+            {
+                int next = (i + 1) % N;
+                // Add mouth points (from mouthR to mouthL in CCW order around origin)
+                asphaltPerimeter.Add(mouthR[i]);
+                asphaltPerimeter.Add(mouthL[i]);
+
+                // Corner from branch i CCW edge (mouthL[i]) to branch next CW edge (mouthR[next])
+                Vector3 startAsphalt = mouthL[i];
+                Vector3 endAsphalt = mouthR[next];
+                Vector3 startSW = swL[i];
+                Vector3 endSW = swR[next];
+
+                Vector3 dirI = dirs[i];
+                Vector3 dirNext = dirs[next];
+
+                float dot = Vector3.Dot(dirI, dirNext);
+
+                List<Vector3> cornerInner = new List<Vector3>();
+                List<Vector3> cornerOuter = new List<Vector3>();
+
+                // If dot < -0.55f (Angle is between ~125° and 180°), this is a continuous through-road side (e.g. through-side of T-junction)
+                if (dot < -0.55f)
+                {
+                    int throughSteps = 3;
+                    for (int s = 0; s <= throughSteps; s++)
+                    {
+                        float u = s / (float)throughSteps;
+                        Vector3 innerPt = Vector3.Lerp(startAsphalt, endAsphalt, u);
+                        Vector3 outerPt = Vector3.Lerp(startSW, endSW, u);
+                        cornerInner.Add(innerPt);
+                        cornerOuter.Add(outerPt);
+
+                        if (s > 0 && s < throughSteps)
+                        {
+                            asphaltPerimeter.Add(innerPt);
+                        }
+                    }
+                }
+                else
+                {
+                    // Curved corner turn
+                    float denom = dirI.x * dirNext.z - dirI.z * dirNext.x;
+                    Vector3 cornerPt;
+                    if (Mathf.Abs(denom) > 0.12f)
+                    {
+                        float dx = startAsphalt.x - endAsphalt.x;
+                        float dz = startAsphalt.z - endAsphalt.z;
+                        float t1 = (dx * dirNext.z - dz * dirNext.x) / denom;
+                        cornerPt = startAsphalt - dirI * t1;
+
+                        float dist = Vector3.Distance(cornerPt, origin);
+                        if (t1 < 0.1f || dist > trimDist * 0.95f)
+                        {
+                            cornerPt = (startAsphalt + endAsphalt) * 0.5f;
+                        }
+                    }
+                    else
+                    {
+                        cornerPt = (startAsphalt + endAsphalt) * 0.5f;
+                    }
+
+                    Vector3 cornerDir = cornerPt - origin;
+                    cornerDir.y = 0f;
+                    if (cornerDir.sqrMagnitude < 0.01f)
+                    {
+                        cornerDir = (startSW + endSW) * 0.5f - origin;
+                        cornerDir.y = 0f;
+                    }
+                    cornerDir.Normalize();
+                    Vector3 cornerSWPt = cornerPt + cornerDir * sw;
+
+                    int steps = 3;
+                    for (int s = 0; s <= steps; s++)
+                    {
+                        float u = s / (float)steps;
+                        float oneMinusU = 1f - u;
+                        Vector3 innerPt = oneMinusU * oneMinusU * startAsphalt + 2f * oneMinusU * u * cornerPt + u * u * endAsphalt;
+                        Vector3 outerPt = oneMinusU * oneMinusU * startSW + 2f * oneMinusU * u * cornerSWPt + u * u * endSW;
+
+                        cornerInner.Add(innerPt);
+                        cornerOuter.Add(outerPt);
+
+                        if (s > 0 && s < steps)
+                        {
+                            asphaltPerimeter.Add(innerPt);
+                        }
+                    }
+                }
+
+                if (sw > 0.01f)
+                {
+                    cornerSidewalks.Add((cornerInner, cornerOuter));
                 }
             }
-            else
+
+            // 2. Resolve Materials from Procedural System
+            Material aspMat = roadMaterial != null && !AssetDatabase.GetAssetPath(roadMaterial).Contains("LowPolyCity")
+                ? roadMaterial
+                : null;
+
+            if (aspMat == null && branches != null)
             {
-                AppendCrosswalkAtBoundary(cwVerts, cwUvs, cwTris, origin + flatForward * (halfIntersection - crosswalkStripeLength * 0.65f), flatForward, right);
-                AppendCrosswalkAtBoundary(cwVerts, cwUvs, cwTris, origin - flatForward * (halfIntersection - crosswalkStripeLength * 0.65f), -flatForward, -right);
-                AppendCrosswalkAtBoundary(cwVerts, cwUvs, cwTris, origin + right * (halfIntersection - crosswalkStripeLength * 0.65f), right, -flatForward);
-                AppendCrosswalkAtBoundary(cwVerts, cwUvs, cwTris, origin - right * (halfIntersection - crosswalkStripeLength * 0.65f), -right, flatForward);
+                for (int b = 0; b < branches.Count; b++)
+                {
+                    if (branches[b]?.Road != null)
+                    {
+                        Transform roadAsphalt = branches[b].Road.transform.Find("Asphalt");
+                        if (roadAsphalt != null)
+                        {
+                            MeshRenderer mr = roadAsphalt.GetComponent<MeshRenderer>();
+                            if (mr != null && mr.sharedMaterial != null)
+                            {
+                                aspMat = mr.sharedMaterial;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (aspMat == null)
+            {
+                aspMat = GetOrCreatePlainAsphaltMaterial();
+            }
+
+            Material swMat = sidewalkMaterial != null
+                ? sidewalkMaterial
+                : null;
+
+            if (swMat == null && branches != null)
+            {
+                for (int b = 0; b < branches.Count; b++)
+                {
+                    if (branches[b]?.Road != null)
+                    {
+                        Transform roadSw = branches[b].Road.transform.Find("Sidewalks");
+                        if (roadSw != null)
+                        {
+                            MeshRenderer mr = roadSw.GetComponent<MeshRenderer>();
+                            if (mr != null && mr.sharedMaterial != null)
+                            {
+                                swMat = mr.sharedMaterial;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (swMat == null)
+            {
+                swMat = AssetDatabase.LoadAssetAtPath<Material>(DefaultSidewalkMaterialPath);
+            }
+            if (swMat == null) swMat = aspMat;
+
+            // 3. Build Asphalt Mesh
+            Mesh asphaltMesh = new Mesh { name = "Intersection Asphalt Mesh" };
+            List<Vector3> aspVerts = new List<Vector3>(asphaltPerimeter.Count + 1);
+            List<Vector2> aspUvs = new List<Vector2>(asphaltPerimeter.Count + 1);
+            List<int> aspTris = new List<int>(asphaltPerimeter.Count * 3);
+
+            float uvTile = Mathf.Max(1f, tileLength);
+            Vector3 centerPos = AdjustRoadVertexToGround(origin, roadYOffset, false);
+            aspVerts.Add(centerPos);
+            aspUvs.Add(new Vector2(centerPos.x / uvTile, centerPos.z / uvTile));
+
+            for (int p = 0; p < asphaltPerimeter.Count; p++)
+            {
+                Vector3 pos = AdjustRoadVertexToGround(asphaltPerimeter[p], roadYOffset, false);
+                aspVerts.Add(pos);
+                aspUvs.Add(new Vector2(pos.x / uvTile, pos.z / uvTile));
+            }
+
+            int perimeterCount = asphaltPerimeter.Count;
+            for (int p = 0; p < perimeterCount; p++)
+            {
+                int curr = 1 + p;
+                int nextP = 1 + ((p + 1) % perimeterCount);
+
+                // Top face (normal pointing UP towards camera)
+                aspTris.Add(0);
+                aspTris.Add(nextP);
+                aspTris.Add(curr);
+            }
+
+            asphaltMesh.SetVertices(aspVerts);
+            asphaltMesh.SetUVs(0, aspUvs);
+            asphaltMesh.SetTriangles(aspTris, 0);
+            asphaltMesh.RecalculateNormals();
+            asphaltMesh.RecalculateTangents();
+            asphaltMesh.RecalculateBounds();
+
+            MeshFilter af = EnsureComponent<MeshFilter>(asphalt);
+            MeshRenderer ar = EnsureComponent<MeshRenderer>(asphalt);
+            af.sharedMesh = asphaltMesh;
+            ar.sharedMaterial = aspMat;
+            asphalt.SetActive(true);
+
+            MeshCollider ac = asphalt.GetComponent<MeshCollider>();
+            if (createMeshCollider)
+            {
+                if (ac == null) ac = Undo.AddComponent<MeshCollider>(asphalt);
+                ac.sharedMesh = asphaltMesh;
+            }
+            else if (ac != null)
+            {
+                Undo.DestroyObjectImmediate(ac);
+            }
+
+            // 4. Build Sidewalks Mesh
+            if (sw > 0.01f && cornerSidewalks.Count > 0)
+            {
+                Mesh swMesh = new Mesh { name = "Intersection Sidewalks Mesh" };
+                List<Vector3> swVerts = new List<Vector3>();
+                List<Vector2> swUvs = new List<Vector2>();
+                List<int> swTris = new List<int>();
+
+                float swTopHeight = roadYOffset + sidewalkHeightOffset;
+
+                foreach (var corner in cornerSidewalks)
+                {
+                    List<Vector3> inner = corner.inner;
+                    List<Vector3> outer = corner.outer;
+                    int count = inner.Count;
+
+                    int startIndex = swVerts.Count;
+
+                    // Top surface vertices
+                    for (int s = 0; s < count; s++)
+                    {
+                        Vector3 inPos = AdjustRoadVertexToGround(inner[s], swTopHeight, false);
+                        Vector3 outPos = AdjustRoadVertexToGround(outer[s], swTopHeight, false);
+
+                        swVerts.Add(inPos);
+                        swVerts.Add(outPos);
+
+                        float v = s / (float)(count - 1);
+                        swUvs.Add(new Vector2(0f, v));
+                        swUvs.Add(new Vector2(1f, v));
+                    }
+
+                    // Top surface quads (normal UP)
+                    for (int s = 0; s < count - 1; s++)
+                    {
+                        int row = startIndex + s * 2;
+                        int nextRow = row + 2;
+
+                        int inA = row;
+                        int outA = row + 1;
+                        int inB = nextRow;
+                        int outB = nextRow + 1;
+
+                        swTris.Add(inA);
+                        swTris.Add(inB);
+                        swTris.Add(outA);
+
+                        swTris.Add(outA);
+                        swTris.Add(inB);
+                        swTris.Add(outB);
+                    }
+
+                    // Outer curb drop skirt
+                    int skirtStart = swVerts.Count;
+                    for (int s = 0; s < count; s++)
+                    {
+                        Vector3 topOuter = swVerts[startIndex + s * 2 + 1];
+                        Vector3 bottomOuter = AdjustRoadVertexToGround(outer[s], roadYOffset - 0.35f, false);
+
+                        swVerts.Add(topOuter);
+                        swVerts.Add(bottomOuter);
+                        swUvs.Add(new Vector2(0f, s / (float)(count - 1)));
+                        swUvs.Add(new Vector2(1f, s / (float)(count - 1)));
+                    }
+
+                    for (int s = 0; s < count - 1; s++)
+                    {
+                        int row = skirtStart + s * 2;
+                        int nextRow = row + 2;
+
+                        // Outer face
+                        swTris.Add(row);
+                        swTris.Add(nextRow);
+                        swTris.Add(row + 1);
+
+                        swTris.Add(nextRow);
+                        swTris.Add(nextRow + 1);
+                        swTris.Add(row + 1);
+                    }
+
+                    // Inner curb step
+                    int innerCurbStart = swVerts.Count;
+                    for (int s = 0; s < count; s++)
+                    {
+                        Vector3 topInner = swVerts[startIndex + s * 2];
+                        Vector3 bottomInner = AdjustRoadVertexToGround(inner[s], roadYOffset, false);
+
+                        swVerts.Add(topInner);
+                        swVerts.Add(bottomInner);
+                        swUvs.Add(new Vector2(0f, s / (float)(count - 1)));
+                        swUvs.Add(new Vector2(1f, s / (float)(count - 1)));
+                    }
+
+                    for (int s = 0; s < count - 1; s++)
+                    {
+                        int row = innerCurbStart + s * 2;
+                        int nextRow = row + 2;
+
+                        swTris.Add(row);
+                        swTris.Add(row + 1);
+                        swTris.Add(nextRow);
+
+                        swTris.Add(nextRow);
+                        swTris.Add(row + 1);
+                        swTris.Add(nextRow + 1);
+                    }
+                }
+
+                swMesh.SetVertices(swVerts);
+                swMesh.SetUVs(0, swUvs);
+                swMesh.SetTriangles(swTris, 0);
+                swMesh.RecalculateNormals();
+                swMesh.RecalculateTangents();
+                swMesh.RecalculateBounds();
+
+                MeshFilter sf = EnsureComponent<MeshFilter>(sidewalkBase);
+                MeshRenderer sr = EnsureComponent<MeshRenderer>(sidewalkBase);
+                sf.sharedMesh = swMesh;
+                sr.sharedMaterial = swMat;
+                sidewalkBase.SetActive(true);
+
+                MeshCollider sc = sidewalkBase.GetComponent<MeshCollider>();
+                if (createSidewalkCollider)
+                {
+                    if (sc == null) sc = Undo.AddComponent<MeshCollider>(sidewalkBase);
+                    sc.sharedMesh = swMesh;
+                }
+                else if (sc != null)
+                {
+                    Undo.DestroyObjectImmediate(sc);
+                }
+            }
+            else if (sidewalkBase != null)
+            {
+                sidewalkBase.SetActive(false);
+            }
+
+            // 5. Build Crosswalks
+            Mesh cwMesh = new Mesh { name = "Intersection Crosswalks Mesh" };
+            List<Vector3> cwVerts = new List<Vector3>();
+            List<Vector2> cwUvs = new List<Vector2>();
+            List<int> cwTris = new List<int>();
+
+            for (int i = 0; i < N; i++)
+            {
+                Vector3 mouthCenter = mouthCenters[i];
+                Vector3 dir = dirs[i];
+                Vector3 across = rights[i];
+
+                AppendCrosswalkAtBoundary(cwVerts, cwUvs, cwTris, mouthCenter, dir, across);
             }
 
             cwMesh.SetVertices(cwVerts);
@@ -3803,7 +4167,7 @@ namespace DeliveryDriver.EditorTools
                     stripeCenter - halfAlong + halfAcross,
                     stripeCenter + halfAlong - halfAcross,
                     stripeCenter + halfAlong + halfAcross,
-                    laneMarkingYOffset + 0.02f);
+                    roadYOffset + Mathf.Max(0.002f, laneMarkingYOffset) + 0.002f);
             }
         }
 
@@ -3894,47 +4258,186 @@ namespace DeliveryDriver.EditorTools
             Repaint();
         }
 
-        private void SimplifyAllDenseRoads()
+        public static void RebuildSingleRoadVisual(SplineRoad road)
+        {
+            if (road == null || !road.IsUsable) return;
+
+            SimpleRoadPlacementTool tool = ScriptableObject.CreateInstance<SimpleRoadPlacementTool>();
+            try
+            {
+                tool.EnsurePlainAsphaltMaterial();
+                tool.RebuildRoadVisuals(road.gameObject, tool.SampleRoadPath(road, 0f, 1f));
+                EditorUtility.SetDirty(road.gameObject);
+            }
+            finally
+            {
+                Object.DestroyImmediate(tool);
+            }
+        }
+
+        public static int SimplifyAllDenseRoadsStatic(float targetSpacing = 14f)
         {
             SplineRoad[] roads = Object.FindObjectsByType<SplineRoad>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            if (roads == null || roads.Length == 0) return 0;
+
+            Undo.IncrementCurrentGroup();
+            Undo.SetCurrentGroupName("Simplify All Dense Roads");
+
             int fixedCount = 0;
-            for (int r = 0; r < roads.Length; r++)
+            SimpleRoadPlacementTool tool = ScriptableObject.CreateInstance<SimpleRoadPlacementTool>();
+
+            try
             {
-                SplineRoad road = roads[r];
-                if (road == null || !road.IsUsable) continue;
+                tool.EnsurePlainAsphaltMaterial();
 
-                int cpCount = road.ControlPointCount;
-                int anchorCount = (cpCount - 1) / 3 + 1;
-                float length = road.GetTotalLength();
-
-                // If road has more than 6 anchors and average distance between anchors is under 8 meters:
-                if (anchorCount > 6 && (length / anchorCount) < 8f)
+                for (int r = 0; r < roads.Length; r++)
                 {
-                    int targetAnchors = Mathf.Max(3, Mathf.CeilToInt(length / 14f));
-                    List<Vector3> simplifiedAnchors = new List<Vector3>(targetAnchors + 1);
-                    for (int i = 0; i <= targetAnchors; i++)
-                    {
-                        float t = i / (float)targetAnchors;
-                        simplifiedAnchors.Add(road.GetPoint(t));
-                    }
+                    SplineRoad road = roads[r];
+                    if (road == null || !road.IsUsable) continue;
 
-                    Undo.RecordObject(road, "Simplify Dense Spline Road");
-                    road.SetSmoothPath(simplifiedAnchors);
-                    EditorUtility.SetDirty(road);
-                    fixedCount++;
+                    int cpCount = road.ControlPointCount;
+                    int anchorCount = (cpCount - 1) / 3 + 1;
+                    float length = road.GetTotalLength();
+
+                    bool isDense = (anchorCount > 5 && (length / anchorCount) < 9f) || cpCount > 24;
+                    if (isDense)
+                    {
+                        Undo.RecordObject(road, "Simplify Spline Road");
+                        bool simplified = road.Simplify(targetSpacing);
+                        if (simplified)
+                        {
+                            EditorUtility.SetDirty(road);
+                            fixedCount++;
+
+                            if (road.transform.Find("Asphalt") != null || road.GetComponent<MeshFilter>() != null)
+                            {
+                                tool.RebuildRoadVisuals(road.gameObject, tool.SampleRoadPath(road, 0f, 1f));
+                                EditorUtility.SetDirty(road.gameObject);
+                            }
+                        }
+                    }
                 }
+            }
+            finally
+            {
+                Object.DestroyImmediate(tool);
             }
 
             if (fixedCount > 0)
             {
+                EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
+                SceneView.RepaintAll();
+            }
+
+            return fixedCount;
+        }
+
+        private void SimplifyAllDenseRoads()
+        {
+            int fixedCount = SimplifyAllDenseRoadsStatic(14f);
+            if (fixedCount > 0)
+            {
                 Debug.Log($"[SimpleRoadPlacementTool] {fixedCount} adet aşırı noktalı yol optimize edildi, gereksiz noktalar temizlendi.");
+            }
+            else
+            {
+                Debug.Log("[SimpleRoadPlacementTool] Sahnedeki tüm yollar zaten optimize durumda.");
             }
             SceneView.RepaintAll();
             Repaint();
         }
 
+        private void SplitRoadsPassingThroughIntersections()
+        {
+            RoadIntersection[] intersections = Object.FindObjectsByType<RoadIntersection>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            if (intersections == null || intersections.Length == 0) return;
+
+            float splitSnapDist = Mathf.Max(connectionSnapDistance, roadWidth * 0.5f + (sidewalkWidth > 0.01f ? sidewalkWidth : 2.2f) + 1.5f);
+            float splitSnapDistSqr = splitSnapDist * splitSnapDist;
+
+            bool splitAny = true;
+            int maxIterations = 20;
+            int iteration = 0;
+
+            while (splitAny && iteration < maxIterations)
+            {
+                splitAny = false;
+                iteration++;
+
+                SplineRoad[] allRoads = Object.FindObjectsByType<SplineRoad>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+                if (allRoads == null || allRoads.Length == 0) break;
+
+                for (int i = 0; i < intersections.Length; i++)
+                {
+                    RoadIntersection intersection = intersections[i];
+                    if (intersection == null) continue;
+                    Vector3 intPos = intersection.transform.position;
+
+                    for (int r = 0; r < allRoads.Length; r++)
+                    {
+                        SplineRoad road = allRoads[r];
+                        if (road == null || !road.IsUsable || road.gameObject == null) continue;
+
+                        Vector3 p0 = road.GetPoint(0f);
+                        Vector3 p1 = road.GetPoint(1f);
+
+                        // If road already starts or ends at this intersection, it is already a proper branch
+                        if (FlatDistanceSqr(p0, intPos) <= splitSnapDistSqr || FlatDistanceSqr(p1, intPos) <= splitSnapDistSqr)
+                        {
+                            continue;
+                        }
+
+                        // Check if road passes near this intersection in its interior
+                        float length = road.GetTotalLength();
+                        int sampleCount = Mathf.Max(16, Mathf.CeilToInt(length / 0.5f));
+                        float bestT = -1f;
+                        float bestDistSqr = splitSnapDistSqr;
+
+                        for (int sample = 0; sample <= sampleCount; sample++)
+                        {
+                            float t = sample / (float)sampleCount;
+                            Vector3 candidate = road.GetPoint(t);
+                            float dSqr = FlatDistanceSqr(intPos, candidate);
+                            if (dSqr < bestDistSqr)
+                            {
+                                bestDistSqr = dSqr;
+                                bestT = t;
+                            }
+                        }
+
+                        // Also check internal anchor control points
+                        if (bestT < 0f && road.ControlPointCount >= 7)
+                        {
+                            for (int cp = 3; cp < road.ControlPointCount - 3; cp += 3)
+                            {
+                                Vector3 anchor = road.GetControlPoint(cp);
+                                if (FlatDistanceSqr(anchor, intPos) <= splitSnapDistSqr)
+                                {
+                                    bestT = cp / (float)(road.ControlPointCount - 1);
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (bestT > 0.03f && bestT < 0.97f)
+                        {
+                            SplitExistingRoadAtConnection(road, bestT, intPos);
+                            splitAny = true;
+                            break;
+                        }
+                    }
+
+                    if (splitAny) break;
+                }
+            }
+        }
+
         private void RebuildAllIntersections()
         {
+            SplitRoadsPassingThroughIntersections();
+            CleanOrphanRoadIntersections();
+            CleanOrphanIntersectionVisuals();
+
             RoadIntersection[] intersections = Object.FindObjectsByType<RoadIntersection>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             for (int i = 0; i < intersections.Length; i++)
             {
@@ -3949,20 +4452,23 @@ namespace DeliveryDriver.EditorTools
                 CreateOrUpdateIntersectionVisual(center, forward);
             }
 
-            Transform roadsRoot = roadParent != null ? roadParent : EnsureRoadRoot(SceneManager.GetActiveScene());
-            Transform visualsRoot = roadsRoot != null ? roadsRoot.Find(GeneratedIntersectionVisualsName) : null;
-            if (visualsRoot != null)
+            // Also check all SplineRoad endpoints to catch any junctions without a RoadIntersection component
+            SplineRoad[] allRoads = Object.FindObjectsByType<SplineRoad>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            if (allRoads != null && allRoads.Length > 0)
             {
-                for (int i = 0; i < visualsRoot.childCount; i++)
+                float clusterDistSqr = (roadWidth * 0.85f) * (roadWidth * 0.85f);
+                List<Vector3> checkedPoints = new List<Vector3>();
+
+                for (int r = 0; r < allRoads.Length; r++)
                 {
-                    Transform visual = visualsRoot.GetChild(i);
-                    if (visual == null) continue;
-                    MeshFilter mf = visual.GetComponentInChildren<MeshFilter>();
-                    if (mf != null && mf.sharedMesh != null)
-                    {
-                        Vector3 center = mf.transform.TransformPoint(mf.sharedMesh.bounds.center);
-                        CreateOrUpdateIntersectionVisual(center, Vector3.forward);
-                    }
+                    SplineRoad road = allRoads[r];
+                    if (road == null || !road.IsUsable || road.ControlPointCount < 2) continue;
+
+                    Vector3 p0 = road.GetControlPoint(0);
+                    Vector3 p1 = road.GetControlPoint(road.ControlPointCount - 1);
+
+                    TryCheckJunctionCluster(p0, checkedPoints, clusterDistSqr);
+                    TryCheckJunctionCluster(p1, checkedPoints, clusterDistSqr);
                 }
             }
 
@@ -3975,8 +4481,25 @@ namespace DeliveryDriver.EditorTools
             Repaint();
         }
 
+        private void TryCheckJunctionCluster(Vector3 pt, List<Vector3> checkedPoints, float clusterDistSqr)
+        {
+            for (int i = 0; i < checkedPoints.Count; i++)
+            {
+                if (FlatDistanceSqr(pt, checkedPoints[i]) <= clusterDistSqr) return;
+            }
+            checkedPoints.Add(pt);
+
+            List<RoadBranchInfo> rawBranches = GetIntersectionBranches(pt);
+            List<RoadBranchInfo> branches = FilterUniqueBranches(rawBranches);
+            if (branches.Count >= 3)
+            {
+                CreateOrUpdateIntersectionVisual(pt, Vector3.forward);
+            }
+        }
+
         private void RebuildAllRoadsInScene()
         {
+            EnsurePlainAsphaltMaterial();
             SplineRoad[] roads = Object.FindObjectsByType<SplineRoad>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             if (roads == null || roads.Length == 0) return;
 
@@ -4072,19 +4595,7 @@ namespace DeliveryDriver.EditorTools
             bridgeTowerHeight = Mathf.Max(bridgeTowerHeight, 22f);
             bridgeTowerSpacing = Mathf.Max(bridgeTowerSpacing, 90f);
 
-            if (roadPrefab == null)
-            {
-                roadPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(DefaultRoadPrefabPath);
-                if (roadPrefab == null)
-                {
-                    roadPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(FallbackRoadPrefabPath);
-                }
-            }
-
-            if (roadMaterial == null || AssetDatabase.GetAssetPath(roadMaterial) == DefaultRoadMaterialPath)
-            {
-                roadMaterial = GetOrCreatePlainAsphaltMaterial();
-            }
+            roadMaterial = GetOrCreatePlainAsphaltMaterial();
 
             if (sidewalkMaterial == null)
             {
@@ -4127,7 +4638,7 @@ namespace DeliveryDriver.EditorTools
 
         private void EnsurePlainAsphaltMaterial()
         {
-            if (roadMaterial == null || AssetDatabase.GetAssetPath(roadMaterial) == DefaultRoadMaterialPath)
+            if (roadMaterial == null || AssetDatabase.GetAssetPath(roadMaterial).Contains("LowPolyCity"))
             {
                 roadMaterial = GetOrCreatePlainAsphaltMaterial();
             }
