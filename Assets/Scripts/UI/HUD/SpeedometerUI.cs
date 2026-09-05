@@ -115,9 +115,9 @@ public class SpeedometerUI : MonoBehaviour
     public void ResolvePlayerRigidbody()
     {
         // 1. PlayerVehicleManager
-        if (PlayerVehicleManager.Instance != null && PlayerVehicleManager.Instance.ActiveCarController != null)
+        if (PlayerVehicleManager.Instance != null && PlayerVehicleManager.Instance.ActiveVehicleController != null)
         {
-            activeCarController = PlayerVehicleManager.Instance.ActiveCarController;
+            activeCarController = PlayerVehicleManager.Instance.ActiveVehicleController;
             playerRigidbody = activeCarController.GetComponent<Rigidbody>();
             if (playerRigidbody != null) return;
         }

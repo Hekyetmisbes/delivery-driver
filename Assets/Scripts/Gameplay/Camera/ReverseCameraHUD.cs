@@ -157,9 +157,9 @@ public class ReverseCameraHUD : MonoBehaviour
     public void ResolveTarget()
     {
         // 1. PlayerVehicleManager
-        if (PlayerVehicleManager.Instance != null && PlayerVehicleManager.Instance.ActiveCarController != null)
+        if (PlayerVehicleManager.Instance != null && PlayerVehicleManager.Instance.ActiveVehicleController != null)
         {
-            SetTarget(PlayerVehicleManager.Instance.ActiveCarController.transform);
+            SetTarget(PlayerVehicleManager.Instance.ActiveVehicleController.transform);
             return;
         }
 
