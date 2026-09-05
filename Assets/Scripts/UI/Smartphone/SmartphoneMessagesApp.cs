@@ -118,7 +118,7 @@ namespace DeliveryDriver.UI.Smartphone
             mt.text = message;
             mt.fontSize = 11f;
             mt.color = new Color(0.8f, 0.88f, 0.95f, 0.9f);
-            mt.enableWordWrapping = true;
+            mt.textWrappingMode = TextWrappingModes.Normal;
         }
     }
 }

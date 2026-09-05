@@ -293,7 +293,7 @@ namespace DeliveryDriver.UI.Smartphone
             offerDescText.text = "Yeni bir teslimat görevi geldi. Belirtilen noktadan kargoyu alıp adrese ulaştırın.";
             offerDescText.fontSize = 12f;
             offerDescText.color = new Color(0.85f, 0.9f, 0.95f, 0.95f);
-            offerDescText.enableWordWrapping = true;
+            offerDescText.textWrappingMode = TextWrappingModes.Normal;
 
             // Offer Reward Box
             GameObject rewardObj = new GameObject("RewardBox", typeof(RectTransform), typeof(Image));
@@ -436,7 +436,7 @@ namespace DeliveryDriver.UI.Smartphone
             adsRect.sizeDelta = new Vector2(-28f, 40f);
             activeStatusText = adStatus.GetComponent<TextMeshProUGUI>();
             activeStatusText.fontSize = 13f;
-            activeStatusText.enableWordWrapping = true;
+            activeStatusText.textWrappingMode = TextWrappingModes.Normal;
 
             GameObject adRw = new GameObject("Reward", typeof(RectTransform), typeof(TextMeshProUGUI));
             adRw.transform.SetParent(activeDeliveryCardObj.transform, false);
@@ -486,7 +486,7 @@ namespace DeliveryDriver.UI.Smartphone
             estTmp.fontSize = 13f;
             estTmp.alignment = TextAlignmentOptions.Center;
             estTmp.color = new Color(0.7f, 0.8f, 0.9f, 0.8f);
-            estTmp.enableWordWrapping = true;
+            estTmp.textWrappingMode = TextWrappingModes.Normal;
         }
 
         private void HandleAccept()
