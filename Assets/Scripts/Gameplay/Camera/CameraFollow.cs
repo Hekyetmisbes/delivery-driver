@@ -281,9 +281,10 @@ public class CameraFollow : MonoBehaviour
         Vector2 horizDiff = new Vector2(diff.x, diff.z);
         if (horizDiff.magnitude < minHorizontalDistance)
         {
+            Vector3 backDir3D = -(yawRotation * Vector3.forward);
             Vector2 horizDir = horizDiff.sqrMagnitude > 0.001f
                 ? horizDiff.normalized
-                : -new Vector2(yawRotation * Vector3.forward).normalized;
+                : new Vector2(backDir3D.x, backDir3D.z).normalized;
 
             Vector3 p = transform.position;
             p.x = targetPos.x + horizDir.x * minHorizontalDistance;
