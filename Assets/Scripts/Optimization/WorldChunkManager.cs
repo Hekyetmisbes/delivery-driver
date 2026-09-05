@@ -10,6 +10,8 @@ namespace DeliveryDriver.Optimization
     /// </summary>
     public class WorldChunkManager : MonoBehaviour
     {
+        public static WorldChunkManager Instance { get; private set; }
+
         [Header("Chunk Configuration")]
         [Tooltip("Size of each chunk in world units")]
         public float chunkSize = 64f;
@@ -19,13 +21,13 @@ namespace DeliveryDriver.Optimization
 
         [Header("Ring Distances")]
         [Tooltip("Near ring: Full detail (0 to nearRingDistance)")]
-        public float nearRingDistance = 90f;
+        public float nearRingDistance = 180f;
 
         [Tooltip("Mid ring: Proxy detail (nearRingDistance to midRingDistance)")]
-        public float midRingDistance = 150f;
+        public float midRingDistance = 320f;
 
         [Tooltip("Far ring: Unloaded (beyond midRingDistance)")]
-        public float farRingDistance = 170f;
+        public float farRingDistance = 450f;
 
         [Header("Player Tracking")]
         [Tooltip("Transform to track (usually player vehicle)")]
@@ -39,7 +41,7 @@ namespace DeliveryDriver.Optimization
         public float updateInterval = 0.25f;
 
         [Tooltip("Maximum chunks to update per frame (prevents spikes)")]
-        public int maxChunkUpdatesPerFrame = 16;
+        public int maxChunkUpdatesPerFrame = 24;
 
         [Header("Debug")]
         public bool showDebugInfo = false;
@@ -53,10 +55,17 @@ namespace DeliveryDriver.Optimization
         public bool cullStaticRenderersOnly = false;
 
         [Tooltip("Extra buffer to reduce pop-in near the radius boundary")]
-        public float rendererCullingPadding = 8f;
+        public float rendererCullingPadding = 25f;
 
         [Tooltip("How often to refresh dynamic renderer/NPC caches")]
         public float cacheRefreshInterval = 30f;
+
+        [Header("Frustum Culling (Camera View Angle)")]
+        [Tooltip("Cull or downgrade chunks outside camera view frustum to avoid rendering unseen areas behind or far to sides")]
+        public bool enableFrustumCulling = true;
+
+        [Tooltip("Distance around player where chunks are always kept active even if behind camera (safety ring for rear shadows & mirrors)")]
+        public float frustumSafetyDistance = 100f;
 
         // Internal state
         private Dictionary<Vector2Int, WorldChunk> chunks = new Dictionary<Vector2Int, WorldChunk>();
@@ -71,6 +80,9 @@ namespace DeliveryDriver.Optimization
         private readonly HashSet<Transform> chunkRootSet = new HashSet<Transform>();
         private readonly List<ChunkQueueEntry> chunkQueueBuffer = new List<ChunkQueueEntry>();
         private Camera cachedMainCamera;
+        private readonly Plane[] cameraFrustumPlanes = new Plane[6];
+        private readonly Plane[] reverseCameraFrustumPlanes = new Plane[6];
+        private bool isReverseFrustumValid;
         private GUIStyle debugHeaderStyle;
         private Renderer[] cachedSceneRenderers;
 
@@ -85,6 +97,23 @@ namespace DeliveryDriver.Optimization
         private int chunksInNearRing;
         private int chunksInMidRing;
         private int chunksInFarRing;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this)
+            {
+                // Preserve newest valid instance
+            }
+            Instance = this;
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
+        }
 
         private void Start()
         {
@@ -130,7 +159,7 @@ namespace DeliveryDriver.Optimization
         public void DiscoverChunks()
         {
             chunks.Clear();
-            WorldChunk[] foundChunks = FindObjectsByType<WorldChunk>(FindObjectsSortMode.None);
+            WorldChunk[] foundChunks = FindObjectsByType<WorldChunk>(FindObjectsInactive.Include, FindObjectsSortMode.None);
 
             foreach (var chunk in foundChunks)
             {
@@ -200,6 +229,29 @@ namespace DeliveryDriver.Optimization
         {
             if (chunks.Count == 0) return;
 
+            if (enableFrustumCulling)
+            {
+                if (cachedMainCamera == null)
+                {
+                    cachedMainCamera = Camera.main;
+                }
+
+                if (cachedMainCamera != null)
+                {
+                    GeometryUtility.CalculateFrustumPlanes(cachedMainCamera, cameraFrustumPlanes);
+                }
+
+                Camera revCam = (ReverseCameraHUD.Instance != null && ReverseCameraHUD.IsReverseEngaged)
+                    ? ReverseCameraHUD.Instance.ReverseCamera
+                    : null;
+                isReverseFrustumValid = false;
+                if (revCam != null && revCam.gameObject.activeInHierarchy)
+                {
+                    GeometryUtility.CalculateFrustumPlanes(revCam, reverseCameraFrustumPlanes);
+                    isReverseFrustumValid = true;
+                }
+            }
+
             Vector3 playerPos = playerTransform.position;
             // Rebuild every interval so chunks outside the active circle are unloaded immediately.
             BuildChunkUpdateQueue(playerPos);
@@ -237,7 +289,36 @@ namespace DeliveryDriver.Optimization
                 Vector3 npcPos = npc.transform.position;
                 float dx = npcPos.x - playerPos.x;
                 float dz = npcPos.z - playerPos.z;
-                bool npcVisible = dx * dx + dz * dz <= npcRadiusSqr;
+                float sqrDist = dx * dx + dz * dz;
+                bool npcVisible = sqrDist <= npcRadiusSqr;
+
+                // Frustum culling for NPCs: if beyond safety radius and behind camera, don't render!
+                if (npcVisible && enableFrustumCulling && cachedMainCamera != null && sqrDist > (frustumSafetyDistance * frustumSafetyDistance))
+                {
+                    Vector3 toNpc = npcPos - cachedMainCamera.transform.position;
+                    bool behindMain = Vector3.Dot(cachedMainCamera.transform.forward, toNpc.normalized) < -0.15f;
+                    if (behindMain)
+                    {
+                        bool visibleInReverse = false;
+                        if (isReverseFrustumValid)
+                        {
+                            Camera revCam = ReverseCameraHUD.Instance != null ? ReverseCameraHUD.Instance.ReverseCamera : null;
+                            if (revCam != null)
+                            {
+                                Vector3 toNpcRev = npcPos - revCam.transform.position;
+                                if (Vector3.Dot(revCam.transform.forward, toNpcRev.normalized) >= -0.15f)
+                                {
+                                    visibleInReverse = true;
+                                }
+                            }
+                        }
+
+                        if (!visibleInReverse)
+                        {
+                            npcVisible = false;
+                        }
+                    }
+                }
 
                 // Skip if visibility hasn't changed - avoids expensive renderer.enabled writes
                 if (npcVisibilityState.TryGetValue(npc, out bool currentVisible) && currentVisible == npcVisible)
@@ -308,6 +389,16 @@ namespace DeliveryDriver.Optimization
                 if (cachedMainCamera != null && renderer.transform.IsChildOf(cachedMainCamera.transform)) continue;
                 if (renderer is ParticleSystemRenderer) continue;
                 if (cullStaticRenderersOnly && !renderer.gameObject.isStatic) continue;
+
+                // Never hard-cull roads, terrain, water, or splines
+                int roadLayer = LayerMask.NameToLayer("Road");
+                if (roadLayer != -1 && renderer.gameObject.layer == roadLayer) continue;
+                int waterLayer = LayerMask.NameToLayer("Water");
+                if (waterLayer != -1 && renderer.gameObject.layer == waterLayer) continue;
+                if (renderer.GetComponent<Terrain>() != null || renderer.GetComponentInParent<Terrain>() != null) continue;
+                if (renderer.GetComponentInParent<TrafficSystem.Spline.SplineRoad>() != null) continue;
+                string rName = renderer.name.ToLowerInvariant();
+                if (rName.Contains("road") || rName.Contains("street") || rName.Contains("asphalt") || rName.Contains("intersection") || rName.Contains("spline") || rName.Contains("sidewalk") || rName.Contains("terrain")) continue;
 
                 if (IsRendererManagedByChunk(renderer.transform))
                 {
@@ -433,7 +524,7 @@ namespace DeliveryDriver.Optimization
                 if (chunk == null) continue;
 
                 float distance = Vector3.Distance(playerPos, chunk.GetWorldCenter());
-                WorldChunk.ChunkState targetState = DetermineChunkState(distance);
+                WorldChunk.ChunkState targetState = DetermineChunkState(chunk, distance);
 
                 // Update chunk state if changed
                 if (chunk.currentState != targetState)
@@ -458,21 +549,75 @@ namespace DeliveryDriver.Optimization
             }
         }
 
-        private WorldChunk.ChunkState DetermineChunkState(float distance)
+        private WorldChunk.ChunkState DetermineChunkState(WorldChunk chunk, float distance)
         {
+            float proxyDistanceLimit = GetProxyDistanceLimit();
+            if (distance > proxyDistanceLimit)
+            {
+                return WorldChunk.ChunkState.Unloaded;
+            }
+
+            // Frustum Culling: if chunk is beyond safety radius, check if outside camera view
+            if (enableFrustumCulling && distance > frustumSafetyDistance && chunk != null)
+            {
+                Bounds chunkBounds = chunk.GetBounds();
+                bool inMainFrustum = cachedMainCamera != null && GeometryUtility.TestPlanesAABB(cameraFrustumPlanes, chunkBounds);
+                bool inReverseFrustum = isReverseFrustumValid && GeometryUtility.TestPlanesAABB(reverseCameraFrustumPlanes, chunkBounds);
+
+                if (!inMainFrustum && !inReverseFrustum)
+                {
+                    // Outside both camera views: do not render full detail
+                    return WorldChunk.ChunkState.Unloaded;
+                }
+            }
+
             if (distance <= nearRingDistance)
             {
                 return WorldChunk.ChunkState.LoadedFull;
             }
 
-            // Keep proxy chunks only inside the streaming circle; unload everything outside it.
-            float proxyDistanceLimit = GetProxyDistanceLimit();
-            if (distance <= proxyDistanceLimit)
+            return WorldChunk.ChunkState.LoadedProxy;
+        }
+
+        /// <summary>
+        /// Geri vitese geçildiğinde veya geri tuşuna basıldığı anda arkadaki binaların
+        /// kamera görüntüsü HUD'a gelene kadar hemen yüklenmesini sağlar.
+        /// </summary>
+        public void OnReverseEngaged(Camera revCam)
+        {
+            if (revCam != null)
             {
-                return WorldChunk.ChunkState.LoadedProxy;
+                GeometryUtility.CalculateFrustumPlanes(revCam, reverseCameraFrustumPlanes);
+                isReverseFrustumValid = true;
             }
 
-            return WorldChunk.ChunkState.Unloaded;
+            if (playerTransform != null)
+            {
+                UpdateChunkStates();
+                ProcessImmediateChunkUpdates();
+            }
+        }
+
+        private void ProcessImmediateChunkUpdates()
+        {
+            if (playerTransform == null) return;
+
+            Vector3 playerPos = playerTransform.position;
+            int immediateBudget = Mathf.Min(chunksToUpdate.Count, 48);
+
+            for (int i = 0; i < immediateBudget && chunksToUpdate.Count > 0; i++)
+            {
+                WorldChunk chunk = chunksToUpdate.Dequeue();
+                if (chunk == null) continue;
+
+                float distance = Vector3.Distance(playerPos, chunk.GetWorldCenter());
+                WorldChunk.ChunkState targetState = DetermineChunkState(chunk, distance);
+
+                if (chunk.currentState != targetState)
+                {
+                    chunk.SetState(targetState);
+                }
+            }
         }
 
         private float GetProxyDistanceLimit()

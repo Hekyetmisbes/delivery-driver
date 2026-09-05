@@ -17,6 +17,10 @@ public class ReverseCameraHUD : MonoBehaviour
     private const string GameSceneName = "Game";
     private const string AltGameSceneName = "GameScene";
 
+    public static ReverseCameraHUD Instance { get; private set; }
+    public static bool IsReverseEngaged => Instance != null && (Instance.isReverseActive || Instance.currentAlpha > 0.005f || (Instance.carController != null && Instance.carController.IsReverseInputActive));
+    public Camera ReverseCamera => reverseCam;
+
     [Header("--- HEDEF ARAÇ ---")]
     [Tooltip("Takip edilecek araç. Boşsa otomatik bulunur.")]
     [SerializeField] private Transform carTarget;
@@ -26,12 +30,12 @@ public class ReverseCameraHUD : MonoBehaviour
     [SerializeField] private Vector3 cameraLocalOffset = new Vector3(0f, 0.75f, -1.8f);
     [Tooltip("Kamera açısı. Y=180 geriye bakar, X pozitif = aşağı eğimli.")]
     [SerializeField] private Vector3 cameraLocalEuler = new Vector3(12f, 180f, 0f);
-    [SerializeField] private float fieldOfView = 65f;
+    [SerializeField] private float fieldOfView = 70f;
 
     [Header("--- HUD PANEL AYARLARI ---")]
-    [SerializeField] private Vector2 panelSize = new Vector2(380f, 190f);
-    [SerializeField] private Vector2 panelAnchoredPosition = new Vector2(0f, -18f);
-    [SerializeField] private float fadeSpeed = 8f;
+    [SerializeField] private Vector2 panelSize = new Vector2(500f, 250f);
+    [SerializeField] private Vector2 panelAnchoredPosition = new Vector2(0f, -16f);
+    [SerializeField] private float fadeSpeed = 10f;
 
     [Header("--- TETİKLEYİCİLER ---")]
     [SerializeField] private float reverseVelocityThreshold = -0.12f;
@@ -60,9 +64,16 @@ public class ReverseCameraHUD : MonoBehaviour
     private TextMeshProUGUI gearBadgeText;
     private float currentAlpha;
     private bool isReverseActive;
+    private bool wasReverseEngagedLastFrame;
 
     private void Awake()
     {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        Instance = this;
         InitializeRenderTexture();
     }
 
@@ -118,7 +129,7 @@ public class ReverseCameraHUD : MonoBehaviour
     {
         if (renderTexture == null)
         {
-            renderTexture = new RenderTexture(480, 240, 16, RenderTextureFormat.ARGB32)
+            renderTexture = new RenderTexture(640, 320, 16, RenderTextureFormat.ARGB32)
             {
                 name = "_ReverseCameraTexture",
                 filterMode = FilterMode.Bilinear,
@@ -138,7 +149,7 @@ public class ReverseCameraHUD : MonoBehaviour
         reverseCam = camObj.AddComponent<Camera>();
         reverseCam.targetTexture = renderTexture;
         reverseCam.nearClipPlane = 0.15f;
-        reverseCam.farClipPlane = 250f;
+        reverseCam.farClipPlane = 450f;
         reverseCam.fieldOfView = fieldOfView;
         reverseCam.clearFlags = CameraClearFlags.Skybox;
         reverseCam.backgroundColor = Color.black;
@@ -285,7 +296,7 @@ public class ReverseCameraHUD : MonoBehaviour
         headerRect.anchorMax = new Vector2(1f, 1f);
         headerRect.pivot = new Vector2(0.5f, 1f);
         headerRect.anchoredPosition = Vector2.zero;
-        headerRect.sizeDelta = new Vector2(0f, 26f);
+        headerRect.sizeDelta = new Vector2(0f, 28f);
 
         Image headerImg = headerObj.GetComponent<Image>();
         headerImg.color = headerColor;
@@ -299,7 +310,7 @@ public class ReverseCameraHUD : MonoBehaviour
         badgeRect.anchorMax = new Vector2(0f, 0.5f);
         badgeRect.pivot = new Vector2(0f, 0.5f);
         badgeRect.anchoredPosition = new Vector2(8f, 0f);
-        badgeRect.sizeDelta = new Vector2(22f, 18f);
+        badgeRect.sizeDelta = new Vector2(26f, 22f);
 
         Image badgeImg = badgeObj.GetComponent<Image>();
         badgeImg.color = new Color(0.9f, 0.15f, 0.15f, 1f);
@@ -315,7 +326,7 @@ public class ReverseCameraHUD : MonoBehaviour
 
         gearBadgeText = badgeTextObj.GetComponent<TextMeshProUGUI>();
         gearBadgeText.text = "R";
-        gearBadgeText.fontSize = 14f;
+        gearBadgeText.fontSize = 15f;
         gearBadgeText.fontStyle = FontStyles.Bold;
         gearBadgeText.alignment = TextAlignmentOptions.Center;
         gearBadgeText.color = Color.white;
@@ -326,12 +337,12 @@ public class ReverseCameraHUD : MonoBehaviour
         RectTransform titleRect = titleObj.GetComponent<RectTransform>();
         titleRect.anchorMin = new Vector2(0f, 0f);
         titleRect.anchorMax = new Vector2(1f, 1f);
-        titleRect.offsetMin = new Vector2(36f, 0f);
-        titleRect.offsetMax = new Vector2(-60f, 0f);
+        titleRect.offsetMin = new Vector2(40f, 0f);
+        titleRect.offsetMax = new Vector2(-70f, 0f);
 
         headerTitleText = titleObj.GetComponent<TextMeshProUGUI>();
         headerTitleText.text = "REAR VIEW / GERİ GÖRÜŞ";
-        headerTitleText.fontSize = 12f;
+        headerTitleText.fontSize = 13f;
         headerTitleText.fontStyle = FontStyles.Bold;
         headerTitleText.alignment = TextAlignmentOptions.Left;
         headerTitleText.color = new Color(0.85f, 0.95f, 1f, 0.95f);
@@ -343,12 +354,12 @@ public class ReverseCameraHUD : MonoBehaviour
         liveRect.anchorMin = new Vector2(1f, 0.5f);
         liveRect.anchorMax = new Vector2(1f, 0.5f);
         liveRect.pivot = new Vector2(1f, 0.5f);
-        liveRect.anchoredPosition = new Vector2(-8f, 0f);
-        liveRect.sizeDelta = new Vector2(60f, 20f);
+        liveRect.anchoredPosition = new Vector2(-10f, 0f);
+        liveRect.sizeDelta = new Vector2(65f, 20f);
 
         TextMeshProUGUI liveText = liveObj.GetComponent<TextMeshProUGUI>();
         liveText.text = "● LIVE";
-        liveText.fontSize = 11f;
+        liveText.fontSize = 12f;
         liveText.fontStyle = FontStyles.Bold;
         liveText.alignment = TextAlignmentOptions.Right;
         liveText.color = new Color(0.2f, 1f, 0.4f, 0.9f);
@@ -360,7 +371,7 @@ public class ReverseCameraHUD : MonoBehaviour
         screenRect.anchorMin = Vector2.zero;
         screenRect.anchorMax = Vector2.one;
         screenRect.offsetMin = new Vector2(0f, 0f);
-        screenRect.offsetMax = new Vector2(0f, -26f); // Below header
+        screenRect.offsetMax = new Vector2(0f, -28f); // Below header
 
         cameraDisplayImage = screenObj.GetComponent<RawImage>();
         cameraDisplayImage.texture = renderTexture;
@@ -369,13 +380,15 @@ public class ReverseCameraHUD : MonoBehaviour
         // 5. Parking Guidelines Overlay
         if (showParkingGuidelines)
         {
-            BuildParkingGuidelines(screenObj.transform, fallback);
+            float screenW = Mathf.Max(100f, panelSize.x - 6f);
+            float screenH = Mathf.Max(50f, panelSize.y - 6f - 28f);
+            BuildParkingGuidelines(screenObj.transform, fallback, screenW, screenH);
         }
 
         panelObj.SetActive(false);
     }
 
-    private void BuildParkingGuidelines(Transform parent, Sprite fallback)
+    private void BuildParkingGuidelines(Transform parent, Sprite fallback, float screenW, float screenH)
     {
         GameObject guideRoot = new GameObject("ParkingGuidelines", typeof(RectTransform));
         guideRoot.transform.SetParent(parent, false);
@@ -386,19 +399,19 @@ public class ReverseCameraHUD : MonoBehaviour
         grRect.offsetMax = Vector2.zero;
 
         // Kırmızı Dur Çizgisi (Alt / En Yakın)
-        CreateGuideLine(guideRoot.transform, fallback, new Vector2(0.22f, 0.12f), new Vector2(0.78f, 0.12f), new Color(1f, 0.15f, 0.15f, 0.85f), 2.5f);
+        CreateGuideLine(guideRoot.transform, fallback, new Vector2(0.22f, 0.12f), new Vector2(0.78f, 0.12f), new Color(1f, 0.15f, 0.15f, 0.85f), 3f, screenW, screenH);
         // Sarı Uyarı Çizgisi (Orta)
-        CreateGuideLine(guideRoot.transform, fallback, new Vector2(0.26f, 0.28f), new Vector2(0.74f, 0.28f), new Color(1f, 0.85f, 0.1f, 0.75f), 2f);
+        CreateGuideLine(guideRoot.transform, fallback, new Vector2(0.26f, 0.28f), new Vector2(0.74f, 0.28f), new Color(1f, 0.85f, 0.1f, 0.75f), 2.5f, screenW, screenH);
         // Yeşil Güvenli Çizgi (Üst / Uzak)
-        CreateGuideLine(guideRoot.transform, fallback, new Vector2(0.30f, 0.46f), new Vector2(0.70f, 0.46f), new Color(0.2f, 1f, 0.35f, 0.7f), 1.8f);
+        CreateGuideLine(guideRoot.transform, fallback, new Vector2(0.30f, 0.46f), new Vector2(0.70f, 0.46f), new Color(0.2f, 1f, 0.35f, 0.7f), 2f, screenW, screenH);
 
         // Sol Kılavuz Hattı (Perspektif)
-        CreateGuideLine(guideRoot.transform, fallback, new Vector2(0.18f, 0.05f), new Vector2(0.32f, 0.52f), new Color(0.15f, 0.9f, 1f, 0.65f), 2f);
+        CreateGuideLine(guideRoot.transform, fallback, new Vector2(0.18f, 0.05f), new Vector2(0.32f, 0.52f), new Color(0.15f, 0.9f, 1f, 0.65f), 2.5f, screenW, screenH);
         // Sağ Kılavuz Hattı (Perspektif)
-        CreateGuideLine(guideRoot.transform, fallback, new Vector2(0.82f, 0.05f), new Vector2(0.68f, 0.52f), new Color(0.15f, 0.9f, 1f, 0.65f), 2f);
+        CreateGuideLine(guideRoot.transform, fallback, new Vector2(0.82f, 0.05f), new Vector2(0.68f, 0.52f), new Color(0.15f, 0.9f, 1f, 0.65f), 2.5f, screenW, screenH);
     }
 
-    private static void CreateGuideLine(Transform parent, Sprite fallback, Vector2 startRatio, Vector2 endRatio, Color color, float thickness)
+    private static void CreateGuideLine(Transform parent, Sprite fallback, Vector2 startRatio, Vector2 endRatio, Color color, float thickness, float screenW, float screenH)
     {
         GameObject lineObj = new GameObject("GuideLine", typeof(RectTransform), typeof(Image));
         lineObj.transform.SetParent(parent, false);
@@ -408,9 +421,8 @@ public class ReverseCameraHUD : MonoBehaviour
         rect.anchorMax = Vector2.zero;
         rect.pivot = new Vector2(0.5f, 0.5f);
 
-        // Parent boyutu varsayımı (368x150)
-        Vector2 start = new Vector2(startRatio.x * 368f, startRatio.y * 150f);
-        Vector2 end = new Vector2(endRatio.x * 368f, endRatio.y * 150f);
+        Vector2 start = new Vector2(startRatio.x * screenW, startRatio.y * screenH);
+        Vector2 end = new Vector2(endRatio.x * screenW, endRatio.y * screenH);
         Vector2 mid = (start + end) * 0.5f;
         Vector2 diff = end - start;
         float length = diff.magnitude;
@@ -451,6 +463,19 @@ public class ReverseCameraHUD : MonoBehaviour
         EnsureUI();
 
         bool reversing = CheckIsReversing();
+        bool reverseInputEngaged = carController != null && carController.IsReverseInputActive;
+        bool isAnyReverse = reversing || reverseInputEngaged;
+
+        // Geriye basıldığı anda veya geri giderken arkadaki binaların kamera açılana kadar yüklenmesini tetikle
+        if (isAnyReverse && !wasReverseEngagedLastFrame && reverseCam != null)
+        {
+            UpdateCameraPosition();
+            if (DeliveryDriver.Optimization.WorldChunkManager.Instance != null)
+            {
+                DeliveryDriver.Optimization.WorldChunkManager.Instance.OnReverseEngaged(reverseCam);
+            }
+        }
+        wasReverseEngagedLastFrame = isAnyReverse;
         isReverseActive = reversing;
 
         float targetAlpha = reversing ? 1f : 0f;
@@ -470,8 +495,8 @@ public class ReverseCameraHUD : MonoBehaviour
                 panelCanvasGroup.alpha = currentAlpha;
             }
 
-            // Hafif yukarı-aşağı kayma animasyonu (-10'dan -18'e)
-            float yPos = Mathf.Lerp(-10f, panelAnchoredPosition.y, currentAlpha);
+            // Hafif yukarı-aşağı kayma animasyonu (-8'den panelAnchoredPosition.y'ye)
+            float yPos = Mathf.Lerp(-8f, panelAnchoredPosition.y, currentAlpha);
             panelRoot.anchoredPosition = new Vector2(panelAnchoredPosition.x, yPos);
         }
 
@@ -595,6 +620,11 @@ public class ReverseCameraHUD : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (Instance == this)
+        {
+            Instance = null;
+        }
+
         if (reverseCam != null)
         {
             Destroy(reverseCam.gameObject);
