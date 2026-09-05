@@ -36,6 +36,12 @@ namespace TrafficSystem
         private float lastRecoveryTime;
         private int maneuverAttempts;
 
+        // Donut / Circling Detection
+        private Vector3 donutAnchorPos;
+        private float cumulativeYaw;
+        private float lastYawAngle;
+        private float donutTimer;
+
         private void Awake()
         {
             carAgent = GetComponent<NpcCarAgent>();
@@ -60,6 +66,42 @@ namespace TrafficSystem
 
             UpdateStuckDetection();
             UpdateFlippedDetection();
+            UpdateDonutDetection();
+        }
+
+        private void UpdateDonutDetection()
+        {
+            float currentYaw = transform.eulerAngles.y;
+            float deltaYaw = Mathf.DeltaAngle(lastYawAngle, currentYaw);
+            lastYawAngle = currentYaw;
+
+            // Check if vehicle has moved away from the anchor position
+            if (Vector3.Distance(transform.position, donutAnchorPos) > 8f)
+            {
+                donutAnchorPos = transform.position;
+                cumulativeYaw = 0f;
+                donutTimer = 0f;
+                return;
+            }
+
+            // If spinning continuously in one direction
+            if (Mathf.Abs(deltaYaw) > 1.2f)
+            {
+                cumulativeYaw += deltaYaw;
+                donutTimer += Time.deltaTime;
+
+                if (Mathf.Abs(cumulativeYaw) >= 330f && donutTimer >= 2.5f)
+                {
+                    cumulativeYaw = 0f;
+                    donutTimer = 0f;
+                    TriggerTeleportRecovery("Circling / Donut Detected");
+                }
+            }
+            else
+            {
+                cumulativeYaw = Mathf.MoveTowards(cumulativeYaw, 0f, 60f * Time.deltaTime);
+                donutTimer = Mathf.MoveTowards(donutTimer, 0f, Time.deltaTime);
+            }
         }
 
         private void UpdateStuckDetection()

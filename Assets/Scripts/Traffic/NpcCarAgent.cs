@@ -271,6 +271,76 @@ namespace TrafficSystem
             }
         }
 
+        private SplineRoad GetNextRoadForIntersection(RoadIntersection intersection)
+        {
+            if (intersection == null) return null;
+
+            // 1. Check plannedRoute
+            if (plannedRoute.Count > 1 && plannedRoute[0] == currentRoad)
+            {
+                SplineRoad plannedNext = plannedRoute[1];
+                if (plannedNext != null && plannedNext != currentRoad && IsRoadConnectedTo(plannedNext, intersection))
+                {
+                    return plannedNext;
+                }
+            }
+            else if (plannedRoute.Count > 0 && plannedRoute[0] != currentRoad)
+            {
+                SplineRoad plannedNext = plannedRoute[0];
+                if (plannedNext != null && IsRoadConnectedTo(plannedNext, intersection))
+                {
+                    return plannedNext;
+                }
+            }
+
+            // 2. Fallback to connected roads of intersection
+            if (intersection.connectedRoads != null && intersection.connectedRoads.Count > 0)
+            {
+                List<SplineRoad> options = new List<SplineRoad>(intersection.connectedRoads.Count);
+                for (int i = 0; i < intersection.connectedRoads.Count; i++)
+                {
+                    SplineRoad r = intersection.connectedRoads[i];
+                    if (r != null && r != currentRoad && r.IsUsable)
+                    {
+                        options.Add(r);
+                    }
+                }
+
+                if (options.Count > 0)
+                {
+                    SplineRoad picked = options[Random.Range(0, options.Count)];
+                    if (plannedRoute.Count > 0 && plannedRoute[0] == currentRoad)
+                    {
+                        plannedRoute.Insert(1, picked);
+                    }
+                    else
+                    {
+                        plannedRoute.Add(picked);
+                    }
+                    return picked;
+                }
+            }
+
+            return null;
+        }
+
+        private bool IsRoadConnectedTo(SplineRoad road, RoadIntersection intersection)
+        {
+            if (road == null || intersection == null) return false;
+            if (road.startIntersection == intersection || road.endIntersection == intersection) return true;
+
+            Vector3 jPos = intersection.transform.position;
+            return Vector3.Distance(road.GetPoint(0f), jPos) < 10f || Vector3.Distance(road.GetPoint(1f), jPos) < 10f;
+        }
+
+        private bool DetermineEnterForward(SplineRoad nextRoad, RoadIntersection junction)
+        {
+            Vector3 junctionPos = junction != null ? junction.transform.position : transform.position;
+            float distToStart = Vector3.Distance(nextRoad.GetPoint(0f), junctionPos);
+            float distToEnd = Vector3.Distance(nextRoad.GetPoint(1f), junctionPos);
+            return distToStart <= distToEnd;
+        }
+
         public float GetGroundClearanceOffset()
         {
             ResolveWheelCollidersIfNeeded();
@@ -317,33 +387,37 @@ namespace TrafficSystem
             float totalLength = currentRoad.GetTotalLength();
             float distanceRemaining = isDrivingForwardOnRoad ? (totalLength - distanceOnRoad) : distanceOnRoad;
 
-            // 3. Find lookahead target (Pure Pursuit) and detect approaching intersection
+            // 3. Find lookahead target (Pure Pursuit) and handle intersection navigation
             float lookAheadDist = distanceOnRoad + (isDrivingForwardOnRoad ? lookAheadDistance : -lookAheadDistance);
             Vector3 targetPosition;
             RoadIntersection approachingIntersection = null;
 
-            if (lookAheadDist > totalLength || lookAheadDist < 0f)
+            bool isApproachingEnd = (lookAheadDist > totalLength || lookAheadDist < 0f || distanceRemaining < lookAheadDistance);
+            if (isApproachingEnd)
             {
                 approachingIntersection = isDrivingForwardOnRoad ? currentRoad.endIntersection : currentRoad.startIntersection;
 
                 if (approachingIntersection != null)
                 {
-                    SplineRoad nextRoad = null;
-                    if (plannedRoute.Count > 1 && plannedRoute[0] == currentRoad)
-                        nextRoad = plannedRoute[1];
-                    else if (plannedRoute.Count > 0 && plannedRoute[0] != currentRoad)
-                        nextRoad = plannedRoute[0];
+                    SplineRoad nextRoad = GetNextRoadForIntersection(approachingIntersection);
 
                     if (nextRoad != null)
                     {
-                        float overShoot = isDrivingForwardOnRoad ? (lookAheadDist - totalLength) : -lookAheadDist;
-                        bool enterNextForward = (nextRoad.startIntersection == approachingIntersection);
-                        float nextTargetDist = enterNextForward ? overShoot : (nextRoad.GetTotalLength() - overShoot);
-                        targetPosition = nextRoad.GetLanePosition(nextRoad.DistanceToT(nextTargetDist), enterNextForward);
+                        bool enterNextForward = DetermineEnterForward(nextRoad, approachingIntersection);
+                        Vector3 exitPoint = currentRoad.GetLanePosition(isDrivingForwardOnRoad ? 1f : 0f, isDrivingForwardOnRoad);
+                        Vector3 entryPoint = nextRoad.GetLanePosition(enterNextForward ? 0f : 1f, enterNextForward);
 
-                        if (distanceRemaining < 1.5f)
+                        float distToExit = Vector3.Distance(transform.position, exitPoint);
+                        float distToEntry = Vector3.Distance(transform.position, entryPoint);
+
+                        // Robust handover condition:
+                        // Trigger handover if near the exit, near the entry, or closer to the entry than exit
+                        bool shouldTransition = (distanceRemaining < 2.5f) ||
+                                                 (distToEntry < 3.5f) ||
+                                                 (distToEntry < distToExit && distanceRemaining < 5.0f);
+
+                        if (shouldTransition)
                         {
-                            // Vehicle has crossed into the new road: release previous intersection
                             if (currentIntersectionReserved != null)
                             {
                                 currentIntersectionReserved.ExitIntersection(this);
@@ -356,18 +430,58 @@ namespace TrafficSystem
 
                             currentRoad = nextRoad;
                             isDrivingForwardOnRoad = enterNextForward;
-                            currentT = currentRoad.DistanceToT(enterNextForward ? 0f : nextRoad.GetTotalLength());
+                            currentT = enterNextForward ? 0.02f : 0.98f;
+
+                            // Immediate next-road target
+                            float newTotalLen = currentRoad.GetTotalLength();
+                            float newTargetDist = enterNextForward ? Mathf.Min(newTotalLen, lookAheadDistance) : Mathf.Max(0f, newTotalLen - lookAheadDistance);
+                            targetPosition = currentRoad.GetLanePosition(currentRoad.DistanceToT(newTargetDist), enterNextForward);
+                        }
+                        else
+                        {
+                            // Vehicle is still approaching or traversing the intersection:
+                            if (distanceRemaining > 3.0f && distToExit > 3.0f)
+                            {
+                                // Follow lane straight to intersection exit (avoids cutting corner curb)
+                                float exitTargetDist = isDrivingForwardOnRoad ? Mathf.Min(totalLength, distanceOnRoad + lookAheadDistance) : Mathf.Max(0f, distanceOnRoad - lookAheadDistance);
+                                targetPosition = currentRoad.GetLanePosition(currentRoad.DistanceToT(exitTargetDist), isDrivingForwardOnRoad);
+                            }
+                            else
+                            {
+                                // Smooth curve through intersection from exitPoint to entryPoint
+                                Vector3 junctionCenter = approachingIntersection.transform.position;
+                                Vector3 cornerMid = Vector3.Lerp(exitPoint, entryPoint, 0.5f);
+                                Vector3 controlPoint = Vector3.Lerp(cornerMid, junctionCenter, 0.4f);
+
+                                float tInter = Mathf.Clamp01(1f - (distToEntry / Mathf.Max(0.1f, distToExit + distToEntry)));
+                                targetPosition = BezierUtility.EvaluateQuadratic(exitPoint, controlPoint, entryPoint, Mathf.Clamp01(tInter + 0.35f));
+                            }
                         }
                     }
                     else
                     {
-                        targetPosition = currentRoad.GetLanePosition(isDrivingForwardOnRoad ? 1f : 0f, isDrivingForwardOnRoad);
-                        PlanRouteToRandomDestination();
+                        // No connecting road (dead end): reverse direction when reaching the end
+                        if (distanceRemaining < 2.5f)
+                        {
+                            isDrivingForwardOnRoad = !isDrivingForwardOnRoad;
+                            plannedRoute.Clear();
+                            PlanRouteToRandomDestination();
+                        }
+                        float safeDist = isDrivingForwardOnRoad ? Mathf.Min(totalLength, distanceOnRoad + lookAheadDistance) : Mathf.Max(0f, distanceOnRoad - lookAheadDistance);
+                        targetPosition = currentRoad.GetLanePosition(currentRoad.DistanceToT(safeDist), isDrivingForwardOnRoad);
                     }
                 }
                 else
                 {
-                    targetPosition = currentRoad.GetLanePosition(isDrivingForwardOnRoad ? 1f : 0f, isDrivingForwardOnRoad);
+                    // No intersection reference: if reached dead end, reverse
+                    if (distanceRemaining < 2.5f)
+                    {
+                        isDrivingForwardOnRoad = !isDrivingForwardOnRoad;
+                        plannedRoute.Clear();
+                        PlanRouteToRandomDestination();
+                    }
+                    float safeDist = isDrivingForwardOnRoad ? Mathf.Min(totalLength, distanceOnRoad + lookAheadDistance) : Mathf.Max(0f, distanceOnRoad - lookAheadDistance);
+                    targetPosition = currentRoad.GetLanePosition(currentRoad.DistanceToT(safeDist), isDrivingForwardOnRoad);
                 }
             }
             else
@@ -476,15 +590,49 @@ namespace TrafficSystem
                 }
             }
 
-            // 7. Steering (Pure Pursuit)
+            // 7. Steering (Pure Pursuit with Anti-Donut Safeguard)
             Vector3 localTarget = transform.InverseTransformPoint(targetPosition);
-            float targetAngle = Mathf.Atan2(localTarget.x, localTarget.z) * Mathf.Rad2Deg;
+
+            // ANTI-DONUT SAFEGUARD:
+            // If the target point is behind the vehicle's front axle, advance forward along spline
+            if (localTarget.z < 0.5f)
+            {
+                float forwardLookahead = distanceOnRoad + (isDrivingForwardOnRoad ? (lookAheadDistance + 8f) : -(lookAheadDistance + 8f));
+                forwardLookahead = Mathf.Clamp(forwardLookahead, 0f, totalLength);
+                Vector3 altTarget = currentRoad.GetLanePosition(currentRoad.DistanceToT(forwardLookahead), isDrivingForwardOnRoad);
+                Vector3 altLocal = transform.InverseTransformPoint(altTarget);
+                if (altLocal.z > 0.5f)
+                {
+                    targetPosition = altTarget;
+                    localTarget = altLocal;
+                }
+            }
+
+            // Using Mathf.Max(0.1f, localTarget.z) ensures the steering angle is always calculated
+            // in the forward hemisphere, preventing 360-degree donut orbits.
+            float forwardZ = Mathf.Max(0.1f, localTarget.z);
+            float targetAngle = Mathf.Atan2(localTarget.x, forwardZ) * Mathf.Rad2Deg;
             currentSteerAngle = Mathf.Clamp(targetAngle, -maxSteerAngle, maxSteerAngle);
 
             frontLeftCollider.steerAngle = currentSteerAngle;
             frontRightCollider.steerAngle = currentSteerAngle;
 
-            // 8. Motor / Brakes (Anti-spin and Smooth ramping)
+            // 8. Dynamic Cornering Speed & Motor / Brakes
+            float absAngle = Mathf.Abs(targetAngle);
+            if (absAngle > 15f)
+            {
+                float turnSeverity = Mathf.Clamp01((absAngle - 15f) / 35f);
+                float maxCornerSpeed = Mathf.Lerp(curveSpeed, 10f, turnSeverity); // 10 to 18 km/h on sharp turns
+                commandedSpeed = Mathf.Min(commandedSpeed, maxCornerSpeed);
+            }
+
+            // If car is facing backwards relative to target (localTarget.z < 0.2f):
+            if (localTarget.z < 0.2f)
+            {
+                // Brake gently to avoid runaway spin
+                commandedSpeed = Mathf.Min(commandedSpeed, 4f);
+            }
+
             float speedDiff = commandedSpeed - CurrentSpeedKmh;
             float targetMotor = 0f;
             float targetBrake = 0f;
@@ -494,10 +642,15 @@ namespace TrafficSystem
                 targetBrake = braking;
                 targetMotor = 0f;
             }
-            else if (speedDiff > 1f)
+            else if (speedDiff > 1f && localTarget.z > 0.1f)
             {
                 targetMotor = acceleration;
                 targetBrake = 0f;
+            }
+            else if (localTarget.z <= 0.1f)
+            {
+                targetBrake = braking * 0.3f;
+                targetMotor = 0f;
             }
 
             // Smoothly ramp torque to prevent skidding
