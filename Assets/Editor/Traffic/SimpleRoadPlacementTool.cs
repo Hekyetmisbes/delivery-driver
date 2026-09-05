@@ -213,6 +213,19 @@ namespace DeliveryDriver.EditorTools
             Repaint();
         }
 
+        private void OnHierarchyChange()
+        {
+            if (activeSmoothRoad == null && smoothPath.Count >= 2)
+            {
+                smoothPath.Clear();
+                selectedJunctionPointIndex = -1;
+                CleanOrphanIntersectionVisuals();
+                SceneView.RepaintAll();
+                Repaint();
+            }
+            InvalidateSceneCache();
+        }
+
         private Vector2 scrollPos;
 
         private void OnGUI()
@@ -256,12 +269,27 @@ namespace DeliveryDriver.EditorTools
                 }
             }
 
-            if (GUILayout.Button("🧹 Clean & Rebuild All Intersections"))
+            using (new EditorGUILayout.HorizontalScope())
             {
-                CleanOrphanRoadIntersections();
-                CleanOrphanIntersectionVisuals();
-                RebuildAllIntersections();
-                InvalidateSceneCache();
+                if (GUILayout.Button("🧹 Clean & Rebuild All Intersections"))
+                {
+                    CleanOrphanRoadIntersections();
+                    CleanOrphanIntersectionVisuals();
+                    RebuildAllIntersections();
+                    InvalidateSceneCache();
+                }
+
+                GUI.backgroundColor = new Color(1f, 0.75f, 0.3f);
+                if (GUILayout.Button("🧹 Bozuk & Yetim Yolları Temizle"))
+                {
+                    int cleaned = CleanOrphanRoadsAndMeshes();
+                    CleanOrphanRoadIntersections();
+                    CleanOrphanIntersectionVisuals();
+                    InvalidateSceneCache();
+                    SceneView.RepaintAll();
+                    EditorUtility.DisplayDialog("Yol Temizliği", $"{cleaned} adet bozuk veya yetim yol objesi temizlendi.", "Tamam");
+                }
+                GUI.backgroundColor = Color.white;
             }
 
             EditorGUILayout.EndScrollView();
@@ -461,14 +489,39 @@ namespace DeliveryDriver.EditorTools
 
             if (Selection.activeGameObject != null)
             {
-                SplineRoad selectedRoad = Selection.activeGameObject.GetComponent<SplineRoad>();
-                if (selectedRoad != null && (activeSmoothRoad == null || activeSmoothRoad != selectedRoad.gameObject))
+                SplineRoad selectedRoad = Selection.activeGameObject.GetComponentInParent<SplineRoad>();
+                GameObject rootRoad = selectedRoad != null ? selectedRoad.gameObject : GetRoadRootObject(Selection.activeGameObject);
+                if (rootRoad != null && IsPartOfAnyRoad(rootRoad.transform))
                 {
-                    EditorGUILayout.Space(4f);
-                    if (GUILayout.Button($"Load '{selectedRoad.name}' Into Tool", GUILayout.Height(24f)))
+                    EditorGUILayout.Space(6f);
+                    EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+                    EditorGUILayout.LabelField($"Seçili Yol Objesi: {rootRoad.name}", EditorStyles.boldLabel);
+                    EditorGUILayout.BeginHorizontal();
+                    if (selectedRoad != null && (activeSmoothRoad == null || activeSmoothRoad != rootRoad))
                     {
-                        LoadRoadIntoTool(selectedRoad, selectStart: false);
+                        if (GUILayout.Button("Tool'a Yükle", GUILayout.Height(24)))
+                        {
+                            LoadRoadIntoTool(selectedRoad, selectStart: false);
+                        }
                     }
+                    GUI.backgroundColor = new Color(1f, 0.35f, 0.35f);
+                    if (GUILayout.Button("Bu Yolu Sahneden Sil (Del)", GUILayout.Height(24)))
+                    {
+                        Undo.IncrementCurrentGroup();
+                        Undo.SetCurrentGroupName("Delete Selected Road");
+                        Undo.DestroyObjectImmediate(rootRoad);
+                        if (activeSmoothRoad == rootRoad)
+                        {
+                            activeSmoothRoad = null;
+                            smoothPath.Clear();
+                        }
+                        CleanOrphanIntersectionVisuals();
+                        InvalidateSceneCache();
+                        SceneView.RepaintAll();
+                    }
+                    GUI.backgroundColor = Color.white;
+                    EditorGUILayout.EndHorizontal();
+                    EditorGUILayout.EndVertical();
                 }
             }
         }
@@ -524,7 +577,22 @@ namespace DeliveryDriver.EditorTools
             for (int r = 0; r < sceneRoads.Length; r++)
             {
                 SplineRoad road = sceneRoads[r];
-                if (road == null || !road.IsUsable) continue;
+                if (road == null) continue;
+
+                if (!road.IsUsable)
+                {
+                    Vector3 pt = road.transform.position;
+                    if (road.ControlPointCount > 0) pt = road.GetControlPoint(0);
+                    Vector2 guiPoint = HandleUtility.WorldToGUIPoint(pt);
+                    float dist = Vector2.Distance(mousePosition, guiPoint);
+                    if (dist < bestScreenDistance)
+                    {
+                        bestScreenDistance = dist;
+                        bestPointIndex = -1;
+                        bestRoad = road;
+                    }
+                    continue;
+                }
 
                 int cpCount = road.ControlPointCount;
                 if (cpCount >= 4)
@@ -539,6 +607,23 @@ namespace DeliveryDriver.EditorTools
                         {
                             bestScreenDistance = dist;
                             bestPointIndex = a;
+                            bestRoad = road;
+                        }
+                    }
+
+                    // Also check samples along curve so clicking anywhere on the road selects it
+                    float roadLen = road.GetTotalLength();
+                    int sampleSteps = Mathf.Clamp(Mathf.RoundToInt(roadLen / 8f), 3, 25);
+                    for (int s = 1; s < sampleSteps; s++)
+                    {
+                        float t = s / (float)sampleSteps;
+                        Vector3 pt = road.GetPoint(t);
+                        Vector2 guiPoint = HandleUtility.WorldToGUIPoint(pt);
+                        float dist = Vector2.Distance(mousePosition, guiPoint);
+                        if (dist < bestScreenDistance)
+                        {
+                            bestScreenDistance = dist;
+                            bestPointIndex = -1;
                             bestRoad = road;
                         }
                     }
@@ -610,6 +695,11 @@ namespace DeliveryDriver.EditorTools
                 if (branches.Count < 3)
                 {
                     toDestroy.Add(child.gameObject);
+                }
+                else
+                {
+                    BuildProceduralIntersection(child.gameObject, visualCenter, branches);
+                    EditorUtility.SetDirty(child.gameObject);
                 }
             }
 
@@ -843,6 +933,65 @@ namespace DeliveryDriver.EditorTools
                     SceneView.RepaintAll();
                     return;
                 }
+
+                GameObject picked = HandleUtility.PickGameObject(current.mousePosition, false);
+                if (picked != null)
+                {
+                    SplineRoad pickedRoad = picked.GetComponentInParent<SplineRoad>();
+                    if (pickedRoad != null)
+                    {
+                        LoadRoadIntoTool(pickedRoad);
+                        handledSceneClick = true;
+                        current.Use();
+                        Repaint();
+                        SceneView.RepaintAll();
+                        return;
+                    }
+                    else if (IsPartOfAnyRoad(picked.transform))
+                    {
+                        GameObject rootRoad = GetRoadRootObject(picked);
+                        if (rootRoad != null)
+                        {
+                            Selection.activeGameObject = rootRoad;
+                            handledSceneClick = true;
+                            current.Use();
+                            Repaint();
+                            SceneView.RepaintAll();
+                            return;
+                        }
+                    }
+                }
+            }
+
+            if (current.type == EventType.MouseDown && current.button == 0 && !current.shift && !current.control && !current.alt && smoothPath.Count == 0)
+            {
+                GameObject picked = HandleUtility.PickGameObject(current.mousePosition, false);
+                if (picked != null)
+                {
+                    SplineRoad pickedRoad = picked.GetComponentInParent<SplineRoad>();
+                    if (pickedRoad != null)
+                    {
+                        LoadRoadIntoTool(pickedRoad);
+                        handledSceneClick = true;
+                        current.Use();
+                        Repaint();
+                        SceneView.RepaintAll();
+                        return;
+                    }
+                    else if (IsPartOfAnyRoad(picked.transform))
+                    {
+                        GameObject rootRoad = GetRoadRootObject(picked);
+                        if (rootRoad != null)
+                        {
+                            Selection.activeGameObject = rootRoad;
+                            handledSceneClick = true;
+                            current.Use();
+                            Repaint();
+                            SceneView.RepaintAll();
+                            return;
+                        }
+                    }
+                }
             }
 
             if (current.type == EventType.MouseDown && current.button == 0 && current.shift && !current.control && !current.alt)
@@ -866,7 +1015,11 @@ namespace DeliveryDriver.EditorTools
 
             if (current.type == EventType.KeyDown)
             {
-                if (current.keyCode == KeyCode.Escape)
+                if (current.keyCode == KeyCode.LeftControl || current.keyCode == KeyCode.RightControl)
+                {
+                    SceneView.RepaintAll();
+                }
+                else if (current.keyCode == KeyCode.Escape)
                 {
                     if (selectedJunctionPointIndex != -1)
                     {
@@ -885,6 +1038,41 @@ namespace DeliveryDriver.EditorTools
                         return;
                     }
                 }
+                else if (current.keyCode == KeyCode.Delete || current.keyCode == KeyCode.Backspace)
+                {
+                    if (selectedJunctionPointIndex >= 0 && selectedJunctionPointIndex < smoothPath.Count)
+                    {
+                        DeleteSelectedPoint();
+                        current.Use();
+                        Repaint();
+                        SceneView.RepaintAll();
+                        return;
+                    }
+                    else if (smoothPath.Count > 0 || activeSmoothRoad != null)
+                    {
+                        DeleteCurrentActiveRoad();
+                        current.Use();
+                        Repaint();
+                        SceneView.RepaintAll();
+                        return;
+                    }
+                    else if (Selection.activeGameObject != null && IsPartOfAnyRoad(Selection.activeGameObject.transform))
+                    {
+                        GameObject rootRoad = GetRoadRootObject(Selection.activeGameObject);
+                        if (rootRoad != null)
+                        {
+                            Undo.IncrementCurrentGroup();
+                            Undo.SetCurrentGroupName("Delete Selected Road");
+                            Undo.DestroyObjectImmediate(rootRoad);
+                            CleanOrphanIntersectionVisuals();
+                            InvalidateSceneCache();
+                            current.Use();
+                            Repaint();
+                            SceneView.RepaintAll();
+                            return;
+                        }
+                    }
+                }
                 else if (current.keyCode == KeyCode.N)
                 {
                     StartNewSmoothRoad();
@@ -892,6 +1080,14 @@ namespace DeliveryDriver.EditorTools
                     Repaint();
                     SceneView.RepaintAll();
                     return;
+                }
+            }
+
+            if (current.type == EventType.KeyUp)
+            {
+                if (current.keyCode == KeyCode.LeftControl || current.keyCode == KeyCode.RightControl)
+                {
+                    SceneView.RepaintAll();
                 }
             }
 
@@ -922,12 +1118,20 @@ namespace DeliveryDriver.EditorTools
 
             if (placementMode == PlacementMode.SmoothMesh)
             {
+                bool wasConnectingEndpoint = isHoverSnappedToRoad && smoothPath.Count >= 1;
                 if (connectToExistingRoads)
                 {
                     point = ResolveConnectionPoint(point);
                 }
 
                 ContinueSmoothRoad(point);
+
+                if (wasConnectingEndpoint)
+                {
+                    RebuildAllIntersections();
+                    StartNewSmoothRoad();
+                    Debug.Log("[SimpleRoadPlacementTool] Yol başarıyla mevcut yola bağlandı ve tamamlandı.");
+                }
                 return;
             }
 
@@ -3185,6 +3389,7 @@ namespace DeliveryDriver.EditorTools
             smoothPath.Clear();
             activeSmoothRoad = null;
             selectedJunctionPointIndex = -1;
+            CleanOrphanIntersectionVisuals();
             InvalidateSceneCache();
             SceneView.RepaintAll();
             Repaint();
@@ -3212,6 +3417,55 @@ namespace DeliveryDriver.EditorTools
             {
                 Undo.DestroyObjectImmediate(activeSmoothRoad);
                 activeSmoothRoad = null;
+            }
+
+            SceneView.RepaintAll();
+            Repaint();
+        }
+
+        private void DeleteCurrentActiveRoad()
+        {
+            Undo.IncrementCurrentGroup();
+            Undo.SetCurrentGroupName("Delete Active Road");
+            if (activeSmoothRoad != null)
+            {
+                Undo.DestroyObjectImmediate(activeSmoothRoad);
+                activeSmoothRoad = null;
+            }
+            smoothPath.Clear();
+            selectedJunctionPointIndex = -1;
+            CleanOrphanIntersectionVisuals();
+            InvalidateSceneCache();
+            SceneView.RepaintAll();
+            Repaint();
+        }
+
+        private void DeleteSelectedPoint()
+        {
+            if (selectedJunctionPointIndex < 0 || selectedJunctionPointIndex >= smoothPath.Count)
+            {
+                DeleteCurrentActiveRoad();
+                return;
+            }
+
+            Undo.IncrementCurrentGroup();
+            Undo.SetCurrentGroupName("Delete Selected Road Point");
+            smoothPath.RemoveAt(selectedJunctionPointIndex);
+            selectedJunctionPointIndex = -1;
+
+            InvalidateSceneCache();
+            if (smoothPath.Count >= 2 && activeSmoothRoad != null)
+            {
+                RebuildSmoothRoad();
+            }
+            else if (smoothPath.Count < 2 && activeSmoothRoad != null)
+            {
+                Undo.DestroyObjectImmediate(activeSmoothRoad);
+                activeSmoothRoad = null;
+            }
+            else if (smoothPath.Count == 0)
+            {
+                StartNewSmoothRoad();
             }
 
             SceneView.RepaintAll();
@@ -3444,14 +3698,24 @@ namespace DeliveryDriver.EditorTools
         private void DrawScenePreview()
         {
             Handles.BeginGUI();
-            GUILayout.BeginArea(new Rect(12f, 12f, 440f, 96f), EditorStyles.helpBox);
+            GUILayout.BeginArea(new Rect(12f, 12f, 530f, 96f), EditorStyles.helpBox);
             GUILayout.Label("Simple Road Placement", EditorStyles.boldLabel);
 
             if (placementMode == PlacementMode.SmoothMesh)
             {
-                string statusText = smoothPath.Count == 0
-                    ? "Yeni Yol Modu: İlk noktayı koymak için Shift+Sol Tık yapın."
-                    : $"Yol çiziliyor ({smoothPath.Count} nokta). Bitirip yeni yola başlamak için N'ye basın.";
+                string statusText;
+                if (activeSmoothRoad != null)
+                {
+                    statusText = $"Seçili Yol: '{activeSmoothRoad.name}' ({smoothPath.Count} nokta). Silmek için: [Yolu Sil (Del)] veya Del tuşu.";
+                }
+                else if (smoothPath.Count > 0)
+                {
+                    statusText = $"Yol çiziliyor ({smoothPath.Count} nokta). Nokta sil: Sağ Tık. Yolu sil: Del.";
+                }
+                else
+                {
+                    statusText = "Yeni Yol: Shift+Sol Tık. Yol Seç / Sil: Yola Ctrl+Sol Tık yapın ve 'Del' tuşuna basın.";
+                }
                 GUILayout.Label(statusText);
 
                 using (new GUILayout.HorizontalScope())
@@ -3466,9 +3730,14 @@ namespace DeliveryDriver.EditorTools
                         ConnectTouchingRoadsInScene();
                     }
 
-                    if (smoothPath.Count > 0 && GUILayout.Button("Sil (Sağ Tık)", GUILayout.Height(22)))
+                    if (smoothPath.Count > 0 && GUILayout.Button("Nokta Geri Al (Sağ Tık)", GUILayout.Height(22)))
                     {
                         UndoLastSmoothPoint();
+                    }
+
+                    if ((smoothPath.Count > 0 || activeSmoothRoad != null) && GUILayout.Button("Yolu Sil (Del)", GUILayout.Height(22)))
+                    {
+                        DeleteCurrentActiveRoad();
                     }
                 }
             }
@@ -3527,7 +3796,8 @@ namespace DeliveryDriver.EditorTools
                     Handles.color = Color.green;
                 }
 
-                if (Event.current.control && !Event.current.alt)
+                bool canSelectPoint = !Event.current.shift && !Event.current.alt;
+                if (canSelectPoint)
                 {
                     if (Handles.Button(smoothPath[i], Quaternion.identity, handleSize * 1.15f, handleSize * 1.55f, Handles.SphereHandleCap))
                     {
@@ -3548,7 +3818,7 @@ namespace DeliveryDriver.EditorTools
                     Handles.DrawWireDisc(smoothPath[i], Vector3.up, handleSize * 1.85f);
                     GUIStyle labelStyle = new GUIStyle(EditorStyles.boldLabel);
                     labelStyle.normal.textColor = Color.magenta;
-                    Handles.Label(smoothPath[i] + Vector3.up * (handleSize * 1.75f), $"[Devam Noktasi #{i}]", labelStyle);
+                    Handles.Label(smoothPath[i] + Vector3.up * (handleSize * 1.75f), $"[Devam Noktasi #{i}] (Sil: Del)", labelStyle);
                 }
             }
 
@@ -3556,7 +3826,7 @@ namespace DeliveryDriver.EditorTools
             {
                 DrawSceneRoadHandles(showIntermediatePoints: true);
             }
-            else if (smoothPath.Count == 0)
+            else if (smoothPath.Count == 0 || !Event.current.shift)
             {
                 DrawSceneRoadHandles(showIntermediatePoints: false);
             }
@@ -3583,7 +3853,7 @@ namespace DeliveryDriver.EditorTools
                     Handles.SphereHandleCap(0, previewPoint, Quaternion.identity, 0.45f, EventType.Repaint);
                     GUIStyle lockStyle = new GUIStyle(EditorStyles.boldLabel);
                     lockStyle.normal.textColor = new Color(0f, 1f, 0.9f);
-                    Handles.Label(previewPoint + Vector3.up * 1.5f, "[KAVŞAK KİLİTLENDİ (Shift+Tık)]", lockStyle);
+                    Handles.Label(previewPoint + Vector3.up * 1.5f, "[YOLA KİLİTLENDİ (Shift+Tık ile Bağla)]", lockStyle);
                 }
                 else
                 {
@@ -3598,7 +3868,7 @@ namespace DeliveryDriver.EditorTools
                 Handles.SphereHandleCap(0, hoverPoint, Quaternion.identity, 0.45f, EventType.Repaint);
                 GUIStyle lockStyle = new GUIStyle(EditorStyles.boldLabel);
                 lockStyle.normal.textColor = new Color(0f, 1f, 0.9f);
-                Handles.Label(hoverPoint + Vector3.up * 1.5f, "[KAVŞAK KİLİTLENDİ (Shift+Tık)]", lockStyle);
+                Handles.Label(hoverPoint + Vector3.up * 1.5f, "[YOLA KİLİTLENDİ (Shift+Tık ile Başla)]", lockStyle);
             }
 
             if (Event.current.shift && Event.current.control && smoothPath.Count >= 2)
@@ -3611,84 +3881,175 @@ namespace DeliveryDriver.EditorTools
         {
             EnsureSceneCache();
             SplineRoad[] sceneRoads = cachedSceneRoads;
-            if (sceneRoads == null) return;
-            for (int r = 0; r < sceneRoads.Length; r++)
+            if (sceneRoads != null)
             {
-                SplineRoad road = sceneRoads[r];
-                if (road == null || !road.IsUsable || (activeSmoothRoad != null && road.gameObject == activeSmoothRoad))
+                for (int r = 0; r < sceneRoads.Length; r++)
                 {
-                    continue;
-                }
-
-                Vector3 startPoint = road.GetPoint(0f);
-                Vector3 endPoint = road.GetPoint(1f);
-
-                // Start endpoint (Cyan)
-                float startSize = HandleUtility.GetHandleSize(startPoint) * 0.18f;
-                Handles.color = new Color(0.2f, 0.9f, 1f, 0.9f);
-                if (Handles.Button(startPoint, Quaternion.identity, startSize, startSize * 1.5f, Handles.SphereHandleCap))
-                {
-                    if (Event.current.control)
+                    SplineRoad road = sceneRoads[r];
+                    if (road == null || (activeSmoothRoad != null && road.gameObject == activeSmoothRoad && smoothPath.Count > 0))
                     {
-                        LoadRoadIntoTool(road, selectPointIndex: 0);
+                        continue;
                     }
-                    else
-                    {
-                        StartNewSmoothRoad();
-                        AddSmoothPoint(startPoint);
-                    }
-                    handledSceneClick = true;
-                    Event.current.Use();
-                    Repaint();
-                    SceneView.RepaintAll();
-                    return;
-                }
 
-                // End endpoint (Yellow)
-                float endSize = HandleUtility.GetHandleSize(endPoint) * 0.18f;
-                Handles.color = new Color(1f, 0.85f, 0.2f, 0.9f);
-                if (Handles.Button(endPoint, Quaternion.identity, endSize, endSize * 1.5f, Handles.SphereHandleCap))
-                {
-                    if (Event.current.control)
+                    // If road is unusable or broken, draw an orange warning handle so it's visible and deletable!
+                    if (!road.IsUsable)
                     {
-                        LoadRoadIntoTool(road, selectPointIndex: -1);
-                    }
-                    else
-                    {
-                        StartNewSmoothRoad();
-                        AddSmoothPoint(endPoint);
-                    }
-                    handledSceneClick = true;
-                    Event.current.Use();
-                    Repaint();
-                    SceneView.RepaintAll();
-                    return;
-                }
-
-                // Only draw intermediate points if holding Ctrl
-                if (showIntermediatePoints)
-                {
-                    int cpCount = road.ControlPointCount;
-                    if (cpCount >= 4)
-                    {
-                        int anchorCount = (cpCount - 1) / 3 + 1;
-                        for (int a = 1; a < anchorCount - 1; a++)
+                        Vector3 brokenPos = road.transform.position;
+                        if (road.ControlPointCount > 0)
                         {
-                            int cp = a * 3;
-                            Vector3 pt = road.GetControlPoint(cp);
-                            float size = HandleUtility.GetHandleSize(pt) * 0.16f;
-                            Handles.color = new Color(0.3f, 1f, 0.4f, 0.9f);
+                            brokenPos = road.GetControlPoint(0);
+                        }
+                        float brokenSize = HandleUtility.GetHandleSize(brokenPos) * 0.22f;
+                        Handles.color = new Color(1f, 0.3f, 0.1f, 0.95f);
+                        if (Handles.Button(brokenPos, Quaternion.identity, brokenSize, brokenSize * 1.6f, Handles.SphereHandleCap))
+                        {
+                            Selection.activeGameObject = road.gameObject;
+                            LoadRoadIntoTool(road);
+                            handledSceneClick = true;
+                            Event.current.Use();
+                            Repaint();
+                            SceneView.RepaintAll();
+                            return;
+                        }
+                        GUIStyle brokenStyle = new GUIStyle(EditorStyles.boldLabel);
+                        brokenStyle.normal.textColor = new Color(1f, 0.4f, 0.1f);
+                        Handles.Label(brokenPos + Vector3.up * 1.2f, $"⚠️ [Bozuk Yol: {road.name} (Tıkla ve Sil)]", brokenStyle);
+                        continue;
+                    }
 
-                            if (Handles.Button(pt, Quaternion.identity, size, size * 1.5f, Handles.SphereHandleCap))
+                    Vector3 startPoint = road.GetPoint(0f);
+                    Vector3 endPoint = road.GetPoint(1f);
+
+                    // Start endpoint (Cyan)
+                    float startSize = HandleUtility.GetHandleSize(startPoint) * 0.18f;
+                    Handles.color = new Color(0.2f, 0.9f, 1f, 0.9f);
+                    if (Handles.Button(startPoint, Quaternion.identity, startSize, startSize * 1.5f, Handles.SphereHandleCap))
+                    {
+                        if (Event.current.control)
+                        {
+                            LoadRoadIntoTool(road, selectPointIndex: 0);
+                        }
+                        else
+                        {
+                            StartNewSmoothRoad();
+                            AddSmoothPoint(startPoint);
+                        }
+                        handledSceneClick = true;
+                        Event.current.Use();
+                        Repaint();
+                        SceneView.RepaintAll();
+                        return;
+                    }
+
+                    // End endpoint (Yellow)
+                    float endSize = HandleUtility.GetHandleSize(endPoint) * 0.18f;
+                    Handles.color = new Color(1f, 0.85f, 0.2f, 0.9f);
+                    if (Handles.Button(endPoint, Quaternion.identity, endSize, endSize * 1.5f, Handles.SphereHandleCap))
+                    {
+                        if (Event.current.control)
+                        {
+                            LoadRoadIntoTool(road, selectPointIndex: -1);
+                        }
+                        else
+                        {
+                            StartNewSmoothRoad();
+                            AddSmoothPoint(endPoint);
+                        }
+                        handledSceneClick = true;
+                        Event.current.Use();
+                        Repaint();
+                        SceneView.RepaintAll();
+                        return;
+                    }
+
+                    // Points along road when holding Ctrl (showIntermediatePoints)
+                    if (showIntermediatePoints)
+                    {
+                        int cpCount = road.ControlPointCount;
+                        if (cpCount >= 4)
+                        {
+                            int anchorCount = (cpCount - 1) / 3 + 1;
+                            if (anchorCount > 2)
                             {
-                                LoadRoadIntoTool(road, selectPointIndex: a);
-                                handledSceneClick = true;
-                                Event.current.Use();
-                                Repaint();
-                                SceneView.RepaintAll();
-                                return;
+                                for (int a = 1; a < anchorCount - 1; a++)
+                                {
+                                    int cp = a * 3;
+                                    Vector3 pt = road.GetControlPoint(cp);
+                                    float size = HandleUtility.GetHandleSize(pt) * 0.16f;
+                                    Handles.color = new Color(0.3f, 1f, 0.4f, 0.9f);
+
+                                    if (Handles.Button(pt, Quaternion.identity, size, size * 1.5f, Handles.SphereHandleCap))
+                                    {
+                                        LoadRoadIntoTool(road, selectPointIndex: a);
+                                        handledSceneClick = true;
+                                        Event.current.Use();
+                                        Repaint();
+                                        SceneView.RepaintAll();
+                                        return;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                // Straight 2-anchor road: sample points along the road so handles always appear when Ctrl is held!
+                                float len = road.GetTotalLength();
+                                int sampleSteps = Mathf.Clamp(Mathf.RoundToInt(len / 12f), 1, 6);
+                                for (int s = 1; s <= sampleSteps; s++)
+                                {
+                                    float t = s / (float)(sampleSteps + 1);
+                                    Vector3 pt = road.GetPoint(t);
+                                    float size = HandleUtility.GetHandleSize(pt) * 0.16f;
+                                    Handles.color = new Color(0.3f, 1f, 0.4f, 0.9f);
+
+                                    if (Handles.Button(pt, Quaternion.identity, size, size * 1.5f, Handles.SphereHandleCap))
+                                    {
+                                        LoadRoadIntoTool(road, selectPointIndex: -1);
+                                        handledSceneClick = true;
+                                        Event.current.Use();
+                                        Repaint();
+                                        SceneView.RepaintAll();
+                                        return;
+                                    }
+                                }
                             }
                         }
+                    }
+                }
+            }
+
+            // Also check for any orphan road objects under Placed Roads that lack SplineRoad!
+            Transform roadsRoot = roadParent != null ? roadParent : GameObject.Find(DefaultRootName)?.transform;
+            if (roadsRoot != null)
+            {
+                for (int i = 0; i < roadsRoot.childCount; i++)
+                {
+                    Transform child = roadsRoot.GetChild(i);
+                    if (child == null) continue;
+                    if (child.name == GeneratedIntersectionsName || child.name == GeneratedIntersectionVisualsName) continue;
+
+                    SplineRoad sRoad = child.GetComponent<SplineRoad>();
+                    if (sRoad == null)
+                    {
+                        Vector3 orphanPos = child.position;
+                        MeshFilter mf = child.GetComponentInChildren<MeshFilter>();
+                        if (mf != null && mf.sharedMesh != null)
+                        {
+                            orphanPos = mf.transform.TransformPoint(mf.sharedMesh.bounds.center);
+                        }
+                        float orphanSize = HandleUtility.GetHandleSize(orphanPos) * 0.22f;
+                        Handles.color = new Color(1f, 0.5f, 0f, 0.95f);
+                        if (Handles.Button(orphanPos, Quaternion.identity, orphanSize, orphanSize * 1.6f, Handles.SphereHandleCap))
+                        {
+                            Selection.activeGameObject = child.gameObject;
+                            handledSceneClick = true;
+                            Event.current.Use();
+                            Repaint();
+                            SceneView.RepaintAll();
+                            return;
+                        }
+                        GUIStyle orphanStyle = new GUIStyle(EditorStyles.boldLabel);
+                        orphanStyle.normal.textColor = new Color(1f, 0.6f, 0.1f);
+                        Handles.Label(orphanPos + Vector3.up * 1.5f, $"⚠️ [Yetim Obje: {child.name} (Tıkla ve Sil)]", orphanStyle);
                     }
                 }
             }
@@ -3707,16 +4068,19 @@ namespace DeliveryDriver.EditorTools
             activeSmoothRoad = road.gameObject;
             smoothPath.Clear();
 
-            for (int i = 0; i < road.ControlPointCount; i += 3)
+            if (road.ControlPointCount >= 4)
             {
-                smoothPath.Add(road.GetControlPoint(i));
-            }
+                for (int i = 0; i < road.ControlPointCount; i += 3)
+                {
+                    smoothPath.Add(road.GetControlPoint(i));
+                }
 
-            if (smoothPath.Count < 2)
-            {
-                smoothPath.Clear();
-                smoothPath.Add(road.GetPoint(0f));
-                smoothPath.Add(road.GetPoint(1f));
+                if (smoothPath.Count < 2)
+                {
+                    smoothPath.Clear();
+                    smoothPath.Add(road.GetPoint(0f));
+                    smoothPath.Add(road.GetPoint(1f));
+                }
             }
 
             if (selectPointIndex >= 0 && selectPointIndex < smoothPath.Count)
@@ -3725,7 +4089,7 @@ namespace DeliveryDriver.EditorTools
             }
             else
             {
-                selectedJunctionPointIndex = smoothPath.Count - 1;
+                selectedJunctionPointIndex = smoothPath.Count > 0 ? smoothPath.Count - 1 : -1;
             }
 
             Selection.activeGameObject = road.gameObject;
@@ -3736,6 +4100,61 @@ namespace DeliveryDriver.EditorTools
         private void LoadRoadIntoTool(SplineRoad road, bool selectStart)
         {
             LoadRoadIntoTool(road, selectStart ? 0 : -1);
+        }
+
+        private GameObject GetRoadRootObject(GameObject obj)
+        {
+            if (obj == null) return null;
+            SplineRoad spline = obj.GetComponentInParent<SplineRoad>();
+            if (spline != null) return spline.gameObject;
+            RoadIntersection intersection = obj.GetComponentInParent<RoadIntersection>();
+            if (intersection != null) return intersection.gameObject;
+
+            Transform current = obj.transform;
+            Transform roadsRoot = roadParent != null ? roadParent : GameObject.Find(DefaultRootName)?.transform;
+            while (current.parent != null && current.parent != roadsRoot && current.parent.name != GeneratedIntersectionVisualsName)
+            {
+                current = current.parent;
+            }
+            return current.gameObject;
+        }
+
+        public static int CleanOrphanRoadsAndMeshes()
+        {
+            int cleanedCount = 0;
+            Undo.IncrementCurrentGroup();
+            Undo.SetCurrentGroupName("Clean Orphan Road Objects");
+
+            // 1. SplineRoads that are broken or have < 4 points or total length < 0.5f
+            SplineRoad[] allRoads = Object.FindObjectsByType<SplineRoad>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            for (int i = 0; i < allRoads.Length; i++)
+            {
+                SplineRoad road = allRoads[i];
+                if (road == null) continue;
+                if (!road.IsUsable || road.ControlPointCount < 4 || road.GetTotalLength() < 0.5f)
+                {
+                    Undo.DestroyObjectImmediate(road.gameObject);
+                    cleanedCount++;
+                }
+            }
+
+            // 2. Orphan meshes under Placed Roads without SplineRoad
+            GameObject root = GameObject.Find(DefaultRootName);
+            if (root != null)
+            {
+                for (int i = root.transform.childCount - 1; i >= 0; i--)
+                {
+                    Transform child = root.transform.GetChild(i);
+                    if (child.name == GeneratedIntersectionsName || child.name == GeneratedIntersectionVisualsName) continue;
+                    if (child.GetComponent<SplineRoad>() == null)
+                    {
+                        Undo.DestroyObjectImmediate(child.gameObject);
+                        cleanedCount++;
+                    }
+                }
+            }
+
+            return cleanedCount;
         }
 
         private void DrawBranchHandles()
@@ -5065,8 +5484,55 @@ namespace DeliveryDriver.EditorTools
 
         private void SplitRoadsPassingThroughIntersections()
         {
+            List<Vector3> intersectionPositions = new List<Vector3>();
+
             RoadIntersection[] intersections = Object.FindObjectsByType<RoadIntersection>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-            if (intersections == null || intersections.Length == 0) return;
+            if (intersections != null)
+            {
+                for (int i = 0; i < intersections.Length; i++)
+                {
+                    if (intersections[i] != null)
+                    {
+                        intersectionPositions.Add(intersections[i].transform.position);
+                    }
+                }
+            }
+
+            Scene scene = SceneManager.GetActiveScene();
+            Transform roadsRoot = roadParent != null ? roadParent : EnsureRoadRoot(scene);
+            if (roadsRoot != null)
+            {
+                Transform visRoot = roadsRoot.Find(GeneratedIntersectionVisualsName);
+                if (visRoot != null)
+                {
+                    for (int v = 0; v < visRoot.childCount; v++)
+                    {
+                        Transform child = visRoot.GetChild(v);
+                        if (child == null) continue;
+                        Vector3 cPos = child.position;
+                        MeshFilter mf = child.GetComponentInChildren<MeshFilter>();
+                        if (mf != null && mf.sharedMesh != null)
+                        {
+                            cPos = mf.transform.TransformPoint(mf.sharedMesh.bounds.center);
+                        }
+                        bool duplicate = false;
+                        for (int p = 0; p < intersectionPositions.Count; p++)
+                        {
+                            if (FlatDistanceSqr(intersectionPositions[p], cPos) < 4f)
+                            {
+                                duplicate = true;
+                                break;
+                            }
+                        }
+                        if (!duplicate)
+                        {
+                            intersectionPositions.Add(cPos);
+                        }
+                    }
+                }
+            }
+
+            if (intersectionPositions.Count == 0) return;
 
             float splitSnapDist = Mathf.Max(connectionSnapDistance, roadWidth * 0.5f + (sidewalkWidth > 0.01f ? sidewalkWidth : 2.2f) + 1.5f);
             float splitSnapDistSqr = splitSnapDist * splitSnapDist;
@@ -5083,11 +5549,9 @@ namespace DeliveryDriver.EditorTools
                 SplineRoad[] allRoads = Object.FindObjectsByType<SplineRoad>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
                 if (allRoads == null || allRoads.Length == 0) break;
 
-                for (int i = 0; i < intersections.Length; i++)
+                for (int i = 0; i < intersectionPositions.Count; i++)
                 {
-                    RoadIntersection intersection = intersections[i];
-                    if (intersection == null) continue;
-                    Vector3 intPos = intersection.transform.position;
+                    Vector3 intPos = intersectionPositions[i];
 
                     for (int r = 0; r < allRoads.Length; r++)
                     {
