@@ -131,11 +131,11 @@ public class CarController : MonoBehaviour
 
     [Header("--- HANDBRAKE DRIFT ---")]
     [Tooltip("El freni birakildiginda kaymanin aninda kesilmeyip tatli ve akici sekilde toparlanma suresi (s).")]
-    [Range(0.1f, 3f)]
-    [SerializeField] private float driftRecoveryDuration = 1.4f;
+    [Range(0.1f, 4f)]
+    [SerializeField] private float driftRecoveryDuration = 2.0f;
     [Tooltip("El freni aktifken arka teker yan tutusunun korunacak orani.")]
-    [Range(0.1f, 1f)]
-    [SerializeField] private float handbrakeRearSidewaysGripFactor = 0.28f;
+    [Range(0.05f, 1f)]
+    [SerializeField] private float handbrakeRearSidewaysGripFactor = 0.20f;
     [Tooltip("El freni aktifken direksiyon yonune verilen hafif donus destegi.")]
     [SerializeField] private float handbrakeDriftAssistTorque = 1100f;
     [Tooltip("Drift desteginin devreye girmesi icin minimum hiz (km/s).")]
@@ -734,15 +734,15 @@ public class CarController : MonoBehaviour
         }
 
         // Drift halindeyken ve el freni birakildiginda yanal kaymanin aninda kesilmeyip tatli sekilde suzulmesi
-        float recoveryGripRatio = Mathf.SmoothStep(0f, 1f, 1f - currentDriftGripBlend);
-        float effectiveGripFactor = antiSlideGripFactor * recoveryGripRatio;
+        float gripRecoveryCurve = Mathf.Pow(Mathf.Clamp01(1f - currentDriftGripBlend), 2.2f);
+        float effectiveGripFactor = antiSlideGripFactor * gripRecoveryCurve;
         if (effectiveGripFactor <= 0.01f)
         {
             return;
         }
 
-        // Yanal kaymayi sonumleyen ivmeyi kademeli arttirarak küt oturmayi onle (cozy progressive drift glide)
-        float dynamicDampingRate = Mathf.Lerp(6f, 20f, recoveryGripRatio);
+        // Yanal kaymayi kademeli sonumle: küt oturmayi onler, el freni sonrasi tatli kaymaya izin verir
+        float dynamicDampingRate = Mathf.Lerp(3.2f, 12f, gripRecoveryCurve);
         float dampingAcceleration = -lateralSpeed * (effectiveGripFactor * dynamicDampingRate);
         Vector3 worldForce = transform.right * (dampingAcceleration * groundedRatio * rb.mass);
         rb.AddForce(worldForce, ForceMode.Force);
@@ -819,8 +819,8 @@ public class CarController : MonoBehaviour
 
         // DURUM 2: Direksiyon notr (Anti-Spin Stability)
         // Oyuncu direksiyon cevirmiyorken arka savruluyorsa, burnu hareket yonune toparla
-        // Drift cikisinda veya drift esnasinda arac küt bicimde duzeltilmesin diye drift toparlanmasi sonuna kadar beklenir
-        if (steerMagnitude <= 0.05f && antiSpinStability > 0f && currentDriftGripBlend < 0.2f)
+        // Drift esnasinda veya drift cikisinda arac küt bicimde duzeltilmesin diye yumusak toparlama
+        if (steerMagnitude <= 0.05f && antiSpinStability > 0f)
         {
             Vector3 flatForward = transform.forward;
             flatForward.y = 0f;
@@ -840,8 +840,9 @@ public class CarController : MonoBehaviour
                 float dampingD = currentYaw * 650f;
                 float targetTorque = (angleRad * 2400f - dampingD) * antiSpinStability;
 
-                // Drift cikisinda yumusak toparlama
-                targetTorque *= (1f - currentDriftGripBlend);
+                // Drift esnasinda ve cikisinda yumusak toparlama (küt duzeltmeyi onler)
+                float blendScale = Mathf.Pow(Mathf.Clamp01(1f - currentDriftGripBlend), 1.8f);
+                targetTorque *= blendScale;
                 rb.AddTorque(Vector3.up * targetTorque, ForceMode.Force);
             }
         }
@@ -890,19 +891,35 @@ public class CarController : MonoBehaviour
         }
 
         float speedKmh = rb.linearVelocity.magnitude * 3.6f;
-        bool isInitiatingDrift = isHandbraking && speedKmh >= handbrakeDriftMinSpeedKmh;
+        Vector3 localVel = transform.InverseTransformDirection(rb.linearVelocity);
+        float lateralSpeed = Mathf.Abs(localVel.x);
 
-        // Drift blend: El freni basildiginda hizlica drifte gir, birakildiginda driftRecoveryDuration suresince yumusacik toparla
-        float targetBlend = isInitiatingDrift ? 1f : 0f;
+        bool isInitiatingDrift = isHandbraking && speedKmh >= handbrakeDriftMinSpeedKmh;
+        bool isResidualSlide = lateralSpeed > 0.8f && speedKmh >= 8f;
+
+        // Drift blend: El freni basildiginda hizlica drifte girer (targetBlend = 1f).
+        // El freni birakildiginda eger arac hala yana kayiyorsa hemen 0'a cakilmaz,
+        // kayma hizina bagli olarak blend'i bir sure yuksek tutar ve yumusakca 0'a iner.
+        float targetBlend = 0f;
+        if (isInitiatingDrift)
+        {
+            targetBlend = 1f;
+        }
+        else if (isResidualSlide && currentDriftGripBlend > 0.1f)
+        {
+            targetBlend = Mathf.Clamp01(lateralSpeed / 4f) * 0.65f;
+        }
+
         float blendRate = isInitiatingDrift
-            ? 7f
-            : (driftRecoveryDuration > 0.01f ? 1f / driftRecoveryDuration : 20f);
+            ? 8f
+            : (driftRecoveryDuration > 0.01f ? (1f / driftRecoveryDuration) : 10f);
 
         currentDriftGripBlend = Mathf.MoveTowards(currentDriftGripBlend, targetBlend, blendRate * Time.fixedDeltaTime);
 
-        // Arka lastik yanal tutusunu kademeli blend ile uygula
-        float gripFactor = Mathf.Lerp(1f, handbrakeRearSidewaysGripFactor, currentDriftGripBlend);
-        gripFactor = Mathf.Clamp(gripFactor, 0.2f, 1f);
+        // Arka lastik yanal tutusunu kademeli blend ile uygula (smooth step gecis)
+        float smoothGripBlend = Mathf.SmoothStep(0f, 1f, currentDriftGripBlend);
+        float gripFactor = Mathf.Lerp(1f, handbrakeRearSidewaysGripFactor, smoothGripBlend);
+        gripFactor = Mathf.Clamp(gripFactor, 0.15f, 1f);
         ApplyRearSidewaysGrip(gripFactor);
 
         if (currentDriftGripBlend > 0.05f && Mathf.Abs(smoothedSteerInput) > 0.05f)

@@ -93,23 +93,59 @@ namespace TrafficSystem
             UpdateWheelVisuals();
         }
 
+        private WheelCollider[] allWheelColliders;
+
         private void ApplyTorqueToWheels(float motor, float brake)
         {
-            frontLeftCollider.motorTorque = motor;
-            frontRightCollider.motorTorque = motor;
-            frontLeftCollider.brakeTorque = brake;
-            frontRightCollider.brakeTorque = brake;
-            rearLeftCollider.brakeTorque = brake;
-            rearRightCollider.brakeTorque = brake;
+            if (frontLeftCollider != null) frontLeftCollider.motorTorque = motor;
+            if (frontRightCollider != null) frontRightCollider.motorTorque = motor;
+
+            if (allWheelColliders != null && allWheelColliders.Length > 0)
+            {
+                for (int i = 0; i < allWheelColliders.Length; i++)
+                {
+                    if (allWheelColliders[i] != null)
+                    {
+                        allWheelColliders[i].brakeTorque = brake;
+                    }
+                }
+            }
+            else
+            {
+                if (frontLeftCollider != null) frontLeftCollider.brakeTorque = brake;
+                if (frontRightCollider != null) frontRightCollider.brakeTorque = brake;
+                if (rearLeftCollider != null) rearLeftCollider.brakeTorque = brake;
+                if (rearRightCollider != null) rearRightCollider.brakeTorque = brake;
+            }
         }
 
         private void Awake()
         {
             rb = GetComponent<Rigidbody>();
             if (rb == null) rb = gameObject.AddComponent<Rigidbody>();
-            rb.centerOfMass = new Vector3(0, -0.4f, 0); // Stabilize CoM
 
             ResolveWheelCollidersIfNeeded();
+            allWheelColliders = GetComponentsInChildren<WheelCollider>();
+
+            // Calculate dynamic Center of Mass based on actual wheel axle heights (prevents flipping / sinking)
+            float avgWheelY = 0.35f;
+            if (allWheelColliders != null && allWheelColliders.Length > 0)
+            {
+                float sumY = 0f;
+                for (int i = 0; i < allWheelColliders.Length; i++)
+                {
+                    sumY += transform.InverseTransformPoint(allWheelColliders[i].transform.position).y;
+                }
+                avgWheelY = sumY / allWheelColliders.Length;
+            }
+
+            // Stabilize CoM slightly below the wheel axle level
+            rb.centerOfMass = new Vector3(0f, avgWheelY - 0.12f, 0.05f);
+            rb.interpolation = RigidbodyInterpolation.Interpolate;
+            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+
+            EnsureBodyCollider(avgWheelY);
+
             wheelVisualService = new NpcCarWheelVisualService(autoResolveWheelReferences, autoCreateWheelVisualsIfMissing);
             NpcCarWheelVisualSet wheelVisuals = wheelVisualService.ResolveWheelVisuals(
                 frontLeftCollider,
@@ -674,6 +710,8 @@ namespace TrafficSystem
             currentBrakeTorque = Mathf.MoveTowards(currentBrakeTorque, targetBrake, (braking / 0.2f) * Time.fixedDeltaTime);
 
             ApplyTorqueToWheels(currentMotorTorque, currentBrakeTorque);
+            ApplyAntiRollBars();
+            ApplyUprightStability();
             UpdateWheelVisuals();
         }
 
@@ -906,6 +944,119 @@ namespace TrafficSystem
             {
                 lowestWheelBottomLocalY = wheelBottomLocalY;
             }
+        }
+
+        private void ApplyAntiRollBars()
+        {
+            ApplyAntiRollOnAxle(frontLeftCollider, frontRightCollider, 7500f);
+            ApplyAntiRollOnAxle(rearLeftCollider, rearRightCollider, 7500f);
+        }
+
+        private void ApplyAntiRollOnAxle(WheelCollider left, WheelCollider right, float stiffness)
+        {
+            if (left == null || right == null || stiffness <= 0f) return;
+
+            float leftTravel = 1f;
+            float rightTravel = 1f;
+            bool leftGrounded = false;
+            bool rightGrounded = false;
+            float leftSuspension = Mathf.Max(0.001f, left.suspensionDistance);
+            float rightSuspension = Mathf.Max(0.001f, right.suspensionDistance);
+
+            if (left.GetGroundHit(out WheelHit hit))
+            {
+                leftGrounded = true;
+                leftTravel = (-left.transform.InverseTransformPoint(hit.point).y - left.radius) / leftSuspension;
+                leftTravel = Mathf.Clamp01(leftTravel);
+            }
+
+            if (right.GetGroundHit(out hit))
+            {
+                rightGrounded = true;
+                rightTravel = (-right.transform.InverseTransformPoint(hit.point).y - right.radius) / rightSuspension;
+                rightTravel = Mathf.Clamp01(rightTravel);
+            }
+
+            float antiRollForce = (leftTravel - rightTravel) * stiffness;
+
+            if (leftGrounded)
+            {
+                rb.AddForceAtPosition(left.transform.up * -antiRollForce, left.transform.position, ForceMode.Force);
+            }
+
+            if (rightGrounded)
+            {
+                rb.AddForceAtPosition(right.transform.up * antiRollForce, right.transform.position, ForceMode.Force);
+            }
+        }
+
+        private void ApplyUprightStability()
+        {
+            if (rb == null) return;
+            Vector3 currentUp = transform.up;
+            float tiltAngle = Vector3.Angle(currentUp, Vector3.up);
+            if (tiltAngle > 10f)
+            {
+                Vector3 restoreTorque = Vector3.Cross(currentUp, Vector3.up) * (rb.mass * 32f);
+                rb.AddTorque(restoreTorque, ForceMode.Force);
+            }
+        }
+
+        private void EnsureBodyCollider(float avgWheelY)
+        {
+            // Check if there is already a non-trigger body collider (BoxCollider or MeshCollider)
+            Collider[] colliders = GetComponentsInChildren<Collider>();
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                if (colliders[i] != null && !colliders[i].isTrigger && !(colliders[i] is WheelCollider))
+                {
+                    return; // Body collider already present
+                }
+            }
+
+            // If missing (like Ambulance or Lorry), dynamically generate a safe BoxCollider from renderers
+            Renderer[] renderers = GetComponentsInChildren<Renderer>();
+            if (renderers == null || renderers.Length == 0) return;
+
+            Bounds bounds = new Bounds(transform.position, Vector3.zero);
+            bool initialized = false;
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] is ParticleSystemRenderer || renderers[i] is TrailRenderer) continue;
+                if (!initialized)
+                {
+                    bounds = renderers[i].bounds;
+                    initialized = true;
+                }
+                else
+                {
+                    bounds.Encapsulate(renderers[i].bounds);
+                }
+            }
+
+            if (!initialized) return;
+
+            BoxCollider bodyBox = gameObject.AddComponent<BoxCollider>();
+            Vector3 localCenter = transform.InverseTransformPoint(bounds.center);
+            Vector3 localSize = transform.InverseTransformVector(bounds.size);
+            localSize = new Vector3(Mathf.Abs(localSize.x), Mathf.Abs(localSize.y), Mathf.Abs(localSize.z));
+
+            // Raise the bottom of the body box slightly above wheel contact to prevent dragging on road
+            float bottomLimit = avgWheelY - 0.10f;
+            float boxBottom = localCenter.y - (localSize.y * 0.5f);
+            if (boxBottom < bottomLimit)
+            {
+                float deficit = bottomLimit - boxBottom;
+                localSize.y = Mathf.Max(0.5f, localSize.y - deficit);
+                localCenter.y += deficit * 0.5f;
+            }
+
+            // Inset X slightly to avoid wheel rubbing
+            localSize.x = Mathf.Max(0.5f, localSize.x * 0.90f);
+
+            bodyBox.center = localCenter;
+            bodyBox.size = localSize;
+            bodyBox.isTrigger = false;
         }
 
         private void OnDrawGizmos()

@@ -1,174 +1,328 @@
 using UnityEngine;
 using DeliveryDriver.Vehicle;
 using Unity.Cinemachine;
-#if ENABLE_INPUT_SYSTEM
-using UnityEngine.InputSystem;
-#endif
 
+/// <summary>
+/// Araç takip kamerası (Dedicated 3rd-person Vehicle Chase Camera).
+/// Cinemachine gecikmeleri ve açı bozulmalarını önlemek için LateUpdate içinde
+/// doğrudan transform kontrolü yapar.
+/// 
+/// Güvenlik Önlemleri:
+/// 1. Geri giderken kamera açısı (yaw) kilitlenir; araç arkasında kalır ve dönmez ("geri giderken hareket etmesin kamera").
+/// 2. Geri giderken mesafeyi anında korur; araç kameranın içine/tavanına giremez.
+/// 3. Yatay min mesafe (5.2m) ve min yükseklik (2.0m) sert sınırlarla (clamp) korunur.
+/// 4. Pitch açısı (3° - 24°) sınırlandırılarak kameranın tavana dik bakması kesinlikle engellenir.
+/// 5. CinemachineBrain ve CinemachineCamera runtime'da devre dışı bırakılır.
+/// </summary>
 public class CameraFollow : MonoBehaviour
 {
-    [Header("Target Settings")]
-    [Tooltip("Takip edilecek arac")]
+    [Header("--- HEDEF AYARLARI ---")]
+    [Tooltip("Takip edilecek araç")]
     public Transform target;
 
-    [Header("Offset Settings")]
-    [Tooltip("Kameranin araca gore konumu (X, Y, Z). Z negatif olmali ki arkada dursun.")]
-    [SerializeField] private Vector3 offset = new Vector3(0, 4f, -8f);
-    [SerializeField] private Vector3 lookAtTargetOffset = new Vector3(0f, 1.5f, 0f);
+    [Header("--- KONUM VE MESAFE ---")]
+    [Tooltip("Kameranın araca göre varsayılan konumu (X=0, Y=yükseklik, Z=negatif mesafe)")]
+    [SerializeField] private Vector3 offset = new Vector3(0f, 3.4f, -7.0f);
+    [Tooltip("Kameranın odaklanacağı hedef yükseklik (aracın merkezinden yukarı)")]
+    [SerializeField] private float lookAtHeight = 1.3f;
+    [Tooltip("Kameranın araca yatayda yaklaşabileceği MUTLAK minimum mesafe (tavana yapışmayı önler)")]
+    [SerializeField] private float minHorizontalDistance = 5.2f;
+    [Tooltip("Kameranın araçtan yüksekliğinin MUTLAK minimum sınırı")]
+    [SerializeField] private float minHeightAboveTarget = 2.0f;
 
-    [Header("Smooth Settings")]
-    [Tooltip("Kamera takip yumusakligi (Dusuk = daha siki, Yuksek = daha gevek)")]
-    [SerializeField] private float translateSmoothTime = 0.2f;
-    [Tooltip("Yuksek hizda takip gecikmesini azaltmak icin minimum smooth time")]
-    [SerializeField] private float minTranslateSmoothTime = 0.08f;
-    [Tooltip("Bu hizdan sonra kamera takipte sikilasir (km/h)")]
-    [SerializeField] private float tightenFollowStartSpeedKmh = 70f;
-    [Tooltip("Bu hizda minimum smooth time degerine ulasir (km/h)")]
-    [SerializeField] private float tightenFollowFullSpeedKmh = 170f;
-    [Tooltip("Donus yumusakligi (Dusuk = daha gecikmeli, Yuksek = daha hizli)")]
-    [SerializeField] private float rotationSmoothSpeed = 1.5f;
-    [Tooltip("Kamera rotasyonu tamamen arabayi takip etsin mi?")]
-    [SerializeField] private bool followRotation = false;
+    [Header("--- AÇI VE PITCH SINIRLARI ---")]
+    [Tooltip("Minimum aşağı eğim açısı (derece).")]
+    [SerializeField] private float minPitchAngle = 3f;
+    [Tooltip("Maksimum aşağı eğim açısı (derece). Kameranın tavana dik bakmasını önlemek için sınırlıdır.")]
+    [SerializeField] private float maxPitchAngle = 24f;
 
-    [Header("Dinamik Mesafe")]
-    [Tooltip("İleri giderken kameranın geri çekildiği maksimum ekstra mesafe (m)")]
+    [Header("--- TAKİP YUMUŞAKLIĞI ---")]
+    [Tooltip("Kamera yatay dönüş (yaw) yumuşaklık süresi")]
+    [SerializeField] private float yawSmoothTime = 0.16f;
+    [Tooltip("Kamera pozisyon takip yumuşaklığı")]
+    [SerializeField] private float translateSmoothTime = 0.14f;
+    [Tooltip("Yüksek hızda pozisyon takip yumuşaklığı")]
+    [SerializeField] private float minTranslateSmoothTime = 0.06f;
+
+    [Header("--- DİNAMİK HIZ MESAFESİ ---")]
+    [Tooltip("Yüksek hızda kameranın hafifçe geriye çekilme miktarı (m)")]
     [SerializeField] private float forwardZoomOutExtra = 0.8f;
-    [Tooltip("Bu hızda (km/h) maksimum geri çekilme sağlanır")]
+    [Tooltip("Maksimum geri çekilmenin sağlandığı hız (km/h)")]
     [SerializeField] private float forwardZoomOutSpeedKmh = 140f;
-    [Tooltip("Mesafe değişim yumuşaklığı (düşük = daha yavaş uzaklaşma)")]
-    [SerializeField] private float dynamicZoomLerpSpeed = 1.8f;
-    [Tooltip("Geri giderken tavana yaklaşmayı önlemek için ek mesafe (m)")]
-    [SerializeField] private float reverseZoomOutExtra = 2.2f;
-    [Tooltip("Geri giderken tavana yaklaşmayı önlemek için ek yükseklik (m)")]
-    [SerializeField] private float reverseHeightExtra = 1.0f;
 
-    [Header("Speed Feel")]
-    [Tooltip("Arac hizina gore kamera FOV degissin mi")]
+    [Header("--- DİNAMİK FOV ---")]
+    [Tooltip("Araç hızına göre FOV değişimi")]
     [SerializeField] private bool enableSpeedFov = true;
     [SerializeField] private float baseFov = 60f;
-    [SerializeField] private float maxSpeedFov = 66f;
-    [SerializeField] private float fovMaxSpeedKmh = 160f;
-    [SerializeField] private float fovLerpSpeed = 5f;
+    [SerializeField] private float maxSpeedFov = 68f;
+    [SerializeField] private float fovMaxSpeedKmh = 150f;
+    [SerializeField] private float fovLerpSpeed = 4f;
 
-    [Header("Geri Görüş Kamerası (HUD)")]
-    [Tooltip("Araç geri giderken ekranın üstünde geri görüş kamerası göster")]
+    [Header("--- GERİ GÖRÜŞ KAMERASI (HUD) ---")]
     [SerializeField] private bool enableReverseCamera = true;
-    [Tooltip("Araç arkasındaki kamera konumu (lokal). Z negatif = aracın arkası.")]
     [SerializeField] private Vector3 reverseCamOffset = new Vector3(0f, 0.8f, -1.4f);
-    [Tooltip("Kamera açısı. Y=180 geriye bakar, X pozitif = aşağı eğimli.")]
     [SerializeField] private Vector3 reverseCamEuler = new Vector3(8f, 180f, 0f);
     [SerializeField] private float reverseCamFov = 72f;
-    [Tooltip("Viewport sol kenarı (0-1)")]
     [SerializeField] private float reverseCamVpX = 0.32f;
-    [Tooltip("Viewport alt kenarı (0=alt, 1=üst). 0.79 -> ekranın üst kısmı.")]
     [SerializeField] private float reverseCamVpY = 0.79f;
     [SerializeField] private float reverseCamVpW = 0.36f;
     [SerializeField] private float reverseCamVpH = 0.18f;
-    [Tooltip("Bu hızın (m/s) altında araç durağan sayılır; geri tuşu kamerayı açar.")]
     [SerializeField] private float reverseCamStationaryThreshold = 1.0f;
 
-    [Header("Geri Görüş Kamerası Stili")]
-    [Tooltip("Çerçeve rengi")]
+    [Header("--- GERİ GÖRÜŞ KAMERASI STİLİ ---")]
     [SerializeField] private Color reverseCamBorderColor = new Color(0.1f, 0.9f, 1f, 0.85f);
-    [Tooltip("Çerçeve kalınlığı (piksel)")]
     [SerializeField] private float reverseCamBorderWidth = 2.5f;
-    [Tooltip("Arka plan karartma çerçevesi kalınlığı (piksel)")]
     [SerializeField] private float reverseCamFramePadding = 6f;
-    [Tooltip("Fade animasyon hızı")]
     [SerializeField] private float reverseCamFadeSpeed = 6f;
-    [Tooltip("Üst gradient yüksekliği (piksel)")]
     [SerializeField] private float reverseCamGradientHeight = 28f;
 
-    // Runtime variables
-    private Vector3 currentVelocity;
+    // Runtime state
+    private Camera mainCamera;
     private Rigidbody targetRb;
     private CarController carController;
-    private Camera mainCamera;
-    private Camera reverseCamHUD;
-    private bool reverseCamShowing;
-    private float reverseCamFadeAlpha;
-    private Texture2D reverseCamWhiteTex;
-    private GUIStyle reverseCamLabelStyle;
-    private float currentZoomOffset;
-    private VehicleCameraAnchors vehicleCameraAnchors;
-    private CinemachineBrain cinemachineBrain;
-    private CameraFollowGameplayRig gameplayRig;
+    private float currentYaw;
+    private float yawVelocity;
+    private Vector3 positionVelocity;
+    private float currentFov;
     private CameraFollowExternalControllerCoordinator externalControllerCoordinator;
+    private bool isInitialized;
 
-    void Awake()
+    private void Awake()
     {
-        EnsureInitialized();
+        InitializeCamera();
     }
 
-    void Start()
+    private void Start()
     {
         if (target != null)
         {
             SetTarget(target);
-            return;
         }
-
-        TryResolveTarget();
-
-        if (target == null)
+        else
         {
-            Debug.LogWarning("[CameraFollow] Target (Arac) bulunamadi!");
+            TryResolveTarget();
         }
+
+        WarpToTarget();
+    }
+
+    private void InitializeCamera()
+    {
+        if (isInitialized) return;
+
+        mainCamera = GetComponent<Camera>();
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
+        }
+
+        currentFov = baseFov;
+        if (mainCamera != null)
+        {
+            mainCamera.fieldOfView = baseFov;
+        }
+
+        // Cinemachine çakışmalarını devre dışı bırak:
+        // Kamera kontrolü doğrudan bu scriptin LateUpdate metodunda gerçekleşir.
+        var brain = GetComponent<CinemachineBrain>();
+        if (brain != null)
+        {
+            brain.WorldUpOverride = null;
+            brain.enabled = false;
+        }
+
+        var cmCameras = FindObjectsByType<CinemachineCamera>(FindObjectsSortMode.None);
+        for (int i = 0; i < cmCameras.Length; i++)
+        {
+            if (cmCameras[i] != null)
+            {
+                cmCameras[i].enabled = false;
+            }
+        }
+
+        externalControllerCoordinator = new CameraFollowExternalControllerCoordinator();
+        EnsureExternalControllers();
+
+        isInitialized = true;
     }
 
     public void SetTarget(Transform newTarget)
     {
-        EnsureInitialized();
+        InitializeCamera();
 
         VehicleCameraBinding binding = VehicleCameraTargetResolver.Resolve(newTarget);
         target = binding.Target;
         targetRb = binding.Rigidbody;
         carController = binding.CarController;
-        vehicleCameraAnchors = binding.CameraAnchors;
 
-        RefreshCameraControllers();
-
-        if (target == null)
+        if (target != null)
         {
-            gameplayRig.ClearTarget(cinemachineBrain);
-            externalControllerCoordinator.ClearTargets();
-            return;
+            currentYaw = target.eulerAngles.y;
+            yawVelocity = 0f;
+            positionVelocity = Vector3.zero;
         }
 
-        gameplayRig.ResetRuntimeFov(gameplayRig.ResolveCurrentLensFov(baseFov));
-
-        BindGameplayRig();
-        externalControllerCoordinator.ApplyTarget(mainCamera, target);
-        gameplayRig.Update(target, targetRb, carController, BuildGameplaySettings(), 0f);
-
-        Debug.Log($"[CameraFollow] Target updated: target={target.name}, targetRb={targetRb != null}, carController={carController != null}, cinemachine={gameplayRig.HasGameplayCamera}");
+        EnsureExternalControllers();
+        if (externalControllerCoordinator != null)
+        {
+            if (target != null)
+                externalControllerCoordinator.ApplyTarget(mainCamera, target);
+            else
+                externalControllerCoordinator.ClearTargets();
+        }
     }
 
-    void LateUpdate()
+    /// <summary>
+    /// Kamerayı anında hedefin arkasındaki ideal konuma yerleştirir (spawn/teleport durumları).
+    /// </summary>
+    public void WarpToTarget()
+    {
+        if (target == null) return;
+
+        currentYaw = target.eulerAngles.y;
+        yawVelocity = 0f;
+        positionVelocity = Vector3.zero;
+
+        Quaternion yawRot = Quaternion.Euler(0f, currentYaw, 0f);
+        Vector3 targetPos = target.position;
+        Vector3 desiredPos = targetPos + (yawRot * offset);
+
+        transform.position = desiredPos;
+
+        Vector3 lookTarget = targetPos + Vector3.up * lookAtHeight;
+        Vector3 lookDir = lookTarget - transform.position;
+        if (lookDir.sqrMagnitude > 0.001f)
+        {
+            Quaternion targetRot = Quaternion.LookRotation(lookDir, Vector3.up);
+            float pitch = targetRot.eulerAngles.x;
+            if (pitch > 180f) pitch -= 360f;
+            pitch = Mathf.Clamp(pitch, minPitchAngle, maxPitchAngle);
+            transform.rotation = Quaternion.Euler(pitch, targetRot.eulerAngles.y, 0f);
+        }
+    }
+
+    private void TryResolveTarget()
+    {
+        Transform resolved = VehicleCameraTargetResolver.ResolveDefaultTarget();
+        if (resolved != null && resolved != target)
+        {
+            SetTarget(resolved);
+        }
+    }
+
+    private void LateUpdate()
     {
         if (target == null)
         {
             TryResolveTarget();
-            return;
+            if (target == null) return;
         }
 
-        gameplayRig.Update(target, targetRb, carController, BuildGameplaySettings(), Time.deltaTime);
-    }
+        float deltaTime = Time.deltaTime;
+        if (deltaTime <= 0.00001f) return;
 
-    void TryResolveTarget()
-    {
-        Transform resolvedTarget = VehicleCameraTargetResolver.ResolveDefaultTarget();
-        if (resolvedTarget != null && resolvedTarget != target)
+        Vector3 targetPos = target.position;
+
+        // Araç hız ve yön verileri
+        Vector3 velocity = targetRb != null ? targetRb.linearVelocity : Vector3.zero;
+        float speedKmh = velocity.magnitude * 3.6f;
+        float localVelZ = target.InverseTransformDirection(velocity).z;
+
+        bool reverseInput = carController != null && carController.IsReverseInputActive;
+        bool isMovingReverse = localVelZ < -0.25f;
+        bool isReversing = reverseInput || isMovingReverse;
+
+        // 1. YAW (Yatay Dönüş Açısı)
+        // Kural: "Geri giderken hareket etmesin kamera"
+        // Geri giderken kameranın araç önüne dönmesini veya saçmalamasını önlemek için yaw açısı kilitlenir.
+        if (!isReversing)
         {
-            SetTarget(resolvedTarget);
+            float targetYaw = target.eulerAngles.y;
+            currentYaw = Mathf.SmoothDampAngle(currentYaw, targetYaw, ref yawVelocity, yawSmoothTime, Mathf.Infinity, deltaTime);
+        }
+        else
+        {
+            yawVelocity = 0f; // Geri viteste yaw sabit kalır
+        }
+
+        // 2. MESAFE VE HIZ ZOOM
+        float forwardSpeedKmh = Mathf.Max(0f, localVelZ * 3.6f);
+        float zoomOut = isReversing ? 0f : (Mathf.Clamp01(forwardSpeedKmh / Mathf.Max(1f, forwardZoomOutSpeedKmh)) * forwardZoomOutExtra);
+        float targetDistance = Mathf.Abs(offset.z) + zoomOut;
+        float targetHeight = offset.y;
+
+        Quaternion yawRotation = Quaternion.Euler(0f, currentYaw, 0f);
+        Vector3 desiredPosition = targetPos + (yawRotation * new Vector3(offset.x, targetHeight, -targetDistance));
+
+        // 3. POZİSYON TAKİBİ
+        if (isReversing)
+        {
+            // Geri giderken araba kameraya çarpmasın diye kamera araçla tam senkronize geri çekilir
+            transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref positionVelocity, 0.02f, Mathf.Infinity, deltaTime);
+        }
+        else
+        {
+            float smoothT = Mathf.InverseLerp(40f, 130f, speedKmh);
+            float currentSmoothTime = Mathf.Lerp(translateSmoothTime, minTranslateSmoothTime, smoothT);
+            transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref positionVelocity, currentSmoothTime, Mathf.Infinity, deltaTime);
+        }
+
+        // 4. KESİN GÜVENLİK SINIRLARI (TAVANA YAPIŞMAYI VE İÇİNE GİRMEYİ MATEMATİKSEL OLARAK ENGELLER)
+        // A) Minimum Yükseklik Sınırı:
+        if (transform.position.y < targetPos.y + minHeightAboveTarget)
+        {
+            Vector3 p = transform.position;
+            p.y = targetPos.y + minHeightAboveTarget;
+            transform.position = p;
+        }
+
+        // B) Minimum Yatay Mesafe Sınırı:
+        Vector3 diff = transform.position - targetPos;
+        Vector2 horizDiff = new Vector2(diff.x, diff.z);
+        if (horizDiff.magnitude < minHorizontalDistance)
+        {
+            Vector2 horizDir = horizDiff.sqrMagnitude > 0.001f
+                ? horizDiff.normalized
+                : -new Vector2(yawRotation * Vector3.forward).normalized;
+
+            Vector3 p = transform.position;
+            p.x = targetPos.x + horizDir.x * minHorizontalDistance;
+            p.z = targetPos.z + horizDir.y * minHorizontalDistance;
+            transform.position = p;
+        }
+
+        // 5. ROTASYON (LOOK AT & PITCH CLAMP)
+        // Kameranın arabanın tavanına dik bakması (yere bakması) maxPitchAngle ile engellenir!
+        Vector3 lookTarget = targetPos + Vector3.up * lookAtHeight;
+        Vector3 lookDir = lookTarget - transform.position;
+        if (lookDir.sqrMagnitude > 0.001f)
+        {
+            Quaternion targetRot = Quaternion.LookRotation(lookDir, Vector3.up);
+            float pitch = targetRot.eulerAngles.x;
+            if (pitch > 180f) pitch -= 360f;
+            pitch = Mathf.Clamp(pitch, minPitchAngle, maxPitchAngle);
+            transform.rotation = Quaternion.Euler(pitch, targetRot.eulerAngles.y, 0f);
+        }
+
+        // 6. SPEED FOV
+        if (enableSpeedFov && mainCamera != null)
+        {
+            float targetFov = baseFov;
+            if (speedKmh > 10f)
+            {
+                float t = Mathf.Clamp01(speedKmh / fovMaxSpeedKmh);
+                targetFov = Mathf.Lerp(baseFov, maxSpeedFov, t);
+            }
+            currentFov = Mathf.Lerp(currentFov, targetFov, fovLerpSpeed * deltaTime);
+            mainCamera.fieldOfView = currentFov;
         }
     }
 
-    void EnsureExternalCameraControllers()
+    private void EnsureExternalControllers()
     {
         if (externalControllerCoordinator == null)
         {
-            return;
+            externalControllerCoordinator = new CameraFollowExternalControllerCoordinator();
         }
 
         externalControllerCoordinator.EnsureControllers(
@@ -188,336 +342,4 @@ public class CameraFollow : MonoBehaviour
                 reverseCamFadeSpeed,
                 reverseCamGradientHeight));
     }
-
-    void EnsureInitialized()
-    {
-        if (mainCamera == null)
-        {
-            mainCamera = GetComponent<Camera>();
-        }
-
-        if (cinemachineBrain == null)
-        {
-            cinemachineBrain = GetComponent<CinemachineBrain>();
-        }
-
-        if (gameplayRig == null)
-        {
-            gameplayRig = new CameraFollowGameplayRig(mainCamera, baseFov);
-        }
-
-        if (externalControllerCoordinator == null)
-        {
-            externalControllerCoordinator = new CameraFollowExternalControllerCoordinator();
-        }
-
-        RefreshCameraControllers();
-    }
-
-    void RefreshCameraControllers()
-    {
-        gameplayRig?.ResolveRig();
-        EnsureExternalCameraControllers();
-    }
-
-    void BindGameplayRig()
-    {
-        gameplayRig.BindTarget(target, cinemachineBrain);
-    }
-
-    CameraFollowGameplayRigSettings BuildGameplaySettings()
-    {
-        return new CameraFollowGameplayRigSettings(
-            offset,
-            lookAtTargetOffset,
-            enableSpeedFov,
-            baseFov,
-            maxSpeedFov,
-            fovMaxSpeedKmh,
-            fovLerpSpeed,
-            forwardZoomOutExtra,
-            forwardZoomOutSpeedKmh,
-            dynamicZoomLerpSpeed,
-            reverseZoomOutExtra,
-            reverseHeightExtra);
-    }
-
-    void HandleCameraMovement(float deltaTime)
-    {
-        // --- Geri/fren tespiti ve dinamik Z offset ---
-        bool reverseInput = carController != null && carController.IsReverseInputActive;
-        bool isReversing = false;
-        float currentHeightAdjust = 0f;
-
-        if (targetRb != null)
-        {
-            float localVelZ = target.InverseTransformDirection(targetRb.linearVelocity).z;
-            // Geri tuşuna basılıyorsa VEYA araç gerçekten geri gidiyorsa → kamera geriye ve yukarıya açılsın
-            isReversing = reverseInput || localVelZ < -0.2f;
-
-            if (isReversing)
-            {
-                // Geri giderken kamera ekstra hareket etmesin
-                currentZoomOffset = Mathf.Lerp(currentZoomOffset, 0f, 8f * deltaTime);
-                currentHeightAdjust = Mathf.Lerp(currentHeightAdjust, 0f, 8f * deltaTime);
-            }
-            else
-            {
-                // İleri giderken: hıza göre kamerayı hafifçe geri çek
-                float forwardKmh = Mathf.Max(0f, localVelZ * 3.6f);
-                float zoomT = Mathf.Clamp01(forwardKmh / Mathf.Max(1f, forwardZoomOutSpeedKmh));
-                float targetZoom = -zoomT * forwardZoomOutExtra;
-                currentZoomOffset = Mathf.Lerp(currentZoomOffset, targetZoom, dynamicZoomLerpSpeed * deltaTime);
-            }
-        }
-
-        Vector3 targetOffset = new Vector3(offset.x, offset.y + currentHeightAdjust, offset.z + currentZoomOffset);
-
-        // --- Pozisyon hesaplama ---
-        Vector3 desiredPosition;
-        if (followRotation)
-        {
-            desiredPosition = target.TransformPoint(targetOffset);
-        }
-        else
-        {
-            Quaternion yawRotation = Quaternion.Euler(0f, target.eulerAngles.y, 0f);
-            desiredPosition = target.position + (yawRotation * targetOffset);
-        }
-
-        // --- Pozisyonu uygula ---
-        if (isReversing)
-        {
-            // Geri/fren: SmoothDamp ataleti sıfırla, pozisyona anında snap yap
-            currentVelocity = Vector3.zero;
-            transform.position = desiredPosition;
-        }
-        else
-        {
-            float smoothTime = translateSmoothTime;
-            if (targetRb != null)
-            {
-                float speedKmh = targetRb.linearVelocity.magnitude * 3.6f;
-                float tightenT = Mathf.InverseLerp(tightenFollowStartSpeedKmh, tightenFollowFullSpeedKmh, speedKmh);
-                smoothTime = Mathf.Lerp(translateSmoothTime, minTranslateSmoothTime, tightenT);
-            }
-
-            transform.position = Vector3.SmoothDamp(
-                transform.position,
-                desiredPosition,
-                ref currentVelocity,
-                Mathf.Max(0.01f, smoothTime),
-                Mathf.Infinity,
-                Mathf.Max(0.0001f, deltaTime));
-        }
-
-        // 6. Rotasyon ayari — her zaman arabanin biraz ustune bak
-        Vector3 lookAtTarget = target.position + Vector3.up * 1.5f;
-        Vector3 direction = lookAtTarget - transform.position;
-
-        if (direction != Vector3.zero)
-        {
-            Quaternion targetRotation = Quaternion.LookRotation(direction);
-
-            float currentRotSpeed = rotationSmoothSpeed;
-
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, currentRotSpeed * deltaTime);
-        }
-    }
-    void OnGUI()
-    {
-        if (!enableReverseCamera || reverseCamFadeAlpha < 0.01f) return;
-
-        EnsureReverseCamGUIResources();
-
-        // Viewport → ekran pikseli
-        float sw = Screen.width;
-        float sh = Screen.height;
-        float rx = reverseCamVpX * sw;
-        float ry = (1f - reverseCamVpY - reverseCamVpH) * sh; // GUI: sol üst orijin
-        float rw = reverseCamVpW * sw;
-        float rh = reverseCamVpH * sh;
-
-        Color prevColor = GUI.color;
-        float a = reverseCamFadeAlpha;
-
-        // 1) Dış karartma çerçevesi (padding)
-        float pad = reverseCamFramePadding;
-        GUI.color = new Color(0f, 0f, 0f, 0.7f * a);
-        // Üst
-        GUI.DrawTexture(new Rect(rx - pad, ry - pad, rw + pad * 2f, pad), reverseCamWhiteTex);
-        // Alt
-        GUI.DrawTexture(new Rect(rx - pad, ry + rh, rw + pad * 2f, pad), reverseCamWhiteTex);
-        // Sol
-        GUI.DrawTexture(new Rect(rx - pad, ry, pad, rh), reverseCamWhiteTex);
-        // Sağ
-        GUI.DrawTexture(new Rect(rx + rw, ry, pad, rh), reverseCamWhiteTex);
-
-        // 2) Parlak kenarlık çizgileri
-        float bw = reverseCamBorderWidth;
-        Color borderCol = reverseCamBorderColor;
-        borderCol.a *= a;
-        GUI.color = borderCol;
-        // Üst
-        GUI.DrawTexture(new Rect(rx - bw, ry - bw, rw + bw * 2f, bw), reverseCamWhiteTex);
-        // Alt
-        GUI.DrawTexture(new Rect(rx - bw, ry + rh, rw + bw * 2f, bw), reverseCamWhiteTex);
-        // Sol
-        GUI.DrawTexture(new Rect(rx - bw, ry, bw, rh), reverseCamWhiteTex);
-        // Sağ
-        GUI.DrawTexture(new Rect(rx + rw, ry, bw, rh), reverseCamWhiteTex);
-
-        // 3) Üst gradient overlay (karartma)
-        float gradH = Mathf.Min(reverseCamGradientHeight, rh * 0.4f);
-        for (int i = 0; i < 8; i++)
-        {
-            float t = i / 8f;
-            float lineH = gradH / 8f;
-            GUI.color = new Color(0f, 0f, 0f, (1f - t) * 0.45f * a);
-            GUI.DrawTexture(new Rect(rx, ry + t * gradH, rw, lineH), reverseCamWhiteTex);
-        }
-
-        // 4) "REAR VIEW" etiketi
-        GUI.color = new Color(1f, 1f, 1f, 0.9f * a);
-        reverseCamLabelStyle.fontSize = Mathf.Max(10, (int)(sh * 0.014f));
-        Rect labelRect = new Rect(rx, ry + 2f, rw, reverseCamLabelStyle.fontSize + 6f);
-        GUI.Label(labelRect, "REAR VIEW", reverseCamLabelStyle);
-
-        // 5) Köşe aksan çizgileri (küçük L şekilleri)
-        float cornerLen = Mathf.Min(rw, rh) * 0.08f;
-        float cornerW = bw * 1.5f;
-        Color cornerCol = reverseCamBorderColor;
-        cornerCol.a = Mathf.Min(1f, cornerCol.a * 1.4f) * a;
-        GUI.color = cornerCol;
-        // Sol üst
-        GUI.DrawTexture(new Rect(rx - bw, ry - bw, cornerLen, cornerW), reverseCamWhiteTex);
-        GUI.DrawTexture(new Rect(rx - bw, ry - bw, cornerW, cornerLen), reverseCamWhiteTex);
-        // Sağ üst
-        GUI.DrawTexture(new Rect(rx + rw - cornerLen + bw, ry - bw, cornerLen, cornerW), reverseCamWhiteTex);
-        GUI.DrawTexture(new Rect(rx + rw, ry - bw, cornerW, cornerLen), reverseCamWhiteTex);
-        // Sol alt
-        GUI.DrawTexture(new Rect(rx - bw, ry + rh, cornerLen, cornerW), reverseCamWhiteTex);
-        GUI.DrawTexture(new Rect(rx - bw, ry + rh - cornerLen + bw, cornerW, cornerLen), reverseCamWhiteTex);
-        // Sağ alt
-        GUI.DrawTexture(new Rect(rx + rw - cornerLen + bw, ry + rh, cornerLen, cornerW), reverseCamWhiteTex);
-        GUI.DrawTexture(new Rect(rx + rw, ry + rh - cornerLen + bw, cornerW, cornerLen), reverseCamWhiteTex);
-
-        GUI.color = prevColor;
-    }
-
-    void EnsureReverseCamGUIResources()
-    {
-        if (reverseCamWhiteTex == null)
-        {
-            reverseCamWhiteTex = new Texture2D(1, 1);
-            reverseCamWhiteTex.SetPixel(0, 0, Color.white);
-            reverseCamWhiteTex.Apply();
-        }
-
-        if (reverseCamLabelStyle == null)
-        {
-            reverseCamLabelStyle = new GUIStyle(GUI.skin.label);
-            reverseCamLabelStyle.alignment = TextAnchor.UpperCenter;
-            reverseCamLabelStyle.fontStyle = FontStyle.Bold;
-            reverseCamLabelStyle.normal.textColor = new Color(0.85f, 0.95f, 1f, 1f);
-        }
-    }
-
-    void OnDestroy()
-    {
-        if (reverseCamHUD != null) Destroy(reverseCamHUD.gameObject);
-        if (reverseCamWhiteTex != null) Destroy(reverseCamWhiteTex);
-    }
-
-    // ── Geri Görüş Kamerası ──────────────────────────────────────────────────
-
-    void SetupReverseCameraHUD()
-    {
-        if (!enableReverseCamera) return;
-
-        var go = new GameObject("_ReverseCameraHUD");
-        reverseCamHUD = go.AddComponent<Camera>();
-        reverseCamHUD.fieldOfView = reverseCamFov;
-        reverseCamHUD.nearClipPlane = 0.15f;
-        reverseCamHUD.farClipPlane = 300f;
-        reverseCamHUD.depth = 2f;   // Main cam (0) üzerinde, overlay kamera katmaninda
-        reverseCamHUD.rect = new Rect(reverseCamVpX, reverseCamVpY, reverseCamVpW, reverseCamVpH);
-        reverseCamHUD.cullingMask = mainCamera != null ? mainCamera.cullingMask : ~0;
-        reverseCamHUD.backgroundColor = mainCamera != null ? mainCamera.backgroundColor : Color.black;
-        reverseCamHUD.clearFlags = ResolveSecondaryCameraClearFlags();
-        reverseCamHUD.allowHDR = mainCamera != null && mainCamera.allowHDR;
-        reverseCamHUD.allowMSAA = mainCamera != null && mainCamera.allowMSAA;
-
-        Skybox mainSkybox = mainCamera != null ? mainCamera.GetComponent<Skybox>() : null;
-        Material skyboxMaterial = mainSkybox != null && mainSkybox.material != null
-            ? mainSkybox.material
-            : RenderSettings.skybox;
-        if (skyboxMaterial != null)
-        {
-            Skybox reverseSkybox = go.AddComponent<Skybox>();
-            reverseSkybox.material = skyboxMaterial;
-        }
-
-        reverseCamHUD.enabled = false;
-    }
-
-    CameraClearFlags ResolveSecondaryCameraClearFlags()
-    {
-        if (mainCamera != null)
-        {
-            return mainCamera.clearFlags;
-        }
-
-        return RenderSettings.skybox != null ? CameraClearFlags.Skybox : CameraClearFlags.SolidColor;
-    }
-
-    void UpdateReverseCameraHUD()
-    {
-        if (!enableReverseCamera || reverseCamHUD == null) return;
-
-        bool shouldShow = IsCarReversing();
-
-        // Smooth fade
-        float targetAlpha = shouldShow ? 1f : 0f;
-        reverseCamFadeAlpha = Mathf.MoveTowards(reverseCamFadeAlpha, targetAlpha,
-            reverseCamFadeSpeed * Time.deltaTime);
-
-        bool camActive = reverseCamFadeAlpha > 0.01f;
-        if (camActive != reverseCamShowing)
-        {
-            reverseCamShowing = camActive;
-            reverseCamHUD.enabled = reverseCamShowing;
-        }
-
-        if (!reverseCamShowing) return;
-
-        Transform reverseAnchor = vehicleCameraAnchors != null ? vehicleCameraAnchors.ReverseCameraAnchor : null;
-        Quaternion yaw = Quaternion.Euler(0f, target.eulerAngles.y, 0f);
-        reverseCamHUD.transform.position = reverseAnchor != null
-            ? reverseAnchor.position
-            : target.position + yaw * reverseCamOffset;
-        reverseCamHUD.transform.rotation = yaw * Quaternion.Euler(reverseCamEuler);
-    }
-
-    bool IsCarReversing()
-    {
-        if (targetRb == null)
-            return carController != null && carController.IsReverseInputActive;
-
-        float localZ = target.InverseTransformDirection(targetRb.linearVelocity).z;
-
-        // Araç gerçekten geri gidiyorsa
-        if (localZ < -0.1f) return true;
-
-        // Araç durağan haldeyken geri tuşuna basılıyorsa
-        if (targetRb.linearVelocity.magnitude < reverseCamStationaryThreshold
-            && carController != null
-            && carController.IsReverseInputActive)
-        {
-            return true;
-        }
-
-        return false;
-    }
 }
-
