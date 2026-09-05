@@ -211,18 +211,7 @@ namespace DeliveryDriver.EditorTools
 
         private void OnSelectionChange()
         {
-            TryLoadSelectedRoad();
-        }
-
-        private void TryLoadSelectedRoad()
-        {
-            if (Selection.activeGameObject == null) return;
-            SplineRoad road = Selection.activeGameObject.GetComponent<SplineRoad>();
-            if (road == null) road = Selection.activeGameObject.GetComponentInParent<SplineRoad>();
-            if (road != null && road.IsUsable && (activeSmoothRoad == null || road.gameObject != activeSmoothRoad))
-            {
-                LoadRoadIntoTool(road, selectPointIndex: -1);
-            }
+            Repaint();
         }
 
         private Vector2 scrollPos;
@@ -2295,9 +2284,25 @@ namespace DeliveryDriver.EditorTools
             }
         }
 
-        private bool IsBridgeSample(Vector3 sample)
+        private bool CanCreateBridges()
         {
             if (!autoCreateBridges)
+            {
+                return false;
+            }
+
+            // City streets in Istanbul and Ankara must follow ground/terrain; no bridges inside cities
+            if (targetCategory == RoadTargetCategory.Istanbul || targetCategory == RoadTargetCategory.Ankara)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool IsBridgeSample(Vector3 sample)
+        {
+            if (!CanCreateBridges())
             {
                 return false;
             }
@@ -2308,7 +2313,7 @@ namespace DeliveryDriver.EditorTools
                 groundY = hitY;
             }
 
-            return sample.y - groundY >= Mathf.Min(bridgeMinGroundClearance, 0.75f);
+            return sample.y - groundY >= Mathf.Max(bridgeMinGroundClearance, 2.5f);
         }
 
         private void AppendBridgeSegment(
@@ -2581,7 +2586,7 @@ namespace DeliveryDriver.EditorTools
         {
             if (samples == null || samples.Count == 0) return;
 
-            if (autoCreateBridges && samples.Count >= 2)
+            if (CanCreateBridges() && samples.Count >= 2)
             {
                 int startBridge = -1;
                 int endBridge = -1;
@@ -2592,7 +2597,7 @@ namespace DeliveryDriver.EditorTools
                     float groundY = bridgeSupportBaseY;
                     bool hasGround = TryGetGroundHeight(sample, out groundY);
 
-                    bool isOverGap = (!hasGround) || (sample.y - groundY >= Mathf.Min(bridgeMinGroundClearance, 0.75f));
+                    bool isOverGap = (!hasGround) || (sample.y - groundY >= Mathf.Max(bridgeMinGroundClearance, 2.5f));
 
                     if (isOverGap)
                     {
@@ -3386,35 +3391,44 @@ namespace DeliveryDriver.EditorTools
         {
             Ray ray = HandleUtility.GUIPointToWorldRay(mousePosition);
 
-            // If drawing a bridge and we have existing points, maintain bridge deck height over gaps/valleys/water
-            if (autoCreateBridges && smoothPath != null && smoothPath.Count > 0)
+            if (Physics.Raycast(ray, out RaycastHit hit, 100000f))
+            {
+                // If we are placing a highway/bridge over water or deep abyss (>= 3m drop)
+                if (CanCreateBridges() && smoothPath != null && smoothPath.Count > 0)
+                {
+                    int cIndex = GetContinuationPointIndex();
+                    float bridgeDeckY = (cIndex >= 0 && cIndex < smoothPath.Count) ? smoothPath[cIndex].y : smoothPath[smoothPath.Count - 1].y;
+
+                    bool isWater = hit.collider.gameObject.name.ToLowerInvariant().Contains("water")
+                                || hit.collider.CompareTag("Water")
+                                || hit.collider.gameObject.layer == LayerMask.NameToLayer("Water");
+
+                    if (isWater || (bridgeDeckY - hit.point.y >= 3.0f))
+                    {
+                        Plane deckPlane = new Plane(Vector3.up, new Vector3(0f, bridgeDeckY, 0f));
+                        if (deckPlane.Raycast(ray, out float deckDist))
+                        {
+                            point = ray.GetPoint(deckDist);
+                            return true;
+                        }
+                    }
+                }
+
+                point = hit.point;
+                return true;
+            }
+
+            // Fallback for void / horizon when drawing a bridge: maintain bridge deck height
+            if (CanCreateBridges() && smoothPath != null && smoothPath.Count > 0)
             {
                 int cIndex = GetContinuationPointIndex();
                 float bridgeDeckY = (cIndex >= 0 && cIndex < smoothPath.Count) ? smoothPath[cIndex].y : smoothPath[smoothPath.Count - 1].y;
                 Plane deckPlane = new Plane(Vector3.up, new Vector3(0f, bridgeDeckY, 0f));
                 if (deckPlane.Raycast(ray, out float deckDist))
                 {
-                    Vector3 deckCandidate = ray.GetPoint(deckDist);
-                    if (TryGetGroundHeight(deckCandidate, out float groundY))
-                    {
-                        if (bridgeDeckY - groundY >= 0.35f)
-                        {
-                            point = deckCandidate;
-                            return true;
-                        }
-                    }
-                    else
-                    {
-                        point = deckCandidate;
-                        return true;
-                    }
+                    point = ray.GetPoint(deckDist);
+                    return true;
                 }
-            }
-
-            if (Physics.Raycast(ray, out RaycastHit hit, 100000f))
-            {
-                point = hit.point;
-                return true;
             }
 
             Plane groundPlane = new Plane(Vector3.up, Vector3.zero);
@@ -3615,7 +3629,15 @@ namespace DeliveryDriver.EditorTools
                 Handles.color = new Color(0.2f, 0.9f, 1f, 0.9f);
                 if (Handles.Button(startPoint, Quaternion.identity, startSize, startSize * 1.5f, Handles.SphereHandleCap))
                 {
-                    LoadRoadIntoTool(road, selectPointIndex: 0);
+                    if (Event.current.control)
+                    {
+                        LoadRoadIntoTool(road, selectPointIndex: 0);
+                    }
+                    else
+                    {
+                        StartNewSmoothRoad();
+                        AddSmoothPoint(startPoint);
+                    }
                     handledSceneClick = true;
                     Event.current.Use();
                     Repaint();
@@ -3628,7 +3650,15 @@ namespace DeliveryDriver.EditorTools
                 Handles.color = new Color(1f, 0.85f, 0.2f, 0.9f);
                 if (Handles.Button(endPoint, Quaternion.identity, endSize, endSize * 1.5f, Handles.SphereHandleCap))
                 {
-                    LoadRoadIntoTool(road, selectPointIndex: -1);
+                    if (Event.current.control)
+                    {
+                        LoadRoadIntoTool(road, selectPointIndex: -1);
+                    }
+                    else
+                    {
+                        StartNewSmoothRoad();
+                        AddSmoothPoint(endPoint);
+                    }
                     handledSceneClick = true;
                     Event.current.Use();
                     Repaint();
