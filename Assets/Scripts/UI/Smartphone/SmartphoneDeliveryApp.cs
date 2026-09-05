@@ -195,16 +195,28 @@ namespace DeliveryDriver.UI.Smartphone
             hImg.color = new Color(0.09f, 0.13f, 0.2f, 0.98f);
             hImg.sprite = fallbackSprite;
 
+            GameObject hIconObj = new GameObject("Icon", typeof(RectTransform), typeof(Image));
+            hIconObj.transform.SetParent(headerObj.transform, false);
+            RectTransform hiRect = hIconObj.GetComponent<RectTransform>();
+            hiRect.anchorMin = new Vector2(0f, 0.5f);
+            hiRect.anchorMax = new Vector2(0f, 0.5f);
+            hiRect.pivot = new Vector2(0f, 0.5f);
+            hiRect.anchoredPosition = new Vector2(14f, 0f);
+            hiRect.sizeDelta = new Vector2(24f, 24f);
+            Image hiImg = hIconObj.GetComponent<Image>();
+            hiImg.sprite = SmartphoneIconRegistry.GetDeliveryAppIcon();
+            hiImg.preserveAspect = true;
+
             GameObject hTitleObj = new GameObject("Title", typeof(RectTransform), typeof(TextMeshProUGUI));
             hTitleObj.transform.SetParent(headerObj.transform, false);
             RectTransform htRect = hTitleObj.GetComponent<RectTransform>();
             htRect.anchorMin = Vector2.zero;
             htRect.anchorMax = Vector2.one;
-            htRect.offsetMin = new Vector2(16f, 0f);
+            htRect.offsetMin = new Vector2(46f, 0f);
             htRect.offsetMax = new Vector2(-16f, 0f);
 
             TextMeshProUGUI htText = hTitleObj.GetComponent<TextMeshProUGUI>();
-            htText.text = "📦 Kurye Express - İlanlar";
+            htText.text = "Kurye Express - İlanlar";
             htText.fontSize = 15f;
             htText.fontStyle = FontStyles.Bold;
             htText.alignment = TextAlignmentOptions.Left;

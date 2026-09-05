@@ -58,7 +58,7 @@ namespace DeliveryDriver.UI.Smartphone
             string tier = CourierRatingManager.Instance != null ? CourierRatingManager.Instance.GetRatingTierTitle() : "VIP / Mükemmel Kurye";
             float multiplier = CourierRatingManager.Instance != null ? CourierRatingManager.Instance.GetRatingRewardMultiplier() : 1.35f;
 
-            if (ratingScoreText != null) ratingScoreText.text = $"★ {rating:F1} / 5.0";
+            if (ratingScoreText != null) ratingScoreText.text = $"{rating:F1} / 5.0";
             if (ratingTierText != null) ratingTierText.text = tier;
             if (rewardBonusText != null)
             {
@@ -92,7 +92,7 @@ namespace DeliveryDriver.UI.Smartphone
             for (int i = 0; i < count; i++)
             {
                 var r = reviews[i];
-                string ratingTag = $"[★ {r.rating:F1}]";
+                string ratingTag = $"[{r.rating:F1} / 5.0]";
                 Color tagColor = r.isPositive ? new Color(1f, 0.84f, 0f, 1f) : new Color(1f, 0.35f, 0.35f, 1f);
 
                 GameObject bubble = CreateMessageBubble(listContainer, r.customerName, ratingTag, tagColor, r.comment, r.timeString, yOffset);
@@ -158,16 +158,29 @@ namespace DeliveryDriver.UI.Smartphone
             scImg.color = new Color(0.12f, 0.16f, 0.24f, 0.95f);
             scImg.sprite = fallbackSprite;
 
+            // Star Icon
+            GameObject starObj = new GameObject("StarIcon", typeof(RectTransform), typeof(Image));
+            starObj.transform.SetParent(scoreCardObj.transform, false);
+            RectTransform str = starObj.GetComponent<RectTransform>();
+            str.anchorMin = new Vector2(0f, 0.5f);
+            str.anchorMax = new Vector2(0f, 0.5f);
+            str.pivot = new Vector2(0f, 0.5f);
+            str.anchoredPosition = new Vector2(12f, 8f);
+            str.sizeDelta = new Vector2(18f, 18f);
+            Image sImg = starObj.GetComponent<Image>();
+            sImg.sprite = SmartphoneIconRegistry.GetStarIcon();
+            sImg.preserveAspect = true;
+
             // Score Big
             GameObject sbObj = new GameObject("RatingScore", typeof(RectTransform), typeof(TextMeshProUGUI));
             sbObj.transform.SetParent(scoreCardObj.transform, false);
             RectTransform sbRect = sbObj.GetComponent<RectTransform>();
             sbRect.anchorMin = new Vector2(0f, 0.5f);
             sbRect.anchorMax = new Vector2(0.55f, 1f);
-            sbRect.offsetMin = new Vector2(12f, 0f);
+            sbRect.offsetMin = new Vector2(34f, 0f);
             sbRect.offsetMax = new Vector2(0f, -6f);
             ratingScoreText = sbObj.GetComponent<TextMeshProUGUI>();
-            ratingScoreText.text = "★ 5.0 / 5.0";
+            ratingScoreText.text = "5.0 / 5.0";
             ratingScoreText.fontSize = 18f;
             ratingScoreText.fontStyle = FontStyles.Bold;
             ratingScoreText.color = new Color(1f, 0.85f, 0.15f, 1f);
