@@ -131,6 +131,7 @@ namespace DeliveryDriver.EditorTools
 
         private SplineRoad[] cachedSceneRoads;
         private RoadIntersection[] cachedSceneIntersections;
+        private readonly List<GameObject> cachedOrphanRoads = new List<GameObject>();
         private double lastSceneCacheTime;
 
         private void EnsureSceneCache()
@@ -140,6 +141,47 @@ namespace DeliveryDriver.EditorTools
             {
                 cachedSceneRoads = Object.FindObjectsByType<SplineRoad>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
                 cachedSceneIntersections = Object.FindObjectsByType<RoadIntersection>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+                cachedOrphanRoads.Clear();
+
+                List<Transform> placedRoots = FindAllPlacedRoadsRoots();
+                for (int pr = 0; pr < placedRoots.Count; pr++)
+                {
+                    Transform pRoot = placedRoots[pr];
+                    if (pRoot == null) continue;
+                    for (int i = 0; i < pRoot.childCount; i++)
+                    {
+                        Transform child = pRoot.GetChild(i);
+                        if (child == null) continue;
+                        if (child.name == GeneratedIntersectionsName || child.name == GeneratedIntersectionVisualsName) continue;
+                        if (child.GetComponent<SplineRoad>() == null)
+                        {
+                            cachedOrphanRoads.Add(child.gameObject);
+                        }
+                    }
+                }
+
+                MeshRenderer[] allRenderers = Object.FindObjectsByType<MeshRenderer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+                if (allRenderers != null)
+                {
+                    for (int mr = 0; mr < allRenderers.Length; mr++)
+                    {
+                        MeshRenderer renderer = allRenderers[mr];
+                        if (renderer == null) continue;
+                        string rName = renderer.name;
+                        if (rName.Contains("Asphalt") || rName.Contains("Sidewalk") || rName.StartsWith("SmoothRoad_") || rName.StartsWith("RoadSegment_"))
+                        {
+                            GameObject rootRoad = GetRoadRootObject(renderer.gameObject);
+                            if (rootRoad != null && rootRoad.GetComponent<SplineRoad>() == null && rootRoad.GetComponent<RoadIntersection>() == null)
+                            {
+                                if (!cachedOrphanRoads.Contains(rootRoad))
+                                {
+                                    cachedOrphanRoads.Add(rootRoad);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 lastSceneCacheTime = now;
             }
         }
@@ -148,6 +190,7 @@ namespace DeliveryDriver.EditorTools
         {
             cachedSceneRoads = null;
             cachedSceneIntersections = null;
+            cachedOrphanRoads.Clear();
         }
 
         private sealed class BranchRecord
@@ -4017,41 +4060,87 @@ namespace DeliveryDriver.EditorTools
                 }
             }
 
-            // Also check for any orphan road objects under Placed Roads that lack SplineRoad!
-            Transform roadsRoot = roadParent != null ? roadParent : GameObject.Find(DefaultRootName)?.transform;
-            if (roadsRoot != null)
+            // Draw handles for all orphan road objects discovered in cache
+            if (cachedOrphanRoads != null)
             {
-                for (int i = 0; i < roadsRoot.childCount; i++)
+                for (int o = 0; o < cachedOrphanRoads.Count; o++)
                 {
-                    Transform child = roadsRoot.GetChild(i);
-                    if (child == null) continue;
-                    if (child.name == GeneratedIntersectionsName || child.name == GeneratedIntersectionVisualsName) continue;
-
-                    SplineRoad sRoad = child.GetComponent<SplineRoad>();
-                    if (sRoad == null)
+                    GameObject orphan = cachedOrphanRoads[o];
+                    if (orphan != null)
                     {
-                        Vector3 orphanPos = child.position;
-                        MeshFilter mf = child.GetComponentInChildren<MeshFilter>();
-                        if (mf != null && mf.sharedMesh != null)
-                        {
-                            orphanPos = mf.transform.TransformPoint(mf.sharedMesh.bounds.center);
-                        }
-                        float orphanSize = HandleUtility.GetHandleSize(orphanPos) * 0.22f;
-                        Handles.color = new Color(1f, 0.5f, 0f, 0.95f);
-                        if (Handles.Button(orphanPos, Quaternion.identity, orphanSize, orphanSize * 1.6f, Handles.SphereHandleCap))
-                        {
-                            Selection.activeGameObject = child.gameObject;
-                            handledSceneClick = true;
-                            Event.current.Use();
-                            Repaint();
-                            SceneView.RepaintAll();
-                            return;
-                        }
-                        GUIStyle orphanStyle = new GUIStyle(EditorStyles.boldLabel);
-                        orphanStyle.normal.textColor = new Color(1f, 0.6f, 0.1f);
-                        Handles.Label(orphanPos + Vector3.up * 1.5f, $"⚠️ [Yetim Obje: {child.name} (Tıkla ve Sil)]", orphanStyle);
+                        DrawOrphanRoadHandle(orphan);
+                        if (handledSceneClick) return;
                     }
                 }
+            }
+        }
+
+        private void DrawOrphanRoadHandle(GameObject target)
+        {
+            if (target == null) return;
+            Vector3 orphanPos = target.transform.position;
+            MeshFilter mf = target.GetComponentInChildren<MeshFilter>();
+
+            List<Vector3> samplePoints = new List<Vector3>();
+            if (mf != null && mf.sharedMesh != null)
+            {
+                Bounds b = mf.sharedMesh.bounds;
+                samplePoints.Add(mf.transform.TransformPoint(new Vector3(b.min.x, b.center.y, b.min.z)));
+                samplePoints.Add(mf.transform.TransformPoint(b.center));
+                samplePoints.Add(mf.transform.TransformPoint(new Vector3(b.max.x, b.center.y, b.max.z)));
+                orphanPos = mf.transform.TransformPoint(b.center);
+            }
+            else
+            {
+                samplePoints.Add(orphanPos);
+            }
+
+            for (int p = 0; p < samplePoints.Count; p++)
+            {
+                Vector3 pt = samplePoints[p];
+                float ptSize = HandleUtility.GetHandleSize(pt) * 0.22f;
+                Handles.color = new Color(1f, 0.45f, 0.05f, 0.95f);
+                if (Handles.Button(pt, Quaternion.identity, ptSize, ptSize * 1.6f, Handles.SphereHandleCap))
+                {
+                    Selection.activeGameObject = target;
+                    handledSceneClick = true;
+                    Event.current.Use();
+                    Repaint();
+                    SceneView.RepaintAll();
+                    return;
+                }
+            }
+
+            GUIStyle orphanStyle = new GUIStyle(EditorStyles.boldLabel);
+            orphanStyle.normal.textColor = new Color(1f, 0.55f, 0.1f);
+            Handles.Label(orphanPos + Vector3.up * 1.5f, $"⚠️ [Yetim Yol: {target.name} (Tıkla ve Sil)]", orphanStyle);
+        }
+
+        private static List<Transform> FindAllPlacedRoadsRoots()
+        {
+            List<Transform> list = new List<Transform>();
+            Scene scene = SceneManager.GetActiveScene();
+            if (!scene.isLoaded) return list;
+
+            GameObject[] roots = scene.GetRootGameObjects();
+            for (int i = 0; i < roots.Length; i++)
+            {
+                FindPlacedRoadsRecursive(roots[i].transform, list);
+            }
+            return list;
+        }
+
+        private static void FindPlacedRoadsRecursive(Transform tr, List<Transform> list)
+        {
+            if (tr == null) return;
+            if (tr.name == DefaultRootName)
+            {
+                list.Add(tr);
+                return;
+            }
+            for (int i = 0; i < tr.childCount; i++)
+            {
+                FindPlacedRoadsRecursive(tr.GetChild(i), list);
             }
         }
 
@@ -4111,9 +4200,16 @@ namespace DeliveryDriver.EditorTools
             if (intersection != null) return intersection.gameObject;
 
             Transform current = obj.transform;
-            Transform roadsRoot = roadParent != null ? roadParent : GameObject.Find(DefaultRootName)?.transform;
-            while (current.parent != null && current.parent != roadsRoot && current.parent.name != GeneratedIntersectionVisualsName)
+            while (current.parent != null && 
+                   current.parent.name != DefaultRootName && 
+                   current.parent.name != GeneratedIntersectionVisualsName &&
+                   !current.parent.name.StartsWith("SmoothRoad_") &&
+                   !current.parent.name.StartsWith("RoadSegment_"))
             {
+                if (current.name.StartsWith("SmoothRoad_") || current.name.StartsWith("RoadSegment_"))
+                {
+                    return current.gameObject;
+                }
                 current = current.parent;
             }
             return current.gameObject;
@@ -4138,13 +4234,16 @@ namespace DeliveryDriver.EditorTools
                 }
             }
 
-            // 2. Orphan meshes under Placed Roads without SplineRoad
-            GameObject root = GameObject.Find(DefaultRootName);
-            if (root != null)
+            // 2. Orphan meshes under all Placed Roads folders without SplineRoad
+            List<Transform> placedRoots = FindAllPlacedRoadsRoots();
+            for (int pr = 0; pr < placedRoots.Count; pr++)
             {
-                for (int i = root.transform.childCount - 1; i >= 0; i--)
+                Transform pRoot = placedRoots[pr];
+                if (pRoot == null) continue;
+                for (int i = pRoot.childCount - 1; i >= 0; i--)
                 {
-                    Transform child = root.transform.GetChild(i);
+                    Transform child = pRoot.GetChild(i);
+                    if (child == null) continue;
                     if (child.name == GeneratedIntersectionsName || child.name == GeneratedIntersectionVisualsName) continue;
                     if (child.GetComponent<SplineRoad>() == null)
                     {
@@ -4154,7 +4253,41 @@ namespace DeliveryDriver.EditorTools
                 }
             }
 
+            // 3. Any GameObject anywhere in scene named "SmoothRoad_*" or "RoadSegment_*" without SplineRoad
+            Scene scene = SceneManager.GetActiveScene();
+            if (scene.isLoaded)
+            {
+                GameObject[] rootObjects = scene.GetRootGameObjects();
+                for (int i = 0; i < rootObjects.Length; i++)
+                {
+                    cleanedCount += CleanOrphanRoadObjectsRecursive(rootObjects[i].transform);
+                }
+            }
+
             return cleanedCount;
+        }
+
+        private static int CleanOrphanRoadObjectsRecursive(Transform parent)
+        {
+            if (parent == null) return 0;
+            int count = 0;
+            for (int i = parent.childCount - 1; i >= 0; i--)
+            {
+                Transform child = parent.GetChild(i);
+                if (child == null) continue;
+
+                count += CleanOrphanRoadObjectsRecursive(child);
+
+                if (child.name.StartsWith("SmoothRoad_") || child.name.StartsWith("RoadSegment_"))
+                {
+                    if (child.GetComponent<SplineRoad>() == null)
+                    {
+                        Undo.DestroyObjectImmediate(child.gameObject);
+                        count++;
+                    }
+                }
+            }
+            return count;
         }
 
         private void DrawBranchHandles()
