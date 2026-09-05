@@ -3398,9 +3398,9 @@ namespace DeliveryDriver.EditorTools
                     int cIndex = GetContinuationPointIndex();
                     float bridgeDeckY = (cIndex >= 0 && cIndex < smoothPath.Count) ? smoothPath[cIndex].y : smoothPath[smoothPath.Count - 1].y;
 
-                    bool isWater = hit.collider.gameObject.name.ToLowerInvariant().Contains("water")
-                                || hit.collider.CompareTag("Water")
-                                || hit.collider.gameObject.layer == LayerMask.NameToLayer("Water");
+                    int waterLayer = LayerMask.NameToLayer("Water");
+                    bool isWater = hit.collider.gameObject.name.IndexOf("water", System.StringComparison.OrdinalIgnoreCase) >= 0
+                                || (waterLayer != -1 && hit.collider.gameObject.layer == waterLayer);
 
                     if (isWater || (bridgeDeckY - hit.point.y >= 3.0f))
                     {
