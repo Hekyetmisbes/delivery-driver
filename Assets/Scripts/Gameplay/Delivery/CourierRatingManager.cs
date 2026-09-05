@@ -16,6 +16,10 @@ public class CourierRatingManager : MonoBehaviour
     private const string RatingPrefsKey = "DeliveryDriver.CourierRating";
     private const string RatingCountPrefsKey = "DeliveryDriver.CourierRatingCount";
     private const string ReviewHistoryPrefsKey = "DeliveryDriver.CourierReviewHistory";
+    private const string BatchCounterPrefsKey = "DeliveryDriver.CourierBatchCounter";
+    private const string BatchPosPrefsKey = "DeliveryDriver.CourierBatchPos";
+    private const string BatchNegPrefsKey = "DeliveryDriver.CourierBatchNeg";
+    public const int DeliveriesPerReview = 3;
 
     public static CourierRatingManager Instance { get; private set; }
 
@@ -47,10 +51,40 @@ public class CourierRatingManager : MonoBehaviour
     {
         public string id;
         public string customerName;
+        public string customerName_tr;
+        public string customerName_en;
         public float rating;
         public string comment;
+        public string comment_tr;
+        public string comment_en;
         public string timeString;
+        public string timeString_tr;
+        public string timeString_en;
         public bool isPositive;
+
+        public string GetCustomerName()
+        {
+            bool isEn = LocalizationTable.CurrentLocale == LocalizationTable.EnglishLocale;
+            if (isEn && !string.IsNullOrEmpty(customerName_en)) return customerName_en;
+            if (!string.IsNullOrEmpty(customerName_tr)) return customerName_tr;
+            return customerName ?? (isEn ? "Customer" : "Müşteri");
+        }
+
+        public string GetComment()
+        {
+            bool isEn = LocalizationTable.CurrentLocale == LocalizationTable.EnglishLocale;
+            if (isEn && !string.IsNullOrEmpty(comment_en)) return comment_en;
+            if (!string.IsNullOrEmpty(comment_tr)) return comment_tr;
+            return comment ?? string.Empty;
+        }
+
+        public string GetTimeString()
+        {
+            bool isEn = LocalizationTable.CurrentLocale == LocalizationTable.EnglishLocale;
+            if (isEn && !string.IsNullOrEmpty(timeString_en)) return timeString_en;
+            if (!string.IsNullOrEmpty(timeString_tr)) return timeString_tr;
+            return timeString ?? (isEn ? "Just now" : "Yeni");
+        }
     }
 
     [Serializable]
@@ -62,6 +96,9 @@ public class CourierRatingManager : MonoBehaviour
     [Header("Courier Stats")]
     [SerializeField] private float currentRating = 5.0f;
     [SerializeField] private int totalRatedDeliveries = 0;
+    [SerializeField] private int deliveryBatchCounter = 0;
+    [SerializeField] private int batchPositiveCount = 0;
+    [SerializeField] private int batchNegativeCount = 0;
 
     private readonly List<ActiveReviewItem> recentReviews = new List<ActiveReviewItem>();
     private ReviewDatabaseFile positiveReviewsDb;
@@ -70,6 +107,8 @@ public class CourierRatingManager : MonoBehaviour
 
     public float CurrentRating => currentRating;
     public int TotalRatedDeliveries => totalRatedDeliveries;
+    public int DeliveriesCompletedInBatch => deliveryBatchCounter;
+    public int DeliveriesUntilNextReview => Mathf.Max(0, DeliveriesPerReview - deliveryBatchCounter);
     public IReadOnlyList<ActiveReviewItem> RecentReviews => recentReviews;
 
     public event Action<float> OnRatingChanged;
@@ -164,11 +203,11 @@ public class CourierRatingManager : MonoBehaviour
 
     public string GetRatingTierTitle()
     {
-        if (currentRating >= 4.8f) return "VIP / Mükemmel Kurye";
-        if (currentRating >= 4.2f) return "Kıdemli Kurye";
-        if (currentRating >= 3.5f) return "Standart Kurye";
-        if (currentRating >= 2.5f) return "Gelişmekte Olan Kurye";
-        return "Riskli Kurye (Düşük Bütçeli)";
+        if (currentRating >= 4.8f) return LocalizationTable.Get("rating_tier_vip");
+        if (currentRating >= 4.2f) return LocalizationTable.Get("rating_tier_senior");
+        if (currentRating >= 3.5f) return LocalizationTable.Get("rating_tier_standard");
+        if (currentRating >= 2.5f) return LocalizationTable.Get("rating_tier_developing");
+        return LocalizationTable.Get("rating_tier_risk");
     }
 
     public void RecordDeliveryOutcome(QuestData quest, bool succeeded)
@@ -185,39 +224,61 @@ public class CourierRatingManager : MonoBehaviour
             isPositive = false; // Kargo ezildi veya ağır hasar aldı
         }
 
-        ActiveReviewItem review;
-        if (isPositive)
+        totalRatedDeliveries++;
+        deliveryBatchCounter++;
+        if (isPositive) batchPositiveCount++;
+        else batchNegativeCount++;
+
+        // Her 3 teslimatta bir değerlendirme puanı güncellenir ve yeni müşteri yorumu gelir
+        if (deliveryBatchCounter >= DeliveriesPerReview)
         {
-            // Puan artışı (+0.05 ile +0.15)
-            float delta = rank == PerformanceRating.S ? 0.12f : (rank == PerformanceRating.A ? 0.08f : 0.04f);
-            currentRating = Mathf.Clamp(currentRating + delta, 1.0f, 5.0f);
-            review = CreatePositiveReview(rank);
+            deliveryBatchCounter = 0;
+            bool batchIsPositive = batchPositiveCount >= batchNegativeCount;
+
+            ActiveReviewItem review;
+            if (batchIsPositive)
+            {
+                // Puan artışı (+0.05 ile +0.15)
+                float delta = rank == PerformanceRating.S ? 0.12f : (rank == PerformanceRating.A ? 0.08f : 0.04f);
+                currentRating = Mathf.Clamp(currentRating + delta, 1.0f, 5.0f);
+                review = CreatePositiveReview(rank);
+            }
+            else
+            {
+                // Puan düşüşü (-0.20 ile -0.35)
+                float penalty = (!succeeded || rank == PerformanceRating.F) ? 0.35f : (rank == PerformanceRating.D ? 0.25f : 0.15f);
+                currentRating = Mathf.Clamp(currentRating - penalty, 1.0f, 5.0f);
+                review = CreateNegativeReview(rank);
+            }
+
+            batchPositiveCount = 0;
+            batchNegativeCount = 0;
+
+            recentReviews.Insert(0, review);
+            while (recentReviews.Count > 15)
+            {
+                recentReviews.RemoveAt(recentReviews.Count - 1);
+            }
+
+            SaveData();
+            OnRatingChanged?.Invoke(currentRating);
+            OnNewReviewAdded?.Invoke(review);
+
+            // Akıllı telefon bildirim baloncuğunu tetikle
+            if (SmartphoneUI.Instance != null)
+            {
+                string toastTitle = batchIsPositive
+                    ? LocalizationTable.Get("toast_new_review")
+                    : LocalizationTable.Get("toast_customer_complaint");
+                string toastBody = $"{review.GetCustomerName()}: [{review.rating:F1}/5.0] {review.GetComment()}";
+                SmartphoneUI.Instance.TriggerNotification(toastTitle, toastBody);
+            }
         }
         else
         {
-            // Puan düşüşü (-0.20 ile -0.35)
-            float penalty = (!succeeded || rank == PerformanceRating.F) ? 0.35f : (rank == PerformanceRating.D ? 0.25f : 0.15f);
-            currentRating = Mathf.Clamp(currentRating - penalty, 1.0f, 5.0f);
-            review = CreateNegativeReview(rank);
-        }
-
-        totalRatedDeliveries++;
-        recentReviews.Insert(0, review);
-        while (recentReviews.Count > 15)
-        {
-            recentReviews.RemoveAt(recentReviews.Count - 1);
-        }
-
-        SaveData();
-        OnRatingChanged?.Invoke(currentRating);
-        OnNewReviewAdded?.Invoke(review);
-
-        // Akıllı telefon bildirim baloncuğunu tetikle
-        if (SmartphoneUI.Instance != null)
-        {
-            string toastTitle = isPositive ? "Yeni Müşteri Değerlendirmesi" : "Müşteri Şikayeti";
-            string toastBody = $"{review.customerName}: [{review.rating:F1}/5.0] {review.comment}";
-            SmartphoneUI.Instance.TriggerNotification(toastTitle, toastBody);
+            // Sayacı kaydet ve puan/ilerleme eventini tetikle
+            SaveData();
+            OnRatingChanged?.Invoke(currentRating);
         }
     }
 
@@ -236,10 +297,16 @@ public class CourierRatingManager : MonoBehaviour
             return new ActiveReviewItem
             {
                 id = entry.id,
-                customerName = entry.GetCustomerName(),
+                customerName = entry.customerName_tr,
+                customerName_tr = entry.customerName_tr,
+                customerName_en = entry.customerName_en,
                 rating = starRating,
-                comment = entry.GetComment(),
+                comment = entry.comment_tr,
+                comment_tr = entry.comment_tr,
+                comment_en = entry.comment_en,
                 timeString = "Yeni",
+                timeString_tr = "Yeni",
+                timeString_en = "Just now",
                 isPositive = true
             };
         }
@@ -248,9 +315,15 @@ public class CourierRatingManager : MonoBehaviour
         {
             id = "default_pos",
             customerName = "Kızılay Müşterisi",
+            customerName_tr = "Kızılay Müşterisi",
+            customerName_en = "City Customer",
             rating = starRating,
             comment = "Teslimat tam vaktinde ve hasarsız ulaştı, teşekkürler!",
+            comment_tr = "Teslimat tam vaktinde ve hasarsız ulaştı, teşekkürler!",
+            comment_en = "Delivery arrived on time and undamaged, thank you!",
             timeString = "Yeni",
+            timeString_tr = "Yeni",
+            timeString_en = "Just now",
             isPositive = true
         };
     }
@@ -270,10 +343,16 @@ public class CourierRatingManager : MonoBehaviour
             return new ActiveReviewItem
             {
                 id = entry.id,
-                customerName = entry.GetCustomerName(),
+                customerName = entry.customerName_tr,
+                customerName_tr = entry.customerName_tr,
+                customerName_en = entry.customerName_en,
                 rating = starRating,
-                comment = entry.GetComment(),
+                comment = entry.comment_tr,
+                comment_tr = entry.comment_tr,
+                comment_en = entry.comment_en,
                 timeString = "Yeni",
+                timeString_tr = "Yeni",
+                timeString_en = "Just now",
                 isPositive = false
             };
         }
@@ -282,9 +361,15 @@ public class CourierRatingManager : MonoBehaviour
         {
             id = "default_neg",
             customerName = "Şehir Sakini",
+            customerName_tr = "Şehir Sakini",
+            customerName_en = "Local Resident",
             rating = starRating,
             comment = "Paket gecikti veya hasarlı teslim edildi. Memnun kalmadım.",
+            comment_tr = "Paket gecikti veya hasarlı teslim edildi. Memnun kalmadım.",
+            comment_en = "Package arrived late or damaged. Not satisfied.",
             timeString = "Yeni",
+            timeString_tr = "Yeni",
+            timeString_en = "Just now",
             isPositive = false
         };
     }
@@ -347,6 +432,9 @@ public class CourierRatingManager : MonoBehaviour
     {
         currentRating = PlayerPrefs.GetFloat(RatingPrefsKey, 5.0f);
         totalRatedDeliveries = PlayerPrefs.GetInt(RatingCountPrefsKey, 0);
+        deliveryBatchCounter = PlayerPrefs.GetInt(BatchCounterPrefsKey, 0);
+        batchPositiveCount = PlayerPrefs.GetInt(BatchPosPrefsKey, 0);
+        batchNegativeCount = PlayerPrefs.GetInt(BatchNegPrefsKey, 0);
 
         string jsonHistory = PlayerPrefs.GetString(ReviewHistoryPrefsKey, string.Empty);
         if (!string.IsNullOrEmpty(jsonHistory))
@@ -354,10 +442,18 @@ public class CourierRatingManager : MonoBehaviour
             try
             {
                 SavedReviewHistory history = JsonUtility.FromJson<SavedReviewHistory>(jsonHistory);
-                if (history != null && history.items != null && history.items.Count > 0)
+                if (history != null && history.items != null)
                 {
                     recentReviews.Clear();
-                    recentReviews.AddRange(history.items);
+                    for (int i = 0; i < history.items.Count; i++)
+                    {
+                        var item = history.items[i];
+                        // Eski yapay fallback/seed yorumları tamamen temizle
+                        if (item.id != null && item.id.StartsWith("seed_")) continue;
+
+                        HydrateReviewTranslations(item);
+                        recentReviews.Add(item);
+                    }
                     return;
                 }
             }
@@ -367,58 +463,43 @@ public class CourierRatingManager : MonoBehaviour
             }
         }
 
-        // Başlangıç varsayılan yorumları
-        SeedInitialReviews();
+        recentReviews.Clear();
     }
 
-    private void SeedInitialReviews()
+    private void HydrateReviewTranslations(ActiveReviewItem item)
     {
-        recentReviews.Clear();
-        recentReviews.Add(new ActiveReviewItem
-        {
-            id = "seed_1",
-            customerName = "Kızılay Medikal Deposu",
-            rating = 5.0f,
-            comment = "Acil medikal kargomuz tam vaktinde ve eksiksiz ulaştı. Çok profesyonel kurye!",
-            timeString = "15 dk önce",
-            isPositive = true
-        });
+        if (item == null || string.IsNullOrEmpty(item.id)) return;
 
-        recentReviews.Add(new ActiveReviewItem
+        if (string.IsNullOrEmpty(item.customerName_en) || string.IsNullOrEmpty(item.comment_en))
         {
-            id = "seed_2",
-            customerName = "Tunalı Pastanesi",
-            rating = 5.0f,
-            comment = "Hassas pasta siparişimiz tek bir çizik bile olmadan geldi. Elinize sağlık!",
-            timeString = "42 dk önce",
-            isPositive = true
-        });
+            ReviewDatabaseFile db = item.isPositive ? positiveReviewsDb : negativeReviewsDb;
+            if (db != null && db.reviews != null)
+            {
+                for (int i = 0; i < db.reviews.Length; i++)
+                {
+                    if (db.reviews[i].id == item.id)
+                    {
+                        item.customerName_tr = db.reviews[i].customerName_tr;
+                        item.customerName_en = db.reviews[i].customerName_en;
+                        item.comment_tr = db.reviews[i].comment_tr;
+                        item.comment_en = db.reviews[i].comment_en;
+                        break;
+                    }
+                }
+            }
+        }
 
-        recentReviews.Add(new ActiveReviewItem
-        {
-            id = "seed_3",
-            customerName = "Batıkent Elektronik",
-            rating = 4.8f,
-            comment = "Hassas ekran panelleri çok özenli taşınmış, teslimat hızı muhteşemdi.",
-            timeString = "Bugün 14:15",
-            isPositive = true
-        });
-
-        recentReviews.Add(new ActiveReviewItem
-        {
-            id = "seed_4",
-            customerName = "Lojistik Merkezi",
-            rating = 5.0f,
-            comment = "Hoş geldiniz! 5.0 başlangıç puanınızla VIP kargo ilanlarına erişebilirsiniz.",
-            timeString = "Bugün 12:00",
-            isPositive = true
-        });
+        if (string.IsNullOrEmpty(item.timeString_tr)) item.timeString_tr = "Yeni";
+        if (string.IsNullOrEmpty(item.timeString_en)) item.timeString_en = "Just now";
     }
 
     private void SaveData()
     {
         PlayerPrefs.SetFloat(RatingPrefsKey, currentRating);
         PlayerPrefs.SetInt(RatingCountPrefsKey, totalRatedDeliveries);
+        PlayerPrefs.SetInt(BatchCounterPrefsKey, deliveryBatchCounter);
+        PlayerPrefs.SetInt(BatchPosPrefsKey, batchPositiveCount);
+        PlayerPrefs.SetInt(BatchNegPrefsKey, batchNegativeCount);
 
         SavedReviewHistory history = new SavedReviewHistory();
         history.items.AddRange(recentReviews);

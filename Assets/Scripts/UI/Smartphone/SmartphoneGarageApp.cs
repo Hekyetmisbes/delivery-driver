@@ -21,6 +21,35 @@ namespace DeliveryDriver.UI.Smartphone
         private TextMeshProUGUI speedBonusesText;
         private TextMeshProUGUI sRankCountText;
 
+        // Localized static label references
+        private TextMeshProUGUI headerTitleText;
+        private TextMeshProUGUI stat1LabelText;
+        private TextMeshProUGUI stat2LabelText;
+        private TextMeshProUGUI stat3LabelText;
+        private TextMeshProUGUI tipText;
+
+        private void OnEnable()
+        {
+            LocalizationTable.OnLocaleChanged += HandleLocaleChanged;
+        }
+
+        private void OnDisable()
+        {
+            LocalizationTable.OnLocaleChanged -= HandleLocaleChanged;
+        }
+
+        private void HandleLocaleChanged()
+        {
+            if (headerTitleText != null) headerTitleText.text = LocalizationTable.Get("garage_app_header");
+            if (vehicleStatusText != null) vehicleStatusText.text = LocalizationTable.Get("garage_vehicle_status");
+            if (stat1LabelText != null) stat1LabelText.text = LocalizationTable.Get("garage_stat_total_driving");
+            if (stat2LabelText != null) stat2LabelText.text = LocalizationTable.Get("garage_stat_speed_bonuses");
+            if (stat3LabelText != null) stat3LabelText.text = LocalizationTable.Get("garage_stat_s_ranks");
+            if (tipText != null) tipText.text = LocalizationTable.Get("garage_tuning_tip");
+
+            RefreshData();
+        }
+
         public void Initialize(Transform parent, Sprite fallback)
         {
             if (appRoot != null) return;
@@ -63,11 +92,20 @@ namespace DeliveryDriver.UI.Smartphone
             int speedBonuses = prog != null ? prog.SpeedBonusesEarned : 0;
             int sRanks = prog != null ? prog.SRanksAchieved : 0;
 
-            if (vehicleNameText != null) vehicleNameText.text = "Standart Kurye Vanı (V1)";
-            if (vehicleStatusText != null) vehicleStatusText.text = "[+] Aktif & Hazır Durumda";
+            if (vehicleNameText != null)
+            {
+                string vName = LocalizationTable.Get("garage_vehicle_name");
+                if (DeliveryDriver.Company.PlayerVehicleManager.Instance != null &&
+                    DeliveryDriver.Company.PlayerVehicleManager.Instance.ActiveVehicleController != null)
+                {
+                    vName = DeliveryDriver.Company.PlayerVehicleManager.Instance.ActiveVehicleController.gameObject.name.Replace("(Clone)", "").Trim();
+                }
+                vehicleNameText.text = vName;
+            }
+            if (vehicleStatusText != null) vehicleStatusText.text = LocalizationTable.Get("garage_vehicle_status");
             if (totalKmText != null) totalKmText.text = $"{distanceKm:F1} km";
-            if (speedBonusesText != null) speedBonusesText.text = $"{speedBonuses} Kez";
-            if (sRankCountText != null) sRankCountText.text = $"{sRanks} Teslimat";
+            if (speedBonusesText != null) speedBonusesText.text = LocalizationTable.Format("garage_stat_speed_bonus_val", speedBonuses);
+            if (sRankCountText != null) sRankCountText.text = LocalizationTable.Format("garage_stat_s_rank_val", sRanks);
         }
 
         private void BuildGarageContent(Transform parent)
@@ -106,12 +144,12 @@ namespace DeliveryDriver.UI.Smartphone
             htRect.offsetMin = new Vector2(46f, 0f);
             htRect.offsetMax = new Vector2(-16f, 0f);
 
-            TextMeshProUGUI htText = hTitleObj.GetComponent<TextMeshProUGUI>();
-            htText.text = "Garajım & Araç Durumu";
-            htText.fontSize = 15f;
-            htText.fontStyle = FontStyles.Bold;
-            htText.alignment = TextAlignmentOptions.Left;
-            htText.color = new Color(1f, 0.75f, 0.2f, 1f);
+            headerTitleText = hTitleObj.GetComponent<TextMeshProUGUI>();
+            headerTitleText.text = LocalizationTable.Get("garage_app_header");
+            headerTitleText.fontSize = 15f;
+            headerTitleText.fontStyle = FontStyles.Bold;
+            headerTitleText.alignment = TextAlignmentOptions.Left;
+            headerTitleText.color = new Color(1f, 0.75f, 0.2f, 1f);
 
             // Vehicle Card
             GameObject vCardObj = new GameObject("VehicleCard", typeof(RectTransform), typeof(Image));
@@ -148,7 +186,7 @@ namespace DeliveryDriver.UI.Smartphone
             vnRect.anchoredPosition = new Vector2(0f, 38f);
             vnRect.sizeDelta = new Vector2(-20f, 26f);
             vehicleNameText = vNameObj.GetComponent<TextMeshProUGUI>();
-            vehicleNameText.text = "Standart Kurye Vanı";
+            vehicleNameText.text = LocalizationTable.Get("garage_vehicle_name");
             vehicleNameText.fontSize = 16f;
             vehicleNameText.fontStyle = FontStyles.Bold;
             vehicleNameText.alignment = TextAlignmentOptions.Center;
@@ -163,7 +201,7 @@ namespace DeliveryDriver.UI.Smartphone
             vsRect.anchoredPosition = new Vector2(0f, 14f);
             vsRect.sizeDelta = new Vector2(-20f, 20f);
             vehicleStatusText = vStatObj.GetComponent<TextMeshProUGUI>();
-            vehicleStatusText.text = "[+] Aktif & Hazır Durumda";
+            vehicleStatusText.text = LocalizationTable.Get("garage_vehicle_status");
             vehicleStatusText.fontSize = 12f;
             vehicleStatusText.alignment = TextAlignmentOptions.Center;
             vehicleStatusText.color = new Color(0.2f, 1f, 0.45f, 0.95f);
@@ -182,9 +220,9 @@ namespace DeliveryDriver.UI.Smartphone
             dsBg.color = new Color(0.1f, 0.14f, 0.2f, 0.95f);
             dsBg.sprite = fallbackSprite;
 
-            totalKmText = CreateRow(dStatsObj.transform, "Toplam Sürüş:", "0.0 km", -16f);
-            speedBonusesText = CreateRow(dStatsObj.transform, "Hız Bonusları:", "0", -56f);
-            sRankCountText = CreateRow(dStatsObj.transform, "S-Rank Başarıları:", "0", -96f);
+            totalKmText = CreateRow(dStatsObj.transform, LocalizationTable.Get("garage_stat_total_driving"), "0.0 km", -16f, out stat1LabelText);
+            speedBonusesText = CreateRow(dStatsObj.transform, LocalizationTable.Get("garage_stat_speed_bonuses"), "0", -56f, out stat2LabelText);
+            sRankCountText = CreateRow(dStatsObj.transform, LocalizationTable.Get("garage_stat_s_ranks"), "0", -96f, out stat3LabelText);
 
             // Tuning Tip
             GameObject tipObj = new GameObject("Tip", typeof(RectTransform), typeof(TextMeshProUGUI));
@@ -194,14 +232,14 @@ namespace DeliveryDriver.UI.Smartphone
             tRect.anchorMax = new Vector2(1f, 0f);
             tRect.anchoredPosition = new Vector2(0f, 14f);
             tRect.sizeDelta = new Vector2(-28f, 22f);
-            TextMeshProUGUI tTmp = tipObj.GetComponent<TextMeshProUGUI>();
-            tTmp.text = "[!] Para biriktirerek yeni araçlar satın alabilirsiniz!";
-            tTmp.fontSize = 11f;
-            tTmp.alignment = TextAlignmentOptions.Center;
-            tTmp.color = new Color(0.7f, 0.85f, 0.95f, 0.75f);
+            tipText = tipObj.GetComponent<TextMeshProUGUI>();
+            tipText.text = LocalizationTable.Get("garage_tuning_tip");
+            tipText.fontSize = 11f;
+            tipText.alignment = TextAlignmentOptions.Center;
+            tipText.color = new Color(0.7f, 0.85f, 0.95f, 0.75f);
         }
 
-        private TextMeshProUGUI CreateRow(Transform parent, string label, string defaultValue, float yOffset)
+        private TextMeshProUGUI CreateRow(Transform parent, string label, string defaultValue, float yOffset, out TextMeshProUGUI labelText)
         {
             GameObject lblObj = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
             lblObj.transform.SetParent(parent, false);
@@ -212,10 +250,10 @@ namespace DeliveryDriver.UI.Smartphone
             lRect.anchoredPosition = new Vector2(14f, yOffset);
             lRect.sizeDelta = new Vector2(0f, 22f);
 
-            TextMeshProUGUI lText = lblObj.GetComponent<TextMeshProUGUI>();
-            lText.text = label;
-            lText.fontSize = 12f;
-            lText.color = new Color(0.75f, 0.85f, 0.95f, 0.9f);
+            labelText = lblObj.GetComponent<TextMeshProUGUI>();
+            labelText.text = label;
+            labelText.fontSize = 12f;
+            labelText.color = new Color(0.75f, 0.85f, 0.95f, 0.9f);
 
             GameObject valObj = new GameObject("Value", typeof(RectTransform), typeof(TextMeshProUGUI));
             valObj.transform.SetParent(parent, false);

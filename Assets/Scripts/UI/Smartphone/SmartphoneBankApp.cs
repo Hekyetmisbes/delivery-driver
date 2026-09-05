@@ -23,6 +23,40 @@ namespace DeliveryDriver.UI.Smartphone
         private TextMeshProUGUI xpProgressText;
         private Image xpProgressBar;
 
+        // Localized static label references
+        private TextMeshProUGUI headerTitleText;
+        private TextMeshProUGUI chipText;
+        private TextMeshProUGUI balanceLabelText;
+        private TextMeshProUGUI accountTypeText;
+        private TextMeshProUGUI stat1LabelText;
+        private TextMeshProUGUI stat2LabelText;
+        private TextMeshProUGUI stat3LabelText;
+        private TextMeshProUGUI xpLabelText;
+
+        private void OnEnable()
+        {
+            LocalizationTable.OnLocaleChanged += HandleLocaleChanged;
+        }
+
+        private void OnDisable()
+        {
+            LocalizationTable.OnLocaleChanged -= HandleLocaleChanged;
+        }
+
+        private void HandleLocaleChanged()
+        {
+            if (headerTitleText != null) headerTitleText.text = LocalizationTable.Get("bank_app_header");
+            if (chipText != null) chipText.text = LocalizationTable.Get("bank_card_chip");
+            if (balanceLabelText != null) balanceLabelText.text = LocalizationTable.Get("bank_card_balance_lbl");
+            if (accountTypeText != null) accountTypeText.text = LocalizationTable.Get("bank_card_account_type");
+            if (stat1LabelText != null) stat1LabelText.text = LocalizationTable.Get("bank_stat_career_earnings");
+            if (stat2LabelText != null) stat2LabelText.text = LocalizationTable.Get("bank_stat_completed_jobs");
+            if (stat3LabelText != null) stat3LabelText.text = LocalizationTable.Get("bank_stat_courier_level");
+            if (xpLabelText != null) xpLabelText.text = LocalizationTable.Get("bank_stat_next_level_prog");
+
+            RefreshData();
+        }
+
         public void Initialize(Transform parent, Sprite fallback)
         {
             if (appRoot != null) return;
@@ -70,8 +104,8 @@ namespace DeliveryDriver.UI.Smartphone
 
             if (balanceAmountText != null) balanceAmountText.text = $"{money:N0} TL";
             if (totalEarnedText != null) totalEarnedText.text = $"{totalEarned:N0} TL";
-            if (completedJobsText != null) completedJobsText.text = $"{completedJobs} Teslimat";
-            if (levelText != null) levelText.text = $"Seviye {level}";
+            if (completedJobsText != null) completedJobsText.text = LocalizationTable.Format("bank_stat_delivery_count", completedJobs);
+            if (levelText != null) levelText.text = LocalizationTable.Format("bank_stat_level_val", level);
 
             if (xpProgressText != null) xpProgressText.text = $"{currentXp} / {nextXp} XP";
             if (xpProgressBar != null)
@@ -117,12 +151,12 @@ namespace DeliveryDriver.UI.Smartphone
             htRect.offsetMin = new Vector2(46f, 0f);
             htRect.offsetMax = new Vector2(-16f, 0f);
 
-            TextMeshProUGUI htText = hTitleObj.GetComponent<TextMeshProUGUI>();
-            htText.text = "QuickPay Mobil Banka";
-            htText.fontSize = 15f;
-            htText.fontStyle = FontStyles.Bold;
-            htText.alignment = TextAlignmentOptions.Left;
-            htText.color = new Color(0.3f, 0.95f, 0.45f, 1f);
+            headerTitleText = hTitleObj.GetComponent<TextMeshProUGUI>();
+            headerTitleText.text = LocalizationTable.Get("bank_app_header");
+            headerTitleText.fontSize = 15f;
+            headerTitleText.fontStyle = FontStyles.Bold;
+            headerTitleText.alignment = TextAlignmentOptions.Left;
+            headerTitleText.color = new Color(0.3f, 0.95f, 0.45f, 1f);
 
             // Virtual Debit Card Box
             GameObject cardObj = new GameObject("CreditCard", typeof(RectTransform), typeof(Image));
@@ -147,11 +181,11 @@ namespace DeliveryDriver.UI.Smartphone
             chRect.pivot = new Vector2(0f, 1f);
             chRect.anchoredPosition = new Vector2(16f, -14f);
             chRect.sizeDelta = new Vector2(120f, 22f);
-            TextMeshProUGUI chText = chipObj.GetComponent<TextMeshProUGUI>();
-            chText.text = "DEBIT CARD  )))";
-            chText.fontSize = 11f;
-            chText.fontStyle = FontStyles.Bold;
-            chText.color = new Color(0.8f, 0.9f, 1f, 0.8f);
+            chipText = chipObj.GetComponent<TextMeshProUGUI>();
+            chipText.text = LocalizationTable.Get("bank_card_chip");
+            chipText.fontSize = 11f;
+            chipText.fontStyle = FontStyles.Bold;
+            chipText.color = new Color(0.8f, 0.9f, 1f, 0.8f);
 
             // Balance Label
             GameObject bLblObj = new GameObject("BalanceLabel", typeof(RectTransform), typeof(TextMeshProUGUI));
@@ -162,10 +196,10 @@ namespace DeliveryDriver.UI.Smartphone
             blRect.pivot = new Vector2(0f, 0.5f);
             blRect.anchoredPosition = new Vector2(16f, 14f);
             blRect.sizeDelta = new Vector2(-32f, 18f);
-            TextMeshProUGUI blText = bLblObj.GetComponent<TextMeshProUGUI>();
-            blText.text = "Mevcut Bakiye";
-            blText.fontSize = 11f;
-            blText.color = new Color(0.75f, 0.85f, 0.95f, 0.9f);
+            balanceLabelText = bLblObj.GetComponent<TextMeshProUGUI>();
+            balanceLabelText.text = LocalizationTable.Get("bank_card_balance_lbl");
+            balanceLabelText.fontSize = 11f;
+            balanceLabelText.color = new Color(0.75f, 0.85f, 0.95f, 0.9f);
 
             // Balance Amount Big
             GameObject bAmtObj = new GameObject("BalanceAmount", typeof(RectTransform), typeof(TextMeshProUGUI));
@@ -191,10 +225,10 @@ namespace DeliveryDriver.UI.Smartphone
             nRect.pivot = new Vector2(0f, 0f);
             nRect.anchoredPosition = new Vector2(16f, 12f);
             nRect.sizeDelta = new Vector2(-32f, 18f);
-            TextMeshProUGUI nText = numObj.GetComponent<TextMeshProUGUI>();
-            nText.text = "**** 4821   |   KURYE HESABI";
-            nText.fontSize = 11f;
-            nText.color = new Color(0.85f, 0.92f, 1f, 0.7f);
+            accountTypeText = numObj.GetComponent<TextMeshProUGUI>();
+            accountTypeText.text = LocalizationTable.Get("bank_card_account_type");
+            accountTypeText.fontSize = 11f;
+            accountTypeText.color = new Color(0.85f, 0.92f, 1f, 0.7f);
 
             // Statistics Panel
             GameObject statsObj = new GameObject("StatsPanel", typeof(RectTransform), typeof(Image));
@@ -211,13 +245,13 @@ namespace DeliveryDriver.UI.Smartphone
             spBg.sprite = fallbackSprite;
 
             // Stat 1: Total Money Earned
-            totalEarnedText = CreateStatRow(statsObj.transform, "Kariyer Toplam Kazancı:", "0 TL", -16f);
+            totalEarnedText = CreateStatRow(statsObj.transform, LocalizationTable.Get("bank_stat_career_earnings"), "0 TL", -16f, out stat1LabelText);
 
             // Stat 2: Completed Deliveries
-            completedJobsText = CreateStatRow(statsObj.transform, "Tamamlanan İşler:", "0", -56f);
+            completedJobsText = CreateStatRow(statsObj.transform, LocalizationTable.Get("bank_stat_completed_jobs"), "0", -56f, out stat2LabelText);
 
             // Stat 3: Level & XP
-            levelText = CreateStatRow(statsObj.transform, "Kurye Seviyesi:", "Seviye 1", -96f);
+            levelText = CreateStatRow(statsObj.transform, LocalizationTable.Get("bank_stat_courier_level"), LocalizationTable.Format("bank_stat_level_val", 1), -96f, out stat3LabelText);
 
             // XP Bar Label
             GameObject xpLblObj = new GameObject("XPLabel", typeof(RectTransform), typeof(TextMeshProUGUI));
@@ -227,12 +261,12 @@ namespace DeliveryDriver.UI.Smartphone
             xplRect.anchorMax = new Vector2(1f, 1f);
             xplRect.anchoredPosition = new Vector2(14f, -140f);
             xplRect.sizeDelta = new Vector2(-28f, 18f);
-            TextMeshProUGUI xplText = xpLblObj.GetComponent<TextMeshProUGUI>();
-            xplText.text = "Sonraki Seviyeye İlerleme:";
-            xplText.fontSize = 11f;
-            xplText.color = new Color(0.7f, 0.82f, 0.95f, 0.9f);
+            xpLabelText = xpLblObj.GetComponent<TextMeshProUGUI>();
+            xpLabelText.text = LocalizationTable.Get("bank_stat_next_level_prog");
+            xpLabelText.fontSize = 11f;
+            xpLabelText.color = new Color(0.7f, 0.82f, 0.95f, 0.9f);
 
-            xpProgressText = CreateStatRow(statsObj.transform, "", "0 / 100 XP", -140f);
+            xpProgressText = CreateStatRow(statsObj.transform, "", "0 / 100 XP", -140f, out _);
 
             // XP Progress Bar BG
             GameObject barBgObj = new GameObject("XPBarBg", typeof(RectTransform), typeof(Image));
@@ -265,8 +299,9 @@ namespace DeliveryDriver.UI.Smartphone
             xpProgressBar.fillAmount = 0.35f;
         }
 
-        private TextMeshProUGUI CreateStatRow(Transform parent, string label, string defaultValue, float yOffset)
+        private TextMeshProUGUI CreateStatRow(Transform parent, string label, string defaultValue, float yOffset, out TextMeshProUGUI labelText)
         {
+            labelText = null;
             if (!string.IsNullOrEmpty(label))
             {
                 GameObject lblObj = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
@@ -278,10 +313,10 @@ namespace DeliveryDriver.UI.Smartphone
                 lRect.anchoredPosition = new Vector2(14f, yOffset);
                 lRect.sizeDelta = new Vector2(0f, 22f);
 
-                TextMeshProUGUI lText = lblObj.GetComponent<TextMeshProUGUI>();
-                lText.text = label;
-                lText.fontSize = 12f;
-                lText.color = new Color(0.75f, 0.85f, 0.95f, 0.9f);
+                labelText = lblObj.GetComponent<TextMeshProUGUI>();
+                labelText.text = label;
+                labelText.fontSize = 12f;
+                labelText.color = new Color(0.75f, 0.85f, 0.95f, 0.9f);
             }
 
             GameObject valObj = new GameObject("Value", typeof(RectTransform), typeof(TextMeshProUGUI));

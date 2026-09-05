@@ -16,11 +16,35 @@ namespace DeliveryDriver.UI.Smartphone
         private GameObject appRoot;
         private Sprite fallbackSprite;
 
+        private TextMeshProUGUI headerTitleText;
         private TextMeshProUGUI ratingScoreText;
         private TextMeshProUGUI ratingTierText;
         private TextMeshProUGUI rewardBonusText;
+        private TextMeshProUGUI batchProgressText;
         private Transform listContainer;
+        private GameObject emptyStateCardObj;
+        private TextMeshProUGUI emptyStateText;
         private readonly List<GameObject> activeBubbleObjects = new List<GameObject>();
+
+        private void OnEnable()
+        {
+            LocalizationTable.OnLocaleChanged += HandleLocaleChanged;
+        }
+
+        private void OnDisable()
+        {
+            LocalizationTable.OnLocaleChanged -= HandleLocaleChanged;
+        }
+
+        private void OnDestroy()
+        {
+            LocalizationTable.OnLocaleChanged -= HandleLocaleChanged;
+        }
+
+        private void HandleLocaleChanged()
+        {
+            RefreshView();
+        }
 
         public void Initialize(Transform parent, Sprite fallback)
         {
@@ -54,8 +78,13 @@ namespace DeliveryDriver.UI.Smartphone
 
         public void RefreshView()
         {
+            if (headerTitleText != null)
+            {
+                headerTitleText.text = LocalizationTable.Get("messages_app_header");
+            }
+
             float rating = CourierRatingManager.Instance != null ? CourierRatingManager.Instance.CurrentRating : 5.0f;
-            string tier = CourierRatingManager.Instance != null ? CourierRatingManager.Instance.GetRatingTierTitle() : "VIP / Mükemmel Kurye";
+            string tier = CourierRatingManager.Instance != null ? CourierRatingManager.Instance.GetRatingTierTitle() : LocalizationTable.Get("rating_tier_vip");
             float multiplier = CourierRatingManager.Instance != null ? CourierRatingManager.Instance.GetRatingRewardMultiplier() : 1.35f;
 
             if (ratingScoreText != null) ratingScoreText.text = $"{rating:F1} / 5.0";
@@ -63,7 +92,9 @@ namespace DeliveryDriver.UI.Smartphone
             if (rewardBonusText != null)
             {
                 int percent = Mathf.RoundToInt((multiplier - 1f) * 100f);
-                string bonusStr = percent >= 0 ? $"+%{percent} Kargo Primi" : $"{percent}% Kesinti";
+                string bonusStr = percent >= 0
+                    ? LocalizationTable.Format("rating_bonus_positive", percent)
+                    : LocalizationTable.Format("rating_bonus_negative", percent);
                 rewardBonusText.text = bonusStr;
                 rewardBonusText.color = percent >= 0 ? new Color(0.3f, 0.95f, 0.45f, 1f) : new Color(1f, 0.35f, 0.35f, 1f);
             }
@@ -85,9 +116,35 @@ namespace DeliveryDriver.UI.Smartphone
                 ? CourierRatingManager.Instance.RecentReviews
                 : null;
 
-            if (reviews == null || reviews.Count == 0) return;
+            int batchCompleted = CourierRatingManager.Instance != null ? CourierRatingManager.Instance.DeliveriesCompletedInBatch : 0;
+            int untilNext = CourierRatingManager.Instance != null ? CourierRatingManager.Instance.DeliveriesUntilNextReview : 3;
 
-            float yOffset = 0f;
+            if (reviews == null || reviews.Count == 0)
+            {
+                if (emptyStateCardObj != null)
+                {
+                    emptyStateCardObj.SetActive(true);
+                    if (emptyStateText != null)
+                    {
+                        emptyStateText.text = LocalizationTable.Format("messages_empty_state", batchCompleted);
+                    }
+                }
+                if (batchProgressText != null) batchProgressText.gameObject.SetActive(false);
+                return;
+            }
+
+            if (emptyStateCardObj != null)
+            {
+                emptyStateCardObj.SetActive(false);
+            }
+
+            if (batchProgressText != null)
+            {
+                batchProgressText.gameObject.SetActive(true);
+                batchProgressText.text = LocalizationTable.Format("messages_next_review_counter", untilNext);
+            }
+
+            float yOffset = -24f;
             int count = Mathf.Min(reviews.Count, 5);
             for (int i = 0; i < count; i++)
             {
@@ -95,7 +152,11 @@ namespace DeliveryDriver.UI.Smartphone
                 string ratingTag = $"[{r.rating:F1} / 5.0]";
                 Color tagColor = r.isPositive ? new Color(1f, 0.84f, 0f, 1f) : new Color(1f, 0.35f, 0.35f, 1f);
 
-                GameObject bubble = CreateMessageBubble(listContainer, r.customerName, ratingTag, tagColor, r.comment, r.timeString, yOffset);
+                string customer = r.GetCustomerName();
+                string comment = r.GetComment();
+                string time = r.GetTimeString();
+
+                GameObject bubble = CreateMessageBubble(listContainer, customer, ratingTag, tagColor, comment, time, yOffset);
                 activeBubbleObjects.Add(bubble);
                 yOffset -= 76f;
             }
@@ -137,12 +198,12 @@ namespace DeliveryDriver.UI.Smartphone
             htRect.offsetMin = new Vector2(46f, 0f);
             htRect.offsetMax = new Vector2(-16f, 0f);
 
-            TextMeshProUGUI htText = hTitleObj.GetComponent<TextMeshProUGUI>();
-            htText.text = "Müşteri Yorumları & Puan";
-            htText.fontSize = 15f;
-            htText.fontStyle = FontStyles.Bold;
-            htText.alignment = TextAlignmentOptions.Left;
-            htText.color = new Color(0.4f, 0.85f, 1f, 1f);
+            headerTitleText = hTitleObj.GetComponent<TextMeshProUGUI>();
+            headerTitleText.text = LocalizationTable.Get("messages_app_header");
+            headerTitleText.fontSize = 15f;
+            headerTitleText.fontStyle = FontStyles.Bold;
+            headerTitleText.alignment = TextAlignmentOptions.Left;
+            headerTitleText.color = new Color(0.4f, 0.85f, 1f, 1f);
 
             // Rating Score Card (Overview)
             GameObject scoreCardObj = new GameObject("RatingScoreCard", typeof(RectTransform), typeof(Image));
@@ -194,7 +255,7 @@ namespace DeliveryDriver.UI.Smartphone
             stRect.offsetMin = new Vector2(12f, 6f);
             stRect.offsetMax = Vector2.zero;
             ratingTierText = stObj.GetComponent<TextMeshProUGUI>();
-            ratingTierText.text = "VIP / Mükemmel Kurye";
+            ratingTierText.text = LocalizationTable.Get("rating_tier_vip");
             ratingTierText.fontSize = 11.5f;
             ratingTierText.color = new Color(0.85f, 0.92f, 1f, 0.85f);
 
@@ -223,6 +284,47 @@ namespace DeliveryDriver.UI.Smartphone
             cRect.anchoredPosition = new Vector2(0f, -174f);
             cRect.sizeDelta = new Vector2(0f, 400f);
             listContainer = containerObj.transform;
+
+            // Batch Progress Label (Above list when reviews exist)
+            GameObject bpObj = new GameObject("BatchProgress", typeof(RectTransform), typeof(TextMeshProUGUI));
+            bpObj.transform.SetParent(listContainer, false);
+            RectTransform bpr = bpObj.GetComponent<RectTransform>();
+            bpr.anchorMin = new Vector2(0f, 1f);
+            bpr.anchorMax = new Vector2(1f, 1f);
+            bpr.pivot = new Vector2(0.5f, 1f);
+            bpr.anchoredPosition = new Vector2(0f, 0f);
+            bpr.sizeDelta = new Vector2(-28f, 18f);
+            batchProgressText = bpObj.GetComponent<TextMeshProUGUI>();
+            batchProgressText.fontSize = 10.5f;
+            batchProgressText.color = new Color(0.45f, 0.8f, 1f, 0.85f);
+            batchProgressText.alignment = TextAlignmentOptions.Center;
+
+            // Empty State Card
+            emptyStateCardObj = new GameObject("EmptyStateCard", typeof(RectTransform), typeof(Image));
+            emptyStateCardObj.transform.SetParent(listContainer, false);
+            RectTransform esRect = emptyStateCardObj.GetComponent<RectTransform>();
+            esRect.anchorMin = new Vector2(0f, 1f);
+            esRect.anchorMax = new Vector2(1f, 1f);
+            esRect.pivot = new Vector2(0.5f, 1f);
+            esRect.anchoredPosition = new Vector2(0f, -10f);
+            esRect.sizeDelta = new Vector2(-28f, 160f);
+
+            Image esBg = emptyStateCardObj.GetComponent<Image>();
+            esBg.color = new Color(0.09f, 0.13f, 0.19f, 0.95f);
+            esBg.sprite = fallbackSprite;
+
+            GameObject esTextObj = new GameObject("EmptyText", typeof(RectTransform), typeof(TextMeshProUGUI));
+            esTextObj.transform.SetParent(emptyStateCardObj.transform, false);
+            RectTransform estRect = esTextObj.GetComponent<RectTransform>();
+            estRect.anchorMin = Vector2.zero;
+            estRect.anchorMax = Vector2.one;
+            estRect.offsetMin = new Vector2(16f, 12f);
+            estRect.offsetMax = new Vector2(-16f, -12f);
+            emptyStateText = esTextObj.GetComponent<TextMeshProUGUI>();
+            emptyStateText.fontSize = 12f;
+            emptyStateText.color = new Color(0.7f, 0.82f, 0.92f, 0.9f);
+            emptyStateText.alignment = TextAlignmentOptions.Center;
+            emptyStateText.textWrappingMode = TextWrappingModes.Normal;
 
             RefreshView();
         }

@@ -56,11 +56,19 @@ namespace DeliveryDriver.UI.Smartphone
         // Status Bar
         private TextMeshProUGUI timeText;
         private GameObject backButtonObj;
+        private TextMeshProUGUI backButtonText;
 
         // Home Screen
         private GameObject homeScreenObj;
+        private TextMeshProUGUI homeTitleText;
+        private TextMeshProUGUI homeShiftText;
+        private TextMeshProUGUI deliveryCardTitle;
+        private TextMeshProUGUI deliveryCardSub;
+        private TextMeshProUGUI bankCardTitle;
         private TextMeshProUGUI homeBankSubtitle;
+        private TextMeshProUGUI garageCardTitle;
         private TextMeshProUGUI homeGarageSubtitle;
+        private TextMeshProUGUI messagesCardTitle;
         private TextMeshProUGUI homeMessagesSubtitle;
         private GameObject deliveryBadgeObj;
         private TextMeshProUGUI deliveryBadgeText;
@@ -100,11 +108,18 @@ namespace DeliveryDriver.UI.Smartphone
         private void OnEnable()
         {
             SceneManager.sceneLoaded += OnSceneLoaded;
+            LocalizationTable.OnLocaleChanged += HandleLocaleChanged;
         }
 
         private void OnDisable()
         {
             SceneManager.sceneLoaded -= OnSceneLoaded;
+            LocalizationTable.OnLocaleChanged -= HandleLocaleChanged;
+        }
+
+        private void HandleLocaleChanged()
+        {
+            LocalizeTexts();
         }
 
         private void OnDestroy()
@@ -190,6 +205,7 @@ namespace DeliveryDriver.UI.Smartphone
             OpenApp(SmartphoneAppType.Home);
             ClosePhoneImmediate();
             RefreshBadges();
+            LocalizeTexts();
         }
 
         public void ReceiveMissionOffer(string title, string body, string reward, Action onAccept, Action onReject)
@@ -211,8 +227,8 @@ namespace DeliveryDriver.UI.Smartphone
 
             if (notificationToast != null)
             {
-                string displayTitle = string.IsNullOrWhiteSpace(title) ? "Yeni Kargo Teklifi" : title;
-                string displaySub = $"{reward} • Açmak için [TAB] tuşuna bas";
+                string displayTitle = string.IsNullOrWhiteSpace(title) ? LocalizationTable.Get("phone_toast_offer_title") : title;
+                string displaySub = $"{reward} • {LocalizationTable.Get("phone_toast_hint")}";
                 notificationToast.Show(displayTitle, displaySub, () =>
                 {
                     OpenPhone();
@@ -397,17 +413,33 @@ namespace DeliveryDriver.UI.Smartphone
             }
         }
 
+        public void LocalizeTexts()
+        {
+            if (backButtonText != null) backButtonText.text = LocalizationTable.Get("phone_back_menu");
+            if (homeTitleText != null) homeTitleText.text = LocalizationTable.Get("phone_home_title");
+            if (homeShiftText != null) homeShiftText.text = LocalizationTable.Get("phone_shift_active");
+
+            if (deliveryCardTitle != null) deliveryCardTitle.text = LocalizationTable.Get("phone_app_delivery_title");
+            if (deliveryCardSub != null) deliveryCardSub.text = LocalizationTable.Get("phone_app_delivery_sub");
+
+            if (bankCardTitle != null) bankCardTitle.text = LocalizationTable.Get("phone_app_bank_title");
+            if (garageCardTitle != null) garageCardTitle.text = LocalizationTable.Get("phone_app_garage_title");
+            if (messagesCardTitle != null) messagesCardTitle.text = LocalizationTable.Get("phone_app_messages_title");
+
+            UpdateHomeSubtitles();
+        }
+
         private void UpdateHomeSubtitles()
         {
             if (homeBankSubtitle != null)
             {
                 int money = PlayerProgressionManager.Instance != null ? PlayerProgressionManager.Instance.CurrentMoney : 0;
-                homeBankSubtitle.text = $"{money:N0} TL";
+                homeBankSubtitle.text = LocalizationTable.Format("phone_app_bank_sub", money);
             }
 
             if (homeGarageSubtitle != null)
             {
-                string vName = "Aktif Kurye Vanı";
+                string vName = LocalizationTable.Get("phone_app_garage_sub");
                 if (PlayerVehicleManager.Instance != null && PlayerVehicleManager.Instance.ActiveVehicleController != null)
                 {
                     vName = PlayerVehicleManager.Instance.ActiveVehicleController.gameObject.name.Replace("(Clone)", "").Trim();
@@ -418,7 +450,7 @@ namespace DeliveryDriver.UI.Smartphone
             if (homeMessagesSubtitle != null)
             {
                 float rating = CourierRatingManager.Instance != null ? CourierRatingManager.Instance.CurrentRating : 5.0f;
-                homeMessagesSubtitle.text = $"{rating:F1} / 5.0 Puan";
+                homeMessagesSubtitle.text = LocalizationTable.Format("phone_app_messages_sub", rating);
             }
         }
 
@@ -678,12 +710,12 @@ namespace DeliveryDriver.UI.Smartphone
             bbtRect.anchorMax = Vector2.one;
             bbtRect.offsetMin = Vector2.zero;
             bbtRect.offsetMax = Vector2.zero;
-            TextMeshProUGUI bbtTmp = bbtObj.GetComponent<TextMeshProUGUI>();
-            bbtTmp.text = "< Menü";
-            bbtTmp.fontSize = 11f;
-            bbtTmp.fontStyle = FontStyles.Bold;
-            bbtTmp.alignment = TextAlignmentOptions.Center;
-            bbtTmp.color = new Color(0f, 0.85f, 1f, 1f);
+            backButtonText = bbtObj.GetComponent<TextMeshProUGUI>();
+            backButtonText.text = LocalizationTable.Get("phone_back_menu");
+            backButtonText.fontSize = 11f;
+            backButtonText.fontStyle = FontStyles.Bold;
+            backButtonText.alignment = TextAlignmentOptions.Center;
+            backButtonText.color = new Color(0f, 0.85f, 1f, 1f);
 
             backButtonObj.SetActive(false);
         }
@@ -763,11 +795,11 @@ namespace DeliveryDriver.UI.Smartphone
             tRect.anchorMax = new Vector2(1f, 1f);
             tRect.offsetMin = new Vector2(14f, 0f);
             tRect.offsetMax = new Vector2(-14f, -6f);
-            TextMeshProUGUI tTmp = titleObj.GetComponent<TextMeshProUGUI>();
-            tTmp.text = "Kurye Portalı";
-            tTmp.fontSize = 17f;
-            tTmp.fontStyle = FontStyles.Bold;
-            tTmp.color = new Color(0.95f, 0.98f, 1f, 1f);
+            homeTitleText = titleObj.GetComponent<TextMeshProUGUI>();
+            homeTitleText.text = LocalizationTable.Get("phone_home_title");
+            homeTitleText.fontSize = 17f;
+            homeTitleText.fontStyle = FontStyles.Bold;
+            homeTitleText.color = new Color(0.95f, 0.98f, 1f, 1f);
 
             // Shift Indicator Dot
             GameObject dotObj = new GameObject("ShiftDot", typeof(RectTransform), typeof(Image));
@@ -790,10 +822,10 @@ namespace DeliveryDriver.UI.Smartphone
             sRect.anchorMax = new Vector2(1f, 0.5f);
             sRect.offsetMin = new Vector2(32f, 6f);
             sRect.offsetMax = new Vector2(-14f, 0f);
-            TextMeshProUGUI sTmp = shiftObj.GetComponent<TextMeshProUGUI>();
-            sTmp.text = "Vardiya: Aktif | Şehir Teslimatları";
-            sTmp.fontSize = 11.5f;
-            sTmp.color = new Color(0.2f, 0.95f, 0.45f, 0.95f);
+            homeShiftText = shiftObj.GetComponent<TextMeshProUGUI>();
+            homeShiftText.text = LocalizationTable.Get("phone_shift_active");
+            homeShiftText.fontSize = 11.5f;
+            homeShiftText.color = new Color(0.2f, 0.95f, 0.45f, 0.95f);
 
             // Apps Grid Container
             GameObject gridObj = new GameObject("AppGrid", typeof(RectTransform), typeof(GridLayoutGroup));
@@ -812,19 +844,19 @@ namespace DeliveryDriver.UI.Smartphone
             grid.childAlignment = TextAnchor.MiddleCenter;
 
             // App 1: Kurye Express
-            CreateAppCard(gridObj.transform, "Kurye Express", "Teslimat & İlanlar", SmartphoneIconRegistry.GetDeliveryAppIcon(), new Color(0.95f, 0.45f, 0.1f, 1f), () => OpenApp(SmartphoneAppType.Delivery), out deliveryBadgeObj, out deliveryBadgeText);
+            CreateAppCard(gridObj.transform, LocalizationTable.Get("phone_app_delivery_title"), LocalizationTable.Get("phone_app_delivery_sub"), SmartphoneIconRegistry.GetDeliveryAppIcon(), new Color(0.95f, 0.45f, 0.1f, 1f), () => OpenApp(SmartphoneAppType.Delivery), out deliveryCardTitle, out deliveryCardSub, out deliveryBadgeObj, out deliveryBadgeText);
 
             // App 2: QuickPay Banka
-            CreateAppCard(gridObj.transform, "QuickPay Banka", "0 TL", SmartphoneIconRegistry.GetBankAppIcon(), new Color(0.1f, 0.85f, 0.45f, 1f), () => OpenApp(SmartphoneAppType.Bank), out _, out homeBankSubtitle);
+            CreateAppCard(gridObj.transform, LocalizationTable.Get("phone_app_bank_title"), "0 TL", SmartphoneIconRegistry.GetBankAppIcon(), new Color(0.1f, 0.85f, 0.45f, 1f), () => OpenApp(SmartphoneAppType.Bank), out bankCardTitle, out homeBankSubtitle, out _, out _);
 
             // App 3: Garajım & Filo
-            CreateAppCard(gridObj.transform, "Garajım", "Aktif Kurye Vanı", SmartphoneIconRegistry.GetGarageAppIcon(), new Color(0.15f, 0.65f, 1f, 1f), () => OpenApp(SmartphoneAppType.Garage), out _, out homeGarageSubtitle);
+            CreateAppCard(gridObj.transform, LocalizationTable.Get("phone_app_garage_title"), LocalizationTable.Get("phone_app_garage_sub"), SmartphoneIconRegistry.GetGarageAppIcon(), new Color(0.15f, 0.65f, 1f, 1f), () => OpenApp(SmartphoneAppType.Garage), out garageCardTitle, out homeGarageSubtitle, out _, out _);
 
             // App 4: Müşteri Mesajları
-            CreateAppCard(gridObj.transform, "Müşteri Yorumları", "5.0 / 5.0 Puan", SmartphoneIconRegistry.GetMessagesAppIcon(), new Color(0.7f, 0.35f, 1f, 1f), () => OpenApp(SmartphoneAppType.Messages), out _, out homeMessagesSubtitle);
+            CreateAppCard(gridObj.transform, LocalizationTable.Get("phone_app_messages_title"), "5.0 / 5.0", SmartphoneIconRegistry.GetMessagesAppIcon(), new Color(0.7f, 0.35f, 1f, 1f), () => OpenApp(SmartphoneAppType.Messages), out messagesCardTitle, out homeMessagesSubtitle, out _, out _);
         }
 
-        private void CreateAppCard(Transform parent, string title, string subtitle, Sprite iconSprite, Color accentColor, Action onClick, out GameObject badgeObj, out TextMeshProUGUI subtitleText)
+        private void CreateAppCard(Transform parent, string title, string subtitle, Sprite iconSprite, Color accentColor, Action onClick, out TextMeshProUGUI titleText, out TextMeshProUGUI subtitleText, out GameObject badgeObj, out TextMeshProUGUI badgeText)
         {
             GameObject cardObj = new GameObject($"AppCard_{title}", typeof(RectTransform), typeof(Image), typeof(Button));
             cardObj.transform.SetParent(parent, false);
@@ -873,13 +905,13 @@ namespace DeliveryDriver.UI.Smartphone
             tRect.anchorMax = new Vector2(1f, 0.42f);
             tRect.offsetMin = new Vector2(8f, 0f);
             tRect.offsetMax = new Vector2(-8f, 0f);
-            TextMeshProUGUI tTmp = tObj.GetComponent<TextMeshProUGUI>();
-            tTmp.text = title;
-            tTmp.fontSize = 13.5f;
-            tTmp.fontStyle = FontStyles.Bold;
-            tTmp.alignment = TextAlignmentOptions.Center;
-            tTmp.color = Color.white;
-            tTmp.raycastTarget = false;
+            titleText = tObj.GetComponent<TextMeshProUGUI>();
+            titleText.text = title;
+            titleText.fontSize = 13.5f;
+            titleText.fontStyle = FontStyles.Bold;
+            titleText.alignment = TextAlignmentOptions.Center;
+            titleText.color = Color.white;
+            titleText.raycastTarget = false;
 
             // Subtitle
             GameObject sObj = new GameObject("Subtitle", typeof(RectTransform), typeof(TextMeshProUGUI));
@@ -917,12 +949,12 @@ namespace DeliveryDriver.UI.Smartphone
             btRect.anchorMax = Vector2.one;
             btRect.offsetMin = Vector2.zero;
             btRect.offsetMax = Vector2.zero;
-            TextMeshProUGUI btTmp = btObj.GetComponent<TextMeshProUGUI>();
-            btTmp.text = "1";
-            btTmp.fontSize = 11f;
-            btTmp.fontStyle = FontStyles.Bold;
-            btTmp.alignment = TextAlignmentOptions.Center;
-            btTmp.color = Color.white;
+            badgeText = btObj.GetComponent<TextMeshProUGUI>();
+            badgeText.text = "1";
+            badgeText.fontSize = 11f;
+            badgeText.fontStyle = FontStyles.Bold;
+            badgeText.alignment = TextAlignmentOptions.Center;
+            badgeText.color = Color.white;
 
             badgeObj.SetActive(false);
         }

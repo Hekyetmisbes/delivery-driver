@@ -139,9 +139,12 @@ internal static class DeliveryMissionRules
         if (CourierRatingManager.Instance != null)
         {
             float rating = CourierRatingManager.Instance.CurrentRating;
-            if (rating >= 4.8f) tags.Add("VIP Kurye Primi (+%35)");
-            else if (rating >= 4.4f) tags.Add("Kıdemli Kurye (+%20)");
-            else if (rating < 3.0f) tags.Add("Düşük Puan Kesintisi (-%20)");
+            if (rating >= 4.8f)
+                tags.Add($"{LocalizationTable.Get("rating_tier_vip")} ({LocalizationTable.Format("rating_bonus_positive", 35)})");
+            else if (rating >= 4.4f)
+                tags.Add($"{LocalizationTable.Get("rating_tier_senior")} ({LocalizationTable.Format("rating_bonus_positive", 20)})");
+            else if (rating < 3.0f)
+                tags.Add($"{LocalizationTable.Get("rating_tier_risk")} ({LocalizationTable.Format("rating_bonus_negative", 20)})");
         }
 
         return tags.Count == 0

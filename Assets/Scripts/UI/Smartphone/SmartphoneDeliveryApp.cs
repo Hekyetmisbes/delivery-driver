@@ -34,8 +34,19 @@ namespace DeliveryDriver.UI.Smartphone
         private TextMeshProUGUI activeStatusText;
         private TextMeshProUGUI activeRewardText;
 
-        // Empty / Scanning state UI elements
         private GameObject emptyStateObj;
+
+        // Localized UI text references
+        private TextMeshProUGUI headerTitleText;
+        private TextMeshProUGUI acceptBtnText;
+        private TextMeshProUGUI rejectBtnText;
+        private TextMeshProUGUI activeHeaderTitleText;
+        private TextMeshProUGUI emptyStateText;
+
+        // Raw offer data for live re-localization
+        private string currentOfferTitle = string.Empty;
+        private string currentOfferBody = string.Empty;
+        private string currentOfferReward = string.Empty;
 
         // Current state
         private Action currentAcceptAction;
@@ -43,6 +54,32 @@ namespace DeliveryDriver.UI.Smartphone
         private bool hasPendingOffer;
 
         public bool HasPendingOffer => hasPendingOffer;
+
+        private void OnEnable()
+        {
+            LocalizationTable.OnLocaleChanged += HandleLocaleChanged;
+        }
+
+        private void OnDisable()
+        {
+            LocalizationTable.OnLocaleChanged -= HandleLocaleChanged;
+        }
+
+        private void HandleLocaleChanged()
+        {
+            if (headerTitleText != null) headerTitleText.text = LocalizationTable.Get("delivery_app_header");
+            if (acceptBtnText != null) acceptBtnText.text = LocalizationTable.Get("delivery_btn_accept");
+            if (rejectBtnText != null) rejectBtnText.text = LocalizationTable.Get("delivery_btn_reject");
+            if (activeHeaderTitleText != null) activeHeaderTitleText.text = LocalizationTable.Get("delivery_active_header");
+            if (emptyStateText != null) emptyStateText.text = LocalizationTable.Get("delivery_empty_state");
+
+            if (hasPendingOffer)
+            {
+                RenderOfferTexts();
+            }
+
+            RefreshView();
+        }
 
         public void Initialize(Transform parent, Sprite fallback)
         {
@@ -79,47 +116,68 @@ namespace DeliveryDriver.UI.Smartphone
             hasPendingOffer = true;
             currentAcceptAction = onAccept;
             currentRejectAction = onReject;
+            currentOfferTitle = title;
+            currentOfferBody = body;
+            currentOfferReward = reward;
 
-            if (offerTitleText != null) offerTitleText.text = string.IsNullOrWhiteSpace(title) ? "Kargo Teslimatı" : title;
-            if (offerDescText != null) offerDescText.text = body;
+            RenderOfferTexts();
+            RefreshView();
+        }
+
+        private void RenderOfferTexts()
+        {
+            if (offerTitleText != null)
+            {
+                offerTitleText.text = string.IsNullOrWhiteSpace(currentOfferTitle)
+                    ? LocalizationTable.Get("phone_toast_offer_title")
+                    : currentOfferTitle;
+            }
+
+            if (offerDescText != null)
+            {
+                offerDescText.text = currentOfferBody;
+            }
+
             if (offerRewardText != null)
             {
-                string cleanReward = string.IsNullOrWhiteSpace(reward) ? "150 TL" : reward.Replace("₺", "").Trim() + " TL";
-                offerRewardText.text = cleanReward;
+                string cleanReward = string.IsNullOrWhiteSpace(currentOfferReward) ? "150 TL" : currentOfferReward.Replace("₺", "").Trim();
+                if (!cleanReward.EndsWith("TL", StringComparison.OrdinalIgnoreCase) && !cleanReward.StartsWith("$"))
+                {
+                    cleanReward += " TL";
+                }
+                offerRewardText.text = LocalizationTable.Format("delivery_reward_label", cleanReward);
             }
 
             // Route & Cargo Type extraction / formatting
             if (offerRouteText != null)
             {
-                offerRouteText.text = "Rota: Şehir İçi -> Teslimat Noktası";
+                offerRouteText.text = LocalizationTable.Get("delivery_offer_route_city");
             }
 
             if (cargoTypeBadgeText != null && cargoTypeBadgeBg != null)
             {
-                string upper = (title + " " + body).ToUpperInvariant();
+                string upper = ((currentOfferTitle ?? "") + " " + (currentOfferBody ?? "")).ToUpperInvariant();
                 if (upper.Contains("KIRILABİLİR") || upper.Contains("FRAGILE") || upper.Contains("HASSAS"))
                 {
-                    cargoTypeBadgeText.text = "KIRILABİLİR";
+                    cargoTypeBadgeText.text = LocalizationTable.Get("delivery_badge_fragile");
                     cargoTypeBadgeBg.color = new Color(0.95f, 0.45f, 0.15f, 1f);
                 }
-                else if (upper.Contains("ACİL") || upper.Contains("TIMED") || upper.Contains("ZAMANLI"))
+                else if (upper.Contains("ACİL") || upper.Contains("TIMED") || upper.Contains("ZAMANLI") || upper.Contains("URGENT"))
                 {
-                    cargoTypeBadgeText.text = "ACİL KARGO";
+                    cargoTypeBadgeText.text = LocalizationTable.Get("delivery_badge_urgent");
                     cargoTypeBadgeBg.color = new Color(0.95f, 0.2f, 0.2f, 1f);
                 }
                 else if (upper.Contains("ÇOKLU") || upper.Contains("MULTI"))
                 {
-                    cargoTypeBadgeText.text = "ÇOKLU TESLİMAT";
+                    cargoTypeBadgeText.text = LocalizationTable.Get("delivery_badge_multistop");
                     cargoTypeBadgeBg.color = new Color(0.6f, 0.25f, 0.95f, 1f);
                 }
                 else
                 {
-                    cargoTypeBadgeText.text = "STANDART";
+                    cargoTypeBadgeText.text = LocalizationTable.Get("delivery_badge_standard");
                     cargoTypeBadgeBg.color = new Color(0.15f, 0.6f, 0.95f, 1f);
                 }
             }
-
-            RefreshView();
         }
 
         public void ClearOffer()
@@ -127,6 +185,9 @@ namespace DeliveryDriver.UI.Smartphone
             hasPendingOffer = false;
             currentAcceptAction = null;
             currentRejectAction = null;
+            currentOfferTitle = string.Empty;
+            currentOfferBody = string.Empty;
+            currentOfferReward = string.Empty;
             RefreshView();
         }
 
@@ -155,27 +216,27 @@ namespace DeliveryDriver.UI.Smartphone
             {
                 string targetArea = !string.IsNullOrEmpty(deliveryMgr.CurrentDeliveryNeighborhoodName)
                     ? deliveryMgr.CurrentDeliveryNeighborhoodName
-                    : "Teslimat Bölgesi";
-                activeTargetText.text = $"Hedef: {targetArea}";
+                    : LocalizationTable.Get("delivery_active_area_default");
+                activeTargetText.text = LocalizationTable.Format("delivery_active_target", targetArea);
             }
 
             if (activeStatusText != null)
             {
                 if (deliveryMgr.IsCarryingBox)
                 {
-                    activeStatusText.text = "Kargo Aracınızda - Adrese Ulaştırın";
+                    activeStatusText.text = LocalizationTable.Get("delivery_status_carrying");
                     activeStatusText.color = new Color(0.2f, 0.95f, 0.45f, 1f);
                 }
                 else
                 {
-                    activeStatusText.text = "Yükleme Noktasına Gidin (Kutuyu Alın)";
+                    activeStatusText.text = LocalizationTable.Get("delivery_status_pickup");
                     activeStatusText.color = new Color(1f, 0.85f, 0.2f, 1f);
                 }
             }
 
             if (activeRewardText != null)
             {
-                activeRewardText.text = "Teslimat Tamamlanınca Bakiye Yüklenecek";
+                activeRewardText.text = LocalizationTable.Get("delivery_active_reward_notice");
             }
         }
 
@@ -215,12 +276,12 @@ namespace DeliveryDriver.UI.Smartphone
             htRect.offsetMin = new Vector2(46f, 0f);
             htRect.offsetMax = new Vector2(-16f, 0f);
 
-            TextMeshProUGUI htText = hTitleObj.GetComponent<TextMeshProUGUI>();
-            htText.text = "Kurye Express - İlanlar";
-            htText.fontSize = 15f;
-            htText.fontStyle = FontStyles.Bold;
-            htText.alignment = TextAlignmentOptions.Left;
-            htText.color = new Color(0.3f, 0.95f, 0.45f, 1f);
+            headerTitleText = hTitleObj.GetComponent<TextMeshProUGUI>();
+            headerTitleText.text = LocalizationTable.Get("delivery_app_header");
+            headerTitleText.fontSize = 15f;
+            headerTitleText.fontStyle = FontStyles.Bold;
+            headerTitleText.alignment = TextAlignmentOptions.Left;
+            headerTitleText.color = new Color(0.3f, 0.95f, 0.45f, 1f);
 
             // 1. Pending Offer Card
             offerCardObj = new GameObject("OfferCard", typeof(RectTransform), typeof(Image));
@@ -365,12 +426,12 @@ namespace DeliveryDriver.UI.Smartphone
             abtRect.offsetMin = Vector2.zero;
             abtRect.offsetMax = Vector2.zero;
 
-            TextMeshProUGUI abTmp = abTextObj.GetComponent<TextMeshProUGUI>();
-            abTmp.text = "KABUL ET";
-            abTmp.fontSize = 13f;
-            abTmp.fontStyle = FontStyles.Bold;
-            abTmp.alignment = TextAlignmentOptions.Center;
-            abTmp.color = Color.white;
+            acceptBtnText = abTextObj.GetComponent<TextMeshProUGUI>();
+            acceptBtnText.text = LocalizationTable.Get("delivery_btn_accept");
+            acceptBtnText.fontSize = 13f;
+            acceptBtnText.fontStyle = FontStyles.Bold;
+            acceptBtnText.alignment = TextAlignmentOptions.Center;
+            acceptBtnText.color = Color.white;
 
             // Reject Button
             GameObject rejectBtnObj = new GameObject("RejectBtn", typeof(RectTransform), typeof(Image), typeof(Button));
@@ -397,12 +458,12 @@ namespace DeliveryDriver.UI.Smartphone
             rbtRect.offsetMin = Vector2.zero;
             rbtRect.offsetMax = Vector2.zero;
 
-            TextMeshProUGUI rbTmp = rbTextObj.GetComponent<TextMeshProUGUI>();
-            rbTmp.text = "REDDET";
-            rbTmp.fontSize = 13f;
-            rbTmp.fontStyle = FontStyles.Bold;
-            rbTmp.alignment = TextAlignmentOptions.Center;
-            rbTmp.color = Color.white;
+            rejectBtnText = rbTextObj.GetComponent<TextMeshProUGUI>();
+            rejectBtnText.text = LocalizationTable.Get("delivery_btn_reject");
+            rejectBtnText.fontSize = 13f;
+            rejectBtnText.fontStyle = FontStyles.Bold;
+            rejectBtnText.alignment = TextAlignmentOptions.Center;
+            rejectBtnText.color = Color.white;
 
             // 2. Active Delivery View
             activeDeliveryCardObj = new GameObject("ActiveDeliveryCard", typeof(RectTransform), typeof(Image));
@@ -425,11 +486,11 @@ namespace DeliveryDriver.UI.Smartphone
             adtRect.anchorMax = new Vector2(1f, 1f);
             adtRect.anchoredPosition = new Vector2(14f, -18f);
             adtRect.sizeDelta = new Vector2(-28f, 26f);
-            TextMeshProUGUI adtTmp = adTitle.GetComponent<TextMeshProUGUI>();
-            adtTmp.text = "AKTİF TESLİMAT SÜRÜYOR";
-            adtTmp.fontSize = 15f;
-            adtTmp.fontStyle = FontStyles.Bold;
-            adtTmp.color = new Color(0.3f, 0.95f, 0.45f, 1f);
+            activeHeaderTitleText = adTitle.GetComponent<TextMeshProUGUI>();
+            activeHeaderTitleText.text = LocalizationTable.Get("delivery_active_header");
+            activeHeaderTitleText.fontSize = 15f;
+            activeHeaderTitleText.fontStyle = FontStyles.Bold;
+            activeHeaderTitleText.color = new Color(0.3f, 0.95f, 0.45f, 1f);
 
             GameObject adTarget = new GameObject("Target", typeof(RectTransform), typeof(TextMeshProUGUI));
             adTarget.transform.SetParent(activeDeliveryCardObj.transform, false);
@@ -497,12 +558,12 @@ namespace DeliveryDriver.UI.Smartphone
             estRect.anchorMax = new Vector2(1f, 1f);
             estRect.offsetMin = new Vector2(0f, 0f);
             estRect.offsetMax = new Vector2(0f, -70f);
-            TextMeshProUGUI estTmp = esText.GetComponent<TextMeshProUGUI>();
-            estTmp.text = "Yeni kargo ilanları taranıyor...\n\nŞehirde gezerken yeni teslimat teklifleri telefonunuza bildirim olarak gelecektir.";
-            estTmp.fontSize = 13f;
-            estTmp.alignment = TextAlignmentOptions.Center;
-            estTmp.color = new Color(0.7f, 0.8f, 0.9f, 0.8f);
-            estTmp.textWrappingMode = TextWrappingModes.Normal;
+            emptyStateText = esText.GetComponent<TextMeshProUGUI>();
+            emptyStateText.text = LocalizationTable.Get("delivery_empty_state");
+            emptyStateText.fontSize = 13f;
+            emptyStateText.alignment = TextAlignmentOptions.Center;
+            emptyStateText.color = new Color(0.7f, 0.8f, 0.9f, 0.8f);
+            emptyStateText.textWrappingMode = TextWrappingModes.Normal;
         }
 
         private void HandleAccept()

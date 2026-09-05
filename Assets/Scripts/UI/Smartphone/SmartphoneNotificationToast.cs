@@ -87,7 +87,7 @@ namespace DeliveryDriver.UI.Smartphone
             tRect.offsetMax = new Vector2(-10f, -4f);
 
             titleText = titleObj.GetComponent<TextMeshProUGUI>();
-            titleText.text = "Yeni Teslimat Teklifi";
+            titleText.text = LocalizationTable.Get("phone_toast_offer_title");
             titleText.fontSize = 13f;
             titleText.fontStyle = FontStyles.Bold;
             titleText.color = new Color(0.95f, 0.98f, 1f, 1f);
@@ -104,7 +104,7 @@ namespace DeliveryDriver.UI.Smartphone
             sRect.offsetMax = new Vector2(-10f, 0f);
 
             subtitleText = subObj.GetComponent<TextMeshProUGUI>();
-            subtitleText.text = "Açmak için [TAB] tuşuna bas";
+            subtitleText.text = LocalizationTable.Get("phone_toast_hint");
             subtitleText.fontSize = 11f;
             subtitleText.color = new Color(0.7f, 0.85f, 0.95f, 0.9f);
             subtitleText.alignment = TextAlignmentOptions.Left;
