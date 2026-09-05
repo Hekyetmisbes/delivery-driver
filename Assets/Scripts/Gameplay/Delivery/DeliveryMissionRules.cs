@@ -35,6 +35,26 @@ internal static class DeliveryMissionRules
         int timed = Mathf.Max(0, timedMissionWeight);
         int fragile = Mathf.Max(0, fragileMissionWeight);
         int multiStop = Mathf.Max(0, multiStopMissionWeight);
+
+        if (CourierRatingManager.Instance != null)
+        {
+            float rating = CourierRatingManager.Instance.CurrentRating;
+            if (rating >= 4.5f)
+            {
+                // Yüksek puanlı kuryelere yüksek gelirli kargolar (kırılabilir, acil, çoklu) daha sık gelir
+                fragile = Mathf.RoundToInt(fragile * 1.6f);
+                timed = Mathf.RoundToInt(timed * 1.6f);
+                multiStop = Mathf.RoundToInt(multiStop * 1.5f);
+            }
+            else if (rating < 3.2f)
+            {
+                // Düşük puanlı kuryeler ucuz standart kargolara yönlendirilir
+                standard = Mathf.RoundToInt(standard * 2.5f);
+                fragile = Mathf.RoundToInt(fragile * 0.3f);
+                timed = Mathf.RoundToInt(timed * 0.3f);
+            }
+        }
+
         int totalWeight = standard + timed + fragile + multiStop;
         if (totalWeight <= 0)
         {
@@ -116,6 +136,14 @@ internal static class DeliveryMissionRules
         if (nightBonus) tags.Add(LocalizationTable.Get("mission_condition_night"));
         if (rainRiskBonus) tags.Add(LocalizationTable.Get("mission_condition_rain_risk"));
 
+        if (CourierRatingManager.Instance != null)
+        {
+            float rating = CourierRatingManager.Instance.CurrentRating;
+            if (rating >= 4.8f) tags.Add("VIP Kurye Primi (+%35)");
+            else if (rating >= 4.4f) tags.Add("Kıdemli Kurye (+%20)");
+            else if (rating < 3.0f) tags.Add("Düşük Puan Kesintisi (-%20)");
+        }
+
         return tags.Count == 0
             ? string.Empty
             : LocalizationTable.Format("mission_condition_summary", string.Join(", ", tags), Mathf.Max(1f, rewardMultiplier));
@@ -150,7 +178,11 @@ internal static class DeliveryMissionRules
             _ => 50
         };
 
-        float safeMultiplier = Mathf.Max(1f, rewardMultiplier);
+        float ratingMult = CourierRatingManager.Instance != null
+            ? CourierRatingManager.Instance.GetRatingRewardMultiplier()
+            : 1f;
+
+        float safeMultiplier = Mathf.Max(0.5f, rewardMultiplier * ratingMult);
         baseReward = Mathf.RoundToInt(baseRaw * safeMultiplier);
         bonusReward = Mathf.RoundToInt(bonusRaw * safeMultiplier);
     }

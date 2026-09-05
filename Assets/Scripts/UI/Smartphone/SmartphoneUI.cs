@@ -61,6 +61,7 @@ namespace DeliveryDriver.UI.Smartphone
         private GameObject homeScreenObj;
         private TextMeshProUGUI homeBankSubtitle;
         private TextMeshProUGUI homeGarageSubtitle;
+        private TextMeshProUGUI homeMessagesSubtitle;
         private GameObject deliveryBadgeObj;
         private TextMeshProUGUI deliveryBadgeText;
 
@@ -71,6 +72,7 @@ namespace DeliveryDriver.UI.Smartphone
         private SmartphoneMessagesApp messagesApp;
 
         // HUD Elements
+        [SerializeField] private bool showHudButton = false;
         private RectTransform hudButtonRect;
         private GameObject hudBadgeObj;
         private TextMeshProUGUI hudBadgeText;
@@ -176,7 +178,10 @@ namespace DeliveryDriver.UI.Smartphone
             targetCanvas = ResolveCanvas();
             if (targetCanvas == null) return;
 
-            BuildHUDButton(targetCanvas.transform);
+            if (showHudButton)
+            {
+                BuildHUDButton(targetCanvas.transform);
+            }
             BuildNotificationToast(targetCanvas.transform);
             BuildPhoneContainer(targetCanvas.transform);
             BuildHomeScreen(contentAreaObj.transform);
@@ -213,6 +218,26 @@ namespace DeliveryDriver.UI.Smartphone
                     OpenPhone();
                     OpenApp(SmartphoneAppType.Delivery);
                 }, 6f);
+            }
+        }
+
+        public void TriggerNotification(string title, string body, Action onClick = null)
+        {
+            EnsureUI();
+
+            if (UIAudioFeedback.Instance != null)
+            {
+                UIAudioFeedback.Instance.PlaySwitch();
+            }
+
+            if (notificationToast != null)
+            {
+                Action action = onClick ?? (() =>
+                {
+                    OpenPhone();
+                    OpenApp(SmartphoneAppType.Messages);
+                });
+                notificationToast.Show(title, body, action, 5f);
             }
         }
 
@@ -327,14 +352,14 @@ namespace DeliveryDriver.UI.Smartphone
                 backButtonObj.SetActive(app != SmartphoneAppType.Home);
             }
 
+            if (timeText != null)
+            {
+                timeText.gameObject.SetActive(app == SmartphoneAppType.Home);
+            }
+
             if (app == SmartphoneAppType.Home)
             {
                 UpdateHomeSubtitles();
-            }
-
-            if (UIAudioFeedback.Instance != null)
-            {
-                UIAudioFeedback.Instance.PlayClick();
             }
         }
 
@@ -343,6 +368,7 @@ namespace DeliveryDriver.UI.Smartphone
             if (currentApp == SmartphoneAppType.Delivery && deliveryApp != null) deliveryApp.RefreshView();
             else if (currentApp == SmartphoneAppType.Bank && bankApp != null) bankApp.RefreshData();
             else if (currentApp == SmartphoneAppType.Garage && garageApp != null) garageApp.RefreshData();
+            else if (currentApp == SmartphoneAppType.Messages && messagesApp != null) messagesApp.RefreshView();
             else if (currentApp == SmartphoneAppType.Home) UpdateHomeSubtitles();
         }
 
@@ -387,6 +413,12 @@ namespace DeliveryDriver.UI.Smartphone
                     vName = PlayerVehicleManager.Instance.ActiveVehicleController.gameObject.name.Replace("(Clone)", "").Trim();
                 }
                 homeGarageSubtitle.text = vName;
+            }
+
+            if (homeMessagesSubtitle != null)
+            {
+                float rating = CourierRatingManager.Instance != null ? CourierRatingManager.Instance.CurrentRating : 5.0f;
+                homeMessagesSubtitle.text = $"{rating:F1} / 5.0 Puan";
             }
         }
 
@@ -789,7 +821,7 @@ namespace DeliveryDriver.UI.Smartphone
             CreateAppCard(gridObj.transform, "Garajım", "Aktif Kurye Vanı", SmartphoneIconRegistry.GetGarageAppIcon(), new Color(0.15f, 0.65f, 1f, 1f), () => OpenApp(SmartphoneAppType.Garage), out _, out homeGarageSubtitle);
 
             // App 4: Müşteri Mesajları
-            CreateAppCard(gridObj.transform, "Müşteri Yorumları", "4.9 / 5.0 Puan", SmartphoneIconRegistry.GetMessagesAppIcon(), new Color(0.7f, 0.35f, 1f, 1f), () => OpenApp(SmartphoneAppType.Messages), out _, out _);
+            CreateAppCard(gridObj.transform, "Müşteri Yorumları", "5.0 / 5.0 Puan", SmartphoneIconRegistry.GetMessagesAppIcon(), new Color(0.7f, 0.35f, 1f, 1f), () => OpenApp(SmartphoneAppType.Messages), out _, out homeMessagesSubtitle);
         }
 
         private void CreateAppCard(Transform parent, string title, string subtitle, Sprite iconSprite, Color accentColor, Action onClick, out GameObject badgeObj, out TextMeshProUGUI subtitleText)
