@@ -68,8 +68,8 @@ namespace DeliveryDriver.UI.Smartphone
             int currentXp = prog != null ? prog.CurrentXP : 0;
             int nextXp = prog != null ? Mathf.Max(1, prog.XPToNextLevel) : 100;
 
-            if (balanceAmountText != null) balanceAmountText.text = $"₺{money:N0}";
-            if (totalEarnedText != null) totalEarnedText.text = $"₺{totalEarned:N0}";
+            if (balanceAmountText != null) balanceAmountText.text = $"{money:N0} TL";
+            if (totalEarnedText != null) totalEarnedText.text = $"{totalEarned:N0} TL";
             if (completedJobsText != null) completedJobsText.text = $"{completedJobs} Teslimat";
             if (levelText != null) levelText.text = $"Seviye {level}";
 
@@ -97,16 +97,28 @@ namespace DeliveryDriver.UI.Smartphone
             hImg.color = new Color(0.08f, 0.14f, 0.22f, 0.98f);
             hImg.sprite = fallbackSprite;
 
+            GameObject hIconObj = new GameObject("Icon", typeof(RectTransform), typeof(Image));
+            hIconObj.transform.SetParent(headerObj.transform, false);
+            RectTransform hiRect = hIconObj.GetComponent<RectTransform>();
+            hiRect.anchorMin = new Vector2(0f, 0.5f);
+            hiRect.anchorMax = new Vector2(0f, 0.5f);
+            hiRect.pivot = new Vector2(0f, 0.5f);
+            hiRect.anchoredPosition = new Vector2(14f, 0f);
+            hiRect.sizeDelta = new Vector2(24f, 24f);
+            Image hiImg = hIconObj.GetComponent<Image>();
+            hiImg.sprite = SmartphoneIconRegistry.GetBankAppIcon();
+            hiImg.preserveAspect = true;
+
             GameObject hTitleObj = new GameObject("Title", typeof(RectTransform), typeof(TextMeshProUGUI));
             hTitleObj.transform.SetParent(headerObj.transform, false);
             RectTransform htRect = hTitleObj.GetComponent<RectTransform>();
             htRect.anchorMin = Vector2.zero;
             htRect.anchorMax = Vector2.one;
-            htRect.offsetMin = new Vector2(16f, 0f);
+            htRect.offsetMin = new Vector2(46f, 0f);
             htRect.offsetMax = new Vector2(-16f, 0f);
 
             TextMeshProUGUI htText = hTitleObj.GetComponent<TextMeshProUGUI>();
-            htText.text = "💳 QuickPay Mobil Banka";
+            htText.text = "QuickPay Mobil Banka";
             htText.fontSize = 15f;
             htText.fontStyle = FontStyles.Bold;
             htText.alignment = TextAlignmentOptions.Left;
@@ -136,7 +148,7 @@ namespace DeliveryDriver.UI.Smartphone
             chRect.anchoredPosition = new Vector2(16f, -14f);
             chRect.sizeDelta = new Vector2(120f, 22f);
             TextMeshProUGUI chText = chipObj.GetComponent<TextMeshProUGUI>();
-            chText.text = "DEBIT CARD  ●)))";
+            chText.text = "DEBIT CARD  )))";
             chText.fontSize = 11f;
             chText.fontStyle = FontStyles.Bold;
             chText.color = new Color(0.8f, 0.9f, 1f, 0.8f);
@@ -165,7 +177,7 @@ namespace DeliveryDriver.UI.Smartphone
             baRect.anchoredPosition = new Vector2(16f, -14f);
             baRect.sizeDelta = new Vector2(-32f, 36f);
             balanceAmountText = bAmtObj.GetComponent<TextMeshProUGUI>();
-            balanceAmountText.text = "₺0";
+            balanceAmountText.text = "0 TL";
             balanceAmountText.fontSize = 28f;
             balanceAmountText.fontStyle = FontStyles.Bold;
             balanceAmountText.color = new Color(0.35f, 1f, 0.55f, 1f);
@@ -180,7 +192,7 @@ namespace DeliveryDriver.UI.Smartphone
             nRect.anchoredPosition = new Vector2(16f, 12f);
             nRect.sizeDelta = new Vector2(-32f, 18f);
             TextMeshProUGUI nText = numObj.GetComponent<TextMeshProUGUI>();
-            nText.text = "•••• 4821   |   KURYE HESABI";
+            nText.text = "**** 4821   |   KURYE HESABI";
             nText.fontSize = 11f;
             nText.color = new Color(0.85f, 0.92f, 1f, 0.7f);
 
@@ -199,7 +211,7 @@ namespace DeliveryDriver.UI.Smartphone
             spBg.sprite = fallbackSprite;
 
             // Stat 1: Total Money Earned
-            totalEarnedText = CreateStatRow(statsObj.transform, "Kariyer Toplam Kazancı:", "₺0", -16f);
+            totalEarnedText = CreateStatRow(statsObj.transform, "Kariyer Toplam Kazancı:", "0 TL", -16f);
 
             // Stat 2: Completed Deliveries
             completedJobsText = CreateStatRow(statsObj.transform, "Tamamlanan İşler:", "0", -56f);

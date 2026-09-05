@@ -56,26 +56,38 @@ namespace DeliveryDriver.UI.Smartphone
             hImg.color = new Color(0.12f, 0.18f, 0.26f, 0.98f);
             hImg.sprite = fallbackSprite;
 
+            GameObject hIconObj = new GameObject("Icon", typeof(RectTransform), typeof(Image));
+            hIconObj.transform.SetParent(headerObj.transform, false);
+            RectTransform hiRect = hIconObj.GetComponent<RectTransform>();
+            hiRect.anchorMin = new Vector2(0f, 0.5f);
+            hiRect.anchorMax = new Vector2(0f, 0.5f);
+            hiRect.pivot = new Vector2(0f, 0.5f);
+            hiRect.anchoredPosition = new Vector2(14f, 0f);
+            hiRect.sizeDelta = new Vector2(24f, 24f);
+            Image hiImg = hIconObj.GetComponent<Image>();
+            hiImg.sprite = SmartphoneIconRegistry.GetMessagesAppIcon();
+            hiImg.preserveAspect = true;
+
             GameObject hTitleObj = new GameObject("Title", typeof(RectTransform), typeof(TextMeshProUGUI));
             hTitleObj.transform.SetParent(headerObj.transform, false);
             RectTransform htRect = hTitleObj.GetComponent<RectTransform>();
             htRect.anchorMin = Vector2.zero;
             htRect.anchorMax = Vector2.one;
-            htRect.offsetMin = new Vector2(16f, 0f);
+            htRect.offsetMin = new Vector2(46f, 0f);
             htRect.offsetMax = new Vector2(-16f, 0f);
 
             TextMeshProUGUI htText = hTitleObj.GetComponent<TextMeshProUGUI>();
-            htText.text = "💬 Müşteri Yorumları & SMS";
+            htText.text = "Müşteri Yorumları & SMS";
             htText.fontSize = 15f;
             htText.fontStyle = FontStyles.Bold;
             htText.alignment = TextAlignmentOptions.Left;
             htText.color = new Color(0.4f, 0.85f, 1f, 1f);
 
             // Reviews List Container
-            CreateMessageBubble(parent, "Kızılay Medikal", "⭐⭐⭐⭐⭐", "Acil kargomuz tam zamanında ulaştı, çok profesyonel kurye.", "12 dk önce", -104f);
-            CreateMessageBubble(parent, "Tunalı Pastanesi", "⭐⭐⭐⭐⭐", "Hassas pasta siparişimiz tek bir çizik bile olmadan geldi. Elinize sağlık!", "38 dk önce", -184f);
-            CreateMessageBubble(parent, "Batıkent Elektronik", "⭐⭐⭐⭐⭐", "Çok hızlı teslimat yapıldı, kurye arkadaş çok nazikti.", "Bugün 14:15", -264f);
-            CreateMessageBubble(parent, "Lojistik Merkezi", "🔔 BİLDİRİM", "Tebrikler! Güvenli sürüş ve zamanında teslimat priminiz cüzdanınıza yansıtıldı.", "Bugün 12:00", -344f);
+            CreateMessageBubble(parent, "Kızılay Medikal", "[5.0 / 5.0]", "Acil kargomuz tam zamanında ulaştı, çok profesyonel kurye.", "12 dk önce", -104f);
+            CreateMessageBubble(parent, "Tunalı Pastanesi", "[5.0 / 5.0]", "Hassas pasta siparişimiz tek bir çizik bile olmadan geldi. Elinize sağlık!", "38 dk önce", -184f);
+            CreateMessageBubble(parent, "Batıkent Elektronik", "[5.0 / 5.0]", "Çok hızlı teslimat yapıldı, kurye arkadaş çok nazikti.", "Bugün 14:15", -264f);
+            CreateMessageBubble(parent, "Lojistik Merkezi", "[BİLDİRİM]", "Tebrikler! Güvenli sürüş ve zamanında teslimat priminiz cüzdanınıza yansıtıldı.", "Bugün 12:00", -344f);
         }
 
         private void CreateMessageBubble(Transform parent, string sender, string ratingOrTag, string message, string time, float yPos)

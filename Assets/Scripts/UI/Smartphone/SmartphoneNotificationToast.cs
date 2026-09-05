@@ -62,20 +62,20 @@ namespace DeliveryDriver.UI.Smartphone
             accImg.raycastTarget = false;
 
             // Icon Badge
-            GameObject iconObj = new GameObject("Icon", typeof(RectTransform), typeof(TextMeshProUGUI));
+            GameObject iconObj = new GameObject("Icon", typeof(RectTransform), typeof(Image));
             iconObj.transform.SetParent(toastObj.transform, false);
             RectTransform iconRect = iconObj.GetComponent<RectTransform>();
             iconRect.anchorMin = new Vector2(0f, 0.5f);
             iconRect.anchorMax = new Vector2(0f, 0.5f);
             iconRect.pivot = new Vector2(0.5f, 0.5f);
             iconRect.anchoredPosition = new Vector2(24f, 0f);
-            iconRect.sizeDelta = new Vector2(30f, 30f);
+            iconRect.sizeDelta = new Vector2(26f, 26f);
 
-            TextMeshProUGUI iconTmp = iconObj.GetComponent<TextMeshProUGUI>();
-            iconTmp.text = "🔔";
-            iconTmp.fontSize = 20f;
-            iconTmp.alignment = TextAlignmentOptions.Center;
-            iconTmp.raycastTarget = false;
+            Image iconImg = iconObj.GetComponent<Image>();
+            iconImg.sprite = SmartphoneIconRegistry.GetBellIcon();
+            iconImg.color = Color.white;
+            iconImg.preserveAspect = true;
+            iconImg.raycastTarget = false;
 
             // Title Text
             GameObject titleObj = new GameObject("Title", typeof(RectTransform), typeof(TextMeshProUGUI));

@@ -141,11 +141,18 @@ namespace DeliveryDriver.UI.Smartphone
                     togglePressed = true;
                 }
             }
-#endif
+#if ENABLE_LEGACY_INPUT_MANAGER
             if (!togglePressed && (Input.GetKeyDown(KeyCode.Tab) || Input.GetKeyDown(KeyCode.T)))
             {
                 togglePressed = true;
             }
+#endif
+#else
+            if (Input.GetKeyDown(KeyCode.Tab) || Input.GetKeyDown(KeyCode.T))
+            {
+                togglePressed = true;
+            }
+#endif
 
             if (togglePressed)
             {
@@ -369,7 +376,7 @@ namespace DeliveryDriver.UI.Smartphone
             if (homeBankSubtitle != null)
             {
                 int money = PlayerProgressionManager.Instance != null ? PlayerProgressionManager.Instance.CurrentMoney : 0;
-                homeBankSubtitle.text = $"₺{money:N0}";
+                homeBankSubtitle.text = $"{money:N0} TL";
             }
 
             if (homeGarageSubtitle != null)
@@ -428,18 +435,17 @@ namespace DeliveryDriver.UI.Smartphone
             UIButtonEnhancer.EnhanceButton(btn);
 
             // Icon & Hotkey
-            GameObject iconObj = new GameObject("Icon", typeof(RectTransform), typeof(TextMeshProUGUI));
+            GameObject iconObj = new GameObject("Icon", typeof(RectTransform), typeof(Image));
             iconObj.transform.SetParent(btnObj.transform, false);
             RectTransform iRect = iconObj.GetComponent<RectTransform>();
-            iRect.anchorMin = new Vector2(0f, 0.25f);
-            iRect.anchorMax = Vector2.one;
-            iRect.offsetMin = Vector2.zero;
-            iRect.offsetMax = Vector2.zero;
-            TextMeshProUGUI iconTmp = iconObj.GetComponent<TextMeshProUGUI>();
-            iconTmp.text = "📱";
-            iconTmp.fontSize = 26f;
-            iconTmp.alignment = TextAlignmentOptions.Center;
-            iconTmp.raycastTarget = false;
+            iRect.anchorMin = new Vector2(0.5f, 0.62f);
+            iRect.anchorMax = new Vector2(0.5f, 0.62f);
+            iRect.pivot = new Vector2(0.5f, 0.5f);
+            iRect.sizeDelta = new Vector2(28f, 28f);
+            Image iImg = iconObj.GetComponent<Image>();
+            iImg.sprite = SmartphoneIconRegistry.GetPhoneIcon();
+            iImg.color = Color.white;
+            iImg.raycastTarget = false;
 
             GameObject keyObj = new GameObject("KeyHint", typeof(RectTransform), typeof(TextMeshProUGUI));
             keyObj.transform.SetParent(btnObj.transform, false);
@@ -611,7 +617,7 @@ namespace DeliveryDriver.UI.Smartphone
             icRect.offsetMin = Vector2.zero;
             icRect.offsetMax = new Vector2(-10f, 0f);
             TextMeshProUGUI icTmp = iconsObj.GetComponent<TextMeshProUGUI>();
-            icTmp.text = "5G 📶 🔋";
+            icTmp.text = "5G [||||]";
             icTmp.fontSize = 11f;
             icTmp.alignment = TextAlignmentOptions.Right;
             icTmp.color = new Color(0.85f, 0.9f, 0.95f, 0.9f);
@@ -641,7 +647,7 @@ namespace DeliveryDriver.UI.Smartphone
             bbtRect.offsetMin = Vector2.zero;
             bbtRect.offsetMax = Vector2.zero;
             TextMeshProUGUI bbtTmp = bbtObj.GetComponent<TextMeshProUGUI>();
-            bbtTmp.text = "◀ Menü";
+            bbtTmp.text = "< Menü";
             bbtTmp.fontSize = 11f;
             bbtTmp.fontStyle = FontStyles.Bold;
             bbtTmp.alignment = TextAlignmentOptions.Center;
@@ -726,20 +732,34 @@ namespace DeliveryDriver.UI.Smartphone
             tRect.offsetMin = new Vector2(14f, 0f);
             tRect.offsetMax = new Vector2(-14f, -6f);
             TextMeshProUGUI tTmp = titleObj.GetComponent<TextMeshProUGUI>();
-            tTmp.text = "⚡ Kurye Portalı";
+            tTmp.text = "Kurye Portalı";
             tTmp.fontSize = 17f;
             tTmp.fontStyle = FontStyles.Bold;
             tTmp.color = new Color(0.95f, 0.98f, 1f, 1f);
+
+            // Shift Indicator Dot
+            GameObject dotObj = new GameObject("ShiftDot", typeof(RectTransform), typeof(Image));
+            dotObj.transform.SetParent(headerObj.transform, false);
+            RectTransform dr = dotObj.GetComponent<RectTransform>();
+            dr.anchorMin = new Vector2(0f, 0f);
+            dr.anchorMax = new Vector2(0f, 0.5f);
+            dr.pivot = new Vector2(0f, 0.5f);
+            dr.anchoredPosition = new Vector2(14f, 0f);
+            dr.sizeDelta = new Vector2(12f, 12f);
+            Image dImg = dotObj.GetComponent<Image>();
+            dImg.sprite = SmartphoneIconRegistry.GetDotGreenIcon();
+            dImg.color = Color.white;
+            dImg.raycastTarget = false;
 
             GameObject shiftObj = new GameObject("ShiftStatus", typeof(RectTransform), typeof(TextMeshProUGUI));
             shiftObj.transform.SetParent(headerObj.transform, false);
             RectTransform sRect = shiftObj.GetComponent<RectTransform>();
             sRect.anchorMin = new Vector2(0f, 0f);
             sRect.anchorMax = new Vector2(1f, 0.5f);
-            sRect.offsetMin = new Vector2(14f, 6f);
+            sRect.offsetMin = new Vector2(32f, 6f);
             sRect.offsetMax = new Vector2(-14f, 0f);
             TextMeshProUGUI sTmp = shiftObj.GetComponent<TextMeshProUGUI>();
-            sTmp.text = "🟢 Vardiya: Aktif | Şehir Teslimatları";
+            sTmp.text = "Vardiya: Aktif | Şehir Teslimatları";
             sTmp.fontSize = 11.5f;
             sTmp.color = new Color(0.2f, 0.95f, 0.45f, 0.95f);
 
@@ -760,19 +780,19 @@ namespace DeliveryDriver.UI.Smartphone
             grid.childAlignment = TextAnchor.MiddleCenter;
 
             // App 1: Kurye Express
-            CreateAppCard(gridObj.transform, "Kurye Express", "Teslimat & İlanlar", "📦", new Color(0.95f, 0.45f, 0.1f, 1f), () => OpenApp(SmartphoneAppType.Delivery), out deliveryBadgeObj, out deliveryBadgeText);
+            CreateAppCard(gridObj.transform, "Kurye Express", "Teslimat & İlanlar", SmartphoneIconRegistry.GetDeliveryAppIcon(), new Color(0.95f, 0.45f, 0.1f, 1f), () => OpenApp(SmartphoneAppType.Delivery), out deliveryBadgeObj, out deliveryBadgeText);
 
             // App 2: QuickPay Banka
-            CreateAppCard(gridObj.transform, "QuickPay Banka", "₺0", "💳", new Color(0.1f, 0.85f, 0.45f, 1f), () => OpenApp(SmartphoneAppType.Bank), out _, out homeBankSubtitle);
+            CreateAppCard(gridObj.transform, "QuickPay Banka", "0 TL", SmartphoneIconRegistry.GetBankAppIcon(), new Color(0.1f, 0.85f, 0.45f, 1f), () => OpenApp(SmartphoneAppType.Bank), out _, out homeBankSubtitle);
 
             // App 3: Garajım & Filo
-            CreateAppCard(gridObj.transform, "Garajım", "Aktif Kurye Vanı", "🚗", new Color(0.15f, 0.65f, 1f, 1f), () => OpenApp(SmartphoneAppType.Garage), out _, out homeGarageSubtitle);
+            CreateAppCard(gridObj.transform, "Garajım", "Aktif Kurye Vanı", SmartphoneIconRegistry.GetGarageAppIcon(), new Color(0.15f, 0.65f, 1f, 1f), () => OpenApp(SmartphoneAppType.Garage), out _, out homeGarageSubtitle);
 
             // App 4: Müşteri Mesajları
-            CreateAppCard(gridObj.transform, "Müşteri Yorumları", "4.9 ★ Puan", "⭐", new Color(0.7f, 0.35f, 1f, 1f), () => OpenApp(SmartphoneAppType.Messages), out _, out _);
+            CreateAppCard(gridObj.transform, "Müşteri Yorumları", "4.9 / 5.0 Puan", SmartphoneIconRegistry.GetMessagesAppIcon(), new Color(0.7f, 0.35f, 1f, 1f), () => OpenApp(SmartphoneAppType.Messages), out _, out _);
         }
 
-        private void CreateAppCard(Transform parent, string title, string subtitle, string icon, Color accentColor, Action onClick, out GameObject badgeObj, out TextMeshProUGUI subtitleText)
+        private void CreateAppCard(Transform parent, string title, string subtitle, Sprite iconSprite, Color accentColor, Action onClick, out GameObject badgeObj, out TextMeshProUGUI subtitleText)
         {
             GameObject cardObj = new GameObject($"AppCard_{title}", typeof(RectTransform), typeof(Image), typeof(Button));
             cardObj.transform.SetParent(parent, false);
@@ -799,19 +819,19 @@ namespace DeliveryDriver.UI.Smartphone
             ibImg.sprite = fallbackSprite;
             ibImg.raycastTarget = false;
 
-            // Icon Text
-            GameObject iconObj = new GameObject("Icon", typeof(RectTransform), typeof(TextMeshProUGUI));
+            // Icon Image
+            GameObject iconObj = new GameObject("Icon", typeof(RectTransform), typeof(Image));
             iconObj.transform.SetParent(iconBgObj.transform, false);
             RectTransform iRect = iconObj.GetComponent<RectTransform>();
-            iRect.anchorMin = Vector2.zero;
-            iRect.anchorMax = Vector2.one;
-            iRect.offsetMin = Vector2.zero;
-            iRect.offsetMax = Vector2.zero;
-            TextMeshProUGUI iTmp = iconObj.GetComponent<TextMeshProUGUI>();
-            iTmp.text = icon;
-            iTmp.fontSize = 32f;
-            iTmp.alignment = TextAlignmentOptions.Center;
-            iTmp.raycastTarget = false;
+            iRect.anchorMin = new Vector2(0.5f, 0.5f);
+            iRect.anchorMax = new Vector2(0.5f, 0.5f);
+            iRect.pivot = new Vector2(0.5f, 0.5f);
+            iRect.sizeDelta = new Vector2(40f, 40f);
+            Image iImg = iconObj.GetComponent<Image>();
+            iImg.sprite = iconSprite;
+            iImg.color = Color.white;
+            iImg.preserveAspect = true;
+            iImg.raycastTarget = false;
 
             // Title
             GameObject tObj = new GameObject("Title", typeof(RectTransform), typeof(TextMeshProUGUI));

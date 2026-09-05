@@ -82,12 +82,16 @@ namespace DeliveryDriver.UI.Smartphone
 
             if (offerTitleText != null) offerTitleText.text = string.IsNullOrWhiteSpace(title) ? "Kargo Teslimatı" : title;
             if (offerDescText != null) offerDescText.text = body;
-            if (offerRewardText != null) offerRewardText.text = string.IsNullOrWhiteSpace(reward) ? "₺150" : reward;
+            if (offerRewardText != null)
+            {
+                string cleanReward = string.IsNullOrWhiteSpace(reward) ? "150 TL" : reward.Replace("₺", "").Trim() + " TL";
+                offerRewardText.text = cleanReward;
+            }
 
             // Route & Cargo Type extraction / formatting
             if (offerRouteText != null)
             {
-                offerRouteText.text = "📍 Şehir İçi Rota ➔ Teslimat Noktası";
+                offerRouteText.text = "Rota: Şehir İçi -> Teslimat Noktası";
             }
 
             if (cargoTypeBadgeText != null && cargoTypeBadgeBg != null)
@@ -159,19 +163,19 @@ namespace DeliveryDriver.UI.Smartphone
             {
                 if (deliveryMgr.IsCarryingBox)
                 {
-                    activeStatusText.text = "📦 Kargo Aracınızda - Adrese Ulaştırın";
+                    activeStatusText.text = "Kargo Aracınızda - Adrese Ulaştırın";
                     activeStatusText.color = new Color(0.2f, 0.95f, 0.45f, 1f);
                 }
                 else
                 {
-                    activeStatusText.text = "📍 Yükleme Noktasına Gidin (Kutuyu Alın)";
+                    activeStatusText.text = "Yükleme Noktasına Gidin (Kutuyu Alın)";
                     activeStatusText.color = new Color(1f, 0.85f, 0.2f, 1f);
                 }
             }
 
             if (activeRewardText != null)
             {
-                activeRewardText.text = "💰 Teslimat Tamamlanınca Bakiye Yüklenecek";
+                activeRewardText.text = "Teslimat Tamamlanınca Bakiye Yüklenecek";
             }
         }
 
@@ -275,7 +279,7 @@ namespace DeliveryDriver.UI.Smartphone
             rtRect.sizeDelta = new Vector2(-28f, 22f);
 
             offerRouteText = routeObj.GetComponent<TextMeshProUGUI>();
-            offerRouteText.text = "📍 Şehir İçi Rota";
+            offerRouteText.text = "Rota: Şehir İçi";
             offerRouteText.fontSize = 13f;
             offerRouteText.color = new Color(0.35f, 0.85f, 1f, 1f);
 
@@ -318,7 +322,7 @@ namespace DeliveryDriver.UI.Smartphone
             rwtRect.offsetMax = new Vector2(-12f, 0f);
 
             offerRewardText = rwTextObj.GetComponent<TextMeshProUGUI>();
-            offerRewardText.text = "Ödül: ₺250";
+            offerRewardText.text = "Ödül: 250 TL";
             offerRewardText.fontSize = 17f;
             offerRewardText.fontStyle = FontStyles.Bold;
             offerRewardText.color = new Color(0.3f, 0.95f, 0.45f, 1f);
@@ -328,14 +332,14 @@ namespace DeliveryDriver.UI.Smartphone
             GameObject acceptBtnObj = new GameObject("AcceptBtn", typeof(RectTransform), typeof(Image), typeof(Button));
             acceptBtnObj.transform.SetParent(offerCardObj.transform, false);
             RectTransform abRect = acceptBtnObj.GetComponent<RectTransform>();
-            abRect.anchorMin = new Vector2(0f, 0f);
-            abRect.anchorMax = new Vector2(0.5f, 0f);
+            abRect.anchorMin = new Vector2(0.5f, 0f);
+            abRect.anchorMax = new Vector2(1f, 0f);
             abRect.pivot = new Vector2(0.5f, 0f);
-            abRect.anchoredPosition = new Vector2(14f, 14f);
-            abRect.sizeDelta = new Vector2(-20f, 42f);
+            abRect.anchoredPosition = new Vector2(0f, 12f);
+            abRect.sizeDelta = new Vector2(-20f, 44f);
 
             Image abImg = acceptBtnObj.GetComponent<Image>();
-            abImg.color = new Color(0.15f, 0.7f, 0.35f, 1f);
+            abImg.color = new Color(0.12f, 0.65f, 0.3f, 1f);
             abImg.sprite = fallbackSprite;
 
             acceptButton = acceptBtnObj.GetComponent<Button>();
@@ -350,7 +354,7 @@ namespace DeliveryDriver.UI.Smartphone
             abtRect.offsetMax = Vector2.zero;
 
             TextMeshProUGUI abTmp = abTextObj.GetComponent<TextMeshProUGUI>();
-            abTmp.text = "✓ KABUL ET";
+            abTmp.text = "KABUL ET";
             abTmp.fontSize = 13f;
             abTmp.fontStyle = FontStyles.Bold;
             abTmp.alignment = TextAlignmentOptions.Center;
@@ -360,11 +364,11 @@ namespace DeliveryDriver.UI.Smartphone
             GameObject rejectBtnObj = new GameObject("RejectBtn", typeof(RectTransform), typeof(Image), typeof(Button));
             rejectBtnObj.transform.SetParent(offerCardObj.transform, false);
             RectTransform rbRect = rejectBtnObj.GetComponent<RectTransform>();
-            rbRect.anchorMin = new Vector2(0.5f, 0f);
-            rbRect.anchorMax = new Vector2(1f, 0f);
+            rbRect.anchorMin = new Vector2(0f, 0f);
+            rbRect.anchorMax = new Vector2(0.5f, 0f);
             rbRect.pivot = new Vector2(0.5f, 0f);
-            rbRect.anchoredPosition = new Vector2(-14f, 14f);
-            rbRect.sizeDelta = new Vector2(-20f, 42f);
+            rbRect.anchoredPosition = new Vector2(0f, 12f);
+            rbRect.sizeDelta = new Vector2(-20f, 44f);
 
             Image rbImg = rejectBtnObj.GetComponent<Image>();
             rbImg.color = new Color(0.65f, 0.2f, 0.2f, 1f);
@@ -382,7 +386,7 @@ namespace DeliveryDriver.UI.Smartphone
             rbtRect.offsetMax = Vector2.zero;
 
             TextMeshProUGUI rbTmp = rbTextObj.GetComponent<TextMeshProUGUI>();
-            rbTmp.text = "✕ REDDET";
+            rbTmp.text = "REDDET";
             rbTmp.fontSize = 13f;
             rbTmp.fontStyle = FontStyles.Bold;
             rbTmp.alignment = TextAlignmentOptions.Center;
@@ -410,7 +414,7 @@ namespace DeliveryDriver.UI.Smartphone
             adtRect.anchoredPosition = new Vector2(14f, -18f);
             adtRect.sizeDelta = new Vector2(-28f, 26f);
             TextMeshProUGUI adtTmp = adTitle.GetComponent<TextMeshProUGUI>();
-            adtTmp.text = "🚚 AKTİF TESLİMAT SÜRÜYOR";
+            adtTmp.text = "AKTİF TESLİMAT SÜRÜYOR";
             adtTmp.fontSize = 15f;
             adtTmp.fontStyle = FontStyles.Bold;
             adtTmp.color = new Color(0.3f, 0.95f, 0.45f, 1f);
@@ -461,18 +465,18 @@ namespace DeliveryDriver.UI.Smartphone
             esRect.anchoredPosition = new Vector2(0f, 20f);
             esRect.sizeDelta = new Vector2(-40f, 200f);
 
-            GameObject esIcon = new GameObject("Icon", typeof(RectTransform), typeof(TextMeshProUGUI));
+            GameObject esIcon = new GameObject("Icon", typeof(RectTransform), typeof(Image));
             esIcon.transform.SetParent(emptyStateObj.transform, false);
             RectTransform esiRect = esIcon.GetComponent<RectTransform>();
             esiRect.anchorMin = new Vector2(0.5f, 1f);
             esiRect.anchorMax = new Vector2(0.5f, 1f);
             esiRect.pivot = new Vector2(0.5f, 1f);
             esiRect.anchoredPosition = new Vector2(0f, 0f);
-            esiRect.sizeDelta = new Vector2(60f, 60f);
-            TextMeshProUGUI esiTmp = esIcon.GetComponent<TextMeshProUGUI>();
-            esiTmp.text = "📡";
-            esiTmp.fontSize = 38f;
-            esiTmp.alignment = TextAlignmentOptions.Center;
+            esiRect.sizeDelta = new Vector2(56f, 56f);
+            Image esiImg = esIcon.GetComponent<Image>();
+            esiImg.sprite = SmartphoneIconRegistry.GetDeliveryAppIcon();
+            esiImg.color = Color.white;
+            esiImg.preserveAspect = true;
 
             GameObject esText = new GameObject("Text", typeof(RectTransform), typeof(TextMeshProUGUI));
             esText.transform.SetParent(emptyStateObj.transform, false);
