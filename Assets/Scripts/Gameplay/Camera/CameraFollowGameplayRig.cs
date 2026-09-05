@@ -14,7 +14,9 @@ internal readonly struct CameraFollowGameplayRigSettings
         float fovLerpSpeed,
         float forwardZoomOutExtra,
         float forwardZoomOutSpeedKmh,
-        float dynamicZoomLerpSpeed)
+        float dynamicZoomLerpSpeed,
+        float reverseZoomOutExtra = 1.6f,
+        float reverseHeightExtra = 0.8f)
     {
         Offset = offset;
         LookAtTargetOffset = lookAtTargetOffset;
@@ -26,6 +28,8 @@ internal readonly struct CameraFollowGameplayRigSettings
         ForwardZoomOutExtra = forwardZoomOutExtra;
         ForwardZoomOutSpeedKmh = forwardZoomOutSpeedKmh;
         DynamicZoomLerpSpeed = dynamicZoomLerpSpeed;
+        ReverseZoomOutExtra = reverseZoomOutExtra;
+        ReverseHeightExtra = reverseHeightExtra;
     }
 
     public Vector3 Offset { get; }
@@ -38,6 +42,8 @@ internal readonly struct CameraFollowGameplayRigSettings
     public float ForwardZoomOutExtra { get; }
     public float ForwardZoomOutSpeedKmh { get; }
     public float DynamicZoomLerpSpeed { get; }
+    public float ReverseZoomOutExtra { get; }
+    public float ReverseHeightExtra { get; }
 }
 
 internal sealed class CameraFollowGameplayRig
@@ -48,6 +54,8 @@ internal sealed class CameraFollowGameplayRig
     private CinemachineRotationComposer rotationComposer;
     private float currentGameplayFov;
     private float currentZoomOffset;
+    private float currentHeightOffset;
+    private bool isCurrentlyReversing;
     private bool warnedMissingGameplayCamera;
 
     public bool HasGameplayCamera => gameplayCamera != null;
@@ -68,6 +76,20 @@ internal sealed class CameraFollowGameplayRig
         cinemachineFollow = gameplayCamera != null ? gameplayCamera.GetComponent<CinemachineFollow>() : null;
         rotationComposer = gameplayCamera != null ? gameplayCamera.GetComponent<CinemachineRotationComposer>() : null;
 
+        if (cinemachineFollow != null)
+        {
+            // İleri-geri Z gecikmesini 1.0 saniyeden 0.05 saniyeye indiriyoruz:
+            // Böylece araba hızlandığında ötede kalmaz, geri gittiğinde de tavanına yapışmaz!
+            cinemachineFollow.TrackerSettings.PositionDamping = new Vector3(0.12f, 0.25f, 0.05f);
+            cinemachineFollow.TrackerSettings.RotationDamping = new Vector3(0.15f, 0.2f, 0.15f);
+        }
+
+        if (rotationComposer != null)
+        {
+            rotationComposer.TargetOffset = new Vector3(0f, 1.2f, 0f);
+            rotationComposer.Damping = new Vector2(0.2f, 0.2f);
+        }
+
         if (gameplayCamera == null && !warnedMissingGameplayCamera)
         {
             warnedMissingGameplayCamera = true;
@@ -87,6 +109,7 @@ internal sealed class CameraFollowGameplayRig
     {
         currentGameplayFov = currentLensFov;
         currentZoomOffset = 0f;
+        currentHeightOffset = 0f;
     }
 
     public float ResolveCurrentLensFov(float fallbackFov)
@@ -158,26 +181,50 @@ internal sealed class CameraFollowGameplayRig
         }
 
         float desiredZoomOffset = 0f;
+        float desiredHeightOffset = 0f;
+        isCurrentlyReversing = false;
+
         if (targetRb != null)
         {
             float localVelZ = target.InverseTransformDirection(targetRb.linearVelocity).z;
-            bool isReversing = (carController != null && carController.IsReverseInputActive) || localVelZ < -0.3f;
-            if (!isReversing)
+            isCurrentlyReversing = (carController != null && carController.IsReverseInputActive) || localVelZ < -0.2f;
+
+            if (isCurrentlyReversing)
             {
+                // Geri giderken kamera ekstra hareket etmesin, normal konumunu korusun
+                desiredZoomOffset = 0f;
+                desiredHeightOffset = 0f;
+            }
+            else
+            {
+                // İleri giderken: araba kameradan kopmasın, hafif ve dengeli geri çekilme
                 float forwardKmh = Mathf.Max(0f, localVelZ * 3.6f);
                 float zoomT = Mathf.Clamp01(forwardKmh / Mathf.Max(1f, settings.ForwardZoomOutSpeedKmh));
                 desiredZoomOffset = -zoomT * settings.ForwardZoomOutExtra;
+                desiredHeightOffset = 0f;
             }
         }
 
-        currentZoomOffset = Mathf.Lerp(currentZoomOffset, desiredZoomOffset, Mathf.Max(0.01f, settings.DynamicZoomLerpSpeed) * deltaTime);
+        float lerpSpeed = isCurrentlyReversing ? 8f : settings.DynamicZoomLerpSpeed;
+        currentZoomOffset = Mathf.Lerp(currentZoomOffset, desiredZoomOffset, Mathf.Max(0.01f, lerpSpeed) * deltaTime);
+        currentHeightOffset = Mathf.Lerp(currentHeightOffset, desiredHeightOffset, Mathf.Max(0.01f, lerpSpeed) * deltaTime);
     }
 
     private void ApplyRigSettings(CameraFollowGameplayRigSettings settings, bool snap)
     {
         if (cinemachineFollow != null)
         {
-            Vector3 desiredOffset = new Vector3(settings.Offset.x, settings.Offset.y, settings.Offset.z + currentZoomOffset);
+            // Geri giderken arabanın kameraya yapışmaması için Z damping'i sıkı tut ama kamera ofsetini değiştirme
+            if (isCurrentlyReversing)
+            {
+                cinemachineFollow.TrackerSettings.PositionDamping = new Vector3(0.08f, 0.15f, 0.02f);
+            }
+            else
+            {
+                cinemachineFollow.TrackerSettings.PositionDamping = new Vector3(0.12f, 0.25f, 0.05f);
+            }
+
+            Vector3 desiredOffset = new Vector3(settings.Offset.x, settings.Offset.y + currentHeightOffset, settings.Offset.z + currentZoomOffset);
             if ((cinemachineFollow.FollowOffset - desiredOffset).sqrMagnitude > 0.0001f)
             {
                 cinemachineFollow.FollowOffset = desiredOffset;
@@ -186,6 +233,7 @@ internal sealed class CameraFollowGameplayRig
 
         if (rotationComposer != null)
         {
+            // Sabit ve dengeli lookAt: geri giderken tavana veya yere eğilme yapmaz
             rotationComposer.TargetOffset = settings.LookAtTargetOffset;
         }
 

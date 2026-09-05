@@ -131,11 +131,11 @@ public class CarController : MonoBehaviour
 
     [Header("--- HANDBRAKE DRIFT ---")]
     [Tooltip("El freni birakildiginda kaymanin aninda kesilmeyip tatli ve akici sekilde toparlanma suresi (s).")]
-    [Range(0.1f, 2f)]
-    [SerializeField] private float driftRecoveryDuration = 0.75f;
+    [Range(0.1f, 3f)]
+    [SerializeField] private float driftRecoveryDuration = 1.4f;
     [Tooltip("El freni aktifken arka teker yan tutusunun korunacak orani.")]
-    [Range(0.2f, 1f)]
-    [SerializeField] private float handbrakeRearSidewaysGripFactor = 0.50f;
+    [Range(0.1f, 1f)]
+    [SerializeField] private float handbrakeRearSidewaysGripFactor = 0.28f;
     [Tooltip("El freni aktifken direksiyon yonune verilen hafif donus destegi.")]
     [SerializeField] private float handbrakeDriftAssistTorque = 1100f;
     [Tooltip("Drift desteginin devreye girmesi icin minimum hiz (km/s).")]
@@ -733,15 +733,17 @@ public class CarController : MonoBehaviour
             return;
         }
 
-        // Drift halindeyken yanal kaymayi aninda kesmemek icin grip faktorunu blend ile kademeli uygula
-        float effectiveGripFactor = antiSlideGripFactor * (1f - currentDriftGripBlend);
+        // Drift halindeyken ve el freni birakildiginda yanal kaymanin aninda kesilmeyip tatli sekilde suzulmesi
+        float recoveryGripRatio = Mathf.SmoothStep(0f, 1f, 1f - currentDriftGripBlend);
+        float effectiveGripFactor = antiSlideGripFactor * recoveryGripRatio;
         if (effectiveGripFactor <= 0.01f)
         {
             return;
         }
 
-        // Yanal kaymayi sonumleyen karsi ivme (arcade cozy grip)
-        float dampingAcceleration = -lateralSpeed * (effectiveGripFactor * 22f);
+        // Yanal kaymayi sonumleyen ivmeyi kademeli arttirarak küt oturmayi onle (cozy progressive drift glide)
+        float dynamicDampingRate = Mathf.Lerp(6f, 20f, recoveryGripRatio);
+        float dampingAcceleration = -lateralSpeed * (effectiveGripFactor * dynamicDampingRate);
         Vector3 worldForce = transform.right * (dampingAcceleration * groundedRatio * rb.mass);
         rb.AddForce(worldForce, ForceMode.Force);
 
@@ -817,8 +819,8 @@ public class CarController : MonoBehaviour
 
         // DURUM 2: Direksiyon notr (Anti-Spin Stability)
         // Oyuncu direksiyon cevirmiyorken arka savruluyorsa, burnu hareket yonune toparla
-        // Drift cikisinda veya drift esnasinda arac küt bicimde duzeltilmesin diye drift blend ile yumusatilir
-        if (steerMagnitude <= 0.05f && antiSpinStability > 0f && currentDriftGripBlend < 0.7f)
+        // Drift cikisinda veya drift esnasinda arac küt bicimde duzeltilmesin diye drift toparlanmasi sonuna kadar beklenir
+        if (steerMagnitude <= 0.05f && antiSpinStability > 0f && currentDriftGripBlend < 0.2f)
         {
             Vector3 flatForward = transform.forward;
             flatForward.y = 0f;

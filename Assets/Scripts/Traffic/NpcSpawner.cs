@@ -505,6 +505,37 @@ namespace TrafficSystem
         {
             if (!avoidSpawningInCameraView) return false;
 
+            // 1. Forward View Check: Reject spawn if it's anywhere in front of the player within 90m
+            Transform player = playerTransform;
+            if (player == null && autoFindPlayer)
+            {
+                GameObject taggedPlayer = GameObject.FindGameObjectWithTag("Player");
+                if (taggedPlayer != null) player = taggedPlayer.transform;
+            }
+
+            if (player != null)
+            {
+                Vector3 toSpawn = spawnPosition - player.position;
+                toSpawn.y = 0f;
+                float dist = toSpawn.magnitude;
+
+                if (dist < 90f && dist > 0.1f)
+                {
+                    Vector3 playerFwd = player.forward;
+                    playerFwd.y = 0f;
+                    if (playerFwd.sqrMagnitude > 0.01f)
+                    {
+                        float dot = Vector3.Dot(playerFwd.normalized, toSpawn.normalized);
+                        // Forward arc ~150 degrees (dot > 0.15)
+                        if (dot > 0.15f)
+                        {
+                            return true; // Directly in front of player - reject!
+                        }
+                    }
+                }
+            }
+
+            // 2. Camera Viewport frustum check
             Camera cam = Camera.main;
             if (cam == null) return false;
 
@@ -812,7 +843,7 @@ namespace TrafficSystem
 
         private static Vector3 GetVehicleRootSpawnPosition(GameObject npc, Vector3 groundPosition, NpcCarAgent carAgent)
         {
-            float clearanceOffset = carAgent != null ? carAgent.GetGroundClearanceOffset() : 0.2f;
+            float clearanceOffset = (carAgent != null ? carAgent.GetGroundClearanceOffset() : 0.2f) + 0.35f;
             return groundPosition + Vector3.up * clearanceOffset;
         }
 

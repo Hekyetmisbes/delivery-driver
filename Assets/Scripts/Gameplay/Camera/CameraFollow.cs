@@ -32,19 +32,23 @@ public class CameraFollow : MonoBehaviour
 
     [Header("Dinamik Mesafe")]
     [Tooltip("İleri giderken kameranın geri çekildiği maksimum ekstra mesafe (m)")]
-    [SerializeField] private float forwardZoomOutExtra = 2.5f;
+    [SerializeField] private float forwardZoomOutExtra = 0.8f;
     [Tooltip("Bu hızda (km/h) maksimum geri çekilme sağlanır")]
-    [SerializeField] private float forwardZoomOutSpeedKmh = 80f;
+    [SerializeField] private float forwardZoomOutSpeedKmh = 140f;
     [Tooltip("Mesafe değişim yumuşaklığı (düşük = daha yavaş uzaklaşma)")]
-    [SerializeField] private float dynamicZoomLerpSpeed = 1.2f;
+    [SerializeField] private float dynamicZoomLerpSpeed = 1.8f;
+    [Tooltip("Geri giderken tavana yaklaşmayı önlemek için ek mesafe (m)")]
+    [SerializeField] private float reverseZoomOutExtra = 2.2f;
+    [Tooltip("Geri giderken tavana yaklaşmayı önlemek için ek yükseklik (m)")]
+    [SerializeField] private float reverseHeightExtra = 1.0f;
 
     [Header("Speed Feel")]
     [Tooltip("Arac hizina gore kamera FOV degissin mi")]
     [SerializeField] private bool enableSpeedFov = true;
     [SerializeField] private float baseFov = 60f;
-    [SerializeField] private float maxSpeedFov = 78f;
-    [SerializeField] private float fovMaxSpeedKmh = 190f;
-    [SerializeField] private float fovLerpSpeed = 6f;
+    [SerializeField] private float maxSpeedFov = 66f;
+    [SerializeField] private float fovMaxSpeedKmh = 160f;
+    [SerializeField] private float fovLerpSpeed = 5f;
 
     [Header("Geri Görüş Kamerası (HUD)")]
     [Tooltip("Araç geri giderken ekranın üstünde geri görüş kamerası göster")]
@@ -233,7 +237,9 @@ public class CameraFollow : MonoBehaviour
             fovLerpSpeed,
             forwardZoomOutExtra,
             forwardZoomOutSpeedKmh,
-            dynamicZoomLerpSpeed);
+            dynamicZoomLerpSpeed,
+            reverseZoomOutExtra,
+            reverseHeightExtra);
     }
 
     void HandleCameraMovement(float deltaTime)
@@ -241,20 +247,23 @@ public class CameraFollow : MonoBehaviour
         // --- Geri/fren tespiti ve dinamik Z offset ---
         bool reverseInput = carController != null && carController.IsReverseInputActive;
         bool isReversing = false;
+        float currentHeightAdjust = 0f;
+
         if (targetRb != null)
         {
             float localVelZ = target.InverseTransformDirection(targetRb.linearVelocity).z;
-            // Geri tuşuna basılıyorsa VEYA araç gerçekten geri gidiyorsa → kamera sabit
-            isReversing = reverseInput || localVelZ < -0.3f;
+            // Geri tuşuna basılıyorsa VEYA araç gerçekten geri gidiyorsa → kamera geriye ve yukarıya açılsın
+            isReversing = reverseInput || localVelZ < -0.2f;
 
             if (isReversing)
             {
-                currentVelocity = Vector3.zero;
-                currentZoomOffset = Mathf.Lerp(currentZoomOffset, 0f, 10f * deltaTime);
+                // Geri giderken kamera ekstra hareket etmesin
+                currentZoomOffset = Mathf.Lerp(currentZoomOffset, 0f, 8f * deltaTime);
+                currentHeightAdjust = Mathf.Lerp(currentHeightAdjust, 0f, 8f * deltaTime);
             }
             else
             {
-                // İleri giderken: hıza göre kamerayı yavaşça geri çek
+                // İleri giderken: hıza göre kamerayı hafifçe geri çek
                 float forwardKmh = Mathf.Max(0f, localVelZ * 3.6f);
                 float zoomT = Mathf.Clamp01(forwardKmh / Mathf.Max(1f, forwardZoomOutSpeedKmh));
                 float targetZoom = -zoomT * forwardZoomOutExtra;
@@ -262,7 +271,7 @@ public class CameraFollow : MonoBehaviour
             }
         }
 
-        Vector3 targetOffset = new Vector3(offset.x, offset.y, offset.z + currentZoomOffset);
+        Vector3 targetOffset = new Vector3(offset.x, offset.y + currentHeightAdjust, offset.z + currentZoomOffset);
 
         // --- Pozisyon hesaplama ---
         Vector3 desiredPosition;

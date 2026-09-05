@@ -70,9 +70,13 @@ namespace TrafficSystem
         private RoadIntersection currentIntersectionReserved = null;
 
         public SplineRoad CurrentRoad => currentRoad;
+        public float CurrentT => currentT;
+        public bool IsDrivingForwardOnRoad => isDrivingForwardOnRoad;
         public float CurrentSpeedKmh => rb != null ? rb.linearVelocity.magnitude * 3.6f : 0f;
         public bool IsWaitingAtIntersection => isWaitingAtIntersection;
         public bool IsWaitingInTraffic => isWaitingInTraffic;
+
+        private static readonly Collider[] obstacleOverlapBuffer = new Collider[24];
 
         [Header("External Control")]
         public bool IsControlledExternally = false;
@@ -382,6 +386,18 @@ namespace TrafficSystem
             // 1. Position on spline
             currentT = currentRoad.GetClosestT(transform.position);
 
+            // Subsurface anti-fall protection: if car sinks below the road lane, rescue it immediately
+            Vector3 expectedLanePos = currentRoad.GetLanePosition(currentT, isDrivingForwardOnRoad);
+            if (transform.position.y < expectedLanePos.y - 1.4f || transform.position.y < -15f)
+            {
+                transform.position = expectedLanePos + Vector3.up * (GetGroundClearanceOffset() + 0.35f);
+                if (rb != null)
+                {
+                    rb.linearVelocity = Vector3.Project(rb.linearVelocity, transform.forward);
+                    rb.angularVelocity = Vector3.zero;
+                }
+            }
+
             // 2. Navigation State
             float distanceOnRoad = currentRoad.TToDistance(currentT);
             float totalLength = currentRoad.GetTotalLength();
@@ -687,6 +703,38 @@ namespace TrafficSystem
             Vector3 rightWhisker = Quaternion.Euler(0f, 12f, 0f) * forward;
             CheckRay(origin, leftWhisker, 12f, 0.6f, ref closestDistance, ref leadVehicleRb);
             CheckRay(origin, rightWhisker, 12f, 0.6f, ref closestDistance, ref leadVehicleRb);
+
+            // 5. Flank / Lateral Proximity Detection (Yielding for Side-by-Side & Merging Traffic)
+            int overlapCount = Physics.OverlapSphereNonAlloc(origin, 4.2f, obstacleOverlapBuffer, obstacleLayerMask, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < overlapCount; i++)
+            {
+                Collider col = obstacleOverlapBuffer[i];
+                if (!IsBlockingObstacle(col)) continue;
+
+                Rigidbody otherRb = col.attachedRigidbody;
+                if (otherRb == null || otherRb == rb) continue;
+
+                Vector3 localOther = transform.InverseTransformPoint(otherRb.position);
+                // Within lateral distance of 3.8m and longitudinal zone (-1.8m to +5.5m)
+                if (Mathf.Abs(localOther.x) < 3.8f && localOther.z > -1.8f && localOther.z < 5.5f)
+                {
+                    // Check if other is the Player vehicle: NPC always yields to the Player!
+                    bool otherIsPlayer = otherRb.GetComponent<CarController>() != null || col.GetComponentInParent<CarController>() != null;
+
+                    // If other is ahead of us, or side-by-side and has priority
+                    bool shouldYield = otherIsPlayer || localOther.z > 0.25f || (Mathf.Abs(localOther.z) <= 0.25f && otherRb.GetInstanceID() > rb.GetInstanceID());
+
+                    if (shouldYield)
+                    {
+                        float effectiveDist = Mathf.Max(1.0f, localOther.z + 1.2f);
+                        if (effectiveDist < closestDistance)
+                        {
+                            closestDistance = effectiveDist;
+                            leadVehicleRb = otherRb;
+                        }
+                    }
+                }
+            }
 
             return closestDistance < float.MaxValue;
         }

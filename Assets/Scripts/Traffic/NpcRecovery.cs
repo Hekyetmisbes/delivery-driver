@@ -67,6 +67,7 @@ namespace TrafficSystem
             UpdateStuckDetection();
             UpdateFlippedDetection();
             UpdateDonutDetection();
+            UpdateSubsurfaceDetection();
         }
 
         private void UpdateDonutDetection()
@@ -126,6 +127,17 @@ namespace TrafficSystem
             if (Vector3.Dot(transform.up, Vector3.up) < 0.2f)
             {
                 TriggerTeleportRecovery("Flipped");
+            }
+        }
+
+        private void UpdateSubsurfaceDetection()
+        {
+            if (carAgent == null || carAgent.CurrentRoad == null) return;
+
+            Vector3 roadLanePos = carAgent.CurrentRoad.GetLanePosition(carAgent.CurrentT, carAgent.IsDrivingForwardOnRoad);
+            if (transform.position.y < roadLanePos.y - 1.5f || transform.position.y < -15f)
+            {
+                TriggerTeleportRecovery("Subsurface / Fell Below Road");
             }
         }
 
