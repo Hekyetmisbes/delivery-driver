@@ -80,6 +80,7 @@ public class GlobalUiCoordinator : MonoBehaviour
         EnsureFuelHudComponent();
         EnsureSpeedometerComponent();
         EnsureReverseCameraComponent();
+        EnsureSmartphoneComponent();
         RefreshSceneBindings();
     }
 
@@ -139,6 +140,7 @@ public class GlobalUiCoordinator : MonoBehaviour
         EnsureFuelHudComponent();
         EnsureSpeedometerComponent();
         EnsureReverseCameraComponent();
+        EnsureSmartphoneComponent();
         if (adoptExistingCanvases)
         {
             ReparentSceneCanvases();
@@ -279,6 +281,19 @@ public class GlobalUiCoordinator : MonoBehaviour
         if (GetComponent<ReverseCameraHUD>() == null)
         {
             gameObject.AddComponent<ReverseCameraHUD>();
+        }
+    }
+
+    private void EnsureSmartphoneComponent()
+    {
+        if (FindFirstObjectByType<DeliveryDriver.UI.Smartphone.SmartphoneUI>() != null)
+        {
+            return;
+        }
+
+        if (GetComponent<DeliveryDriver.UI.Smartphone.SmartphoneUI>() == null)
+        {
+            gameObject.AddComponent<DeliveryDriver.UI.Smartphone.SmartphoneUI>();
         }
     }
 
