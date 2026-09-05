@@ -199,7 +199,6 @@ namespace DeliveryDriver.EditorTools
             Selection.selectionChanged += OnSelectionChange;
             LoadDefaultAssets();
             InvalidateSceneCache();
-            TryLoadSelectedRoad();
         }
 
         private void OnDisable()
