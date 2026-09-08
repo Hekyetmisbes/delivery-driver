@@ -1,281 +1,197 @@
 # Delivery Driver
 
-Unity tabanli bir acik dunya teslimat oyunu prototipi. Proje, surus fizigi, gorev/quest sistemi, NPC trafik AI, mahalle bolgeleri, minimap ve performans optimizasyonu gibi birden fazla sistemi tek bir sahnede birlestirir.
+**Delivery Driver**, Unity (Unity 6 / `6000.3.x`) ile geliştirilen açık dünya araç sürüşü, teslimat simülasyonu, şirket/filo yönetimi ve sinematik tanıtım araçlarını birleştiren kapsamlı bir oyun projesidir.
 
-## Icindekiler
-- [Proje Ozeti](#proje-ozeti)
-- [Temel Ozellikler](#temel-ozellikler)
-- [Teknoloji ve Surumler](#teknoloji-ve-surumler)
-- [Kurulum](#kurulum)
-- [Hizli Baslangic](#hizli-baslangic)
-- [Kontroller](#kontroller)
-- [Oynanis Dongusu](#oynanis-dongusu)
-- [Sistem Mimarisi](#sistem-mimarisi)
-- [Veri, Kayit ve Veritabani](#veri-kayit-ve-veritabani)
-- [Klasor Yapisi](#klasor-yapisi)
-- [Editor ve Debug Araclari](#editor-ve-debug-araclari)
-- [Performans Test Araclari](#performans-test-araclari)
-- [Build Alma](#build-alma)
-- [Sorun Giderme](#sorun-giderme)
-- [Ek Dokumanlar](#ek-dokumanlar)
-
-## Proje Ozeti
-Bu proje su hedefleri olan bir teslimat simulasyonu uzerine kurulu:
-
-- Oyuncu, sehir icinde paket teslimat gorevleri alir.
-- Gorevler farkli tiplerde uretilir (standart, zamanli, kirilgan, multi-stop).
-- Gorev odulleri; mesafe, sure baskisi, kargo tipi, risk ve surus performansina gore hesaplanir.
-- Trafik sistemi, yol grafi uzerinden NPC araclari surer ve davranis optimizasyonu uygular.
-- Progresyon sistemi para, XP, level, basarimlar ve hafif bir skill tree yapisi sunar.
-
-Proje aktif gelistirme asamasindadir; roadmap dosyasinda tamamlanan ve planlanan adimlar tutulur.
-
-## Temel Ozellikler
-
-### 1) Surus ve Arac Sistemi
-- `CarController` ile wheel collider tabanli surus fizigi
-- Hiz-duyarli direksiyon
-- El freni / drift puanlama
-- Sert fren algilama (quest ceza/feedback entegrasyonu)
-- Geri viteste reverse kamera HUD destegi
-
-### 2) Teslimat ve Gorev Sistemi
-- `DeliveryManager` ile runtime teslimat olusturma
-- Telefon benzeri gorev teklifi UI (`PhoneMissionUI`)
-- Pickup ve delivery indicatorlari
-- Mahalle bazli hedef secimi ve tekrar azaltma kurallari
-- Minimap objective marker + edge indicator
-- Speedometer HUD
-
-### 3) Quest Altyapisi
-- `QuestManager` ile aktif/available/completed quest akisi
-- Streak, bonus ve ceza hesaplari
-- Daily challenge uretimi
-- Kargo hasar takibi ve basarisizlik nedenleri
-- Quest marker pooling
-
-### 4) Progresyon
-- `PlayerProgressionManager` ile para/XP/level yonetimi
-- Basarimlar
-- Detayli oyuncu istatistikleri
-- `DriverProgressionSystem` ile skill tree:
-  - FuelEfficiency
-  - CargoDurability
-  - RouteAssist
-
-### 5) Trafik AI ve Sehir Sistemleri
-- `RoadGraphBuilder` ile EasyRoads3D + SimplePoly yollarindan yol grafigi uretimi
-- `NpcSpawner` ile dagitik NPC spawn ve pooling
-- `NpcCarAgent` ile path-following, obstacle avoidance, lane davranisi
-- `TrafficSimulationOptimizer` ile mesafeye dayali update throttling
-- `WeatherManager` ile hava durumunun trafik davranisina etkisi
-
-### 6) Optimizasyon ve Streaming
-- `WorldChunkManager` + `WorldChunk` ile halka (near/mid/far) bazli chunk yonetimi
-- `HLODGroup` + `HLODProxy` ile uzak mesafe proxy gecisleri
-- `PerformanceOptimizationManager` ile layer culling + kalite ayari
-- `RuntimeOptimizationBootstrap` ile gecikmeli sistem bootstrapping
-
-### 7) UI Katmani
-- Delivery UI
-- Quest UI (active list, completion/failure, statistics)
-- Pause/Settings/Save-Load UI
-- Skill tree UI
-- Mahalle giris bildirimi UI
-
-## Teknoloji ve Surumler
-- **Unity Editor**: `6000.3.9f1`
-- **Render Pipeline**: URP varliklari mevcut (Settings klasoru)
-- **Input**: Unity Input System (`com.unity.inputsystem`)
-- **Kamera**: Cinemachine paketi yuklu (`com.unity.cinemachine`)
-- **Veritabani**: SQLite (schema/seed + runtime sync)
-- **Dil**: C#
-
-### Paketler (manifest'ten)
-- `com.unity.inputsystem` 1.18.0
-- `com.unity.cinemachine` 3.1.5
-- `com.unity.feature.worldbuilding` 1.0.1
-- Unity core module paketleri
-
-## Kurulum
-
-### Gereksinimler
-- Unity Hub
-- Unity `6000.3.9f1`
-- Windows ortaminda acilis onerilir (repo bu ortamda gelistirildi)
-
-### Adimlar
-1. Repoyu klonlayin:
-   ```bash
-   git clone <repo-url>
-   ```
-2. Unity Hub > **Add** ile proje klasorunu secin.
-3. Unity Hub, projeyi `6000.3.9f1` ile acsin.
-4. Ilk import tamamlanana kadar bekleyin.
-
-## Hizli Baslangic
-1. `Assets/Scenes/SampleScene.unity` sahnesini acin.
-2. Sahne ilk acilista su sistemleri bulundurmalidir:
-   - QuestManager
-   - PlayerProgressionManager
-   - SaveManager
-   - DeliveryManager
-   - RoadGraphBuilder
-   - NpcSpawner
-3. Play'e basin.
-4. Baslangicta telefon gorev teklifi UI gelirse gorevi kabul ederek donguyu baslatin.
-
-## Kontroller
-
-| Aksiyon | Klavye | Gamepad | Not |
-|---|---|---|---|
-| Araci sur (ileri/geri/yon) | `WASD` veya Ok tuslari | Sol analog | `InputSystem_Actions` icinde `Move` |
-| El freni / drift | `Space` | South button (A/X) | `CarController`, `Jump` action'i kullanir |
-| Pause menusu | `Esc` | - | `PauseMenuUI` |
-| Skill tree paneli | `K` | - | `ProgressionSkillTreeUI` |
-| Quest debug menusu | `F1` | - | Sadece Editor/Development build |
-| Memory overlay | `F3` | - | `MemoryProfiler` |
-| Force GC | `F4` | - | Memory profiler acikken |
-| Memory CSV export | `F5` | - | `BenchmarkResults/memory_profile.csv` |
-
-Not: Input action asset icinde `Interact (E)`, `Sprint (LeftShift)`, `Previous (1)`, `Next (2)` gibi ek actionlar da tanimli.
-
-## Oynanis Dongusu
-1. Oyuncuya telefon gorev teklifi gelir.
-2. Gorev kabul edilince pickup noktasi olusur.
-3. Oyuncu pickup bolgesine yaklasinca paket alinmis sayilir.
-4. Delivery noktasi/rotasi aktif olur (multi-stop destekli).
-5. Gorev sonunda:
-   - Odul/ceza hesaplanir
-   - XP/para eklenir
-   - Progresyon ve istatistikler guncellenir
-   - Quest kaydi save + (aktifse) SQLite tarafina senkronlanir
-
-## Sistem Mimarisi
-
-### Cekirdek Oyun
-- `Assets/Scripts/CarController.cs`
-- `Assets/Scripts/CameraFollow.cs`
-- `Assets/Scripts/DeliveryManager.cs`
-- `Assets/Scripts/DeliveryBox.cs`
-- `Assets/Scripts/DeliveryUI.cs`
-
-### Quest + Progresyon
-- `Assets/Scripts/Quest/QuestManager.cs`
-- `Assets/Scripts/Quest/QuestData.cs`
-- `Assets/Scripts/Quest/QuestDatabase.cs`
-- `Assets/Scripts/Quest/PlayerProgressionManager.cs`
-- `Assets/Scripts/Quest/DriverProgressionSystem.cs`
-- `Assets/Scripts/Quest/UI/*`
-
-### Trafik + Yol
-- `Assets/Scripts/RoadGraphBuilder.cs`
-- `Assets/Scripts/RoadGraphTypes.cs`
-- `Assets/Scripts/NpcSpawner.cs`
-- `Assets/Scripts/NpcCarAgent.cs`
-- `Assets/Scripts/TrafficSimulationOptimizer.cs`
-- `Assets/Scripts/WeatherManager.cs`
-
-### Performans
-- `Assets/Scripts/PerformanceOptimizationManager.cs`
-- `Assets/Scripts/WorldChunkManager.cs`
-- `Assets/Scripts/WorldChunk.cs`
-- `Assets/Scripts/HLODGroup.cs`
-- `Assets/Scripts/HLODProxy.cs`
-- `Assets/Scripts/RuntimeOptimizationBootstrap.cs`
-
-## Veri, Kayit ve Veritabani
-
-### Save Sistemi (JSON)
-- Yonetici: `SaveManager`
-- Dosya: `savegame.json`
-- Konum: `Application.persistentDataPath`
-- Auto-save: varsayilan acik (300 sn)
-
-Kaydedilen ana alanlar:
-- Oyuncu para/XP/level
-- Quest durumu ve aktif gorevler
-- Skill tree durumlari
-- Oyun istatistikleri
-
-### SQLite Quest Veritabani
-- Bootstrap: `QuestDatabaseBootstrap`
-- Service: `QuestDatabaseService`
-- Auto Sync: `QuestDatabaseAutoSync`
-- DB dosyasi: `quest.db` (`Application.persistentDataPath`)
-- SQL kaynaklari:
-  - `Assets/StreamingAssets/Database/schema.sql`
-  - `Assets/StreamingAssets/Database/seed.sql`
-
-Notlar:
-- `Mono.Data.Sqlite` provider gerekli.
-- `Assets/Plugins/x86_64/sqlite3.dll` repo icinde bulunur.
-
-## Klasor Yapisi
-```text
-Assets/
-  Scenes/                     Ana oynanis sahnesi (SampleScene)
-  Scripts/                    Tum oyun, UI, AI ve optimizasyon scriptleri
-    Quest/                    Quest/progresyon/save/UI alt sistemi
-    Neighborhood/             Mahalle bolge ve UI sistemi
-    Performance/              Benchmark, memory profiler, regression detector
-    Editor/                   Editor window ve setup toollari
-  Resources/                  QuestDatabase ve CargoLibrary gibi runtime yuklenen assetler
-  StreamingAssets/Database/   SQLite schema ve seed SQL dosyalari
-  Database/                   SQL referans dosyalari
-  Prefabs/                    Quest/NPC prefableri
-  Plugins/x86_64/             Native sqlite3 dll
-ProjectSettings/              Unity proje ayarlari
-Packages/                     Unity package manifest ve lock
-```
-
-## Editor ve Debug Araclari
-- `QuestUISetup`: Quest UI elemanlarini sahnede otomatik kurar.
-- `QuestSystemValidator`: Quest baglantilarini runtime validate eder.
-- `ChunkSetupTool`, `HLODSetupTool`: dunya optimizasyon kurulumu.
-- `NpcPrefabCreator`, `NpcPrefabFixer`: NPC prefab yardimcilari.
-- `RouteVisualizerEditor`: yol/rota gorsellestirme araclari.
-
-## Performans Test Araclari
-- `PerformanceBenchmark`: otomatik kamera rotasinda FPS/CPU/RAM olcumu.
-- `PerformanceRegressionDetector`: baseline'a gore performans gerilemesi takibi.
-- `MemoryProfiler`: runtime memory snapshot/leak detection + CSV export.
-
-Benchmark ciktilari varsayilan olarak proje kokundeki `BenchmarkResults/` klasorune yazilir.
-
-## Build Alma
-1. `File > Build Settings` acin.
-2. `Assets/Scenes/SampleScene.unity` sahnesinin listede oldugunu kontrol edin.
-3. Hedef platformu secin (PC onerilir).
-4. Build alin.
-
-Not: Mobil hedeflerde kalite, input ve performans ayarlari icin ek tuning gerekir.
-
-## Sorun Giderme
-
-### 1) Gorev UI gorunmuyor
-- Sahneye bos bir obje ekleyip `QuestUISetup` component'i takin.
-- Play modunda setup'in tamamlanmasini bekleyin.
-- Alternatif: `Assets/Scripts/Quest/UI/UI_KURULUM_TALIMATLARI.txt` dosyasini izleyin.
-
-### 2) NPC araclar spawn olmuyor
-- `RoadGraphBuilder` grafigi olusturuyor mu kontrol edin.
-- `NpcSpawner` icinde `roadGraphBuilder` referansini dogrulayin.
-
-### 3) SQLite baglanmiyor
-- Console'da `Mono.Data.Sqlite not available` hatasi var mi bakin.
-- `sqlite3.dll` dosyasinin plugin import ayarlarini kontrol edin.
-
-### 4) Save/Load calismiyor
-- `SaveManager` sahnede aktif mi kontrol edin.
-- `Application.persistentDataPath` altinda `savegame.json` olusuyor mu bakin.
-
-## Ek Dokumanlar
-- `DEVELOPMENT_ROADMAP.md`: Gelistirme hedefleri ve sprint durumlari
-- `QUEST_DATABASE_GUIDE.md`: Quest veritabani modeli
-- `Assets/Scripts/Editor/ROUTE_VISUALIZER_README.md`: Rota araclari dokumani
-- `Assets/Scripts/Quest/UI/UI_KURULUM_TALIMATLARI.txt`: UI kurulum adimlari
+Proje; gerçekçi WheelCollider tabanlı araç fiziği, spline tabanlı otonom NPC trafik yapısı, akıllı telefon üzerinden görev teklifleri, çok kademeli teslimat/quest mekanikleri, SQLite ve JSON hibrit veri kalıcılığı ve tanıtım/sosyal medya için **16:9 Trailer & 9:16 Instagram Reels 60 FPS Video Kayıt & Yönetmen Sistemi** içerir.
 
 ---
-Bu README, repo durumu baz alinarak hazirlanmistir. Yeni sistemler eklendikce ilgili bolumlerin guncellenmesi onerilir.
 
+## 📋 İçindekiler
+- [Proje Özeti ve Vizyon](#proje-özeti-ve-vizyon)
+- [Temel Sistemler](#temel-sistemler)
+  - [1. Sürüş ve Araç Fiziği](#1-sürüş-ve-araç-fiziği)
+  - [2. Görev ve Teslimat Döngüsü](#2-görev-ve-teslimat-döngüsü)
+  - [3. Şirket, Filo ve Yakıt Sistemi](#3-şirket-filo-ve-yakıt-sistemi)
+  - [4. Spline Tabanlı Akıllı Trafik AI](#4-spline-tabanlı-akıllı-trafik-ai)
+  - [5. Sinematik Çekim ve Yönetmen Sistemi (Reels & Trailer)](#5-sinematik-çekim-ve-yönetmen-sistemi-reels--trailer)
+  - [6. Navigasyon, Minimap ve HUD](#6-navigasyon-minimap-ve-hud)
+  - [7. Progresyon ve Skill Tree](#7-progresyon-ve-skill-tree)
+  - [8. Veri Kalıcılığı (JSON & SQLite)](#8-veri-kalıcılığı-json--sqlite)
+- [Teknoloji ve Paketler](#teknoloji-ve-paketler)
+- [Sahneler ve Başlatma (Bootstrap Mimarisi)](#sahneler-ve-başlatma-bootstrap-mimarisi)
+- [Klavye ve Gamepad Kontrolleri](#klavye-ve-gamepad-kontrolleri)
+- [Klasör Yapısı](#klasör-yapısı)
+- [Editor ve Araçlar](#editor-ve-araçlar)
+- [Build Alma](#build-alma)
+
+---
+
+## Proje Özeti ve Vizyon
+Oyuncu, kurye olarak başladığı kariyerinde şehir içinde çeşitli kargo ve teslimat görevleri alır:
+* **Görev Çeşitliliği:** Standart, zamana duyarlı (ekspres), kırılgan kargo, soğuk zincir ve çok duraklı (multi-stop) teslimatlar.
+* **Sürüş Değerlendirmesi:** Hız, sert fren, kargo hasarı, viraj alma ve drift performansına göre dinamik prim ve ceza hesapları.
+* **Şirket Büyümesi:** Minivan ile başlayıp kamyon/tır filosu kurma, araç parçalarını yükseltme ve benzin istasyonlarından yakıt ikmali yapma.
+* **Tanıtım & Medya Üretimi:** Oyun içinden tek tuşla 9:16 Instagram Reels/TikTok veya 16:9 YouTube/Steam tanıtım videoları için çok açılı, otomatik yönetmen kesimli ve akıcı 60 FPS MP4 video kaydetme.
+
+---
+
+## Temel Sistemler
+
+### 1. Sürüş ve Araç Fiziği
+* **`CarController`:** WheelCollider tabanlı, hıza duyarlı direksiyon açısı, motor torku, el freni, drift algılama ve sert fren olayları.
+* **`CameraFollow` & `VehicleCameraAnchors`:** Araç boyutuna (van vs. kamyon/tır) göre otomatik pozisyon alan, geri viteste açısını kilitleyen ve `ReverseCameraHUD` ile ayna/geri görüş sunan dinamik kamera.
+* **Görsel Efektler:** `VehicleExhaustSmoke` ile egzoz dumanı, `TruckWheelVisuals` ile çok akslı tır tekerlek senkronizasyonu.
+
+### 2. Görev ve Teslimat Döngüsü
+* **`DeliveryManager`:** Sahnedeki teslimat akışını yönetir; harita üzerinde mahalle ve yol verilerine göre pickup/dropoff noktaları üretir.
+* **`PhoneMissionUI` / `SmartphoneUI`:** Görevler doğrudan oyuncunun sanal akıllı telefonuna bildirim/çağrı olarak gelir (Kabul / Reddet akışı zorunludur).
+* **`QuestManager`:** Görevlerin otorite merkezidir. Kargo tipi (ağır, kırılgan, değerli), rota tamamlama, streak bonusları, zaman kısıtları ve hasar durumunu takip eder.
+
+### 3. Şirket, Filo ve Yakıt Sistemi
+* **`CompanyPageUI` & `PlayerVehicleManager`:** Minivan, Panelvan ve Ağır Vasıta (Kamyon/Tır) araçları arasında geçiş, filo satın alımı ve araç yönetimi.
+* **`FleetManagementUI` & `FleetInteractionPoint`:** Şirket garajında araçları inceleme ve yükseltme (`VehicleUpgradeData`).
+* **`FuelSystem` & `FuelStationZone`:** Araçların yakıt tüketimi, benzin istasyonlarında interaktif yakıt ikmali (`FuelStationUI`) ve ekranda yakıt HUD'ı (`FuelHudUI`).
+
+### 4. Spline Tabanlı Akıllı Trafik AI
+* **`RoadNetworkManager`:** Şehrin yol ağını `SplineRoad` eğrileri ve `RoadIntersection` kavşakları üzerinden temsil eden modern otorite.
+* **`SplinePathfinder`:** A* algoritması ile kavşaklar ve spline yollar üzerinden rotalama.
+* **`NpcCarAgent`:** Pure Pursuit direksiyon algoritması ile pürüzsüz viraj alma, engel algılama, şerit takibi ve kavşak geçiş öncelikleri.
+* **`NpcSpawner` & `NpcRecovery`:** Oyuncu etrafında dinamik NPC araç havuzlama ve takılan araçları kurtarma mantığı.
+
+### 5. Sinematik Çekim ve Yönetmen Sistemi (Reels & Trailer)
+* **`CinematicCameraController`:** 7 farklı profesyonel sinematik kamera açısı (Kaput, Jant/Drift, Kapı Profili, Alçak Egzoz, Drone/Helikopter, Akıllı Yol Kenarı Geçişi ve Takip).
+* **Format Desteği:** Tek tuşla **16:9 Trailer (1920x1080)** ve **9:16 Dikey Instagram Reels (1080x1920)** kadrajları arasında geçiş.
+* **🎬 `CinematicDirector`:** Sen aracı sürerken 3-5 saniyede bir kamera açılarını otomatik olarak değiştiren akıllı yönetmen modu (hıza ve drifte duyarlı kesimler).
+* **`CinematicRecorderController` (Unity Recorder `5.1.7`):** Oyun içi FPS düşse bile kare kare render alarak **sıfır frame-drop, tereyağı gibi akıcı 60 FPS MP4** dosyasını doğrudan `Recordings/Reels/` veya `Recordings/Trailers/` dizinlerine kaydeder.
+* **Temiz Çekim (Clean Footage):** Kayıt esnasında oyun HUD'ını otomatik gizleyerek tertemiz trailer çıktısı alma.
+
+### 6. Navigasyon, Minimap ve HUD
+* **`NavigationService`:** Tüm yönlendirme servisinin tekil kaynağı (Single Source of Truth).
+* **`MinimapUI` & `CompassUI`:** Rota çizgisi, hedef ikonları, dinamik zoom ve yol katmanı.
+* **`GlobalUiCoordinator`:** Sahne geçişlerinde kaybolmayan persistant global Canvas mimarisi.
+* **`SpeedometerUI`:** Ayarlar menüsünden değiştirilebilir **KMH / MPH** hız göstergesi.
+* **`BalanceHudUI`:** Güncel bakiye, kazanılan paralar ve animasyonlu gelir bildirimleri.
+
+### 7. Progresyon ve Skill Tree
+* **`PlayerProgressionManager`:** Seviye, XP, para, teslimat istatistikleri ve başarımlar.
+* **`DriverProgressionSystem`:** Sürücü yetenek ağacı (Yakıt Verimliliği, Kargo Dayanıklılığı, Navigasyon Kolaylığı vb.).
+
+### 8. Veri Kalıcılığı (JSON & SQLite)
+* **JSON (`SaveManager`):** `Application.persistentDataPath/savegame.json` üzerinde oyuncu seviyesi, parası, kilit açılımları ve tamamlanan görevler.
+* **PlayerPrefs (`GameSettings`):** Ses, grafik kalitesi, çözünürlük, hedef FPS, hız birimi (KMH/MPH), dil, erişilebilirlik ve UI ölçeği.
+* **SQLite (`QuestDatabaseService`):** `quest.db` veritabanı üzerinden ayrıntılı teslimat geçmişi, şirket verileri ve görev kütüphanesi senkronizasyonu (`schema.sql` / `seed.sql`).
+
+---
+
+## Teknoloji ve Paketler
+* **Unity Versiyonu:** `6000.3.9f1` / `6000.3.12f1` (Unity 6)
+* **Render Pipeline:** Universal Render Pipeline (URP)
+* **Girdi Sistemi:** New Input System (`com.unity.inputsystem: 1.19.0`)
+* **Kamera:** Unity Cinemachine (`com.unity.cinemachine: 3.1.6`)
+* **Video Kayıt:** Unity Recorder (`com.unity.recorder: 5.1.7`)
+* **Zaman Çizelgesi:** Unity Timeline (`com.unity.timeline: 1.8.11`)
+* **Veritabanı:** Mono.Data.Sqlite (`Assets/Plugins/x86_64/sqlite3.dll`)
+
+---
+
+## Sahneler ve Başlatma (Bootstrap Mimarisi)
+
+Build ayarlarında yalnızca iki sahne etkindir:
+1. **`Assets/Scenes/MainMenu.unity`:** Tamamen kod tabanlı (`MainMenuRuntimeUI`) inşa edilen, ayarlar ve profil menüsünü barındıran başlangıç sahnesi.
+2. **`Assets/Scenes/Game.unity`:** Açık dünya teslimat ortamı (Git LFS takip edilir).
+
+> [!NOTE]
+> Projede runtime bootstrap sistemleri kullanılır (`CinematicCaptureInstaller`, `GameSceneCompanyPageInstaller`, `FuelSystemInstaller`, `GlobalUiCoordinator`, `QuestDatabaseBootstrap` vb.). Birçok sistem sahne yüklendiğinde kendisini otomatik olarak oluşturur; sahne üzerinde gereksiz statik nesne çoğaltılmasından kaçınılmalıdır.
+
+---
+
+## Klavye ve Gamepad Kontrolleri
+
+### Sürüş ve Oynanış
+| Aksiyon | Klavye | Gamepad | Açıklama |
+|---|---|---|---|
+| **Sürüş (Gaz/Fren/Direksiyon)** | `WASD` / Ok Tuşları | Sol Analog | `Move` Action |
+| **El Freni / Drift** | `Space` | South Button (A/X) | Wheel collider fren kilidi |
+| **Akıllı Telefon (Görevler)** | `Tab` / `T` | D-Pad Up | Görev teklifleri ve kargo detayları |
+| **Etkileşim (İstasyon / Şirket)** | `E` | West Button (X/Square) | Yakıt alma veya garaj etkileşimi |
+| **Yetenek Ağacı (Skill Tree)** | `K` | - | Sürücü gelişim menüsü |
+| **Duraklatma / Ayarlar** | `Esc` | Start Button | `PauseMenuUI` |
+
+### 🎬 Sinematik Çekim & Video Kayıt (Reels & Trailer)
+| Tuş | Fonksiyon | Açıklama |
+|---|---|---|
+| **`1` - `7`** | **Kamera Açıları** | Kaput, Jant, Profil, Egzoz, Drone, Ralli Geçişi, Takip |
+| **`F7`** | **Otomatik Yönetmen (Director)** | 3-5 saniyede bir kamera açılarını otomatik keser |
+| **`F8`** | **Format Değiştir** | 16:9 Trailer ↔ 9:16 Instagram Reels/TikTok geçişi |
+| **`F9`** | **60 FPS Video Kaydı** | MP4 video kaydını başlatır / durdurur (`Recordings/`) |
+| **`F10`** | **Ağır Çekim (Slow-Mo)** | Drift/viraj anları için 0.25x ağır çekim |
+| **`H`** | **Sinematik HUD** | Ekrandaki durum panelini gizler / gösterir |
+
+### Debug ve Profiler (Development)
+| Tuş | Fonksiyon |
+|---|---|
+| `F1` | Quest Debug Menüsü |
+| `F3` | Bellek & RAM Profiler Göstergesi |
+| `F4` | Manuel Garbage Collection (GC.Collect) |
+| `F5` | Bellek Verilerini CSV Olarak Dışa Aktar |
+
+---
+
+## Klasör Yapısı
+
+```text
+Assets/
+  Art/                        Materyaller, dokular ve çevre kaplamaları
+  Editor/
+    Build/                    Build ve derleme otomasyonları
+    Cinematic/                CinematicCaptureWindow ve RecorderController
+    City/                     Şehir inşa ve düzenleme araçları
+    Optimization/             Optimizasyon ve chunk yardımcıları
+    Traffic/                  Spline yol düzenleyicileri ve trafik araçları
+  Prefabs/
+    NPCs/                     Trafik araç prefableri
+    Quest/                    Görev markerları ve teslimat kutuları
+    Vehicle/                  Oyuncu araçları (Minivan, LorryCargo vb.)
+  Resources/                  CargoLibrary, QuestDatabase ve UI varlıkları
+  Scenes/
+    MainMenu.unity            Kod tabanlı ana menü sahnesi
+    Game.unity                Açık dünya oynanış sahnesi (Git LFS)
+  Scripts/
+    City/                     Mahalle bölgeleri ve sokak isimlendirmeleri
+    Company/                  Şirket sayfası, filo yönetimi ve araç seçimi
+    Core/                     Ayarlar, JSON save ve SQLite veritabanı
+    Gameplay/
+      Camera/                 CameraFollow, ReverseCameraHUD ve Cinematic/
+      Delivery/               DeliveryManager, PhoneMissionUI, DeliveryBox
+      Vehicle/                CarController, FuelSystem, Anchors, Smoke
+    Navigation/               NavigationService, ObjectiveMarker, RouteRenderer
+    Optimization/             WorldChunkManager, HLODGroup, AdvancedObjectPool
+    Performance/              MemoryProfiler ve performans benchmarkları
+    Quest/                    QuestManager, PlayerProgression, SkillTree, UI/
+    Traffic/                  Spline yollar, RoadNetworkManager, NpcCarAgent
+    UI/                       GlobalUiCoordinator, HUD, Menus, Minimap, Core/
+  Settings/                   URP ve New Input System ayarları
+  StreamingAssets/Database/   SQLite schema.sql ve seed.sql
+  Plugins/x86_64/             sqlite3.dll
+```
+
+---
+
+## Editor ve Araçlar
+* **Sinematik Stüdyo:** `Delivery Driver > Cinematic Capture & Director` menüsünden video kayıt, format ve açı kontrol penceresi.
+* **Trafik & Yol:** `Delivery Driver > Traffic` üzerinden Spline yol ve kavşak düzenleme yardımcıları.
+* **Şehir & Çevre:** `Delivery Driver > City` üzerinden bölge ve bina yerleşim araçları.
+* **Performans Benchmark:** `BenchmarkResults/` klasörüne otomatik FPS, CPU ve RAM dökümü alan test modülü.
+
+---
+
+## Build Alma
+1. `File > Build Profiles` veya `Build Settings` penceresini açın.
+2. Sahne sıralamasının şu şekilde olduğundan emin olun:
+   * `Assets/Scenes/MainMenu.unity` (0)
+   * `Assets/Scenes/Game.unity` (1)
+3. Platform olarak **Windows (x86_64)** seçin.
+4. **Build** butonuna basın.
+
+---
+*Son güncelleme: Eylül 2026 - Delivery Driver Geliştirme Ekibi*
