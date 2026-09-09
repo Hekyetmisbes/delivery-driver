@@ -147,6 +147,10 @@ namespace DeliveryDriver.EditorTools
             roadA.SetSmoothPath(combinedAnchors);
             roadA.startIntersection = outerStartInter;
             roadA.endIntersection = outerEndInter;
+            if (string.IsNullOrEmpty(roadA.sectorTag) && !string.IsNullOrEmpty(roadB.sectorTag))
+            {
+                roadA.sectorTag = roadB.sectorTag;
+            }
 
             // Rewire outer intersections
             if (outerStartInter != null)

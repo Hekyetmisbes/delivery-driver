@@ -17,6 +17,9 @@ namespace TrafficSystem.Spline
         [Tooltip("Intersection at the END of this road (t=1)")]
         public RoadIntersection endIntersection;
 
+        [Tooltip("City or Highway sector this road belongs to (e.g., 'Ankara', 'İstanbul', 'Highways')")]
+        public string sectorTag = "Ankara";
+
         // Cached distance lookup for constant speed traversal
         [SerializeField, HideInInspector]
         private float[] distances;
