@@ -1570,7 +1570,7 @@ namespace DeliveryDriver.EditorTools
 
             if (createLaneMarkings && visualSamples.Count >= 2)
             {
-                ApplyLaneMarkingsMesh(laneMarkings, visualSamples);
+                ApplyLaneMarkingsMesh(laneMarkings, visualSamples, !capStart, !capEnd);
                 laneMarkings.SetActive(true);
             }
             else
@@ -1680,7 +1680,7 @@ namespace DeliveryDriver.EditorTools
 
             if (createLaneMarkings && visualSamples.Count >= 2)
             {
-                ApplyLaneMarkingsMesh(laneMarkings, visualSamples);
+                ApplyLaneMarkingsMesh(laneMarkings, visualSamples, !capStart, !capEnd);
                 laneMarkings.SetActive(true);
             }
             else
@@ -1753,7 +1753,11 @@ namespace DeliveryDriver.EditorTools
             }
         }
 
-        private void ApplyLaneMarkingsMesh(GameObject target, List<Vector3> samples)
+        private void ApplyLaneMarkingsMesh(
+            GameObject target,
+            List<Vector3> samples,
+            bool isStartAtIntersection = false,
+            bool isEndAtIntersection = false)
         {
             Mesh mesh = new Mesh { name = "Smooth Road Lane Markings Mesh" };
             List<Vector3> vertices = new List<Vector3>(samples.Count * 8);
@@ -1761,13 +1765,26 @@ namespace DeliveryDriver.EditorTools
             List<int> triangles = new List<int>(samples.Count * 12);
             List<float> cumulativeDistances = BuildCumulativeDistances(samples);
 
-            AppendDashedLine(vertices, uvs, triangles, samples, cumulativeDistances, 0f);
+            if (!isStartAtIntersection && samples.Count > 0)
+            {
+                isStartAtIntersection = GetEndpointTrimDistance(samples[0]) > 0.01f;
+            }
+            if (!isEndAtIntersection && samples.Count > 0)
+            {
+                isEndAtIntersection = GetEndpointTrimDistance(samples[samples.Count - 1]) > 0.01f;
+            }
+
+            float crosswalkClearance = (crosswalkStripeLength * 0.5f) + 1.2f;
+            float startMargin = isStartAtIntersection ? crosswalkClearance : 0f;
+            float endMargin = isEndAtIntersection ? crosswalkClearance : 0f;
+
+            AppendDashedLine(vertices, uvs, triangles, samples, cumulativeDistances, 0f, startMargin, endMargin);
 
             if (createSideEdgeLines)
             {
                 float sideOffset = Mathf.Max(0f, roadWidth * 0.5f - laneMarkingWidth * 1.5f);
-                AppendContinuousLine(vertices, uvs, triangles, samples, -sideOffset);
-                AppendContinuousLine(vertices, uvs, triangles, samples, sideOffset);
+                AppendContinuousLine(vertices, uvs, triangles, samples, cumulativeDistances, -sideOffset, startMargin, endMargin);
+                AppendContinuousLine(vertices, uvs, triangles, samples, cumulativeDistances, sideOffset, startMargin, endMargin);
             }
 
             mesh.SetVertices(vertices);
@@ -1789,7 +1806,9 @@ namespace DeliveryDriver.EditorTools
             List<int> triangles,
             List<Vector3> samples,
             List<float> cumulativeDistances,
-            float lateralOffset)
+            float lateralOffset,
+            float startMargin = 0f,
+            float endMargin = 0f)
         {
             if (samples.Count < 2 || cumulativeDistances.Count != samples.Count)
             {
@@ -1799,9 +1818,17 @@ namespace DeliveryDriver.EditorTools
             float totalDistance = cumulativeDistances[cumulativeDistances.Count - 1];
             float repeatDistance = laneDashLength + laneDashGap;
 
-            for (float dashStart = 0f; dashStart < totalDistance; dashStart += repeatDistance)
+            float effectiveStart = Mathf.Clamp(startMargin, 0f, totalDistance);
+            float effectiveEnd = Mathf.Clamp(totalDistance - endMargin, effectiveStart, totalDistance);
+
+            if (effectiveEnd - effectiveStart < laneDashLength)
             {
-                float dashEnd = Mathf.Min(dashStart + laneDashLength, totalDistance);
+                return;
+            }
+
+            for (float dashStart = effectiveStart; dashStart < effectiveEnd; dashStart += repeatDistance)
+            {
+                float dashEnd = Mathf.Min(dashStart + laneDashLength, effectiveEnd);
                 if (dashEnd - dashStart < MinDashDistance)
                 {
                     continue;
@@ -1818,12 +1845,35 @@ namespace DeliveryDriver.EditorTools
             List<Vector2> uvs,
             List<int> triangles,
             List<Vector3> samples,
-            float lateralOffset)
+            List<float> cumulativeDistances,
+            float lateralOffset,
+            float startMargin = 0f,
+            float endMargin = 0f)
         {
-            for (int i = 0; i < samples.Count - 1; i++)
+            if (samples.Count < 2 || cumulativeDistances.Count != samples.Count)
             {
-                AppendLineQuad(vertices, uvs, triangles, samples[i], samples[i + 1], lateralOffset);
+                return;
             }
+
+            float totalDistance = cumulativeDistances[cumulativeDistances.Count - 1];
+            float effectiveStart = Mathf.Clamp(startMargin, 0f, totalDistance);
+            float effectiveEnd = Mathf.Clamp(totalDistance - endMargin, effectiveStart, totalDistance);
+
+            if (effectiveEnd - effectiveStart < 0.5f)
+            {
+                return;
+            }
+
+            float step = 1.0f;
+            Vector3 prev = SampleByDistance(samples, cumulativeDistances, effectiveStart);
+            for (float d = effectiveStart + step; d < effectiveEnd; d += step)
+            {
+                Vector3 curr = SampleByDistance(samples, cumulativeDistances, d);
+                AppendLineQuad(vertices, uvs, triangles, prev, curr, lateralOffset);
+                prev = curr;
+            }
+            Vector3 finalPt = SampleByDistance(samples, cumulativeDistances, effectiveEnd);
+            AppendLineQuad(vertices, uvs, triangles, prev, finalPt, lateralOffset);
         }
 
         private void AppendLineQuad(
@@ -5000,7 +5050,19 @@ namespace DeliveryDriver.EditorTools
                     Vector3 roadOutDir = isStart ? roadTan : -roadTan;
                     if (roadOutDir.sqrMagnitude > 0.001f)
                     {
-                        dirs[i] = roadOutDir.normalized;
+                        Vector3 normOutDir = roadOutDir.normalized;
+                        Vector3 radial = roadPt - origin;
+                        radial.y = 0f;
+                        if (radial.sqrMagnitude > 0.01f)
+                        {
+                            radial.Normalize();
+                            if (Vector3.Dot(normOutDir, radial) < 0.25f)
+                            {
+                                normOutDir = Vector3.Lerp(radial, normOutDir, 0.65f).normalized;
+                            }
+                        }
+
+                        dirs[i] = normOutDir;
                         rights[i] = Vector3.Cross(Vector3.up, dirs[i]).normalized;
                         mouthCenters[i] = roadPt;
                     }
@@ -5076,65 +5138,105 @@ namespace DeliveryDriver.EditorTools
                 }
                 else
                 {
-                    // Curved corner turn
-                    float denom = dirI.x * dirNext.z - dirI.z * dirNext.x;
-                    Vector3 cornerPt;
-                    if (Mathf.Abs(denom) > 0.12f)
-                    {
-                        float dx = startAsphalt.x - endAsphalt.x;
-                        float dz = startAsphalt.z - endAsphalt.z;
-                        float t1 = (dx * dirNext.z - dz * dirNext.x) / denom;
-                        cornerPt = startAsphalt - dirI * t1;
+                    // Smooth, continuous circular/Hermite fillet corner with normal-offset sidewalk
+                    Vector3 A = startAsphalt;
+                    Vector3 B = endAsphalt;
+                    Vector3 dA = dirI;
+                    Vector3 dB = dirNext;
+                    float D = Vector3.Distance(A, B);
 
-                        float dist = Vector3.Distance(cornerPt, origin);
-                        if (t1 < 0.1f || dist > trimDist * 0.95f)
-                        {
-                            cornerPt = (startAsphalt + endAsphalt) * 0.5f;
-                        }
+                    if (D < 0.05f)
+                    {
+                        cornerInner.Add(A);
+                        cornerOuter.Add(startSW);
                     }
                     else
                     {
-                        cornerPt = (startAsphalt + endAsphalt) * 0.5f;
-                    }
+                        float denom = dA.x * dB.z - dA.z * dB.x;
+                        Vector3 Delta = A - B;
+                        bool hasCleanApex = false;
+                        float t = 0f, s = 0f;
 
-                    // Keep cornerPt safely away from origin so no triangular sidewalk island cuts into the intersection center
-                    float minDistFromCenter = Mathf.Min(halfRoad * 0.7f, trimDist * 0.4f);
-                    float distToOrigin = Vector3.Distance(cornerPt, origin);
-                    if (distToOrigin < minDistFromCenter)
-                    {
-                        Vector3 pushDir = cornerPt - origin;
-                        pushDir.y = 0f;
-                        if (pushDir.sqrMagnitude < 0.001f) pushDir = dirs[i] + dirs[next];
-                        if (pushDir.sqrMagnitude > 0.001f)
+                        if (Mathf.Abs(denom) > 0.05f)
                         {
-                            cornerPt = origin + pushDir.normalized * minDistFromCenter;
+                            t = (Delta.x * dB.z - Delta.z * dB.x) / denom;
+                            s = (Delta.x * dA.z - Delta.z * dA.x) / denom;
+
+                            if (t > 0.1f && s > 0.1f && t < D * 1.5f && s < D * 1.5f)
+                            {
+                                Vector3 testApex = A - dA * t;
+                                float distApex = Vector3.Distance(testApex, origin);
+                                float minAllowed = Mathf.Min(halfRoad * 0.6f, trimDist * 0.35f);
+                                if (distApex >= minAllowed * 0.5f)
+                                {
+                                    hasCleanApex = true;
+                                }
+                            }
                         }
-                    }
 
-                    Vector3 cornerDir = cornerPt - origin;
-                    cornerDir.y = 0f;
-                    if (cornerDir.sqrMagnitude < 0.01f)
-                    {
-                        cornerDir = (startSW + endSW) * 0.5f - origin;
-                        cornerDir.y = 0f;
-                    }
-                    cornerDir.Normalize();
-                    Vector3 cornerSWPt = cornerPt + cornerDir * sw;
-
-                    int steps = 3;
-                    for (int s = 0; s <= steps; s++)
-                    {
-                        float u = s / (float)steps;
-                        float oneMinusU = 1f - u;
-                        Vector3 innerPt = oneMinusU * oneMinusU * startAsphalt + 2f * oneMinusU * u * cornerPt + u * u * endAsphalt;
-                        Vector3 outerPt = oneMinusU * oneMinusU * startSW + 2f * oneMinusU * u * cornerSWPt + u * u * endSW;
-
-                        cornerInner.Add(innerPt);
-                        cornerOuter.Add(outerPt);
-
-                        if (s > 0 && s < steps)
+                        float kA, kB;
+                        if (hasCleanApex)
                         {
-                            asphaltPerimeter.Add(innerPt);
+                            float maxT = Mathf.Min(t, D * 0.85f);
+                            float maxS = Mathf.Min(s, D * 0.85f);
+                            kA = maxT * 0.552f;
+                            kB = maxS * 0.552f;
+                        }
+                        else
+                        {
+                            float safeK = Mathf.Min(D * 0.35f, halfRoad * 0.85f);
+                            kA = safeK;
+                            kB = safeK;
+                        }
+
+                        Vector3 C0 = A;
+                        Vector3 C1 = A - dA * kA;
+                        Vector3 C2 = B - dB * kB;
+                        Vector3 C3 = B;
+
+                        int steps = 8;
+                        for (int sIdx = 0; sIdx <= steps; sIdx++)
+                        {
+                            float u = sIdx / (float)steps;
+                            float om = 1f - u;
+                            float om2 = om * om;
+                            float om3 = om2 * om;
+                            float u2 = u * u;
+                            float u3 = u2 * u;
+
+                            Vector3 innerPt = om3 * C0 + 3f * om2 * u * C1 + 3f * om * u2 * C2 + u3 * C3;
+
+                            Vector3 tangent = 3f * om2 * (C1 - C0) + 6f * om * u * (C2 - C1) + 3f * u2 * (C3 - C2);
+                            tangent.y = 0f;
+                            if (tangent.sqrMagnitude < 0.0001f)
+                            {
+                                tangent = B - A;
+                                tangent.y = 0f;
+                            }
+                            tangent.Normalize();
+
+                            Vector3 normal = Vector3.Cross(Vector3.up, tangent).normalized;
+                            Vector3 outerPt = innerPt + normal * sw;
+
+                            // Ensure exact alignment at boundary ends with adjacent road sidewalks
+                            if (sIdx == 0)
+                            {
+                                innerPt = startAsphalt;
+                                outerPt = startSW;
+                            }
+                            else if (sIdx == steps)
+                            {
+                                innerPt = endAsphalt;
+                                outerPt = endSW;
+                            }
+
+                            cornerInner.Add(innerPt);
+                            cornerOuter.Add(outerPt);
+
+                            if (sIdx > 0 && sIdx < steps)
+                            {
+                                asphaltPerimeter.Add(innerPt);
+                            }
                         }
                     }
                 }
@@ -5432,15 +5534,21 @@ namespace DeliveryDriver.EditorTools
             Vector3 alongRoadDir,
             Vector3 acrossRoadDir)
         {
-            float totalStripeWidth = crosswalkStripeCount * crosswalkStripeWidth + (crosswalkStripeCount - 1) * crosswalkStripeGap;
-            float startOffset = -totalStripeWidth * 0.5f + crosswalkStripeWidth * 0.5f;
+            float usableWidth = Mathf.Max(2f, roadWidth - 1.0f);
+            float width = Mathf.Max(0.15f, crosswalkStripeWidth);
+            float gap = Mathf.Max(0.1f, crosswalkStripeGap);
+            float pitch = width + gap;
 
-            for (int i = 0; i < crosswalkStripeCount; i++)
+            int count = Mathf.Max(3, Mathf.RoundToInt((usableWidth - width) / pitch) + 1);
+            float actualPitch = count > 1 ? (usableWidth - width) / (count - 1) : 0f;
+            float startOffset = -usableWidth * 0.5f + width * 0.5f;
+
+            for (int i = 0; i < count; i++)
             {
-                float offset = startOffset + i * (crosswalkStripeWidth + crosswalkStripeGap);
+                float offset = startOffset + i * actualPitch;
                 Vector3 stripeCenter = boundaryCenter + acrossRoadDir.normalized * offset;
                 Vector3 halfAlong = alongRoadDir.normalized * (crosswalkStripeLength * 0.5f);
-                Vector3 halfAcross = acrossRoadDir.normalized * (crosswalkStripeWidth * 0.5f);
+                Vector3 halfAcross = acrossRoadDir.normalized * (width * 0.5f);
                 AppendIntersectionQuad(
                     vertices,
                     uvs,
@@ -5859,8 +5967,8 @@ namespace DeliveryDriver.EditorTools
             crosswalkYOffset = Mathf.Max(0.026f, crosswalkYOffset);
             laneMarkingYOffset = Mathf.Max(0.015f, laneMarkingYOffset);
 
-            // 3. Rebuild all intersection geometry
-            RebuildAllIntersections();
+            // 3. Rebuild all roads and intersection geometry (updating lane markings and corner curbs)
+            RebuildAllRoadsInScene();
 
             // 4. Double check all Crosswalks objects in scene to ensure visibility and material
             int fixedCount = 0;
