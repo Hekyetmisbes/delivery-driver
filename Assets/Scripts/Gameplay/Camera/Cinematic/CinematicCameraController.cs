@@ -82,8 +82,6 @@ namespace DeliveryDriver.Cinematic
 
         private void InitializePresets()
         {
-            if (presets != null && presets.Count >= 7) return;
-
             presets = new List<CameraPresetSettings>();
             for (int i = 0; i <= (int)CinematicCameraAngle.RoadsideFlyby; i++)
             {
@@ -140,11 +138,89 @@ namespace DeliveryDriver.Cinematic
                 VehicleCameraBinding binding = VehicleCameraTargetResolver.Resolve(newTarget);
                 targetRb = binding.Rigidbody;
                 carController = binding.CarController;
+
+                // Titreme önleme: Aracın Rigidbody'sinde fizik interpolasyonunu aç.
+                // Rigidbody.interpolation = Interpolate olmadan LateUpdate her render karesinde (60-144 FPS)
+                // fizik adımları (50Hz) arasında araç transformu durağan kalır ve kamera mikro-titreme yapar!
+                if (targetRb != null)
+                {
+                    targetRb.interpolation = RigidbodyInterpolation.Interpolate;
+                }
             }
             else
             {
                 targetRb = null;
                 carController = null;
+            }
+        }
+
+        private List<Canvas> suppressedCanvases = new List<Canvas>();
+
+        /// <summary>
+        /// Sinematik modda veya video kaydı esnasında oyun içi HUD, hız göstergesi,
+        /// geri görüş kamerası ve diğer Canvas öğelerini gizler / geri getirir.
+        /// </summary>
+        public void SuppressGameplayUI(bool suppress)
+        {
+            // 1. Geri Görüş Kamerasını tamamen devre dışı bırak / aç
+            ReverseCameraHUD.IsSuppressed = suppress;
+            if (suppress && ReverseCameraHUD.Instance != null && ReverseCameraHUD.Instance.ReverseCamera != null)
+            {
+                ReverseCameraHUD.Instance.ReverseCamera.enabled = false;
+            }
+
+            // 2. Sahnedeki UGUI Canvas bileşenlerini (Hız göstergesi, minimap, görevler, telefon vb.) gizle/göster
+            if (suppress)
+            {
+                suppressedCanvases.Clear();
+                Canvas[] allCanvases = FindObjectsByType<Canvas>(FindObjectsSortMode.None);
+                for (int i = 0; i < allCanvases.Length; i++)
+                {
+                    Canvas c = allCanvases[i];
+                    if (c != null && c.enabled && c.gameObject.activeInHierarchy)
+                    {
+                        string cName = c.gameObject.name;
+                        if (cName.IndexOf("Pause", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            cName.IndexOf("Confirmation", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            continue;
+                        }
+
+                        c.enabled = false;
+                        suppressedCanvases.Add(c);
+                    }
+                }
+            }
+            else
+            {
+                for (int i = 0; i < suppressedCanvases.Count; i++)
+                {
+                    if (suppressedCanvases[i] != null)
+                    {
+                        suppressedCanvases[i].enabled = true;
+                    }
+                }
+                suppressedCanvases.Clear();
+            }
+        }
+
+        private void OnDisable()
+        {
+            if (isCinematicActive)
+            {
+                SuppressGameplayUI(false);
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (isCinematicActive)
+            {
+                SuppressGameplayUI(false);
+            }
+            if (Instance == this)
+            {
+                Instance = null;
             }
         }
 
@@ -172,10 +248,15 @@ namespace DeliveryDriver.Cinematic
 
             if (active)
             {
+                if (targetRb != null)
+                {
+                    targetRb.interpolation = RigidbodyInterpolation.Interpolate;
+                }
                 currentVelocity = Vector3.zero;
                 ApplyAngle(currentAngle, instantCut: true);
             }
 
+            SuppressGameplayUI(active);
             OnCinematicModeToggled?.Invoke(active);
         }
 
@@ -245,14 +326,27 @@ namespace DeliveryDriver.Cinematic
             if (instantCut && targetCamera != null && vehicleTarget != null)
             {
                 CameraPresetSettings preset = presets[index];
-                Vector3 desiredPos = CalculateDesiredPosition(preset);
-                targetCamera.transform.position = desiredPos;
-
-                Vector3 lookTarget = CalculateLookAtTarget(preset);
-                Vector3 lookDir = lookTarget - desiredPos;
-                if (lookDir.sqrMagnitude > 0.001f)
+                if (preset.isChassisMounted)
                 {
-                    targetCamera.transform.rotation = Quaternion.LookRotation(lookDir, Vector3.up);
+                    Vector3 offset = preset.localOffset;
+                    if (currentFormat == CinematicVideoFormat.Reels_9_16)
+                    {
+                        offset.y += 0.15f;
+                    }
+                    targetCamera.transform.position = vehicleTarget.TransformPoint(offset);
+                    targetCamera.transform.rotation = vehicleTarget.rotation * Quaternion.Euler(preset.localRotationEuler);
+                }
+                else
+                {
+                    Vector3 desiredPos = CalculateDesiredPosition(preset);
+                    targetCamera.transform.position = desiredPos;
+
+                    Vector3 lookTarget = CalculateLookAtTarget(preset);
+                    Vector3 lookDir = lookTarget - desiredPos;
+                    if (lookDir.sqrMagnitude > 0.001f)
+                    {
+                        targetCamera.transform.rotation = Quaternion.LookRotation(lookDir, Vector3.up);
+                    }
                 }
 
                 currentFov = targetFov;
@@ -298,6 +392,9 @@ namespace DeliveryDriver.Cinematic
                 gameplayCameraFollow.enabled = false;
             }
 
+            // Geri görüş kamerasını sinematik mod boyunca kesin olarak bastır
+            ReverseCameraHUD.IsSuppressed = true;
+
             if (vehicleTarget == null || targetCamera == null)
             {
                 ResolveReferences();
@@ -308,29 +405,53 @@ namespace DeliveryDriver.Cinematic
             if (index < 0 || index >= presets.Count) return;
 
             CameraPresetSettings preset = presets[index];
-            float dt = Time.unscaledDeltaTime;
+            float dt = Mathf.Min(Time.unscaledDeltaTime, 0.05f);
 
             // 1. FOV Yumuşak Geçiş
             currentFov = Mathf.Lerp(currentFov, targetFov, dt * fovTransitionSpeed);
             targetCamera.fieldOfView = currentFov;
 
-            // 2. Pozisyon Güncelleme
-            Vector3 desiredPos = CalculateDesiredPosition(preset);
-            if (preset.isFixedWorldPosition)
+            // 2. Pozisyon ve Rotasyon Güncelleme
+            if (preset.isChassisMounted)
             {
-                // Roadside Flyby: Araç kameranın 15m arkasına geçerse yeni bir ön pozisyona atla
+                // ARACA KİLİTLİ (GoPro / Onboard / Tampon / Egzoz / Tekerlek)
+                // Kesinlikle SmoothDamp ve gecikme uygulanmaz; aracın gövdesine milimetrik kilitlenir!
+                Vector3 offset = preset.localOffset;
+                if (currentFormat == CinematicVideoFormat.Reels_9_16)
+                {
+                    offset.y += 0.15f;
+                }
+
+                targetCamera.transform.position = vehicleTarget.TransformPoint(offset);
+                targetCamera.transform.rotation = vehicleTarget.rotation * Quaternion.Euler(preset.localRotationEuler);
+                currentVelocity = Vector3.zero;
+            }
+            else if (preset.isFixedWorldPosition)
+            {
+                // YOL KENARI SABİT GEÇİŞ KAMERASI (Roadside Flyby)
                 Vector3 toVehicle = vehicleTarget.position - roadsideWorldPosition;
                 float forwardDot = Vector3.Dot(toVehicle, targetCamera.transform.forward);
                 if (toVehicle.sqrMagnitude > 40f * 40f || (forwardDot < -10f && toVehicle.sqrMagnitude > 15f * 15f))
                 {
                     ResetRoadsideFlybyPosition();
-                    desiredPos = roadsideWorldPosition;
                 }
+
                 targetCamera.transform.position = roadsideWorldPosition;
+                currentVelocity = Vector3.zero;
+
+                Vector3 lookTarget = vehicleTarget.position + (vehicleTarget.rotation * preset.localLookAtOffset);
+                Vector3 lookDir = lookTarget - targetCamera.transform.position;
+                if (lookDir.sqrMagnitude > 0.001f)
+                {
+                    targetCamera.transform.rotation = Quaternion.LookRotation(lookDir, Vector3.up);
+                }
             }
             else
             {
-                float smoothTime = Mathf.Max(0.01f, preset.positionSmoothTime);
+                // SERBEST / HAVADAN TAKİP (HelicopterDrone & GameplayChase)
+                Vector3 desiredPos = CalculateDesiredPosition(preset);
+                float smoothTime = Mathf.Max(0.02f, preset.positionSmoothTime);
+
                 targetCamera.transform.position = Vector3.SmoothDamp(
                     targetCamera.transform.position,
                     desiredPos,
@@ -338,19 +459,28 @@ namespace DeliveryDriver.Cinematic
                     smoothTime,
                     Mathf.Infinity,
                     dt);
-            }
 
-            // 3. Rotasyon / LookAt Güncelleme
-            Vector3 lookTarget = CalculateLookAtTarget(preset);
-            Vector3 lookDir = lookTarget - targetCamera.transform.position;
-            if (lookDir.sqrMagnitude > 0.001f)
-            {
-                Quaternion targetRot = Quaternion.LookRotation(lookDir, Vector3.up);
-                float rotSpeed = preset.rotationSmoothTime > 0.001f ? (1f / preset.rotationSmoothTime) : 50f;
-                targetCamera.transform.rotation = Quaternion.Slerp(
-                    targetCamera.transform.rotation,
-                    targetRot,
-                    dt * rotSpeed);
+                if (preset.lookAtTarget)
+                {
+                    Vector3 lookTarget = CalculateLookAtTarget(preset);
+                    Vector3 lookDir = lookTarget - targetCamera.transform.position;
+                    if (lookDir.sqrMagnitude > 0.001f)
+                    {
+                        Quaternion targetRot = Quaternion.LookRotation(lookDir, Vector3.up);
+                        float rotSpeed = preset.rotationSmoothTime > 0.001f ? (1f / preset.rotationSmoothTime) : 25f;
+                        targetCamera.transform.rotation = Quaternion.Slerp(
+                            targetCamera.transform.rotation,
+                            targetRot,
+                            dt * rotSpeed);
+                    }
+                }
+                else
+                {
+                    targetCamera.transform.rotation = Quaternion.Slerp(
+                        targetCamera.transform.rotation,
+                        vehicleTarget.rotation * Quaternion.Euler(preset.localRotationEuler),
+                        dt * 15f);
+                }
             }
         }
 
@@ -370,6 +500,17 @@ namespace DeliveryDriver.Cinematic
             {
                 offset.y += 0.25f;
                 if (offset.z < 0) offset.z -= 0.6f; // Biraz daha geniş kadraj
+            }
+
+            // Polis Helikopteri: Aracın ani savrulma ve drift açılarıyla sarsılmadan, hareket yönünü gökyüzünden takip eder
+            if (currentAngle == CinematicCameraAngle.HelicopterDrone)
+            {
+                Vector3 vel = targetRb != null ? targetRb.linearVelocity : vehicleTarget.forward;
+                Vector3 forwardDir = vel.magnitude > 2f ? vel.normalized : vehicleTarget.forward;
+                Vector3 rightDir = Vector3.Cross(Vector3.up, forwardDir).normalized;
+
+                Vector3 heliOffset = (Vector3.up * offset.y) + (rightDir * offset.x) + (forwardDir * offset.z);
+                return vehicleTarget.position + heliOffset;
             }
 
             return vehicleTarget.position + (vehicleTarget.rotation * offset);

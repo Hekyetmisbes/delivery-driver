@@ -103,18 +103,27 @@ namespace DeliveryDriver.Cinematic
                 director = CinematicDirector.Instance ?? FindFirstObjectByType<CinematicDirector>();
             }
 
-            // 1 - 7 Tuşları: Kamera Açıları
+            // 1 - 7 Tuşları (Hem üst sayı sırası hem Numpad): Kamera Açıları
             for (int i = 0; i <= (int)CinematicCameraAngle.RoadsideFlyby; i++)
             {
                 KeyCode numKey = KeyCode.Alpha1 + i;
+                KeyCode padKey = KeyCode.Keypad1 + i;
 #if ENABLE_INPUT_SYSTEM
                 Key newNumKey = Key.Digit1 + i;
+                Key newPadKey = Key.Numpad1 + i;
 #endif
-                if (WasKeyPressed(
+                bool pressed = WasKeyPressed(
 #if ENABLE_INPUT_SYSTEM
                     newNumKey,
 #endif
-                    numKey))
+                    numKey) ||
+                    WasKeyPressed(
+#if ENABLE_INPUT_SYSTEM
+                    newPadKey,
+#endif
+                    padKey);
+
+                if (pressed)
                 {
                     // Manuel kamera seçildiğinde Director modunu devre dışı bırak
                     if (director != null && director.IsDirectorActive)
@@ -234,6 +243,11 @@ namespace DeliveryDriver.Cinematic
             if (cleanFootageOnRecord)
             {
                 HideSceneCanvases();
+                ReverseCameraHUD.IsSuppressed = true;
+                if (ReverseCameraHUD.Instance != null && ReverseCameraHUD.Instance.ReverseCamera != null)
+                {
+                    ReverseCameraHUD.Instance.ReverseCamera.enabled = false;
+                }
             }
 
             OnStartRecordingRequested?.Invoke();
@@ -248,6 +262,10 @@ namespace DeliveryDriver.Cinematic
             if (cleanFootageOnRecord)
             {
                 RestoreSceneCanvases();
+                if (cameraController == null || !cameraController.IsCinematicActive)
+                {
+                    ReverseCameraHUD.IsSuppressed = false;
+                }
             }
 
             OnStopRecordingRequested?.Invoke();

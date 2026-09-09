@@ -18,7 +18,8 @@ public class ReverseCameraHUD : MonoBehaviour
     private const string AltGameSceneName = "GameScene";
 
     public static ReverseCameraHUD Instance { get; private set; }
-    public static bool IsReverseEngaged => Instance != null && (Instance.isReverseActive || Instance.currentAlpha > 0.005f || (Instance.carController != null && Instance.carController.IsReverseInputActive));
+    public static bool IsSuppressed { get; set; }
+    public static bool IsReverseEngaged => Instance != null && !IsSuppressed && (Instance.isReverseActive || Instance.currentAlpha > 0.005f || (Instance.carController != null && Instance.carController.IsReverseInputActive));
     public Camera ReverseCamera => reverseCam;
 
     [Header("--- HEDEF ARAÇ ---")]
@@ -440,7 +441,7 @@ public class ReverseCameraHUD : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (!IsGameSceneActive())
+        if (IsSuppressed || !IsGameSceneActive())
         {
             if (panelRoot != null && panelRoot.gameObject.activeSelf)
             {
