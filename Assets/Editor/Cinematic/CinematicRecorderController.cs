@@ -3,6 +3,7 @@ using System.IO;
 using DeliveryDriver.Cinematic;
 using UnityEditor;
 using UnityEditor.Recorder;
+using UnityEditor.Recorder.Encoder;
 using UnityEditor.Recorder.Input;
 using UnityEngine;
 
@@ -87,7 +88,11 @@ namespace DeliveryDriver.Editor.Cinematic
             movieRecorder = ScriptableObject.CreateInstance<MovieRecorderSettings>();
             movieRecorder.name = "Cinematic Movie Recorder";
             movieRecorder.Enabled = true;
-            movieRecorder.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
+            movieRecorder.EncoderSettings = new CoreEncoderSettings
+            {
+                Codec = CoreEncoderSettings.OutputCodec.MP4,
+                EncodingQuality = CoreEncoderSettings.VideoEncodingQuality.High
+            };
             movieRecorder.OutputFile = currentOutputFile;
 
             var imageInput = new GameViewInputSettings
