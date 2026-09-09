@@ -94,8 +94,13 @@ namespace DeliveryDriver.Cinematic
         {
             if (cameraController == null)
             {
-                cameraController = CinematicCameraController.Instance;
+                cameraController = CinematicCameraController.Instance ?? FindFirstObjectByType<CinematicCameraController>();
                 if (cameraController == null) return;
+            }
+
+            if (director == null)
+            {
+                director = CinematicDirector.Instance ?? FindFirstObjectByType<CinematicDirector>();
             }
 
             // 1 - 7 Tuşları: Kamera Açıları
@@ -116,7 +121,7 @@ namespace DeliveryDriver.Cinematic
                     {
                         director.SetDirector(false);
                     }
-                    cameraController.SetAngle((CinematicCameraAngle)i, instantCut: false);
+                    cameraController.SetAngle((CinematicCameraAngle)i, instantCut: true);
                 }
             }
 
@@ -183,14 +188,17 @@ namespace DeliveryDriver.Cinematic
 #if ENABLE_INPUT_SYSTEM
             if (Keyboard.current != null)
             {
-                var control = Keyboard.current[newKey];
-                if (control != null && control.wasPressedThisFrame)
+                try
                 {
-                    return true;
+                    var control = Keyboard.current[newKey];
+                    if (control != null && control.wasPressedThisFrame)
+                    {
+                        return true;
+                    }
                 }
+                catch { }
             }
 #endif
-#if ENABLE_LEGACY_INPUT_MANAGER || !ENABLE_INPUT_SYSTEM
             try
             {
                 if (Input.GetKeyDown(legacyKey))
@@ -199,7 +207,7 @@ namespace DeliveryDriver.Cinematic
                 }
             }
             catch { }
-#endif
+
             return false;
         }
 

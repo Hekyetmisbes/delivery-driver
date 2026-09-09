@@ -32,8 +32,28 @@ namespace DeliveryDriver.Editor.Cinematic
             EditorApplication.update -= Repaint;
         }
 
+        private static CinematicCameraController EnsureSystem()
+        {
+            if (!EditorApplication.isPlaying) return null;
+
+            CinematicCameraController cam = CinematicCameraController.Instance;
+            if (cam == null)
+            {
+                CinematicCaptureInstaller.EnsureCinematicSystem();
+                cam = CinematicCameraController.Instance;
+            }
+
+            if (cam != null)
+            {
+                cam.ResolveReferences();
+            }
+            return cam;
+        }
+
         private void OnGUI()
         {
+            HandleEditorInput();
+
             scrollPos = EditorGUILayout.BeginScrollView(scrollPos);
 
             EditorGUILayout.Space(8);
@@ -52,6 +72,54 @@ namespace DeliveryDriver.Editor.Cinematic
             DrawShortcutsHelp();
 
             EditorGUILayout.EndScrollView();
+        }
+
+        private void HandleEditorInput()
+        {
+            Event e = Event.current;
+            if (e == null || !EditorApplication.isPlaying) return;
+
+            if (e.type == EventType.KeyDown)
+            {
+                CinematicCameraController cam = EnsureSystem();
+                CinematicDirector dir = CinematicDirector.Instance;
+
+                if (e.keyCode >= KeyCode.Alpha1 && e.keyCode <= KeyCode.Alpha7)
+                {
+                    int angleIndex = e.keyCode - KeyCode.Alpha1;
+                    if (dir != null && dir.IsDirectorActive) dir.SetDirector(false);
+                    if (cam != null) cam.SetAngle((CinematicCameraAngle)angleIndex, instantCut: true);
+                    e.Use();
+                    Repaint();
+                }
+                else if (e.keyCode == KeyCode.F7)
+                {
+                    if (dir != null) dir.ToggleDirector();
+                    e.Use();
+                    Repaint();
+                }
+                else if (e.keyCode == KeyCode.F8)
+                {
+                    if (cam != null) cam.ToggleVideoFormat();
+                    e.Use();
+                    Repaint();
+                }
+                else if (e.keyCode == KeyCode.F9)
+                {
+                    if (CinematicRecorderController.IsRecording)
+                        CinematicRecorderController.HandleStopRecording();
+                    else
+                        CinematicRecorderController.HandleStartRecording();
+                    e.Use();
+                    Repaint();
+                }
+                else if (e.keyCode == KeyCode.F10)
+                {
+                    if (cam != null) cam.ToggleSlowMotion();
+                    e.Use();
+                    Repaint();
+                }
+            }
         }
 
         private void DrawHeader()
@@ -89,6 +157,7 @@ namespace DeliveryDriver.Editor.Cinematic
                 {
                     if (EditorApplication.isPlaying)
                     {
+                        EnsureSystem();
                         CinematicRecorderController.HandleStartRecording();
                     }
                     else
@@ -122,7 +191,7 @@ namespace DeliveryDriver.Editor.Cinematic
 
         private void DrawFormatAndDirectorSection()
         {
-            CinematicCameraController camController = CinematicCameraController.Instance;
+            CinematicCameraController camController = EnsureSystem();
             CinematicDirector director = CinematicDirector.Instance;
 
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
@@ -191,7 +260,7 @@ namespace DeliveryDriver.Editor.Cinematic
 
         private void DrawCameraAnglesSection()
         {
-            CinematicCameraController camController = CinematicCameraController.Instance;
+            CinematicCameraController camController = EnsureSystem();
 
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             showAnglesFold = EditorGUILayout.Foldout(showAnglesFold, "Kamera Açıları Seçimi", true);
@@ -216,13 +285,15 @@ namespace DeliveryDriver.Editor.Cinematic
 
                     if (GUILayout.Button(angleNames[i], GUILayout.Height(24)))
                     {
+                        camController = EnsureSystem();
                         if (camController != null)
                         {
                             if (CinematicDirector.Instance != null && CinematicDirector.Instance.IsDirectorActive)
                             {
                                 CinematicDirector.Instance.SetDirector(false);
                             }
-                            camController.SetAngle((CinematicCameraAngle)i, instantCut: false);
+                            camController.SetAngle((CinematicCameraAngle)i, instantCut: true);
+                            Repaint();
                         }
                     }
                 }

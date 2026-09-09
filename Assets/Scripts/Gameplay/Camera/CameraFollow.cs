@@ -77,6 +77,7 @@ public class CameraFollow : MonoBehaviour
     [SerializeField] private float reverseCamGradientHeight = 28f;
 
     // Runtime state
+    public static bool IsCinematicOverridden { get; set; }
     private Camera mainCamera;
     private Rigidbody targetRb;
     private CarController carController;
@@ -212,6 +213,8 @@ public class CameraFollow : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (IsCinematicOverridden) return;
+
         if (target == null)
         {
             TryResolveTarget();

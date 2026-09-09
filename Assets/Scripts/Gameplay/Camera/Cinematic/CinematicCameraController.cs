@@ -8,7 +8,9 @@ namespace DeliveryDriver.Cinematic
     /// <summary>
     /// Hem 16:9 Trailer hem de 9:16 Instagram Reels formatları için
     /// profesyonel sinematik kamera açılarını ve geçişlerini yöneten kontrolcü.
+    /// LateUpdate içinde en son çalışarak kamera transformunu tam yetkiyle yönetir.
     /// </summary>
+    [DefaultExecutionOrder(100)]
     public class CinematicCameraController : MonoBehaviour
     {
         public static CinematicCameraController Instance { get; private set; }
@@ -89,23 +91,23 @@ namespace DeliveryDriver.Cinematic
             }
         }
 
-        private void ResolveReferences()
+        public void ResolveReferences()
         {
-            if (targetCamera == null)
+            if (gameplayCameraFollow == null)
             {
-                targetCamera = Camera.main;
-                if (targetCamera == null)
-                {
-                    targetCamera = FindFirstObjectByType<Camera>();
-                }
+                gameplayCameraFollow = FindFirstObjectByType<CameraFollow>();
             }
 
-            if (gameplayCameraFollow == null && targetCamera != null)
+            if (targetCamera == null)
             {
-                gameplayCameraFollow = targetCamera.GetComponent<CameraFollow>();
-                if (gameplayCameraFollow == null)
+                if (gameplayCameraFollow != null)
                 {
-                    gameplayCameraFollow = FindFirstObjectByType<CameraFollow>();
+                    targetCamera = gameplayCameraFollow.GetComponent<Camera>();
+                }
+
+                if (targetCamera == null)
+                {
+                    targetCamera = Camera.main ?? FindFirstObjectByType<Camera>();
                 }
             }
 
@@ -123,6 +125,10 @@ namespace DeliveryDriver.Cinematic
                         SetVehicleTarget(resolved);
                     }
                 }
+            }
+            else if (gameplayCameraFollow != null && gameplayCameraFollow.target != null && vehicleTarget != gameplayCameraFollow.target)
+            {
+                SetVehicleTarget(gameplayCameraFollow.target);
             }
         }
 
@@ -153,6 +159,7 @@ namespace DeliveryDriver.Cinematic
         public void SetCinematicMode(bool active)
         {
             isCinematicActive = active;
+            CameraFollow.IsCinematicOverridden = active;
 
             if (gameplayCameraFollow != null)
             {
@@ -165,6 +172,7 @@ namespace DeliveryDriver.Cinematic
 
             if (active)
             {
+                currentVelocity = Vector3.zero;
                 ApplyAngle(currentAngle, instantCut: true);
             }
 
@@ -176,12 +184,15 @@ namespace DeliveryDriver.Cinematic
         /// </summary>
         public void SetAngle(CinematicCameraAngle angle, bool instantCut = false)
         {
+            ResolveReferences();
+
             if (!isCinematicActive)
             {
                 SetCinematicMode(true);
             }
 
             currentAngle = angle;
+            currentVelocity = Vector3.zero;
             ApplyAngle(angle, instantCut);
             OnAngleChanged?.Invoke(angle);
         }
@@ -238,9 +249,15 @@ namespace DeliveryDriver.Cinematic
                 targetCamera.transform.position = desiredPos;
 
                 Vector3 lookTarget = CalculateLookAtTarget(preset);
-                targetCamera.transform.LookAt(lookTarget);
+                Vector3 lookDir = lookTarget - desiredPos;
+                if (lookDir.sqrMagnitude > 0.001f)
+                {
+                    targetCamera.transform.rotation = Quaternion.LookRotation(lookDir, Vector3.up);
+                }
+
                 currentFov = targetFov;
                 targetCamera.fieldOfView = targetFov;
+                currentVelocity = Vector3.zero;
             }
         }
 
@@ -264,9 +281,9 @@ namespace DeliveryDriver.Cinematic
             Vector3 forwardDir = speed > 1f ? vehicleVelocity.normalized : vehicleTarget.forward;
             Vector3 rightDir = Vector3.Cross(Vector3.up, forwardDir).normalized;
 
-            // Aracın 22-30m ilerisinde, yolun 4.5m sağında ve 1.5m yükseklikte bir nokta seç
-            float leadDistance = Mathf.Clamp(speed * 1.5f, 18f, 35f);
-            roadsideWorldPosition = vehicleTarget.position + (forwardDir * leadDistance) + (rightDir * 4.5f) + Vector3.up * 1.4f;
+            // Aracın 20-32m ilerisinde, yolun 4.5m sağında ve 1.4m yükseklikte bir nokta seç
+            float leadDistance = Mathf.Clamp(speed * 1.5f, 18f, 32f);
+            roadsideWorldPosition = vehicleTarget.position + (forwardDir * leadDistance) + (rightDir * 4.2f) + Vector3.up * 1.3f;
             isRoadsideInitialized = true;
         }
 
@@ -274,13 +291,18 @@ namespace DeliveryDriver.Cinematic
         {
             if (!isCinematicActive) return;
 
-            if (vehicleTarget == null)
+            // CameraFollow'un kesin olarak devre dışı kaldığından emin ol
+            CameraFollow.IsCinematicOverridden = true;
+            if (gameplayCameraFollow != null && gameplayCameraFollow.enabled)
             {
-                ResolveReferences();
-                if (vehicleTarget == null) return;
+                gameplayCameraFollow.enabled = false;
             }
 
-            if (targetCamera == null) return;
+            if (vehicleTarget == null || targetCamera == null)
+            {
+                ResolveReferences();
+                if (vehicleTarget == null || targetCamera == null) return;
+            }
 
             int index = (int)currentAngle;
             if (index < 0 || index >= presets.Count) return;
@@ -296,10 +318,10 @@ namespace DeliveryDriver.Cinematic
             Vector3 desiredPos = CalculateDesiredPosition(preset);
             if (preset.isFixedWorldPosition)
             {
-                // Roadside Flyby: Araç kameranın çok uzağına geçerse (> 25m) yeni bir ön pozisyona atla
+                // Roadside Flyby: Araç kameranın 15m arkasına geçerse yeni bir ön pozisyona atla
                 Vector3 toVehicle = vehicleTarget.position - roadsideWorldPosition;
                 float forwardDot = Vector3.Dot(toVehicle, targetCamera.transform.forward);
-                if (toVehicle.sqrMagnitude > 40f * 40f || (forwardDot < -15f && toVehicle.sqrMagnitude > 20f * 20f))
+                if (toVehicle.sqrMagnitude > 40f * 40f || (forwardDot < -10f && toVehicle.sqrMagnitude > 15f * 15f))
                 {
                     ResetRoadsideFlybyPosition();
                     desiredPos = roadsideWorldPosition;
