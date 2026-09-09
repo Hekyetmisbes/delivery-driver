@@ -156,6 +156,11 @@ public class CameraFollow : MonoBehaviour
         targetRb = binding.Rigidbody;
         carController = binding.CarController;
 
+        if (targetRb != null)
+        {
+            targetRb.interpolation = RigidbodyInterpolation.Interpolate;
+        }
+
         if (target != null)
         {
             currentYaw = target.eulerAngles.y;
@@ -290,8 +295,8 @@ public class CameraFollow : MonoBehaviour
                 : new Vector2(backDir3D.x, backDir3D.z).normalized;
 
             Vector3 p = transform.position;
-            p.x = targetPos.x + horizDir.x * minHorizontalDistance;
-            p.z = targetPos.z + horizDir.y * minHorizontalDistance;
+            p.x = Mathf.MoveTowards(p.x, targetPos.x + horizDir.x * minHorizontalDistance, deltaTime * 20f);
+            p.z = Mathf.MoveTowards(p.z, targetPos.z + horizDir.y * minHorizontalDistance, deltaTime * 20f);
             transform.position = p;
         }
 
@@ -305,7 +310,8 @@ public class CameraFollow : MonoBehaviour
             float pitch = targetRot.eulerAngles.x;
             if (pitch > 180f) pitch -= 360f;
             pitch = Mathf.Clamp(pitch, minPitchAngle, maxPitchAngle);
-            transform.rotation = Quaternion.Euler(pitch, targetRot.eulerAngles.y, 0f);
+            Quaternion desiredRot = Quaternion.Euler(pitch, targetRot.eulerAngles.y, 0f);
+            transform.rotation = Quaternion.Slerp(transform.rotation, desiredRot, deltaTime * 25f);
         }
 
         // 6. SPEED FOV

@@ -37,6 +37,8 @@ namespace DeliveryDriver.Cinematic
         private Vector3 currentVelocity;
         private Vector3 roadsideWorldPosition;
         private bool isRoadsideInitialized = false;
+        private float chaseYaw;
+        private float chaseYawVelocity;
         private float targetFov;
         private float currentFov;
         private Rigidbody targetRb;
@@ -138,6 +140,8 @@ namespace DeliveryDriver.Cinematic
                 VehicleCameraBinding binding = VehicleCameraTargetResolver.Resolve(newTarget);
                 targetRb = binding.Rigidbody;
                 carController = binding.CarController;
+                chaseYaw = vehicleTarget.eulerAngles.y;
+                chaseYawVelocity = 0f;
 
                 // Titreme önleme: Aracın Rigidbody'sinde fizik interpolasyonunu aç.
                 // Rigidbody.interpolation = Interpolate olmadan LateUpdate her render karesinde (60-144 FPS)
@@ -336,6 +340,22 @@ namespace DeliveryDriver.Cinematic
                     targetCamera.transform.position = vehicleTarget.TransformPoint(offset);
                     targetCamera.transform.rotation = vehicleTarget.rotation * Quaternion.Euler(preset.localRotationEuler);
                 }
+                else if (angle == CinematicCameraAngle.GameplayChase)
+                {
+                    Vector3 offset = preset.localOffset;
+                    if (currentFormat == CinematicVideoFormat.Reels_9_16)
+                    {
+                        offset.y += 0.35f;
+                        offset.z -= 0.6f;
+                    }
+                    chaseYaw = vehicleTarget.eulerAngles.y;
+                    chaseYawVelocity = 0f;
+                    Vector3 desiredPos = vehicleTarget.position + (Quaternion.Euler(0f, chaseYaw, 0f) * offset);
+                    targetCamera.transform.position = desiredPos;
+
+                    Vector3 lookTarget = vehicleTarget.position + Vector3.up * (currentFormat == CinematicVideoFormat.Reels_9_16 ? 1.4f : 1.1f);
+                    targetCamera.transform.rotation = Quaternion.LookRotation(lookTarget - desiredPos, Vector3.up);
+                }
                 else
                 {
                     Vector3 desiredPos = CalculateDesiredPosition(preset);
@@ -446,9 +466,53 @@ namespace DeliveryDriver.Cinematic
                     targetCamera.transform.rotation = Quaternion.LookRotation(lookDir, Vector3.up);
                 }
             }
+            else if (currentAngle == CinematicCameraAngle.GameplayChase)
+            {
+                // SİNEMATİK TAKİP KAMERASI (GameplayChase)
+                // Süspansiyon sarsıntılarını (pitch) ve viraj yatmasını (roll) tamamen izole et!
+                // Kamera sadece yatay yönelimi (Yaw) ve araç pozisyonunu pürüzsüzce takip eder.
+                float targetYaw = vehicleTarget.eulerAngles.y;
+                chaseYaw = Mathf.SmoothDampAngle(chaseYaw, targetYaw, ref chaseYawVelocity, 0.08f, Mathf.Infinity, dt);
+
+                Vector3 offset = preset.localOffset;
+                if (currentFormat == CinematicVideoFormat.Reels_9_16)
+                {
+                    offset.y += 0.35f;
+                    offset.z -= 0.6f;
+                }
+
+                Quaternion yawRot = Quaternion.Euler(0f, chaseYaw, 0f);
+                Vector3 desiredPos = vehicleTarget.position + (yawRot * offset);
+
+                float smoothTime = Mathf.Max(0.04f, preset.positionSmoothTime);
+                targetCamera.transform.position = Vector3.SmoothDamp(
+                    targetCamera.transform.position,
+                    desiredPos,
+                    ref currentVelocity,
+                    smoothTime,
+                    Mathf.Infinity,
+                    dt);
+
+                // LookAt hedefi: Aracın merkezinin 1.1m yukarısı (süspansiyon pitch'inden etkilenmez!)
+                Vector3 lookTarget = vehicleTarget.position + Vector3.up * 1.1f;
+                if (currentFormat == CinematicVideoFormat.Reels_9_16)
+                {
+                    lookTarget += Vector3.up * 0.30f;
+                }
+
+                Vector3 lookDir = lookTarget - targetCamera.transform.position;
+                if (lookDir.sqrMagnitude > 0.001f)
+                {
+                    Quaternion targetRot = Quaternion.LookRotation(lookDir, Vector3.up);
+                    targetCamera.transform.rotation = Quaternion.Slerp(
+                        targetCamera.transform.rotation,
+                        targetRot,
+                        dt * 20f);
+                }
+            }
             else
             {
-                // SERBEST / HAVADAN TAKİP (HelicopterDrone & GameplayChase)
+                // SERBEST / HAVADAN TAKİP (HelicopterDrone vb.)
                 Vector3 desiredPos = CalculateDesiredPosition(preset);
                 float smoothTime = Mathf.Max(0.02f, preset.positionSmoothTime);
 

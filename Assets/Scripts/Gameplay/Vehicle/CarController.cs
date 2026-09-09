@@ -417,9 +417,14 @@ public class CarController : MonoBehaviour
             float topSpeedRatio = maxForwardSpeedKmh > 1f ? Mathf.Clamp01(speedKmh / maxForwardSpeedKmh) : 0f;
             float speedTorqueFactor = Mathf.Lerp(1f, topSpeedMinTorqueFactor, topSpeedRatio);
 
-            // Virajda direksiyon donmusken tekerlek surtunme direncini yenmek icin ek tork destegi
+            // Virajda direksiyon dönmüşken tekerlek sürtünme direncini yenmek için ek tork desteği
+            // Drift esnasında tork artışı yapılmaz; normal motor torku korunarak kontrolsüz hızlanma önlenir
             float steerRatio = maxSteeringAngle > 0.1f ? Mathf.Clamp01(Mathf.Abs(currentSteerAngle) / maxSteeringAngle) : 0f;
-            float corneringBoost = 1f + (steerRatio * corneringPowerAssist);
+            float corneringBoost = 1f;
+            if (currentDriftGripBlend <= 0.05f && !isHandbraking)
+            {
+                corneringBoost += (steerRatio * corneringPowerAssist);
+            }
 
             float appliedTorque = accelInput * motorTorque * speedTorqueFactor * corneringBoost;
 
@@ -748,30 +753,29 @@ public class CarController : MonoBehaviour
         rb.AddForce(worldForce, ForceMode.Force);
 
         // --- VIRAJDA HIZ KORUMA (Cornering Speed Retention) ---
-        // Yanal kayma sonumlenirken kinetik enerjinin yok olmasini onler;
-        // Yanal momentumu aracin hareket dogrultusuna aktararak virajda yigilmayi engeller.
+        // Normal virajlarda kinetik enerjinin tamamen yok olmasını ve aracın bayılmasını önler.
+        // DRIFT KONTROLÜ: El freni çekildiğinde veya araç drift halindeyken (lateralSpeed > 1.2m/s veya currentDriftGripBlend > 0.05f)
+        // ileri itiş desteği KESİNLİKLE UYGULANMAZ. Gaza basıldığında araç roket gibi fırlamaz, doğal drift patinajı korunur.
         float absForwardSpeed = Mathf.Abs(forwardSpeed);
-        if (corneringSpeedRetention > 0f && absForwardSpeed > 0.5f)
+        bool isDrifting = currentDriftGripBlend > 0.05f || isHandbraking || Mathf.Abs(lateralSpeed) > 1.2f;
+
+        if (!isDrifting && corneringSpeedRetention > 0f && absForwardSpeed > 0.5f)
         {
             float speedKmh = rb.linearVelocity.magnitude * 3.6f;
             if (speedKmh < maxForwardSpeedKmh)
             {
                 float planeSpeed = Mathf.Sqrt(lateralSpeed * lateralSpeed + forwardSpeed * forwardSpeed);
 
-                // Gaza basiliyorsa hizi tam olarak koru, basili degilse ayarli oranda koru
-                float effectiveRetention = corneringSpeedRetention;
-                if (Mathf.Abs(smoothedThrottleInput) > 0.05f)
-                {
-                    effectiveRetention = Mathf.Lerp(effectiveRetention, 0.98f, Mathf.Abs(smoothedThrottleInput));
-                }
-
+                // Normal virajda hafif hız koruma (asla 0.98 gibi roket değerlerine çıkmaz)
+                float effectiveRetention = Mathf.Clamp(corneringSpeedRetention, 0f, 0.65f);
                 float targetSpeed = Mathf.Lerp(absForwardSpeed, planeSpeed, effectiveRetention);
                 float speedDeficit = targetSpeed - absForwardSpeed;
 
                 if (speedDeficit > 0.01f)
                 {
-                    float forwardAccel = (speedDeficit / Time.fixedDeltaTime) * (effectiveGripFactor * 0.95f);
-                    forwardAccel = Mathf.Min(forwardAccel, 28f);
+                    // İvme sınırını makul bir seviyeye (maksimum 3.5 m/s²) çekiyoruz (önceden 28 m/s² gibi roket ivmesiydi!)
+                    float forwardAccel = (speedDeficit / Time.fixedDeltaTime) * (effectiveGripFactor * 0.4f);
+                    forwardAccel = Mathf.Min(forwardAccel, 3.5f);
 
                     Vector3 forwardDir = forwardSpeed >= 0f ? transform.forward : -transform.forward;
                     Vector3 forwardForce = forwardDir * (forwardAccel * groundedRatio * rb.mass);
