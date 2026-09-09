@@ -39,6 +39,8 @@ namespace DeliveryDriver.Cinematic
         private bool isRoadsideInitialized = false;
         private float chaseYaw;
         private float chaseYawVelocity;
+        private float droneYaw;
+        private float droneYawVelocity;
         private float targetFov;
         private float currentFov;
         private Rigidbody targetRb;
@@ -356,6 +358,20 @@ namespace DeliveryDriver.Cinematic
                     Vector3 lookTarget = vehicleTarget.position + Vector3.up * (currentFormat == CinematicVideoFormat.Reels_9_16 ? 1.4f : 1.1f);
                     targetCamera.transform.rotation = Quaternion.LookRotation(lookTarget - desiredPos, Vector3.up);
                 }
+                else if (angle == CinematicCameraAngle.HelicopterDrone)
+                {
+                    droneYaw = vehicleTarget.eulerAngles.y;
+                    droneYawVelocity = 0f;
+                    Vector3 desiredPos = CalculateDesiredPosition(preset);
+                    targetCamera.transform.position = desiredPos;
+
+                    Vector3 lookTarget = CalculateLookAtTarget(preset);
+                    Vector3 lookDir = lookTarget - desiredPos;
+                    if (lookDir.sqrMagnitude > 0.001f)
+                    {
+                        targetCamera.transform.rotation = Quaternion.LookRotation(lookDir, Vector3.up);
+                    }
+                }
                 else
                 {
                     Vector3 desiredPos = CalculateDesiredPosition(preset);
@@ -395,9 +411,9 @@ namespace DeliveryDriver.Cinematic
             Vector3 forwardDir = speed > 1f ? vehicleVelocity.normalized : vehicleTarget.forward;
             Vector3 rightDir = Vector3.Cross(Vector3.up, forwardDir).normalized;
 
-            // Aracın 20-32m ilerisinde, yolun 4.5m sağında ve 1.4m yükseklikte bir nokta seç
-            float leadDistance = Mathf.Clamp(speed * 1.5f, 18f, 32f);
-            roadsideWorldPosition = vehicleTarget.position + (forwardDir * leadDistance) + (rightDir * 4.2f) + Vector3.up * 1.3f;
+            // Aracın 11-16m ilerisinde, yolun 3.5m sağında ve 1.1m yükseklikte sinematik tele kadraj noktası seç
+            float leadDistance = Mathf.Clamp(speed * 0.9f, 11f, 16f);
+            roadsideWorldPosition = vehicleTarget.position + (forwardDir * leadDistance) + (rightDir * 3.5f) + Vector3.up * 1.1f;
             isRoadsideInitialized = true;
         }
 
@@ -531,7 +547,7 @@ namespace DeliveryDriver.Cinematic
                     if (lookDir.sqrMagnitude > 0.001f)
                     {
                         Quaternion targetRot = Quaternion.LookRotation(lookDir, Vector3.up);
-                        float rotSpeed = preset.rotationSmoothTime > 0.001f ? (1f / preset.rotationSmoothTime) : 25f;
+                        float rotSpeed = currentAngle == CinematicCameraAngle.HelicopterDrone ? 12f : (preset.rotationSmoothTime > 0.001f ? (1f / preset.rotationSmoothTime) : 25f);
                         targetCamera.transform.rotation = Quaternion.Slerp(
                             targetCamera.transform.rotation,
                             targetRot,
@@ -552,7 +568,20 @@ namespace DeliveryDriver.Cinematic
         {
             if (preset.isFixedWorldPosition)
             {
-                if (!isRoadsideInitialized) ResetRoadsideFlybyPosition();
+                if (!isRoadsideInitialized)
+                {
+                    ResetRoadsideFlybyPosition();
+                }
+                else
+                {
+                    // Araç kamerayı geçip 18m'den fazla uzaklaştıysa kamerayı hemen aracın önüne tekrar al (kamera sonsuz uzakta kalmaz)
+                    Vector3 carToCam = roadsideWorldPosition - vehicleTarget.position;
+                    float dotAhead = Vector3.Dot(vehicleTarget.forward, carToCam);
+                    if (dotAhead < -6f || carToCam.sqrMagnitude > 380f)
+                    {
+                        ResetRoadsideFlybyPosition();
+                    }
+                }
                 return roadsideWorldPosition;
             }
 
@@ -566,15 +595,14 @@ namespace DeliveryDriver.Cinematic
                 if (offset.z < 0) offset.z -= 0.6f; // Biraz daha geniş kadraj
             }
 
-            // Polis Helikopteri: Aracın ani savrulma ve drift açılarıyla sarsılmadan, hareket yönünü gökyüzünden takip eder
+            // Polis Helikopteri: Saniyelik tekerlek/direksiyon sarsıntılarından ve patinajdan izole, pürüzsüz hava takibi
             if (currentAngle == CinematicCameraAngle.HelicopterDrone)
             {
-                Vector3 vel = targetRb != null ? targetRb.linearVelocity : vehicleTarget.forward;
-                Vector3 forwardDir = vel.magnitude > 2f ? vel.normalized : vehicleTarget.forward;
-                Vector3 rightDir = Vector3.Cross(Vector3.up, forwardDir).normalized;
-
-                Vector3 heliOffset = (Vector3.up * offset.y) + (rightDir * offset.x) + (forwardDir * offset.z);
-                return vehicleTarget.position + heliOffset;
+                float targetYaw = vehicleTarget.eulerAngles.y;
+                float dt = Mathf.Min(Time.unscaledDeltaTime, 0.05f);
+                droneYaw = Mathf.SmoothDampAngle(droneYaw, targetYaw, ref droneYawVelocity, 0.45f, Mathf.Infinity, dt);
+                Quaternion droneRot = Quaternion.Euler(0f, droneYaw, 0f);
+                return vehicleTarget.position + (droneRot * offset);
             }
 
             return vehicleTarget.position + (vehicleTarget.rotation * offset);
@@ -582,6 +610,12 @@ namespace DeliveryDriver.Cinematic
 
         private Vector3 CalculateLookAtTarget(CameraPresetSettings preset)
         {
+            if (currentAngle == CinematicCameraAngle.HelicopterDrone)
+            {
+                // Drone her zaman aracın merkezini süspansiyon/pitch sarsıntısız takip eder
+                return vehicleTarget.position + Vector3.up * 0.8f;
+            }
+
             Vector3 lookOffset = preset.localLookAtOffset;
             if (currentFormat == CinematicVideoFormat.Reels_9_16)
             {

@@ -80,6 +80,8 @@ namespace DeliveryDriver.City
             TryCreateBootstrap(SceneManager.GetActiveScene());
         }
 
+
+
         private static void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
         {
             TryCreateBootstrap(scene);
@@ -92,7 +94,7 @@ namespace DeliveryDriver.City
                 return;
             }
 
-            if (!scene.name.Equals(GameSceneName, StringComparison.OrdinalIgnoreCase))
+            if (!IsGameplayScene(scene.name))
             {
                 return;
             }
@@ -103,14 +105,21 @@ namespace DeliveryDriver.City
             }
 
             GameObject bootstrapObject = new GameObject("BuildingCollisionBootstrap");
+            SceneManager.MoveGameObjectToScene(bootstrapObject, scene);
             bootstrapObject.AddComponent<BuildingCollisionBootstrap>();
+        }
+
+        private static bool IsGameplayScene(string sceneName)
+        {
+            if (string.IsNullOrWhiteSpace(sceneName)) return false;
+            return sceneName.Equals(GameSceneName, StringComparison.OrdinalIgnoreCase) ||
+                   sceneName.Equals("GameScene", StringComparison.OrdinalIgnoreCase);
         }
 
         private void Start()
         {
             Scene activeScene = SceneManager.GetActiveScene();
-            if (!activeScene.IsValid() || !activeScene.isLoaded ||
-                !activeScene.name.Equals(GameSceneName, StringComparison.OrdinalIgnoreCase))
+            if (!activeScene.IsValid() || !activeScene.isLoaded || !IsGameplayScene(activeScene.name))
             {
                 Destroy(gameObject);
                 return;

@@ -22,13 +22,13 @@ public class CameraFollow : MonoBehaviour
 
     [Header("--- KONUM VE MESAFE ---")]
     [Tooltip("Kameranın araca göre varsayılan konumu (X=0, Y=yükseklik, Z=negatif mesafe)")]
-    [SerializeField] private Vector3 offset = new Vector3(0f, 3.4f, -7.0f);
+    [SerializeField] private Vector3 offset = new Vector3(0f, 2.1f, -4.8f);
     [Tooltip("Kameranın odaklanacağı hedef yükseklik (aracın merkezinden yukarı)")]
-    [SerializeField] private float lookAtHeight = 1.3f;
+    [SerializeField] private float lookAtHeight = 1.05f;
     [Tooltip("Kameranın araca yatayda yaklaşabileceği MUTLAK minimum mesafe (tavana yapışmayı önler)")]
-    [SerializeField] private float minHorizontalDistance = 5.2f;
+    [SerializeField] private float minHorizontalDistance = 3.6f;
     [Tooltip("Kameranın araçtan yüksekliğinin MUTLAK minimum sınırı")]
-    [SerializeField] private float minHeightAboveTarget = 2.0f;
+    [SerializeField] private float minHeightAboveTarget = 1.3f;
 
     [Header("--- AÇI VE PITCH SINIRLARI ---")]
     [Tooltip("Minimum aşağı eğim açısı (derece).")]
@@ -121,6 +121,15 @@ public class CameraFollow : MonoBehaviour
         if (mainCamera != null)
         {
             mainCamera.fieldOfView = baseFov;
+        }
+
+        // Eski aşırı uzak mesafeleri dinamik olarak yeni sinematik kadraja güncelle
+        if (offset.y >= 3.2f && offset.z <= -6.8f)
+        {
+            offset = new Vector3(0f, 2.1f, -4.8f);
+            lookAtHeight = 1.05f;
+            minHorizontalDistance = 3.6f;
+            minHeightAboveTarget = 1.3f;
         }
 
         // Cinemachine çakışmalarını devre dışı bırak:
@@ -256,17 +265,17 @@ public class CameraFollow : MonoBehaviour
         // 2. MESAFE VE HIZ ZOOM
         float forwardSpeedKmh = Mathf.Max(0f, localVelZ * 3.6f);
         float zoomOut = isReversing ? 0f : (Mathf.Clamp01(forwardSpeedKmh / Mathf.Max(1f, forwardZoomOutSpeedKmh)) * forwardZoomOutExtra);
-        float targetDistance = Mathf.Abs(offset.z) + zoomOut;
-        float targetHeight = offset.y;
+        float targetDistance = Mathf.Max(Mathf.Abs(offset.z) + zoomOut, minHorizontalDistance);
+        float targetHeight = Mathf.Max(offset.y, minHeightAboveTarget);
 
         Quaternion yawRotation = Quaternion.Euler(0f, currentYaw, 0f);
         Vector3 desiredPosition = targetPos + (yawRotation * new Vector3(offset.x, targetHeight, -targetDistance));
 
-        // 3. POZİSYON TAKİBİ
+        // 3. POZİSYON TAKİBİ (Sarsıntısız, saf SmoothDamp interpolasyonu)
         if (isReversing)
         {
             // Geri giderken araba kameraya çarpmasın diye kamera araçla tam senkronize geri çekilir
-            transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref positionVelocity, 0.02f, Mathf.Infinity, deltaTime);
+            transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref positionVelocity, 0.04f, Mathf.Infinity, deltaTime);
         }
         else
         {
@@ -275,32 +284,7 @@ public class CameraFollow : MonoBehaviour
             transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref positionVelocity, currentSmoothTime, Mathf.Infinity, deltaTime);
         }
 
-        // 4. KESİN GÜVENLİK SINIRLARI (TAVANA YAPIŞMAYI VE İÇİNE GİRMEYİ MATEMATİKSEL OLARAK ENGELLER)
-        // A) Minimum Yükseklik Sınırı:
-        if (transform.position.y < targetPos.y + minHeightAboveTarget)
-        {
-            Vector3 p = transform.position;
-            p.y = targetPos.y + minHeightAboveTarget;
-            transform.position = p;
-        }
-
-        // B) Minimum Yatay Mesafe Sınırı:
-        Vector3 diff = transform.position - targetPos;
-        Vector2 horizDiff = new Vector2(diff.x, diff.z);
-        if (horizDiff.magnitude < minHorizontalDistance)
-        {
-            Vector3 backDir3D = -(yawRotation * Vector3.forward);
-            Vector2 horizDir = horizDiff.sqrMagnitude > 0.001f
-                ? horizDiff.normalized
-                : new Vector2(backDir3D.x, backDir3D.z).normalized;
-
-            Vector3 p = transform.position;
-            p.x = Mathf.MoveTowards(p.x, targetPos.x + horizDir.x * minHorizontalDistance, deltaTime * 20f);
-            p.z = Mathf.MoveTowards(p.z, targetPos.z + horizDir.y * minHorizontalDistance, deltaTime * 20f);
-            transform.position = p;
-        }
-
-        // 5. ROTASYON (LOOK AT & PITCH CLAMP)
+        // 4. ROTASYON (LOOK AT & PITCH CLAMP)
         // Kameranın arabanın tavanına dik bakması (yere bakması) maxPitchAngle ile engellenir!
         Vector3 lookTarget = targetPos + Vector3.up * lookAtHeight;
         Vector3 lookDir = lookTarget - transform.position;
@@ -311,7 +295,7 @@ public class CameraFollow : MonoBehaviour
             if (pitch > 180f) pitch -= 360f;
             pitch = Mathf.Clamp(pitch, minPitchAngle, maxPitchAngle);
             Quaternion desiredRot = Quaternion.Euler(pitch, targetRot.eulerAngles.y, 0f);
-            transform.rotation = Quaternion.Slerp(transform.rotation, desiredRot, deltaTime * 25f);
+            transform.rotation = Quaternion.Slerp(transform.rotation, desiredRot, deltaTime * 18f);
         }
 
         // 6. SPEED FOV

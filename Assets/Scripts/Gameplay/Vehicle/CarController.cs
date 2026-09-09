@@ -1065,34 +1065,40 @@ public class CarController : MonoBehaviour
 
         WheelCollider[] wheels = { frontLeftCollider, frontRightCollider, rearLeftCollider, rearRightCollider };
         float minContactY = float.MaxValue;
+        float maxContactY = float.MinValue;
+        float[] contactHeights = new float[wheels.Length];
 
         for (int i = 0; i < wheels.Length; i++)
         {
             WheelCollider wheel = wheels[i];
-            if (wheel == null)
-            {
-                return;
-            }
+            if (wheel == null) return;
 
             Vector3 localPos = transform.InverseTransformPoint(wheel.transform.position);
-            float contactY = localPos.y - wheel.radius;
-            if (contactY < minContactY)
-            {
-                minContactY = contactY;
-            }
+            // Tekerlek temas duzlemi: Merkez Y + Collider Center Y - Radius
+            float contactY = localPos.y + wheel.center.y - wheel.radius;
+            contactHeights[i] = contactY;
+
+            if (contactY < minContactY) minContactY = contactY;
+            if (contactY > maxContactY) maxContactY = contactY;
         }
 
-        if (Mathf.Abs(minContactY) < 0.001f)
+        // Tekerlekler arasinda belirgin yukseklik farki (5mm'den fazla) yoksa dokunma
+        if (maxContactY - minContactY < 0.005f)
         {
             return;
         }
 
+        // Sadece yuksekte kalan tekerlekleri minContactY duzlemine esitle (tum araci asagi batirmaz)
         for (int i = 0; i < wheels.Length; i++)
         {
-            Transform wt = wheels[i].transform;
-            Vector3 localPos = wt.localPosition;
-            localPos.y -= minContactY;
-            wt.localPosition = localPos;
+            float diff = contactHeights[i] - minContactY;
+            if (diff > 0.003f)
+            {
+                Transform wt = wheels[i].transform;
+                Vector3 localPos = wt.localPosition;
+                localPos.y -= diff;
+                wt.localPosition = localPos;
+            }
         }
     }
 

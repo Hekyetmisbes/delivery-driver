@@ -143,6 +143,16 @@ namespace DeliveryDriver.Company
             return CanUseCurrentVehicleAsFallback(vehicleType);
         }
 
+        public bool SwitchVehicle(VehicleType vehicleType)
+        {
+            bool success = ApplyVehicleTypeInternal(vehicleType, true);
+            if (success)
+            {
+                QuestDatabaseService.Instance?.SaveSelectedVehicleType(QuestDatabaseService.DefaultPlayerId, vehicleType);
+            }
+            return success;
+        }
+
         private bool ApplyVehicleTypeInternal(VehicleType vehicleType, bool allowDuringActiveQuest)
         {
             SynchronizeSceneVehicleState();
@@ -751,7 +761,9 @@ namespace DeliveryDriver.Company
 
         private static bool IsGameSceneActive()
         {
-            return SceneManager.GetActiveScene().name.Equals(GameSceneName, StringComparison.OrdinalIgnoreCase);
+            string sceneName = SceneManager.GetActiveScene().name;
+            return sceneName.Equals(GameSceneName, StringComparison.OrdinalIgnoreCase) ||
+                   sceneName.Equals("GameScene", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

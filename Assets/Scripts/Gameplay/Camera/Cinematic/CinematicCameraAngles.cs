@@ -43,13 +43,13 @@ namespace DeliveryDriver.Cinematic
                     return new CameraPresetSettings
                     {
                         displayName = "Cinematic Chase",
-                        localOffset = new Vector3(0f, 2.8f, -6.2f),
+                        localOffset = new Vector3(0f, 2.0f, -4.8f),
                         localRotationEuler = Vector3.zero,
-                        localLookAtOffset = new Vector3(0f, 1.1f, 0.5f),
+                        localLookAtOffset = new Vector3(0f, 1.0f, 0.5f),
                         fov16x9 = 58f,
                         fov9x16 = 68f,
-                        positionSmoothTime = 0.12f,
-                        rotationSmoothTime = 0.12f,
+                        positionSmoothTime = 0.08f,
+                        rotationSmoothTime = 0.08f,
                         isChassisMounted = false,
                         isFixedWorldPosition = false,
                         lookAtTarget = true
@@ -123,17 +123,17 @@ namespace DeliveryDriver.Cinematic
 
                 case CinematicCameraAngle.HelicopterDrone:
                     // Kullanıcı isteği: "Ve drone çekim polis helikopteri misali bir çekim olsun."
-                    // Yüksek irtifada süzülen, teleobjektif (düşük FOV) hava takip birimi kamerası
+                    // Havadan takip: Aracı net gösterecek yükseklik (7.5m), stabil takip açısı ve aksiyon kadrajı
                     return new CameraPresetSettings
                     {
                         displayName = "Polis Helikopteri Takibi (Air Unit)",
-                        localOffset = new Vector3(8.0f, 18.0f, -22.0f),
+                        localOffset = new Vector3(3.8f, 7.5f, -10.5f),
                         localRotationEuler = Vector3.zero,
-                        localLookAtOffset = new Vector3(0f, 0.6f, 0f),
-                        fov16x9 = 35f,
-                        fov9x16 = 45f,
-                        positionSmoothTime = 0.50f,
-                        rotationSmoothTime = 0.20f,
+                        localLookAtOffset = new Vector3(0f, 0.8f, 0f),
+                        fov16x9 = 42f,
+                        fov9x16 = 52f,
+                        positionSmoothTime = 0.35f,
+                        rotationSmoothTime = 0.15f,
                         isChassisMounted = false,
                         isFixedWorldPosition = false,
                         lookAtTarget = true
@@ -143,11 +143,11 @@ namespace DeliveryDriver.Cinematic
                     return new CameraPresetSettings
                     {
                         displayName = "Yol Kenarı Geçiş (Roadside Flyby)",
-                        localOffset = new Vector3(4.5f, 1.2f, 25.0f),
+                        localOffset = new Vector3(3.5f, 1.1f, 14.0f),
                         localRotationEuler = Vector3.zero,
                         localLookAtOffset = new Vector3(0f, 0.7f, 0f),
-                        fov16x9 = 40f,
-                        fov9x16 = 50f,
+                        fov16x9 = 32f,
+                        fov9x16 = 40f,
                         positionSmoothTime = 0f,
                         rotationSmoothTime = 0.05f,
                         isChassisMounted = false,

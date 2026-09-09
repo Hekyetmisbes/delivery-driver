@@ -114,7 +114,7 @@ namespace DeliveryDriver.EditorTools
         [SerializeField] private float crosswalkStripeWidth = 0.55f;
         [SerializeField] private float crosswalkStripeGap = 0.55f;
         [SerializeField] private int crosswalkStripeCount = 7;
-        [SerializeField] private bool createMeshCollider;
+        [SerializeField] private bool createMeshCollider = true;
         [SerializeField] private bool toolEnabled = true;
 
         [SerializeField] private List<Vector3> smoothPath = new List<Vector3>();
