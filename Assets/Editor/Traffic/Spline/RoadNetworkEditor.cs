@@ -113,8 +113,13 @@ namespace TrafficSystem.Spline.Editor
             EditorGUILayout.Space(8f);
             EditorGUILayout.LabelField("Road Stitching & Merging", EditorStyles.boldLabel);
 
-            bool hasJointStart = spline.startIntersection != null && RoadMergerUtility.IsTwoWayJoint(spline.startIntersection, out SplineRoad startA, out SplineRoad startB);
-            bool hasJointEnd = spline.endIntersection != null && RoadMergerUtility.IsTwoWayJoint(spline.endIntersection, out SplineRoad endA, out SplineRoad endB);
+            SplineRoad startA = null;
+            SplineRoad startB = null;
+            bool hasJointStart = spline.startIntersection != null && RoadMergerUtility.IsTwoWayJoint(spline.startIntersection, out startA, out startB);
+
+            SplineRoad endA = null;
+            SplineRoad endB = null;
+            bool hasJointEnd = spline.endIntersection != null && RoadMergerUtility.IsTwoWayJoint(spline.endIntersection, out endA, out endB);
 
             if (hasJointStart || hasJointEnd)
             {
