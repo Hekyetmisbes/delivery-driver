@@ -234,6 +234,14 @@ namespace DeliveryDriver.EditorTools
             Debug.Log($"[SimpleRoadPlacementTool] {count} adet aşırı noktalı yol optimize edildi, yeni yollar gibi hafifletildi.");
         }
 
+        [MenuItem("Tools/Delivery Driver/City/Merge All 2-Way Road Joints & Fix Gaps", false, 24)]
+        [MenuItem("Tools/Delivery Driver/Traffic/Merge All 2-Way Road Joints & Fix Gaps", false, 24)]
+        public static void MergeAllTwoWayRoadsMenu()
+        {
+            int count = RoadMergerUtility.MergeAllTwoWayRoadsInScene();
+            Debug.Log($"[SimpleRoadPlacementTool] {count} adet 2 yönlü yol bağlantısı başarıyla birleştirildi!");
+        }
+
         private void OnEnable()
         {
             SceneView.duringSceneGui -= DuringSceneGUI;
@@ -2906,15 +2914,15 @@ namespace DeliveryDriver.EditorTools
                 return samples != null ? new List<Vector3>(samples) : new List<Vector3>();
             }
 
-            float startTrim = GetEndpointTrimDistance(samples[0]);
-            float endTrim = GetEndpointTrimDistance(samples[samples.Count - 1]);
+            List<float> distances = BuildCumulativeDistances(samples);
+            float totalDistance = distances[distances.Count - 1];
+            float startTrim = GetEndpointTrimDistance(samples[0], totalDistance);
+            float endTrim = GetEndpointTrimDistance(samples[samples.Count - 1], totalDistance);
             if (startTrim <= 0f && endTrim <= 0f)
             {
                 return new List<Vector3>(samples);
             }
 
-            List<float> distances = BuildCumulativeDistances(samples);
-            float totalDistance = distances[distances.Count - 1];
             if (totalDistance <= startTrim + endTrim + 1f)
             {
                 float available = Mathf.Max(0.5f, totalDistance - 1f);
@@ -2957,7 +2965,7 @@ namespace DeliveryDriver.EditorTools
             public bool IsRightEdge;
         }
 
-        private float GetEndpointTrimDistance(Vector3 endpoint)
+        private float GetEndpointTrimDistance(Vector3 endpoint, float totalRoadDistance = 0f)
         {
             Vector3 intersectionPos;
             if (!TryFindNearbyIntersectionOrVisual(endpoint, out intersectionPos, out int branchCount))
@@ -2968,7 +2976,13 @@ namespace DeliveryDriver.EditorTools
             if (branchCount >= 3)
             {
                 float minTrim = roadWidth * 0.5f + (sidewalkWidth > 0.01f ? sidewalkWidth : 0f) + 0.5f;
-                return intersectionRoadTrimDistance > 0f ? Mathf.Max(minTrim, intersectionRoadTrimDistance) : minTrim;
+                float trimDist = intersectionRoadTrimDistance > 0f ? Mathf.Max(minTrim, intersectionRoadTrimDistance) : minTrim;
+                if (totalRoadDistance > 0.5f)
+                {
+                    trimDist = Mathf.Min(trimDist, totalRoadDistance * 0.45f);
+                }
+                // Allow a small 0.15m overlap so road penetrates slightly under intersection for 100% watertight seal
+                return Mathf.Max(0f, trimDist - 0.15f);
             }
 
             return 0f;

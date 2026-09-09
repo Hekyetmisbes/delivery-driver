@@ -78,6 +78,29 @@ namespace TrafficSystem.Spline
             CalculateDistances();
         }
 
+        public List<Vector3> GetAnchorPoints()
+        {
+            List<Vector3> anchors = new List<Vector3>();
+            if (!HasValidControlPoints()) return anchors;
+            for (int i = 0; i < controlPoints.Count; i += 3)
+            {
+                anchors.Add(controlPoints[i]);
+            }
+            return anchors;
+        }
+
+        public List<Vector3> GetAllControlPoints()
+        {
+            return controlPoints != null ? new List<Vector3>(controlPoints) : new List<Vector3>();
+        }
+
+        public void SetControlPoints(List<Vector3> newPoints)
+        {
+            if (newPoints == null || newPoints.Count < 4) return;
+            controlPoints = new List<Vector3>(newPoints);
+            CalculateDistances();
+        }
+
         public void AddSegment()
         {
             Vector3 lastPoint = controlPoints[controlPoints.Count - 1];

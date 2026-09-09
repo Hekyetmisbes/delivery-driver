@@ -110,6 +110,69 @@ namespace TrafficSystem.Spline.Editor
                 EditorUtility.SetDirty(spline);
             }
 
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Road Stitching & Merging", EditorStyles.boldLabel);
+
+            bool hasJointStart = spline.startIntersection != null && RoadMergerUtility.IsTwoWayJoint(spline.startIntersection, out SplineRoad startA, out SplineRoad startB);
+            bool hasJointEnd = spline.endIntersection != null && RoadMergerUtility.IsTwoWayJoint(spline.endIntersection, out SplineRoad endA, out SplineRoad endB);
+
+            if (hasJointStart || hasJointEnd)
+            {
+                EditorGUILayout.HelpBox("🔗 Bu yol parçası, ucundaki 2 yönlü bir kavşak ile başka bir yola bağlanıyor. Tek parça pürüzsüz yol yapmak ve aradaki yarıkları/çatlakları gidermek için birleştirebilirsiniz.", MessageType.Info);
+                
+                GUI.backgroundColor = new Color(0.2f, 0.7f, 1f);
+                if (GUILayout.Button("✨ Merge Entire Continuous Road Chain (Tüm Yolu Tek Parça Yap)", GUILayout.Height(32)))
+                {
+                    SplineRoad merged = RoadMergerUtility.MergeEntireChain(spline);
+                    if (merged != null)
+                    {
+                        Selection.activeGameObject = merged.gameObject;
+                    }
+                    SceneView.RepaintAll();
+                }
+
+                if (hasJointStart && GUILayout.Button("🔗 Merge With Road at Start Joint"))
+                {
+                    SplineRoad other = (startA == spline) ? startB : startA;
+                    RoadMergerUtility.MergeTwoRoads(spline, other, spline.startIntersection);
+                    SceneView.RepaintAll();
+                }
+
+                if (hasJointEnd && GUILayout.Button("🔗 Merge With Road at End Joint"))
+                {
+                    SplineRoad other = (endA == spline) ? endB : endA;
+                    RoadMergerUtility.MergeTwoRoads(spline, other, spline.endIntersection);
+                    SceneView.RepaintAll();
+                }
+                GUI.backgroundColor = Color.white;
+            }
+            else
+            {
+                GUI.backgroundColor = new Color(0.2f, 0.7f, 1f);
+                if (GUILayout.Button("✨ Check & Merge Connected Road Chain"))
+                {
+                    SplineRoad merged = RoadMergerUtility.MergeEntireChain(spline);
+                    if (merged != null)
+                    {
+                        Selection.activeGameObject = merged.gameObject;
+                    }
+                    SceneView.RepaintAll();
+                }
+                GUI.backgroundColor = Color.white;
+            }
+
+            GUI.backgroundColor = new Color(0.4f, 0.9f, 0.6f);
+            if (GUILayout.Button("🛠️ Fix All 2-Way Road Gaps in Scene (Tüm Parçalı Yolları Birleştir)"))
+            {
+                if (EditorUtility.DisplayDialog("Tüm 2 Yönlü Yolları Birleştir", "Sahnedeki tüm 2 yönlü geçiş noktalarında ayrılmış yollar birleştirilerek kırıksız tek parça yollara dönüştürülecek. Onaylıyor musunuz?", "Evet, Birleştir", "İptal"))
+                {
+                    int count = RoadMergerUtility.MergeAllTwoWayRoadsInScene();
+                    Debug.Log($"[RoadNetworkEditor] {count} adet 2 yönlü yol bağlantısı başarıyla birleştirildi!");
+                    SceneView.RepaintAll();
+                }
+            }
+            GUI.backgroundColor = Color.white;
+
             EditorGUILayout.Space(6f);
             GUI.backgroundColor = new Color(1f, 0.75f, 0.3f);
             if (GUILayout.Button("Simplify ALL Dense Roads in Scene"))
