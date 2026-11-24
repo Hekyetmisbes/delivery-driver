@@ -137,14 +137,17 @@ namespace TrafficSystem
                 ExtractRoadsFromNetwork(roadNetworkRoot);
             }
 
+            // Both extraction passes run synchronously and can reuse the same scene scan.
+            MeshFilter[] meshFilters = null;
             if (!builtFromSceneRoutes && includeSimplePolyRoads)
             {
-                ExtractSimplePolyRoadMeshes(generateDualLaneSegmentsForSimplePoly);
+                meshFilters = FindObjectsByType<MeshFilter>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+                ExtractSimplePolyRoadMeshes(generateDualLaneSegmentsForSimplePoly, meshFilters);
             }
 
             if (!builtFromSceneRoutes)
             {
-                TryAutoRecoverSimplePolyLanes();
+                TryAutoRecoverSimplePolyLanes(meshFilters);
             }
 
             // Build connections between road segments
@@ -155,11 +158,8 @@ namespace TrafficSystem
                 PruneDisconnectedRouteIslands();
             }
 
-            // Pre-build the spatial index so the first FindPath call does not stall.
-            // The pathfinder uses Mathf.Max(1f, transferMaxDistance) as cell size.
-            // Pre-build with a common transfer distance to avoid lazy first-call cost.
-            const float preBuildCellSize = 24f;
-            roadGraph.GetOrBuildSpatialIndex(preBuildCellSize);
+            // Warm the first navigation search tier, rather than an index for a later retry.
+            roadGraph.GetOrBuildSpatialIndex(RoadGraphPathfinder.InitialNavigationTransferDistance);
 
             Debug.Log($"[RoadGraphBuilder] Built road graph: {roadGraph.roadSegments.Count} segments, " +
                      $"{GetTotalWaypointCount()} waypoints");
@@ -1162,9 +1162,9 @@ namespace TrafficSystem
             ExtractSimplePolyRoadMeshes(generateDualLaneSegmentsForSimplePoly);
         }
 
-        private void ExtractSimplePolyRoadMeshes(bool dualLaneMode)
+        private void ExtractSimplePolyRoadMeshes(bool dualLaneMode, MeshFilter[] sceneMeshFilters = null)
         {
-            MeshFilter[] sceneMeshFilters = FindObjectsByType<MeshFilter>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            sceneMeshFilters ??= FindObjectsByType<MeshFilter>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             if (sceneMeshFilters == null || sceneMeshFilters.Length == 0) return;
 
             int initialCount = roadGraph.roadSegments.Count;
@@ -1204,7 +1204,7 @@ namespace TrafficSystem
             }
         }
 
-        private void TryAutoRecoverSimplePolyLanes()
+        private void TryAutoRecoverSimplePolyLanes(MeshFilter[] sceneMeshFilters)
         {
             if (!autoRecoverSimplePolyLaneExtraction || roadGraph == null)
             {
@@ -1219,7 +1219,7 @@ namespace TrafficSystem
             }
 
             int before = roadGraph.roadSegments.Count;
-            ExtractSimplePolyRoadMeshes(true);
+            ExtractSimplePolyRoadMeshes(true, sceneMeshFilters);
             int added = roadGraph.roadSegments.Count - before;
             if (added > 0)
             {

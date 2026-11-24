@@ -80,8 +80,7 @@ namespace DeliveryDriver.Quest.UI
         private readonly List<Image> routeSegmentImages = new List<Image>();
         private readonly List<Vector2> projectedRoutePoints = new List<Vector2>();
         private readonly List<Vector2> simplifiedRoutePoints = new List<Vector2>();
-        private readonly List<Renderer> cachedNpcRenderers = new List<Renderer>();
-        private readonly List<Renderer> temporarilyHiddenNpcRenderers = new List<Renderer>();
+        private readonly MinimapNpcRendererFilter npcRendererFilter = new MinimapNpcRendererFilter();
         [SerializeField] private int activeRouteSegmentCount;
         [SerializeField] private int peakRouteSegmentCount;
 
@@ -93,8 +92,6 @@ namespace DeliveryDriver.Quest.UI
         private Vector3 lastOverlayCameraPosition = Vector3.positiveInfinity;
         private Vector3 lastOverlayObjectiveWorldPosition = Vector3.positiveInfinity;
         private const float OverlayRefreshDistanceThreshold = 0.75f;
-        private float nextNpcRendererRefreshTime;
-        private bool npcRenderersHiddenForMinimap;
 
         private static Sprite whiteSprite;
         public int ActiveRouteSegmentCount => activeRouteSegmentCount;
@@ -133,11 +130,12 @@ namespace DeliveryDriver.Quest.UI
             UnbindNavigationService();
             SetMinimapVisible(false);
             DisableCamera();
-            RestoreNpcRenderersForMinimap();
+            npcRendererFilter.Reset();
         }
 
         private void OnDestroy()
         {
+            npcRendererFilter.Reset();
             ReleaseRenderTexture();
         }
 
@@ -210,6 +208,7 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
+            npcRendererFilter.Reset();
             EnsureMinimap();
             ResolveMapBounds();
             ResolvePlayerTransform(forceRefresh: true);
@@ -1060,7 +1059,7 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            HideNpcRenderersForMinimap();
+            npcRendererFilter.Hide(Time.unscaledTime, npcRendererRefreshInterval);
         }
 
         private void HandleEndCameraRendering(ScriptableRenderContext context, Camera camera)
@@ -1070,83 +1069,7 @@ namespace DeliveryDriver.Quest.UI
                 return;
             }
 
-            RestoreNpcRenderersForMinimap();
-        }
-
-        private void HideNpcRenderersForMinimap()
-        {
-            if (npcRenderersHiddenForMinimap)
-            {
-                return;
-            }
-
-            RefreshNpcRendererCacheIfNeeded();
-            temporarilyHiddenNpcRenderers.Clear();
-
-            for (int i = 0; i < cachedNpcRenderers.Count; i++)
-            {
-                Renderer renderer = cachedNpcRenderers[i];
-                if (renderer == null || !renderer.enabled)
-                {
-                    continue;
-                }
-
-                renderer.enabled = false;
-                temporarilyHiddenNpcRenderers.Add(renderer);
-            }
-
-            npcRenderersHiddenForMinimap = temporarilyHiddenNpcRenderers.Count > 0;
-        }
-
-        private void RestoreNpcRenderersForMinimap()
-        {
-            if (!npcRenderersHiddenForMinimap)
-            {
-                return;
-            }
-
-            for (int i = 0; i < temporarilyHiddenNpcRenderers.Count; i++)
-            {
-                Renderer renderer = temporarilyHiddenNpcRenderers[i];
-                if (renderer != null)
-                {
-                    renderer.enabled = true;
-                }
-            }
-
-            temporarilyHiddenNpcRenderers.Clear();
-            npcRenderersHiddenForMinimap = false;
-        }
-
-        private void RefreshNpcRendererCacheIfNeeded()
-        {
-            if (Time.unscaledTime < nextNpcRendererRefreshTime && cachedNpcRenderers.Count > 0)
-            {
-                return;
-            }
-
-            cachedNpcRenderers.Clear();
-            NpcCarAgent[] npcCars = FindObjectsByType<NpcCarAgent>(FindObjectsSortMode.None);
-            for (int i = 0; i < npcCars.Length; i++)
-            {
-                NpcCarAgent npcCar = npcCars[i];
-                if (npcCar == null)
-                {
-                    continue;
-                }
-
-                Renderer[] renderers = npcCar.GetComponentsInChildren<Renderer>(true);
-                for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
-                {
-                    Renderer renderer = renderers[rendererIndex];
-                    if (renderer != null)
-                    {
-                        cachedNpcRenderers.Add(renderer);
-                    }
-                }
-            }
-
-            nextNpcRendererRefreshTime = Time.unscaledTime + Mathf.Max(0.1f, npcRendererRefreshInterval);
+            npcRendererFilter.Restore();
         }
 
         private static Sprite GetWhiteSprite()

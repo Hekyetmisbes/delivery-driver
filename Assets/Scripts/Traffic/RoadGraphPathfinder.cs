@@ -5,6 +5,7 @@ namespace TrafficSystem
 {
     public static class RoadGraphPathfinder
     {
+        public const float InitialNavigationTransferDistance = 6f;
         public enum IncrementalSearchStatus
         {
             Running,

@@ -78,7 +78,7 @@ namespace DeliveryDriver.Navigation
         // Transfer distance steps for pathfinding
         // ────────────────────────────────────────────────────────────────────
 
-        private static readonly float[] TransferDistances = { 6f, 10f, 16f, 24f, 32f };
+        private static readonly float[] TransferDistances = { RoadGraphPathfinder.InitialNavigationTransferDistance, 10f, 16f, 24f, 32f };
 
         // ────────────────────────────────────────────────────────────────────
         // Internal state
