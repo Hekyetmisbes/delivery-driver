@@ -101,6 +101,10 @@ Open Unity Hub with editor 6000.3.12f1 and ensure Git LFS has materialized Asset
 - [ ] Compare search diagnostics and complete-route equivalence under 1.5 ms, node-only and tiny budgets. Record projection/index build separately and compare frame-time percentiles. Use the RTA* evaluation protocol before changing algorithm.
 - [ ] Profile same route, vehicle, weather and NPC count at 30/60/120 FPS. Record main thread, render thread, GPU frame times, GC allocations, memory, P95/P99 frame time and startup time. Compare equivalent Development builds.
 
+## Deferred navigation research
+
+The project owner's candidate is RTAA* (Real-Time Adaptive A*), not classic RTA*. The feasibility study and future Adaptive GPS & Navigation Overhaul plan are in [RTA_STAR_EVALUATION.md](RTA_STAR_EVALUATION.md). Do not implement a new navigation algorithm or alter GPS behavior during the current code cleanup. Benchmark stale route publication, map matching, high-speed tracking and minimap independently before an explicitly approved prototype.
+
 ## Pending decisions
 
 The current read order is SQLite > PlayerPrefs > JSON; choose final durable economy/storage ownership only after inspecting real save and SQLite migration cases. Transaction rollback and cross-store economy reconciliation still need runtime integration tests. Establish a driving baseline before further traffic scheduling or motor/AI separation. Avoid broad DOTS/ECS migration or package upgrades until measurable need.

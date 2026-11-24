@@ -1,4 +1,6 @@
-# RTA* navigation feasibility — Delivery Driver 2.0
+# RTAA* navigation feasibility and deferred implementation plan — Delivery Driver 2.0
+
+**Status: feasibility only; implementation deferred by project owner.** The current cleanup phase must not replace A*, enable RTAA*, or change GPS/minimap behavior. The existing filename remains stable for links.
 
 ## Recommendation
 
@@ -18,6 +20,27 @@ Korf's RTA* bounds planning effort before each action using local lookahead. The
 Remove unreachable duplicate search implementations (309 source lines before budget/diagnostics additions). Keep public FindPath and incremental session. Add a configurable 1.5 ms cooperative per-Step time budget alongside the existing node limit. Time is checked between node expansions. Projection, index creation, candidate setup, single expansion and path reconstruction can exceed the budget. Multiple slices in a frame can also exceed it; this is not a hard real-time guarantee.
 
 NavigationService exposes last completed request/attempt diagnostics: expanded nodes, queue pops, maximum individual setup or search slice, summed setup/search compute time and wall time (including yields). Aborted sessions may have incomplete diagnostics; retries are separate requests. A route test compares tiny slices and unlimited time on the same directed graph.
+
+## Future Adaptive GPS & Navigation Overhaul (not authorized for implementation yet)
+
+The reported gameplay problem is stale or nonsensical minimap guidance when the vehicle moves faster than route refresh/replanning. RTAA* is the intended research candidate, not classic RTA*. Faster search alone cannot fix stale route publication or map matching.
+
+Source-code findings (defaults, not verified scene Inspector values):
+- NavigationService refreshes every 0.2 s, publishes after 4 m movement, has a 1.5 s reroute cooldown, 0.75 s minimum async interval and 14/26 m off-route thresholds. At 120 km/h the vehicle travels about 6.7 m per refresh and 50 m during the cooldown.
+- RoadGraph.ProjectPointOnRoad scans every road edge at search setup for both start and goal. The active A* search itself uses a spatial index and does not necessarily visit the entire graph each frame.
+- ProjectOnRoute chooses the globally closest segment of the current polyline without a persistent progress cursor or direction score. Parallel roads, crossings and overlapping routes can cause incorrect projection.
+- BuildRouteAsync captures start/end before search and can publish the completed route using that old start. PublishProjected prepends the vehicle-to-projection connector; it can show a backward or off-road line.
+- MinimapUI simplifies the polyline in screen space and may remove important turns. CompassUI computes a direct bearing to the objective rather than the road route. Distinguish these from search performance when reproducing the reported issue.
+
+Future implementation order (explicit approval required):
+1. Index road edges spatially, with a complete-query fallback and direction/elevation/continuity checks. Keep a route progress cursor and handle true reversal or teleport.
+2. Validate request identity, graph revision and current vehicle position before publishing; discard or rebase obsolete results. Show no false connector or unverified complete route.
+3. Separate per-frame vehicle/marker tracking, speed-aware local route tracking, event-driven rerouting and rendering. Use a bounded search budget; select lookahead distance based on vehicle speed and upcoming junctions.
+4. Prototype RTAA* in a development-only harness on the same directed road graph and edge costs. Use bounded local A* lookahead, learn h(s) = f(frontier) - g(s) for expanded states, and reset/invalidate learned values when goal or relevant graph/cost assumptions change. Use a consistent admissible initial heuristic; the existing quantized Manhattan heuristic must not be assumed consistent. Do not confuse local guidance with a complete validated route.
+5. Compare current incremental A* against RTAA*, retaining A* for complete route/ETA and a safe fallback. Only adopt RTAA* if measured improvements justify the tradeoffs; no algorithm switch during cleanup.
+6. Test high-speed traversal, missed junctions, U-turns, parallel/elevated roads, teleport, stale-result rejection, no-path, and route visualization. Record route freshness, wrong-direction guidance, render geometry, search latency, CPU/GC and route cost separately.
+
+Primary RTAA* reference: Sven Koenig and Maxim Likhachev, Real-Time Adaptive A* (AAMAS 2006), https://www.cs.cmu.edu/~maxim/files/rtaa_aamas06_abs.html
 
 ## Experiment design (not executed)
 
