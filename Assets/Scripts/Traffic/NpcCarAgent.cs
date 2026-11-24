@@ -635,8 +635,9 @@ namespace TrafficSystem
             // Preserve the existing decision cadence. A newly spawned/repositioned/woken
             // dynamic body must acquire a fresh plan before applying wheel commands.
             bool needsResponsiveSimulation = dynamicBody && NeedsHighFrequencySimulation();
-            bool runDecision = optimizer == null || needsResponsiveSimulation ||
-                (dynamicBody && !hasDrivePlan) || optimizer.ShouldNPCUpdate(this);
+            bool runDecision = optimizer == null ||
+                NpcDrivePhysicsPolicy.RequiresFreshDecision(dynamicBody, hasDrivePlan, needsResponsiveSimulation) ||
+                optimizer.ShouldNPCUpdate(this);
 
             if (runDecision)
                 UpdateDrivingDecisions(optimizer, dynamicBody);
@@ -657,13 +658,21 @@ namespace TrafficSystem
             }
 
             if (dynamicBody && hasDrivePlan)
-                ApplyThrottle(plannedTargetSpeed);
+            {
+                // On cached-plan ticks also respect the current steering/traction speed cap.
+                // Reuse the existing curvature formula; never increase the cached target.
+                float target = !runDecision && !isReversing
+                    ? Mathf.Min(plannedTargetSpeed, GetTurnLimitedTargetSpeed())
+                    : plannedTargetSpeed;
+                ApplyThrottle(target);
+            }
         }
 
         private void InvalidateDrivePlan()
         {
             hasDrivePlan = false;
             hasSteeringTarget = false;
+            hasSmoothedTargetSteerAngle = false;
             predictionQuerySource = null;
         }
 
@@ -3148,17 +3157,15 @@ namespace TrafficSystem
 
             // Use the current rigidbody speed and honor stop flags even with a cached plan.
             float currentSpeed = CurrentSpeed;
-            if (mustStopForVehicle)
-                effectiveTargetSpeed = 0f;
-            if (imminentCollisionRisk)
-                effectiveTargetSpeed = Mathf.Min(effectiveTargetSpeed, 12f);
+            effectiveTargetSpeed = NpcDrivePhysicsPolicy.LimitForwardTarget(
+                effectiveTargetSpeed, mustStopForVehicle, imminentCollisionRisk);
 
             float speedDifference = effectiveTargetSpeed - currentSpeed;
             float currentSafeDistance = CalculateSafeFollowingDistance();
             bool tooCloseToLead = isFollowing && distanceToVehicleAhead < currentSafeDistance;
 
             // Apply motor torque or braking
-            if (!mustStopForVehicle && speedDifference > speedTolerance)
+            if (NpcDrivePhysicsPolicy.CanAccelerate(speedDifference, speedTolerance, mustStopForVehicle))
             {
                 // Need to accelerate - use personalized acceleration
                 float motorTorque = personalityAcceleration * Mathf.Clamp01(speedDifference / 20f);
@@ -3332,8 +3339,8 @@ namespace TrafficSystem
         }
 
         private static float GetSuspensionTravel(WheelCollider wheel, WheelHit hit) =>
-            Mathf.Clamp01((-wheel.transform.InverseTransformPoint(hit.point).y - wheel.radius) /
-                Mathf.Max(0.001f, wheel.suspensionDistance));
+            NpcDrivePhysicsPolicy.SuspensionTravel(wheel.transform.InverseTransformPoint(hit.point).y,
+                wheel.radius, wheel.suspensionDistance);
 
         private void CacheWheelGeometry()
         {
