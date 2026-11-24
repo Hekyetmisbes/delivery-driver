@@ -390,12 +390,6 @@ namespace TrafficSystem
             return offset;
         }
 
-        private float GetWheelClearance(WheelCollider wheel)
-        {
-            if (wheel == null) return 0f;
-            return wheel.radius; // Just radius, suspension will compress
-        }
-
         private float GetWheelRootOffset(WheelCollider wheel, ref bool used)
         {
             if (wheel == null) return 0f;
@@ -1649,43 +1643,6 @@ namespace TrafficSystem
         }
 
         /// <summary>
-        /// Teleport vehicle to random road position
-        /// </summary>
-        private void TeleportToRandomRoad()
-        {
-            if (roadGraphBuilder == null || roadGraphBuilder.RoadGraph == null)
-                return;
-
-            var (segment, waypointIndex) = roadGraphBuilder.RoadGraph.GetRandomWaypoint();
-            if (segment != null && segment.waypoints.Count > 0)
-            {
-                Waypoint wp = segment.waypoints[waypointIndex];
-
-                // Use waypoint position directly (it's on the road)
-                Vector3 newPos = wp.position + Vector3.up * GetGroundClearanceOffset();
-
-                // Flatten forward direction
-                Vector3 forward = wp.forward;
-                if (forward.sqrMagnitude < 0.01f)
-                {
-                    forward = Vector3.forward;
-                }
-                forward.y = 0;
-                if (forward.sqrMagnitude < 0.01f)
-                {
-                    forward = Vector3.forward;
-                }
-                else
-                {
-                    forward.Normalize();
-                }
-                Quaternion newRot = Quaternion.LookRotation(forward);
-
-                ForceReposition(segment, waypointIndex, newPos, newRot);
-            }
-        }
-
-        /// <summary>
         /// Pure Pursuit steering algorithm
         /// </summary>
         private void ApplySteering()
@@ -2305,118 +2262,6 @@ namespace TrafficSystem
         }
 
         /// <summary>
-        /// Respond to obstacle based on its type
-        /// </summary>
-        private float RespondToObstacle(Collider obstacle, float distance, float currentTargetSpeed)
-        {
-            if (!enableObstacleClassification)
-            {
-                // Default behavior - treat all as vehicles
-                return currentTargetSpeed;
-            }
-
-            ObstacleType type = ClassifyObstacle(obstacle);
-
-            switch (type)
-            {
-                case ObstacleType.Vehicle:
-                    return HandleVehicleObstacle(distance, currentTargetSpeed);
-
-                case ObstacleType.Pedestrian:
-                    return HandlePedestrianObstacle(distance, currentTargetSpeed);
-
-                case ObstacleType.EmergencyVehicle:
-                    return HandleEmergencyVehicle(distance, currentTargetSpeed);
-
-                case ObstacleType.StaticObject:
-                    return HandleStaticObstacle(distance, currentTargetSpeed);
-
-                default:
-                    return HandleVehicleObstacle(distance, currentTargetSpeed);
-            }
-        }
-
-        /// <summary>
-        /// Handle vehicle obstacle - maintain distance, match speed
-        /// </summary>
-        private float HandleVehicleObstacle(float distance, float currentTargetSpeed)
-        {
-            if (distance < criticalBrakingDistance)
-            {
-                return currentTargetSpeed * 0.3f;
-            }
-            else if (distance < safeFollowingDistance)
-            {
-                float distanceFactor = distance / safeFollowingDistance;
-                return currentTargetSpeed * Mathf.Lerp(0.5f, 0.9f, distanceFactor);
-            }
-            return currentTargetSpeed;
-        }
-
-        /// <summary>
-        /// Handle pedestrian - ALWAYS stop, large safety margin
-        /// </summary>
-        private float HandlePedestrianObstacle(float distance, float currentTargetSpeed)
-        {
-            if (distance < 15f) // Large safety margin
-            {
-                return 0f; // Full stop
-            }
-            else if (distance < 25f)
-            {
-                return currentTargetSpeed * 0.3f; // Slow down significantly
-            }
-            return currentTargetSpeed;
-        }
-
-        /// <summary>
-        /// Handle emergency vehicle - pull over and stop
-        /// </summary>
-        private float HandleEmergencyVehicle(float distance, float currentTargetSpeed)
-        {
-            if (distance < 30f)
-            {
-                // Pull over to the right (if possible)
-                if (IsLaneSafe(1)) // Right lane
-                {
-                    ExecuteLaneChange(1);
-                }
-
-                // Slow down significantly
-                return currentTargetSpeed * 0.4f;
-            }
-            return currentTargetSpeed;
-        }
-
-        /// <summary>
-        /// Handle static obstacle - navigate around or stop
-        /// </summary>
-        private float HandleStaticObstacle(float distance, float currentTargetSpeed)
-        {
-            if (distance < criticalBrakingDistance)
-            {
-                return 0f; // Stop for very close static obstacles
-            }
-            else if (distance < safeFollowingDistance * 1.5f)
-            {
-                // Try to change lanes
-                if (enableLaneChange)
-                {
-                    if (IsLaneSafe(-1))
-                    {
-                        ExecuteLaneChange(-1);
-                    }
-                    else if (IsLaneSafe(1))
-                    {
-                        ExecuteLaneChange(1);
-                    }
-                }
-                return currentTargetSpeed * 0.6f;
-            }
-            return currentTargetSpeed;
-        }
-
-        /// <summary>
         /// Check lane availability with additional side checks
         /// </summary>
         private void CheckLaneAvailability(Vector3 origin, Vector3 forward, Vector3 right)
@@ -2780,29 +2625,6 @@ namespace TrafficSystem
             {
                 Debug.Log($"[NpcCarAgent] {name} - Personality: {personality.GetDescription()}");
             }
-        }
-
-        /// <summary>
-        /// Apply personality to behavior parameters
-        /// </summary>
-        private void ApplyPersonalityToParameters()
-        {
-            // Speed calculations
-            targetSpeed *= personality.speedMultiplier;
-            targetSpeed *= personality.speedLimitCompliance;
-
-            // Following distance
-            followingTimeSeconds *= personality.followingDistanceMultiplier;
-
-            // Lane changes
-            laneChangeCooldown /= personality.laneChangeFrequency;
-
-            // Acceleration/braking
-            acceleration *= personality.accelerationAggression;
-            braking *= personality.brakingAggression;
-
-            // Reaction delays
-            // Could be used in future implementations
         }
 
         // ============================================================================

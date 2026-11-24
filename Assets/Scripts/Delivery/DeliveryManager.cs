@@ -633,73 +633,6 @@ public class DeliveryManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Given a point on a road, probe sideways to find the road edge / curb area.
-    /// </summary>
-    private bool TryOffsetToRoadside(Vector3 roadPoint, Collider roadCollider, out Vector3 roadsidePoint)
-    {
-        roadsidePoint = Vector3.positiveInfinity;
-
-        // Try 4 cardinal + 4 diagonal directions to find the road edge
-        Vector3[] directions =
-        {
-            Vector3.right, Vector3.left, Vector3.forward, Vector3.back,
-            (Vector3.right + Vector3.forward).normalized,
-            (Vector3.right + Vector3.back).normalized,
-            (Vector3.left + Vector3.forward).normalized,
-            (Vector3.left + Vector3.back).normalized,
-        };
-
-        // Shuffle so we don't always pick the same direction
-        for (int i = directions.Length - 1; i > 0; i--)
-        {
-            int j = UnityEngine.Random.Range(0, i + 1);
-            (directions[i], directions[j]) = (directions[j], directions[i]);
-        }
-
-        foreach (Vector3 dir in directions)
-        {
-            // Step outward from road center to find where road ends
-            for (float dist = buildingFrontOffset; dist <= buildingFrontOffset + 6f; dist += 1f)
-            {
-                Vector3 candidate = roadPoint + dir * dist;
-                Vector3 probeRayStart = candidate + Vector3.up * 10f;
-
-                if (!Physics.Raycast(probeRayStart, Vector3.down, out RaycastHit sideHit, 30f, groundMask, QueryTriggerInteraction.Ignore))
-                {
-                    continue;
-                }
-
-                if (sideHit.collider.isTrigger)
-                {
-                    continue;
-                }
-
-                // We want to be OFF the road (curb/sidewalk) but still close to it
-                if (!IsRoadCollider(sideHit.collider))
-                {
-                    Vector3 spawnCandidate = sideHit.point + Vector3.up * spawnHeight;
-                    if (!IsSpawnSpaceBlocked(spawnCandidate))
-                    {
-                        roadsidePoint = spawnCandidate;
-                        return true;
-                    }
-                }
-            }
-        }
-
-        // Could not find road edge - place right next to road with offset
-        Vector3 randomDir = new Vector3(UnityEngine.Random.Range(-1f, 1f), 0, UnityEngine.Random.Range(-1f, 1f)).normalized;
-        Vector3 offsetPoint = roadPoint + randomDir * buildingFrontOffset + Vector3.up * spawnHeight;
-        if (!IsSpawnSpaceBlocked(offsetPoint))
-        {
-            roadsidePoint = offsetPoint;
-            return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// Check if a position is inside any neighborhood zone
     /// </summary>
     private bool IsInsideNeighborhood(Vector3 position)
@@ -1960,39 +1893,6 @@ public class DeliveryManager : MonoBehaviour
                    sidewalkValidationBuildingRadius,
                    sidewalkToRoadMaxDistance,
                    out sidewalkPoint);
-    }
-
-    private bool TryFindNearestBuildingCollider(Vector3 origin, float radius, out Collider nearestBuilding, out Vector3 nearestPoint)
-    {
-        nearestBuilding = null;
-        nearestPoint = Vector3.zero;
-        return nearestBuilding != null;
-    }
-
-    private bool TryGetClosestPointSafe(Collider collider, Vector3 origin, out Vector3 point)
-    {
-        point = Vector3.zero;
-        return false;
-    }
-
-    private bool IsNearBuilding(Vector3 position, float radius)
-    {
-        return false;
-    }
-
-    private bool IsNearRoad(Vector3 position, float radius)
-    {
-        return false;
-    }
-
-    private bool IsBuildingCollider(Collider collider)
-    {
-        return false;
-    }
-
-    private bool IsBuildingObject(GameObject obj)
-    {
-        return false;
     }
 
     private string ResolveNeighborhoodName(Vector3 position)
