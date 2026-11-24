@@ -475,31 +475,15 @@ namespace DeliveryDriver.Quest
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (!debugInfiniteTime)
+#endif
             {
                 currentQuest.UpdateTimer(Time.deltaTime);
-            }
-#else
-            currentQuest.UpdateTimer(Time.deltaTime);
-#endif
-
-            // Task 10.1: Time Warning Audio
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (!debugInfiniteTime)
-            {
                 GetAudioPresentationService().TryPlayTimeWarning(currentQuest.TimeRemaining);
-            }
-#else
-            GetAudioPresentationService().TryPlayTimeWarning(currentQuest.TimeRemaining);
-#endif
-
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (!debugInfiniteTime && currentQuest.IsTimeExpired())
-#else
-            if (currentQuest.IsTimeExpired())
-#endif
-            {
-                FailQuest(currentQuest, "Time expired");
-                return;
+                if (currentQuest.IsTimeExpired())
+                {
+                    FailQuest(currentQuest, "Time expired");
+                    return;
+                }
             }
 
             // Track distance if cargo has been picked up
@@ -675,10 +659,8 @@ namespace DeliveryDriver.Quest
                 return false;
             }
 
-            if (activeQuests.Contains(quest))
-            {
+            if (quest.Status != QuestStatus.NotStarted || activeQuests.Contains(quest))
                 return false;
-            }
 
             if (activeQuests.Count >= maxActiveQuests)
             {
@@ -686,26 +668,12 @@ namespace DeliveryDriver.Quest
                 return false;
             }
 
-            availableQuests.Remove(quest);
-            activeQuests.Add(quest);
-            currentQuest = quest;
-
-            if (quest.PickupLocation == null || quest.DeliveryLocations == null || quest.DeliveryLocations.Count == 0)
-            {
-                GetLocationAssignmentService().AssignQuestLocations(quest);
-            }
-
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (debugInfiniteTime)
-            {
-                debugInfiniteTime = false;
-                Debug.Log("[QuestManager] Debug infinite time auto-disabled on quest start.");
-            }
-#endif
+            if ((quest.PickupLocation == null || quest.DeliveryLocations == null || quest.DeliveryLocations.Count == 0) &&
+                !GetLocationAssignmentService().AssignQuestLocations(quest))
+                return false;
 
             quest.StartQuest();
-            damagingCollisionCount = 0;
-            lastCargoPickupTime = -999f;
+            RegisterStartedQuest(quest);
             GetZoneMarkerService().ClearAllZones();
             if (ShouldQuestUseWorldZoneMarkers(quest))
             {
@@ -730,6 +698,50 @@ namespace DeliveryDriver.Quest
             return true;
         }
 
+        private void RegisterStartedQuest(QuestData quest)
+        {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (debugInfiniteTime)
+            {
+                debugInfiniteTime = false;
+                Debug.Log("[QuestManager] Debug infinite time auto-disabled on quest start.");
+            }
+#endif
+            availableQuests.Remove(quest);
+            activeQuests.Add(quest);
+            currentQuest = quest;
+            damagingCollisionCount = 0;
+            lastCargoPickupTime = -999f;
+        }
+
+        private bool RemoveActiveQuest(QuestData quest)
+        {
+            if (!activeQuests.Remove(quest))
+                return false;
+
+            if (currentQuest == quest)
+                currentQuest = null;
+            return true;
+        }
+
+        private bool TrySelectActiveQuest(QuestData quest)
+        {
+            if (quest == null || quest.Status != QuestStatus.Active)
+                return false;
+            if (!ReferenceEquals(currentQuest, quest) && !activeQuests.Contains(quest))
+                return false;
+
+            currentQuest = quest;
+            return true;
+        }
+
+        private void ClearQuestPresentation(QuestData quest)
+        {
+            var markers = GetZoneMarkerService();
+            markers.CleanupQuestMarkers(quest);
+            markers.ClearAllZones();
+        }
+
         public void AbandonQuest(string questID)
         {
             if (string.IsNullOrWhiteSpace(questID))
@@ -744,14 +756,8 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
-            activeQuests.Remove(quest);
-            if (currentQuest == quest)
-            {
-                currentQuest = null;
-            }
-
-            GetZoneMarkerService().CleanupQuestMarkers(quest);
-            GetZoneMarkerService().ClearAllZones();
+            RemoveActiveQuest(quest);
+            ClearQuestPresentation(quest);
 
             if (quest.IsRepeatable)
             {
@@ -767,14 +773,8 @@ namespace DeliveryDriver.Quest
 
         public void CompleteQuest(QuestData quest)
         {
-            if (quest == null || quest.Status != QuestStatus.Active || !activeQuests.Remove(quest))
-            {
+            if (quest == null || quest.Status != QuestStatus.Active || !RemoveActiveQuest(quest))
                 return;
-            }
-            if (currentQuest == quest)
-            {
-                currentQuest = null;
-            }
 
             quest.Status = QuestStatus.Completed;
             quest.CalculateFinalReward(); // Keeps EarnedBonus state up-to-date for rating/stats.
@@ -822,8 +822,7 @@ namespace DeliveryDriver.Quest
             GetAudioPresentationService().SwitchToExplorationMusic(StartManagedCoroutine);
 
             OnQuestCompleted.Invoke(quest);
-            GetZoneMarkerService().CleanupQuestMarkers(quest);
-            GetZoneMarkerService().ClearAllZones();
+            ClearQuestPresentation(quest);
             GenerateAvailableQuests(1);
 
             // Trigger auto-save after quest completion
@@ -835,14 +834,8 @@ namespace DeliveryDriver.Quest
 
         public void FailQuest(QuestData quest, string reason)
         {
-            if (quest == null || quest.Status != QuestStatus.Active || !activeQuests.Remove(quest))
-            {
+            if (quest == null || quest.Status != QuestStatus.Active || !RemoveActiveQuest(quest))
                 return;
-            }
-            if (currentQuest == quest)
-            {
-                currentQuest = null;
-            }
 
             quest.Status = QuestStatus.Failed;
 
@@ -872,8 +865,7 @@ namespace DeliveryDriver.Quest
                 PlayerProgressionManager.Instance.RecordQuestFailure(quest);
             }
 
-            GetZoneMarkerService().CleanupQuestMarkers(quest);
-            GetZoneMarkerService().ClearAllZones();
+            ClearQuestPresentation(quest);
             GetAudioPresentationService().PlayQuestClip(failureClip);
 
             // Task 10.1: Switch back to exploration music
@@ -973,20 +965,8 @@ namespace DeliveryDriver.Quest
 
         public bool CommitExternalPickup(QuestData quest, string deliveryObjectiveDescription = null)
         {
-            if (quest == null || quest.Status != QuestStatus.Active)
-            {
+            if (!TrySelectActiveQuest(quest))
                 return false;
-            }
-
-            if (!ReferenceEquals(currentQuest, quest))
-            {
-                if (!activeQuests.Contains(quest))
-                {
-                    return false;
-                }
-
-                currentQuest = quest;
-            }
 
             if (quest.HasPickedUpCargo || quest.DeliveryLocations == null || quest.DeliveryLocations.Count == 0)
             {
@@ -1005,20 +985,8 @@ namespace DeliveryDriver.Quest
 
         public bool CommitExternalDeliveryStop(QuestData quest)
         {
-            if (quest == null || quest.Status != QuestStatus.Active)
-            {
+            if (!TrySelectActiveQuest(quest))
                 return false;
-            }
-
-            if (!ReferenceEquals(currentQuest, quest))
-            {
-                if (!activeQuests.Contains(quest))
-                {
-                    return false;
-                }
-
-                currentQuest = quest;
-            }
 
             if (!quest.HasPickedUpCargo || quest.DeliveryLocations == null || quest.DeliveryLocations.Count == 0)
             {
@@ -2160,34 +2128,19 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
+            // External physical-box quests may not have delivery stops yet.
+            // Do not reset their prepared timer/cargo data through QuestData.StartQuest.
+            if (quest.Status != QuestStatus.NotStarted || activeQuests.Contains(quest))
+                return;
+
             if (startupInitCoroutine != null)
             {
                 StopCoroutine(startupInitCoroutine);
                 startupInitCoroutine = null;
             }
 
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (debugInfiniteTime)
-            {
-                debugInfiniteTime = false;
-                Debug.Log("[QuestManager] Debug infinite time auto-disabled on external quest start.");
-            }
-#endif
-
-            // Set as current quest
-            currentQuest = quest;
             quest.Status = QuestStatus.Active;
-            damagingCollisionCount = 0;
-            lastCargoPickupTime = -999f;
-
-            // Add to active quests if not already there
-            if (!activeQuests.Contains(quest))
-            {
-                activeQuests.Add(quest);
-            }
-
-            // Remove from available if it's there
-            availableQuests.Remove(quest);
+            RegisterStartedQuest(quest);
             IsSaveReady = true;
 
             // Show pickup marker
