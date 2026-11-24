@@ -2189,41 +2189,6 @@ namespace TrafficSystem
             return true;
         }
 
-        // ============================================================================
-        // PRIORITY 3: Obstacle Classification (Step 6.3)
-        // ============================================================================
-
-        /// <summary>
-        /// Classify obstacle type for appropriate response
-        /// </summary>
-        private ObstacleType ClassifyObstacle(Collider obstacle)
-        {
-            if (obstacle == null) return ObstacleType.Unknown;
-
-            // Check for vehicles
-            if (SafeCompareTag(obstacle.gameObject, "NPC") || SafeCompareTag(obstacle.gameObject, "Player"))
-                return ObstacleType.Vehicle;
-
-            // Check for emergency vehicles
-            if (SafeCompareTag(obstacle.gameObject, "Emergency"))
-                return ObstacleType.EmergencyVehicle;
-
-            // Check for pedestrians
-            if (SafeCompareTag(obstacle.gameObject, "Pedestrian"))
-                return ObstacleType.Pedestrian;
-
-            // Check if it's a vehicle by component
-            if (HasVehicleController(obstacle))
-                return ObstacleType.Vehicle;
-
-            // Check if it's static
-            Rigidbody rb = obstacle.attachedRigidbody;
-            if (rb == null || rb.isKinematic)
-                return ObstacleType.StaticObject;
-
-            return ObstacleType.Unknown;
-        }
-
         private static bool HasVehicleController(Collider collider)
         {
             if (collider == null)

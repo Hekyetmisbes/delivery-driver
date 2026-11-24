@@ -101,6 +101,14 @@ Open Unity Hub with editor 6000.3.12f1 and ensure Git LFS has materialized Asset
 - [ ] Compare search diagnostics and complete-route equivalence under 1.5 ms, node-only and tiny budgets. Record projection/index build separately and compare frame-time percentiles. Use the RTA* evaluation protocol before changing algorithm.
 - [ ] Profile same route, vehicle, weather and NPC count at 30/60/120 FPS. Record main thread, render thread, GPU frame times, GC allocations, memory, P95/P99 frame time and startup time. Compare equivalent Development builds.
 
+## Fifth implementation wave — source simplification
+
+- Replaced bootstrap reflection-based command invocation/property lookup with typed Mono.Data.Sqlite commands and deterministic disposal; schema and seed order, native provider probing, serialized settings and required-table checks remain.
+- Removed unreferenced private NPC recovery/obstacle/personality helpers and obsolete delivery roadside/stub methods. Active collision, lane, spawn and delivery logic is unchanged. Retained serialized settings and public enum/API compatibility, including the obsolete obstacle classification toggle until scene/prefab migration is explicitly reviewed.
+- Consolidated three main-menu settings row builders and repeated apply/save calls while retaining control dimensions, alignment, callbacks, labels and input behavior.
+- RTAA* feasibility is documented separately; no navigation algorithm or GPS/minimap behavior changes in this wave. New pull requests and PR updates are deferred until final review.
+- Validate startup on fresh and existing SQLite databases (including provider unavailable), menu slider/dropdown/toggle behavior and full NPC/delivery smoke tests before merge. Private method removals are based on source references; Unity scene/LFS and reflective invocation checks remain a runtime validation gate.
+
 ## Deferred navigation research
 
 The project owner's candidate is RTAA* (Real-Time Adaptive A*), not classic RTA*. The feasibility study and future Adaptive GPS & Navigation Overhaul plan are in [RTA_STAR_EVALUATION.md](RTA_STAR_EVALUATION.md). Do not implement a new navigation algorithm or alter GPS behavior during the current code cleanup. Benchmark stale route publication, map matching, high-speed tracking and minimap independently before an explicitly approved prototype.
