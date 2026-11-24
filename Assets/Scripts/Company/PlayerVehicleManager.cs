@@ -196,49 +196,98 @@ namespace DeliveryDriver.Company
                 return false;
             }
 
-            Vector3 linearVelocity = CaptureLinearVelocity(spawnSource.Rigidbody);
-            Vector3 angularVelocity = CaptureAngularVelocity(spawnSource.Rigidbody);
-
-            if (activeVehicleRoot != null && activeVehicleRoot != spawnSource.Root)
+            // Validate required physics references before replacing the current player.
+            if (!HasRequiredVehicleComponents(templateController))
             {
-                Destroy(activeVehicleRoot);
-            }
-
-            if (spawnSource.Root != null)
-            {
-                Destroy(spawnSource.Root);
-            }
-
-            GameObject newVehicleRoot = Instantiate(targetTemplate, spawnSource.Pose.position, spawnSource.Pose.rotation);
-            newVehicleRoot.name = targetTemplate.name;
-            newVehicleRoot.tag = "Player";
-            newVehicleRoot.SetActive(true);
-
-            CarController controller = newVehicleRoot.GetComponent<CarController>();
-            if (controller == null)
-            {
-                Debug.LogError($"[PlayerVehicleManager] Instantiated vehicle '{newVehicleRoot.name}' does not contain CarController.");
-                Destroy(newVehicleRoot);
+                Debug.LogError($"[PlayerVehicleManager] Prefab '{targetTemplate.name}' has incomplete physics references.");
                 return false;
             }
 
-            Rigidbody rb = controller.GetComponent<Rigidbody>();
-            if (rb != null)
+            Vector3 linearVelocity = CaptureLinearVelocity(spawnSource.Rigidbody);
+            Vector3 angularVelocity = CaptureAngularVelocity(spawnSource.Rigidbody);
+
+            GameObject previousRoot = activeVehicleRoot;
+            CarController previousController = activeVehicleController != null
+                ? activeVehicleController : spawnSource.Controller;
+            VehicleType previousType = activeVehicleType;
+            FuelSystem previousFuel = previousController != null
+                ? previousController.GetComponent<FuelSystem>() : null;
+            previousFuel?.FlushCurrentFuel();
+
+            GameObject newVehicleRoot = null;
+            try
             {
+                newVehicleRoot = Instantiate(targetTemplate, spawnSource.Pose.position, spawnSource.Pose.rotation);
+                newVehicleRoot.name = targetTemplate.name;
+                CarController controller = newVehicleRoot.GetComponent<CarController>();
+                if (!HasRequiredVehicleComponents(controller))
+                    throw new InvalidOperationException("Instantiated vehicle has incomplete physics references.");
+
+                newVehicleRoot.tag = "Player";
+                newVehicleRoot.SetActive(true);
+
+                Rigidbody rb = controller.GetComponent<Rigidbody>();
                 rb.linearVelocity = linearVelocity;
                 rb.angularVelocity = angularVelocity;
+
+                ConfigureVehicleSpecializedBindings(controller, vehicleType);
+                activeVehicleRoot = newVehicleRoot;
+                activeVehicleController = controller;
+                activeVehicleType = vehicleType;
+                EnsureSingleActivePlayerVehicle(newVehicleRoot);
+                RebindSystems(controller);
+            }
+            catch (Exception e)
+            {
+                if (newVehicleRoot != null)
+                {
+                    newVehicleRoot.tag = "Untagged";
+                    newVehicleRoot.SetActive(false);
+                    Destroy(newVehicleRoot);
+                }
+
+                activeVehicleRoot = previousController != null ? previousController.gameObject : previousRoot;
+                activeVehicleController = previousController;
+                activeVehicleType = previousType;
+                if (activeVehicleRoot != null)
+                {
+                    activeVehicleRoot.tag = "Player";
+                    activeVehicleRoot.SetActive(true);
+                }
+
+                if (previousController != null)
+                {
+                    try
+                    {
+                        previousFuel?.RestoreActiveOwnership();
+                        RebindSystems(previousController);
+                    }
+                    catch (Exception rollbackError)
+                    {
+                        Debug.LogError($"[PlayerVehicleManager] Vehicle rebind rollback failed: {rollbackError.Message}");
+                    }
+                }
+
+                Debug.LogError($"[PlayerVehicleManager] Vehicle switch failed: {e.Message}");
+                return false;
             }
 
-            activeVehicleRoot = newVehicleRoot;
-            activeVehicleController = controller;
-            activeVehicleType = vehicleType;
+            // Commit the replacement only after successful validation and binding.
+            if (previousRoot != null && previousRoot != spawnSource.Root)
+                Destroy(previousRoot);
 
-            ConfigureVehicleSpecializedBindings(controller, vehicleType);
-            EnsureSingleActivePlayerVehicle(newVehicleRoot);
-            RebindSystems(controller);
+            if (spawnSource.Root != null)
+                Destroy(spawnSource.Root);
 
             Debug.Log($"[PlayerVehicleManager] Active player vehicle switched to '{newVehicleRoot.name}' ({vehicleType}).");
             return true;
+        }
+
+        private static bool HasRequiredVehicleComponents(CarController controller)
+        {
+            return controller != null && controller.GetComponent<Rigidbody>() != null &&
+                   controller.frontLeftCollider != null && controller.frontRightCollider != null &&
+                   controller.rearLeftCollider != null && controller.rearRightCollider != null;
         }
 
         private void ResolveActiveSceneVehicle()

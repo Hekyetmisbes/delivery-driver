@@ -98,6 +98,7 @@ public class FuelSystem : MonoBehaviour
         Instance = this;
 
         vehicleRigidbody = GetComponent<Rigidbody>();
+        GetComponent<CarController>()?.BindFuelSystem(this);
         CaptureSpawnPose();
         LoadFuelFromPrefs();
     }
@@ -128,12 +129,18 @@ public class FuelSystem : MonoBehaviour
 
     private void OnDestroy()
     {
-        SaveFuelToPrefs();
-
         if (Instance == this)
         {
+            SaveFuelToPrefs();
             Instance = null;
         }
+    }
+
+    public void FlushCurrentFuel() => SaveFuelToPrefs();
+
+    internal void RestoreActiveOwnership()
+    {
+        Instance = this;
     }
 
     private void OnApplicationPause(bool paused)
@@ -400,6 +407,9 @@ public class FuelSystem : MonoBehaviour
 
     private void SaveFuelToPrefs()
     {
+        if (Instance != this)
+            return; // A retired vehicle must not overwrite the active vehicle's fuel.
+
         PlayerPrefs.SetInt(FuelPrefsVersionKey, 1);
         PlayerPrefs.SetFloat(FuelPrefsKey, Mathf.Clamp(currentFuel, 0f, maxFuel));
         PlayerPrefs.Save();

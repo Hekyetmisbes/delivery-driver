@@ -82,6 +82,7 @@ public class FuelSystemInstaller : MonoBehaviour
             fuelSystem = controller.gameObject.AddComponent<FuelSystem>();
         }
 
+        controller.BindFuelSystem(fuelSystem);
         fuelSystem.CaptureSpawnPose();
         fuelSystem.SetFuelStationPositions(FuelStationPositions);
         fuelSystem.SetFuelStationRadius(FuelStationRadius);

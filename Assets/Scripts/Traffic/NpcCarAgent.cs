@@ -290,6 +290,7 @@ namespace TrafficSystem
 
         // Collision handling
         private static Collider[] sharedOverlapBuffer = new Collider[32];
+        private static readonly RaycastHit[] GroundHitBuffer = new RaycastHit[32];
         private static RaycastHit[] sharedSphereCastBuffer = new RaycastHit[16];
         private bool isColliding;
         private float collisionTimer;
@@ -3758,19 +3759,34 @@ namespace TrafficSystem
         {
             Vector3 origin = desiredPosition + Vector3.up * groundRaycastHeight;
             float maxDistance = groundRaycastHeight + groundRaycastDistance;
-            RaycastHit[] hits = Physics.RaycastAll(origin, Vector3.down, maxDistance, groundMask, QueryTriggerInteraction.Ignore);
-            if (hits != null && hits.Length > 0)
+            RaycastHit[] hits = GroundHitBuffer;
+            int count = Physics.RaycastNonAlloc(origin, Vector3.down, hits, maxDistance,
+                groundMask, QueryTriggerInteraction.Ignore);
+            // NonAlloc can omit a closer hit when full. Preserve correctness with a rare fallback.
+            if (count == hits.Length)
             {
-                System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-                foreach (RaycastHit hit in hits)
-                {
-                    if (hit.collider == null) continue;
-                    if (hit.collider.transform.IsChildOf(transform)) continue;
-                    return hit.point + Vector3.up * GetGroundClearanceOffset();
-                }
+                hits = Physics.RaycastAll(origin, Vector3.down, maxDistance, groundMask,
+                    QueryTriggerInteraction.Ignore);
+                count = hits.Length;
             }
 
-            return desiredPosition;
+            float closestDistance = float.PositiveInfinity;
+            Vector3 closestPoint = desiredPosition;
+            for (int i = 0; i < count; i++)
+            {
+                RaycastHit hit = hits[i];
+                Collider collider = hit.collider;
+                if (collider == null || collider.transform.IsChildOf(transform) ||
+                    hit.distance >= closestDistance)
+                    continue;
+
+                closestDistance = hit.distance;
+                closestPoint = hit.point;
+            }
+
+            return float.IsPositiveInfinity(closestDistance)
+                ? desiredPosition
+                : closestPoint + Vector3.up * GetGroundClearanceOffset();
         }
 
         private void ConfigureGroundMaskIfNeeded()
