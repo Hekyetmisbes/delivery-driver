@@ -2320,9 +2320,6 @@ namespace TrafficSystem
         // ============================================================================
 
         /// <summary>
-        /// Detect vehicle ahead and calculate distance and relative speed
-        /// </summary>
-        /// <summary>
         /// Calculate safe following distance based on speed (2-3 second rule)
         /// </summary>
         private float CalculateSafeFollowingDistance()
