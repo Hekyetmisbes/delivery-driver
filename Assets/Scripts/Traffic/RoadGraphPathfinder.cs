@@ -20,8 +20,7 @@ namespace TrafficSystem
             public readonly Dictionary<long, float> gScore = new Dictionary<long, float>(256);
             public readonly Dictionary<long, long> prev = new Dictionary<long, long>(256);
             public readonly HashSet<long> closed = new HashSet<long>();
-            public readonly SortedList<float, Queue<long>> priorityQueue = new SortedList<float, Queue<long>>();
-            public readonly Stack<Queue<long>> queuePool = new Stack<Queue<long>>();
+            public readonly StableRoadPriorityQueue priorityQueue = new StableRoadPriorityQueue();
             public readonly List<long> pathKeys = new List<long>(256);
 
             public void PrepareCandidateBuffer(List<long> resultKeys)
@@ -37,35 +36,7 @@ namespace TrafficSystem
                 closed.Clear();
                 pathKeys.Clear();
 
-                for (int i = 0; i < priorityQueue.Count; i++)
-                {
-                    ReturnQueue(priorityQueue.Values[i]);
-                }
-
                 priorityQueue.Clear();
-            }
-
-            public Queue<long> RentQueue()
-            {
-                if (queuePool.Count == 0)
-                {
-                    return new Queue<long>(4);
-                }
-
-                Queue<long> queue = queuePool.Pop();
-                queue.Clear();
-                return queue;
-            }
-
-            public void ReturnQueue(Queue<long> queue)
-            {
-                if (queue == null)
-                {
-                    return;
-                }
-
-                queue.Clear();
-                queuePool.Push(queue);
             }
         }
 
@@ -702,36 +673,11 @@ namespace TrafficSystem
             Dictionary<long, float> gScore = buffers.gScore;
             Dictionary<long, long> prev = buffers.prev;
             HashSet<long> closed = buffers.closed;
-            SortedList<float, Queue<long>> pq = buffers.priorityQueue;
-
-            void Enqueue(long key, float cost)
-            {
-                if (!pq.TryGetValue(cost, out Queue<long> queue))
-                {
-                    queue = buffers.RentQueue();
-                    pq[cost] = queue;
-                }
-
-                queue.Enqueue(key);
-            }
-
-            long Dequeue()
-            {
-                float first = pq.Keys[0];
-                Queue<long> queue = pq[first];
-                long key = queue.Dequeue();
-                if (queue.Count == 0)
-                {
-                    pq.Remove(first);
-                    buffers.ReturnQueue(queue);
-                }
-
-                return key;
-            }
+            var pq = buffers.priorityQueue;
 
             Vector3 endPos = endRef.position;
             gScore[startKey] = 0f;
-            Enqueue(startKey, GridManhattanHeuristic(startRef.position, endPos, heuristicCellSize));
+            pq.Enqueue(startKey, GridManhattanHeuristic(startRef.position, endPos, heuristicCellSize));
 
             int iterations = 0;
             while (pq.Count > 0)
@@ -741,7 +687,7 @@ namespace TrafficSystem
                     break;
                 }
 
-                long currentKey = Dequeue();
+                long currentKey = pq.Dequeue();
                 if (currentKey == endKey)
                 {
                     break;
@@ -782,7 +728,7 @@ namespace TrafficSystem
                         gScore[nKey] = tentativeG;
                         prev[nKey] = currentKey;
                         float f = tentativeG + GridManhattanHeuristic(nPos, endPos, heuristicCellSize);
-                        Enqueue(nKey, f);
+                        pq.Enqueue(nKey, f);
                     }
                 }
 
@@ -925,32 +871,11 @@ namespace TrafficSystem
             return path.Count >= 2;
         }
 
-        private static void Enqueue(SearchBuffers buffers, long key, float cost)
-        {
-            SortedList<float, Queue<long>> priorityQueue = buffers.priorityQueue;
-            if (!priorityQueue.TryGetValue(cost, out Queue<long> queue))
-            {
-                queue = buffers.RentQueue();
-                priorityQueue[cost] = queue;
-            }
+        private static void Enqueue(SearchBuffers buffers, long key, float cost) =>
+            buffers.priorityQueue.Enqueue(key, cost);
 
-            queue.Enqueue(key);
-        }
-
-        private static long Dequeue(SearchBuffers buffers)
-        {
-            SortedList<float, Queue<long>> priorityQueue = buffers.priorityQueue;
-            float first = priorityQueue.Keys[0];
-            Queue<long> queue = priorityQueue[first];
-            long key = queue.Dequeue();
-            if (queue.Count == 0)
-            {
-                priorityQueue.Remove(first);
-                buffers.ReturnQueue(queue);
-            }
-
-            return key;
-        }
+        private static long Dequeue(SearchBuffers buffers) =>
+            buffers.priorityQueue.Dequeue();
 
         private static Vector2Int ToGridCell(Vector3 position, float cellSize)
         {
