@@ -299,6 +299,8 @@ namespace TrafficSystem
         private Vector3 separationDirection;
         private List<Collider> nearbyVehicles = new List<Collider>();
         private readonly List<NpcCarAgent> nearbyVehicleBuffer = new List<NpcCarAgent>(24);
+        private TrafficCommunicationSystem predictionQuerySource;
+        private Vector3 predictionQueryOrigin;
         private readonly List<Vector3> selfPredictionSamples = new List<Vector3>(8);
 
         // Advanced obstacle avoidance state
@@ -625,6 +627,7 @@ namespace TrafficSystem
             if (optimizer != null && !needsResponsiveSimulation && !optimizer.ShouldNPCUpdate(this))
                 return;
 
+            predictionQuerySource = null;
             predictiveSpeedLimiter = 1f;
             imminentCollisionRisk = false;
             fixedUpdateCounter++;
@@ -966,8 +969,8 @@ namespace TrafficSystem
 
                 float distanceSqr = toWp.sqrMagnitude;
                 bool isCloseEnough = Mathf.Sqrt(distanceSqr) <= dynamicPassDist;
-                if (!isCloseEnough && (distanceSqr <= 0.0001f ||
-                    Vector3.Dot(flatForward, toWp.normalized) >= waypointPassedDotThreshold))
+                if (!isCloseEnough && !(distanceSqr > 0.0001f &&
+                    Vector3.Dot(flatForward, toWp.normalized) < waypointPassedDotThreshold))
                     break;
 
                 currentWaypointIndex++;
@@ -2696,11 +2699,18 @@ namespace TrafficSystem
         /// </summary>
         private void CheckPredictiveCollisions()
         {
-            if (TrafficCommunicationSystem.Instance == null) return;
+            var traffic = TrafficCommunicationSystem.Instance;
+            if (traffic == null) return;
 
             float speedMs = CurrentSpeed / 3.6f;
             float queryRadius = Mathf.Max(30f, speedMs * predictiveCollisionHorizon + 10f);
-            TrafficCommunicationSystem.Instance.GetNearbyVehicles(transform.position, queryRadius, nearbyVehicleBuffer);
+            Vector3 origin = transform.position;
+            traffic.GetNearbyVehicles(origin, queryRadius, nearbyVehicleBuffer);
+            if (queryRadius >= 20f && !float.IsInfinity(queryRadius))
+            {
+                predictionQuerySource = traffic;
+                predictionQueryOrigin = origin;
+            }
             float minSpeedLimiter = 1f;
             bool urgentRisk = false;
             float safeFollowingGap = CalculateSafeFollowingDistance();
@@ -2841,22 +2851,28 @@ namespace TrafficSystem
             mergingVehicle = null;
             mergePoint = 0f;
 
-            if (TrafficCommunicationSystem.Instance == null) return false;
+            var traffic = TrafficCommunicationSystem.Instance;
+            if (traffic == null) return false;
 
-            // Get nearby vehicles
-            TrafficCommunicationSystem.Instance.GetNearbyVehicles(transform.position, 20f, nearbyVehicleBuffer);
+            Vector3 origin = transform.position;
+            // The wider prediction query already includes the 20 m merge radius.
+            // Never reuse results across physics ticks or after repositioning.
+            bool reusePrediction = predictionQuerySource == traffic && predictionQueryOrigin.Equals(origin);
+            if (!reusePrediction)
+                traffic.GetNearbyVehicles(origin, 20f, nearbyVehicleBuffer);
 
             for (int i = 0; i < nearbyVehicleBuffer.Count; i++)
             {
                 NpcCarAgent otherVehicle = nearbyVehicleBuffer[i];
-                if (otherVehicle == this || otherVehicle == null) continue;
+                if (otherVehicle == this || otherVehicle == null || !otherVehicle.gameObject.activeInHierarchy) continue;
+                Vector3 toOther = otherVehicle.transform.position - origin;
+                if (reusePrediction && toOther.sqrMagnitude > 400f) continue;
 
                 // Check if they're changing lanes towards us
-                VehicleState state = TrafficCommunicationSystem.Instance.GetVehicleState(otherVehicle);
+                VehicleState state = traffic.GetVehicleState(otherVehicle);
                 if (state != null && state.isChangingLanes)
                 {
                     // Check if they're in adjacent lane
-                    Vector3 toOther = otherVehicle.transform.position - transform.position;
                     float lateralDistance = Vector3.Dot(toOther, transform.right);
 
                     if (Mathf.Abs(lateralDistance) > 2f && Mathf.Abs(lateralDistance) < 5f)

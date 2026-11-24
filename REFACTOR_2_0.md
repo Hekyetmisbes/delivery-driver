@@ -117,6 +117,14 @@ Open Unity Hub with editor 6000.3.12f1 and ensure Git LFS has materialized Asset
 - Validate generated quest parameters with and without settings, deterministic location RNG/marker behavior, and all five quest types in Unity. Compare following, stopping for player vehicles, lane changes, obstacles, crowded/saturated cast buffers, distinct detection radii and predictive collision response before and after. Profile query counts and allocations rather than assuming an FPS increase.
 - No changes to A*/RTAA*, GPS, minimap, scenes, prefabs, package versions or PR state.
 
+## Seventh implementation wave — P0 quest lifecycle and NPC path checks
+
+- QuestManager now shares start registration, active removal, external active selection and presentation cleanup. Normal acceptance validates NotStarted and location assignment before registration. External start rejects repeated/terminal starts while keeping physical-box quests' prepared timer/cargo data, missing initial stops and separate presentation behavior. Normal capacity checks, external capacity behavior, terminal rewards/events and save calls remain as before. This is not a full multi-quest state-machine migration; existing global presentation and abandonment semantics remain.
+- Combine the 15-waypoint path analysis and 10-waypoint turn analysis into one scan, preserving exclusive bounds, last significant local turn distance, maximum turn angle, and committed-turn priority. Use common planar forward calculation and skip unnecessary waypoint normalization when already close. Five EditMode cases compare the old angle windows and empty-path behavior.
+- Reuse the broader predictive traffic query for the 20 m merge scan only within the same executed FixedUpdate, with the same communication instance and exact position; filter by actual 20 m radius. Fall back to the independent query after repositioning or when no valid wider query ran. Existing scheduling, merge state and lane rules stay intact.
+- Validate normal and physical-box acceptance, duplicate starts, location failure, restored active quests, abandon/reaccept, completion/failure event order, multi-stop pickup and terminal rewards. Test waypoint windows, committed turns, overlap/merge at 20 m boundaries, spatial cell order and teleport/recovery. Unity build, EditMode and live profiler runs are still pending.
+- No navigation algorithm, GPS/minimap, scene/prefab, package or PR changes.
+
 ## Deferred navigation research
 
 The project owner's candidate is RTAA* (Real-Time Adaptive A*), not classic RTA*. The feasibility study and future Adaptive GPS & Navigation Overhaul plan are in [RTA_STAR_EVALUATION.md](RTA_STAR_EVALUATION.md). Do not implement a new navigation algorithm or alter GPS behavior during the current code cleanup. Benchmark stale route publication, map matching, high-speed tracking and minimap independently before an explicitly approved prototype.
