@@ -1,0 +1,14 @@
+{
+    "name": "DeliveryDriver.EditMode.Tests",
+    "rootNamespace": "DeliveryDriver.Tests",
+    "references": [
+        "GameScripts"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "autoReferenced": false
+}
