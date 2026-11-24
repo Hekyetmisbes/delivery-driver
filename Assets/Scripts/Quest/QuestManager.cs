@@ -180,6 +180,7 @@ namespace DeliveryDriver.Quest
         private string lastQuestId = string.Empty;
         private bool questUiDirty = true;
         private Coroutine startupInitCoroutine;
+        public bool IsSaveReady { get; private set; }
         private QuestLocationAssignmentService questLocationAssignmentService;
         private QuestZoneMarkerService questZoneMarkerService;
         private QuestAudioPresentationService questAudioPresentationService;
@@ -422,6 +423,7 @@ namespace DeliveryDriver.Quest
                     CheckDailyChallenge();
                 }
 
+                IsSaveReady = true;
                 yield break;
             }
 
@@ -449,6 +451,8 @@ namespace DeliveryDriver.Quest
             {
                 CheckDailyChallenge();
             }
+
+            IsSaveReady = true;
         }
 
         private bool IsRoadGraphReady()
@@ -816,12 +820,10 @@ namespace DeliveryDriver.Quest
 
         public void CompleteQuest(QuestData quest)
         {
-            if (quest == null)
+            if (quest == null || quest.Status != QuestStatus.Active || !activeQuests.Remove(quest))
             {
                 return;
             }
-
-            activeQuests.Remove(quest);
             if (currentQuest == quest)
             {
                 currentQuest = null;
@@ -886,12 +888,10 @@ namespace DeliveryDriver.Quest
 
         public void FailQuest(QuestData quest, string reason)
         {
-            if (quest == null)
+            if (quest == null || quest.Status != QuestStatus.Active || !activeQuests.Remove(quest))
             {
                 return;
             }
-
-            activeQuests.Remove(quest);
             if (currentQuest == quest)
             {
                 currentQuest = null;
@@ -2595,6 +2595,7 @@ namespace DeliveryDriver.Quest
 
             // Remove from available if it's there
             availableQuests.Remove(quest);
+            IsSaveReady = true;
 
             // Show pickup marker
             if (quest.PickupLocation != null)

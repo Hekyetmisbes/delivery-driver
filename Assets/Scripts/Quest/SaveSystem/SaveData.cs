@@ -10,6 +10,8 @@ namespace DeliveryDriver.Quest
     [Serializable]
     public class GameSaveData
     {
+        public const int CurrentVersion = 3;
+
         public PlayerProgressionData PlayerData;
         public QuestSaveData QuestData;
         public string SaveDate; // Timestamp
@@ -20,7 +22,7 @@ namespace DeliveryDriver.Quest
             PlayerData = new PlayerProgressionData();
             QuestData = new QuestSaveData();
             SaveDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-            SaveVersion = 3;
+            SaveVersion = CurrentVersion;
         }
     }
 

@@ -75,7 +75,12 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
-            SaveManager.Instance.SaveGame();
+            if (!SaveManager.Instance.TrySaveGame())
+            {
+                ShowStatus(LocalizationTable.Get("save_write_failed"), true);
+                return;
+            }
+
             ShowStatus(LocalizationTable.Get("save_game_saved"));
             UpdateLastSaveDisplay();
             UpdateButtonStates();

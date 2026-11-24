@@ -111,6 +111,8 @@ namespace DeliveryDriver.Quest
             InitializeAchievements();
         }
 
+        public bool IsSaveReady { get; private set; }
+
         private void Start()
         {
             // Try to load saved game
@@ -142,6 +144,7 @@ namespace DeliveryDriver.Quest
                 Debug.Log("[PlayerProgressionManager] SaveManager not found. Starting with default values.");
             }
 
+            IsSaveReady = true;
             StartCoroutine(InitializeMoneyFromDatabaseRoutine());
         }
 

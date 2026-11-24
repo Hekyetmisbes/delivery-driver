@@ -359,11 +359,8 @@ namespace DeliveryDriver.Optimization
         /// </summary>
         public bool ShouldNPCUpdate(NpcCarAgent npc)
         {
-            if (!npcUpdateIntervals.ContainsKey(npc))
-                return true;
-
-            int interval = npcUpdateIntervals[npc];
-            return frameCounter % interval == 0;
+            return !npcUpdateIntervals.TryGetValue(npc, out int interval) ||
+                   frameCounter % interval == 0;
         }
 
         /// <summary>
@@ -371,7 +368,7 @@ namespace DeliveryDriver.Optimization
         /// </summary>
         public float GetNPCDistance(NpcCarAgent npc)
         {
-            return npcDistances.ContainsKey(npc) ? npcDistances[npc] : float.MaxValue;
+            return npcDistances.TryGetValue(npc, out float distance) ? distance : float.MaxValue;
         }
 
         /// <summary>
