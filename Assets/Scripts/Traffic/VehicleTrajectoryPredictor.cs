@@ -21,7 +21,7 @@ namespace TrafficSystem
 
             // Simple linear prediction based on current velocity
             Vector3 currentPos = vehicle.transform.position;
-            Vector3 velocity = rb.linearVelocity;
+            Vector3 velocity = vehicle.SimulationVelocity;
 
             // Account for steering angle if turning
             Vector3 predictedPos = currentPos + velocity * timeAhead;
@@ -114,8 +114,8 @@ namespace TrafficSystem
 
             Vector3 posA = vehicleA.transform.position;
             Vector3 posB = vehicleB.transform.position;
-            Vector3 velA = rbA.linearVelocity;
-            Vector3 velB = rbB.linearVelocity;
+            Vector3 velA = vehicleA.SimulationVelocity;
+            Vector3 velB = vehicleB.SimulationVelocity;
 
             // Relative position and velocity
             Vector3 relativePos = posB - posA;

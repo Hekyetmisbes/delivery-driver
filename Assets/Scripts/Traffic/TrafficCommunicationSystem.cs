@@ -181,7 +181,7 @@ namespace TrafficSystem
                 vehicleRigidbodies[vehicle] = rb;
             }
 
-            state.velocity = rb != null ? rb.linearVelocity : Vector3.zero;
+            state.velocity = vehicle.SimulationVelocity;
             state.speed = vehicle.CurrentSpeed;
             state.forward = vehicle.transform.forward;
         }

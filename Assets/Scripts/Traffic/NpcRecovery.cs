@@ -133,6 +133,12 @@ namespace TrafficSystem
         private void Update()
         {
             if (!carAgent.IsInitialized || roadGraphBuilder == null) return;
+            if (carAgent.IsWaypointLod)
+            {
+                stuckTimer = 0f;
+                offRoadTimer = 0f;
+                return;
+            }
 
             // Debug log to see if recovery is disabled
             if (showDebugInfo && Time.frameCount % 120 == 0) // Log every 120 frames
