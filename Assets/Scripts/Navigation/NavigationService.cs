@@ -58,6 +58,8 @@ namespace DeliveryDriver.Navigation
         [SerializeField] private float hardOffRouteDistanceThreshold = 26f;
         [SerializeField] private float initialAsyncRouteDelay = 0.02f;
         [SerializeField] private int pathSearchIterationsPerFrame = 220;
+        [Tooltip("Cooperative A* search budget per frame in milliseconds. Zero disables time limiting.")]
+        [SerializeField, Min(0f)] private float pathSearchMillisecondsPerFrame = 1.5f;
         [SerializeField] private int maxTransferStepsPerRequest = 1;
         [SerializeField] private float continuedRouteAttemptDelay = 0.08f;
 
@@ -269,82 +271,6 @@ namespace DeliveryDriver.Navigation
             if (!CurrentObjective.IsValid) return;
             if (!ResolvePlayer(out Transform player)) return;
             RequestAsyncRoute(player.position, CurrentObjective.WorldPosition, force: true);
-        }
-
-        private void BuildRoute(Vector3 start, Vector3 end)
-        {
-            needsRouteBuild = false;
-            lastObjectivePosition = end;
-
-            // Try road graph path
-            if (TryResolveRoadGraph(out RoadGraph graph))
-            {
-                if (TryFindGraphRoute(graph, start, end))
-                {
-                    consecutiveFailures = 0;
-                    return;
-                }
-            }
-
-            // Graph route failed - try stale route
-            if (TryUseStaleRoute(start))
-            {
-                consecutiveFailures = 0;
-                return;
-            }
-
-            // All failed - use fallback straight line
-            consecutiveFailures++;
-            PublishFallback(start, end);
-            ScheduleRetry();
-            LogRouteIssue("Rota hesaplanamadi.", start, end);
-            ShowRerouteNotification();
-        }
-
-        private bool TryFindGraphRoute(RoadGraph graph, Vector3 start, Vector3 end)
-        {
-            int startStep = Mathf.Clamp(Mathf.Max(currentTransferStep, baselineTransferStep), 0, TransferDistances.Length - 1);
-            List<Vector3> path = null;
-            int resolvedStep = -1;
-            long budgetTicks = System.Diagnostics.Stopwatch.Frequency / 20; // ~50ms total budget
-            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
-
-            for (int step = startStep; step < TransferDistances.Length; step++)
-            {
-                path = RoadGraphPathfinder.FindPath(graph, start, end, TransferDistances[step]);
-                if (path != null && path.Count >= 2)
-                {
-                    resolvedStep = step;
-                    break;
-                }
-
-                // Don't burn more than ~50ms trying progressively wider transfers
-                if (System.Diagnostics.Stopwatch.GetTimestamp() - t0 > budgetTicks)
-                {
-                    break;
-                }
-            }
-
-            if (resolvedStep < 0 || path == null || path.Count < 2)
-            {
-                currentTransferStep = TransferDistances.Length - 1;
-                nextRerouteTime = Time.time + rerouteCooldown;
-                return false;
-            }
-
-            // Success
-            routePoints.Clear();
-            routePoints.AddRange(path);
-            lastGoodRoute.Clear();
-            lastGoodRoute.AddRange(path);
-            baselineTransferStep = Mathf.Max(0, resolvedStep - 1);
-            currentTransferStep = baselineTransferStep;
-            nextRouteRetryTime = 0f;
-            nextRerouteTime = Time.time + rerouteCooldown;
-
-            ProjectOnRoute(routePoints, start, out int segIdx, out Vector3 projected, out _);
-            PublishProjected(start, segIdx, projected, RouteKind.Graph, true);
-            return true;
         }
 
         private bool TryUseStaleRoute(Vector3 playerPos)
@@ -629,7 +555,7 @@ namespace DeliveryDriver.Navigation
 
                     while (session != null && session.Status == RoadGraphPathfinder.IncrementalSearchStatus.Running)
                     {
-                        session.Step(Mathf.Max(16, pathSearchIterationsPerFrame));
+                        session.Step(Mathf.Max(16, pathSearchIterationsPerFrame), pathSearchMillisecondsPerFrame);
                         if (session.Status == RoadGraphPathfinder.IncrementalSearchStatus.Running)
                         {
                             yield return null;
