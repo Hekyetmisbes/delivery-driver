@@ -109,6 +109,14 @@ Open Unity Hub with editor 6000.3.12f1 and ensure Git LFS has materialized Asset
 - RTAA* feasibility is documented separately; no navigation algorithm or GPS/minimap behavior changes in this wave. New pull requests and PR updates are deferred until final review.
 - Validate startup on fresh and existing SQLite databases (including provider unavailable), menu slider/dropdown/toggle behavior and full NPC/delivery smoke tests before merge. Private method removals are based on source references; Unity scene/LFS and reflective invocation checks remain a runtime validation gate.
 
+## Sixth implementation wave — P0 quest and NPC simplification
+
+- Five generated quest types share creation/marker assignment, location-pair retry logic and `QuestGenerationRules`. Preserve names, unlock fallback, original attempt count, standard-only relaxed distance fallback, type-specific time/reward defaults, minimum times, rounding order, levels, XP and stop scaling. Eight EditMode cases cover the common formulas and configured settings. Existing acceptance/completion/reward application and persistence code were not modified.
+- NPC following and forward threat checks reuse the same SphereCastNonAlloc results when both radii are equal and the buffer is not saturated. Keep independent queries for different radii or a full buffer, distinct following/threat selection widths, player/non-NPC threat detection, braking logic, side probes and existing physics timing. Reuse common lateral probes, torque assignment, suspension travel and closing speed formulas. Remove unused tilt angle calculation.
+- Predict the current NPC's own path samples once per collision-check batch rather than per neighbor; reuse a list, retain the same sample count and horizon, and reuse the safe following gap for that batch. Use another NPC's cached rigidbody with a component fallback. No change to driving thresholds or physics update intervals.
+- Validate generated quest parameters with and without settings, deterministic location RNG/marker behavior, and all five quest types in Unity. Compare following, stopping for player vehicles, lane changes, obstacles, crowded/saturated cast buffers, distinct detection radii and predictive collision response before and after. Profile query counts and allocations rather than assuming an FPS increase.
+- No changes to A*/RTAA*, GPS, minimap, scenes, prefabs, package versions or PR state.
+
 ## Deferred navigation research
 
 The project owner's candidate is RTAA* (Real-Time Adaptive A*), not classic RTA*. The feasibility study and future Adaptive GPS & Navigation Overhaul plan are in [RTA_STAR_EVALUATION.md](RTA_STAR_EVALUATION.md). Do not implement a new navigation algorithm or alter GPS behavior during the current code cleanup. Benchmark stale route publication, map matching, high-speed tracking and minimap independently before an explicitly approved prototype.

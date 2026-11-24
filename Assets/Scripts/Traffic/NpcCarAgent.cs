@@ -299,6 +299,7 @@ namespace TrafficSystem
         private Vector3 separationDirection;
         private List<Collider> nearbyVehicles = new List<Collider>();
         private readonly List<NpcCarAgent> nearbyVehicleBuffer = new List<NpcCarAgent>(24);
+        private readonly List<Vector3> selfPredictionSamples = new List<Vector3>(8);
 
         // Advanced obstacle avoidance state
         private bool leftLaneClear;
@@ -1882,7 +1883,6 @@ namespace TrafficSystem
                     isObstacleDetected = true;
                     obstacleDistance = Mathf.Min(obstacleDistance, centerHit.distance);
                     EvaluateVehicleStopThreat(centerHit.collider, centerHit.distance);
-
                 }
                 else if (IsStaticWorldObstacle(centerHit.collider))
                 {
@@ -1891,7 +1891,6 @@ namespace TrafficSystem
                     imminentCollisionRisk = centerHit.distance < safeFollowingDistance;
                     mustStopForVehicle = centerHit.distance < criticalBrakingDistance;
                     predictiveSpeedLimiter = Mathf.Min(predictiveSpeedLimiter, centerHit.distance < criticalBrakingDistance ? 0f : 0.35f);
-
                 }
                 else
                 {
@@ -1977,8 +1976,7 @@ namespace TrafficSystem
                 RaycastHit hit = sharedSphereCastBuffer[i];
                 Collider collider = hit.collider;
                 bool leadCandidate = findLead && hit.distance < leadDistance;
-                bool threatCandidate = findThreat && hit.distance < threatDistance &&
-                    collider != null && !collider.transform.IsChildOf(transform);
+                bool threatCandidate = findThreat && hit.distance < threatDistance;
                 if ((!leadCandidate && !threatCandidate) || !IsVehicleCollider(collider))
                     continue;
 
@@ -2817,16 +2815,27 @@ namespace TrafficSystem
             TrafficCommunicationSystem.Instance.GetNearbyVehicles(transform.position, queryRadius, nearbyVehicleBuffer);
             float minSpeedLimiter = 1f;
             bool urgentRisk = false;
+            float safeFollowingGap = CalculateSafeFollowingDistance();
+            int sampleCount = Mathf.Max(3, predictiveCollisionSamples);
+            float timeStep = predictiveCollisionHorizon / sampleCount;
+            selfPredictionSamples.Clear();
 
             for (int i = 0; i < nearbyVehicleBuffer.Count; i++)
             {
                 NpcCarAgent otherVehicle = nearbyVehicleBuffer[i];
                 if (otherVehicle == this || otherVehicle == null) continue;
 
-                float closestPredictedDistance = EstimateClosestPredictedDistance(otherVehicle, predictiveCollisionHorizon, predictiveCollisionSamples);
+                // This agent's path and velocity do not change during the neighbor scan.
+                if (selfPredictionSamples.Count == 0)
+                {
+                    for (int sample = 1; sample <= sampleCount; sample++)
+                        selfPredictionSamples.Add(VehicleTrajectoryPredictor.PredictPositionWithPath(this, sample * timeStep));
+                }
+
+                float closestPredictedDistance = EstimateClosestPredictedDistance(otherVehicle, timeStep);
                 float timeToCollision = VehicleTrajectoryPredictor.CalculateTimeToCollision(this, otherVehicle);
                 float relativeClosingSpeed = CalculateRelativeClosingSpeed(otherVehicle);
-                float dynamicSafeGap = CalculateSafeFollowingDistance() + Mathf.Max(0f, relativeClosingSpeed * 1.5f) + collisionBufferDistance;
+                float dynamicSafeGap = safeFollowingGap + Mathf.Max(0f, relativeClosingSpeed * 1.5f) + collisionBufferDistance;
 
                 bool hasPredictiveRisk = closestPredictedDistance < dynamicSafeGap || timeToCollision < cautionTimeToCollision;
                 if (!hasPredictiveRisk)
@@ -2866,26 +2875,16 @@ namespace TrafficSystem
             imminentCollisionRisk = urgentRisk;
         }
 
-        private float EstimateClosestPredictedDistance(NpcCarAgent otherVehicle, float horizonSeconds, int samples)
+        private float EstimateClosestPredictedDistance(NpcCarAgent otherVehicle, float timeStep)
         {
-            if (otherVehicle == null) return float.MaxValue;
-
-            int sampleCount = Mathf.Max(3, samples);
-            float timeStep = horizonSeconds / sampleCount;
             float closestDistance = Vector3.Distance(transform.position, otherVehicle.transform.position);
-
-            for (int i = 1; i <= sampleCount; i++)
+            for (int i = 0; i < selfPredictionSamples.Count; i++)
             {
-                float t = i * timeStep;
-                Vector3 posA = VehicleTrajectoryPredictor.PredictPositionWithPath(this, t);
-                Vector3 posB = VehicleTrajectoryPredictor.PredictPositionWithPath(otherVehicle, t);
-                float distance = Vector3.Distance(posA, posB);
+                Vector3 otherPosition = VehicleTrajectoryPredictor.PredictPositionWithPath(otherVehicle, (i + 1) * timeStep);
+                float distance = Vector3.Distance(selfPredictionSamples[i], otherPosition);
                 if (distance < closestDistance)
-                {
                     closestDistance = distance;
-                }
             }
-
             return closestDistance;
         }
 
@@ -2893,7 +2892,7 @@ namespace TrafficSystem
         {
             if (otherVehicle == null) return 0f;
 
-            Rigidbody otherRb = otherVehicle.GetComponent<Rigidbody>();
+            Rigidbody otherRb = otherVehicle.rb != null ? otherVehicle.rb : otherVehicle.GetComponent<Rigidbody>();
             if (otherRb == null) return 0f;
 
             Vector3 relativePos = otherVehicle.transform.position - transform.position;
