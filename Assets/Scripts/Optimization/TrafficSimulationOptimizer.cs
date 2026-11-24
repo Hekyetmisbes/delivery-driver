@@ -24,11 +24,17 @@ namespace DeliveryDriver.Optimization
         [Tooltip("Beyond far distance: update every 8-16 physics ticks")]
         public float veryFarDistance = 500f;
 
+        [Header("Physics LOD")]
+        [Tooltip("Distance to enter lightweight waypoint movement; independent of decision tiers.")]
+        public float waypointLodEnterDistance = 130f;
+        [Tooltip("Return to dynamic physics before entering the player interaction area.")]
+        public float waypointLodExitDistance = 100f;
+
         [Header("Simulation Quality")]
-        [Tooltip("Disable AI behavior for very far NPCs")]
+        [Tooltip("Allow far NPCs to use lightweight movement when distant physics simplification is enabled.")]
         public bool disableVeryFarAI = true;
 
-        [Tooltip("Simplify physics for distant NPCs")]
+        [Tooltip("Use lightweight waypoint movement for distant, eligible NPCs.")]
         public bool simplifyDistantPhysics = true;
 
         [Tooltip("Disable turn signals for far NPCs")]
@@ -63,7 +69,6 @@ namespace DeliveryDriver.Optimization
 
         // Cached component lookups per NPC
         private Dictionary<NpcCarAgent, TurnSignalController> npcTurnSignals = new Dictionary<NpcCarAgent, TurnSignalController>();
-        private Dictionary<NpcCarAgent, Rigidbody> npcRigidbodies = new Dictionary<NpcCarAgent, Rigidbody>();
         private Dictionary<NpcCarAgent, NpcOptimizationState> npcOptimizationStates = new Dictionary<NpcCarAgent, NpcOptimizationState>();
 
         // Spatial partitioning - delegated to TrafficCommunicationSystem (single grid)
@@ -136,7 +141,6 @@ namespace DeliveryDriver.Optimization
             npcUpdateIntervals[npc] = 1; // Start with every frame
             npcDistances[npc] = float.MaxValue;
             npcTurnSignals[npc] = npc.GetComponent<TurnSignalController>();
-            npcRigidbodies[npc] = npc.GetComponent<Rigidbody>();
             npcOptimizationStates[npc] = NpcOptimizationState.Full;
 
             totalNPCs = registeredNPCs.Count;
@@ -153,7 +157,6 @@ namespace DeliveryDriver.Optimization
             npcUpdateIntervals.Remove(npc);
             npcDistances.Remove(npc);
             npcTurnSignals.Remove(npc);
-            npcRigidbodies.Remove(npc);
             npcOptimizationStates.Remove(npc);
 
             totalNPCs = registeredNPCs.Count;
@@ -208,7 +211,7 @@ namespace DeliveryDriver.Optimization
                 ApplyNPCOptimizations(npc, sqrDistance, farSqr, veryFarSqr);
 
                 // Count statistics
-                if (sqrDistance > veryFarSqr && disableVeryFarAI)
+                if (npc.IsWaypointLod)
                     disabledNPCs++;
                 else if (updateInterval > 1)
                     throttledNPCs++;
@@ -283,47 +286,12 @@ namespace DeliveryDriver.Optimization
                 }
             }
 
-            if (simplifyDistantPhysics)
-            {
-                npcRigidbodies.TryGetValue(npc, out Rigidbody rb);
-                if (rb != null)
-                {
-                    if (rb.isKinematic)
-                    {
-                        rb.isKinematic = false;
-                    }
-
-                    if (rb.interpolation != RigidbodyInterpolation.None)
-                    {
-                        rb.interpolation = RigidbodyInterpolation.None;
-                    }
-                }
-            }
         }
 
         private void DisableNPCBehaviors(NpcCarAgent npc)
         {
-            // Disable turn signals
-            npcTurnSignals.TryGetValue(npc, out TurnSignalController turnSignal);
-            if (turnSignal != null && turnSignal.enabled)
-            {
-                turnSignal.enabled = false;
-            }
-
-            // Simplify physics
-            npcRigidbodies.TryGetValue(npc, out Rigidbody rb);
-            if (rb != null)
-            {
-                if (rb.interpolation != RigidbodyInterpolation.None)
-                {
-                    rb.interpolation = RigidbodyInterpolation.None;
-                }
-
-                if (!rb.isKinematic)
-                {
-                    rb.isKinematic = true; // Make kinematic at very far distance
-                }
-            }
+            // Far visual quality only. NpcCarAgent exclusively owns rigidbody LOD transitions.
+            SimplifyNpcBehaviors(npc);
         }
 
         private void EnableNPCBehaviors(NpcCarAgent npc)
@@ -335,20 +303,32 @@ namespace DeliveryDriver.Optimization
                 turnSignal.enabled = true;
             }
 
-            // Restore physics
-            npcRigidbodies.TryGetValue(npc, out Rigidbody rb);
-            if (rb != null)
-            {
-                if (rb.isKinematic)
-                {
-                    rb.isKinematic = false;
-                }
+        }
 
-                if (rb.interpolation != RigidbodyInterpolation.Interpolate)
-                {
-                    rb.interpolation = RigidbodyInterpolation.Interpolate;
-                }
-            }
+        // Live position instead of the 120 ms statistics cache: protect fast player approaches.
+        public bool TryGetPlayerDistance(NpcCarAgent npc, out float distance)
+        {
+            distance = 0f;
+            if (playerTransform == null || npc == null)
+                return false;
+
+            Vector3 delta = playerTransform.position - npc.transform.position;
+            delta.y = 0f;
+            distance = delta.magnitude;
+            return !float.IsNaN(distance) && !float.IsInfinity(distance);
+        }
+
+        public bool ShouldUseWaypointLod(NpcCarAgent npc, bool alreadyLightweight, out float distance)
+        {
+            if (!TryGetPlayerDistance(npc, out distance) || !simplifyDistantPhysics)
+                return false;
+
+            float exit = Mathf.Max(nearDistance, waypointLodExitDistance);
+            float enter = Mathf.Max(exit + 10f, waypointLodEnterDistance);
+            // The legacy very-far toggle no longer freezes traffic; it only permits the LOD there.
+            if (!disableVeryFarAI && distance >= veryFarDistance)
+                return false;
+            return NpcTrafficLodPolicy.UseWaypointMode(distance, alreadyLightweight, enter, exit);
         }
 
         /// <summary>
@@ -428,10 +408,10 @@ namespace DeliveryDriver.Optimization
             GUILayout.Label($"Total NPCs: {totalNPCs}");
             GUILayout.Label($"Active (Every Frame): {activeNPCs}");
             GUILayout.Label($"Throttled: {throttledNPCs}");
-            GUILayout.Label($"Disabled: {disabledNPCs}");
+            GUILayout.Label($"Waypoint LOD: {disabledNPCs}");
 
             float savings = totalNPCs > 0 ? ((float)(throttledNPCs + disabledNPCs) / totalNPCs) * 100f : 0;
-            GUILayout.Label($"CPU Savings: {savings:F1}%");
+            GUILayout.Label($"Throttled / LOD share: {savings:F1}%");
 
             GUILayout.EndVertical();
             GUILayout.EndArea();
