@@ -134,6 +134,12 @@ Open Unity Hub with editor 6000.3.12f1 and ensure Git LFS has materialized Asset
 - Add 18 EditMode cases covering fresh-plan guards, stop/target limits, acceleration and bounded suspension travel. Tests do not prove wheel dynamics or trajectory safety.
 - Decision scheduling proposals are in [NPC_PHYSICS_DECISION_PLAN.md](NPC_PHYSICS_DECISION_PLAN.md). New risk-driven scheduling, traffic behavior changes and far-distance movement are deferred pending owner discussion. Unity compilation, EditMode and play-mode/profiler validation remain pending.
 
+## Ninth implementation wave — hybrid NPC Physics LOD
+
+- Implement lightweight waypoint traversal for eligible distant NPCs (130/100 m entry/exit defaults), retaining dynamic WheelCollider driving near the player or in risk/maneuver/fallback situations. Restore physical settings, wheel flags and velocity on transition; keep connected roads, bounded step motion and basic obstacle sensing.
+- Replace nested decision decimation with context-sensitive actual physics tick deadlines for sensing, path decisions, turn analysis and slow tasks. Preserve hazard state between sensor refreshes. Use current speed and stopping distance to shorten sensing delays; no new GPS/planning algorithm.
+- Update traffic velocity consumers and skip expensive recovery/wheel-pose work in waypoint mode. Regression cases cover LOD hysteresis, intervals, bounded stepping and tick wrap. See [NPC_PHYSICS_DECISION_PLAN.md](NPC_PHYSICS_DECISION_PLAN.md) for defaults and limitations. Unity scene, wheel behavior, real road topology and profiling validation remain mandatory.
+
 ## Deferred navigation research
 
 The project owner's candidate is RTAA* (Real-Time Adaptive A*), not classic RTA*. The feasibility study and future Adaptive GPS & Navigation Overhaul plan are in [RTA_STAR_EVALUATION.md](RTA_STAR_EVALUATION.md). Do not implement a new navigation algorithm or alter GPS behavior during the current code cleanup. Benchmark stale route publication, map matching, high-speed tracking and minimap independently before an explicitly approved prototype.
