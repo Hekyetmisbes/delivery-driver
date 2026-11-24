@@ -282,14 +282,9 @@ namespace TrafficSystem
         // Performance optimization
         private static int nextNpcId = 0;
         private int npcId;
-        private int fixedUpdateCounter;
         private uint physicsTick;
         internal uint PhysicsTick => physicsTick;
         internal uint PhysicsPhase => unchecked((uint)npcId);
-        private const int ObstacleCheckInterval = 3;    // Check obstacles every 3 FixedUpdates
-        private const int OffRoadCheckInterval = 10;     // Check off-road every 10 FixedUpdates
-        private const int NearbyVehicleCheckInterval = 2;  // 25Hz at 50Hz physics
-        private const int WeatherCheckInterval = 30;       // ~1.67Hz - weather changes slowly
         private const int StabilityCheckInterval = 3;      // Anti-roll every 3 FixedUpdates
         private float cachedWeight;                        // rb.mass * gravity, cached on init
 
@@ -357,12 +352,13 @@ namespace TrafficSystem
         private float plannedTargetSpeed;
         private bool waypointLod;
         private float lodSpeedMs;
+        private Vector3 lodVelocity;
         private float lodHeightOffset;
         private float nextLodEntryTime;
         private int lodWheelMask;
         private RigidbodyInterpolation savedLodInterpolation;
         private CollisionDetectionMode savedLodCollisionMode;
-        private uint lastSafetyTick, lastPathTick, lastNearbyTick, lastOffRoadTick, lastWeatherTick;
+        private uint lastSafetyTick, lastPathTick, lastTurnScanTick, lastNearbyTick, lastOffRoadTick, lastWeatherTick;
 
         // Priority 3: Environmental Awareness
         private float weatherSpeedMultiplier = 1f;
@@ -384,7 +380,8 @@ namespace TrafficSystem
         public RoadSegment CurrentSegment => currentSegment;
         public int CurrentWaypointIndex => currentWaypointIndex;
         public bool IsWaypointLod => waypointLod;
-        public Vector3 SimulationVelocity => waypointLod ? GetWorldForward() * lodSpeedMs :
+        public bool IsChangingLanes => isChangingLanes;
+        public Vector3 SimulationVelocity => waypointLod ? lodVelocity :
             rb != null && !rb.isKinematic ? rb.linearVelocity : Vector3.zero;
         public float CurrentSpeed => SimulationVelocity.magnitude * 3.6f; // km/h
         public bool IsInitialized => isInitialized;
@@ -652,8 +649,12 @@ namespace TrafficSystem
                 ExitWaypointLod(true);
 
             if (!waypointLod && useLod && Time.time >= nextLodEntryTime &&
-                hasDrivePlan && !NeedsHighFrequencySimulation() && !IsManeuvering())
-                TryEnterWaypointLod();
+                hasDrivePlan && !NeedsHighFrequencySimulation() && !IsManeuvering() &&
+                !NpcTrafficLodPolicy.IsDue(physicsTick, lastSafetyTick, 5))
+            {
+                if (!TryEnterWaypointLod())
+                    nextLodEntryTime = Time.time + 1f;
+            }
 
             if (waypointLod)
             {
@@ -691,12 +692,23 @@ namespace TrafficSystem
             bool pathDue = fresh || NpcTrafficLodPolicy.IsDue(physicsTick, lastPathTick, pathInterval);
             bool safetyDue = fresh || NpcTrafficLodPolicy.IsDue(physicsTick, lastSafetyTick, safetyInterval);
             predictionQuerySource = null;
+            RoadSegment previousSegment = currentSegment;
+            int previousWaypoint = currentWaypointIndex;
             if (pathDue)
             {
                 lastPathTick = physicsTick;
                 ReacquireWaypointIfNeeded();
                 UpdatePath();
                 UpdateIntersectionCommitment();
+            }
+
+            // Steering uses the current path, but expensive angle scans do not need
+            // the same frequency unless a turn/segment transition is actually imminent.
+            if (fresh || previousSegment != currentSegment ||
+                (maneuver && previousWaypoint != currentWaypointIndex) ||
+                NpcTrafficLodPolicy.IsDue(physicsTick, lastTurnScanTick, maneuver ? 2 : Mathf.Max(3, pathInterval)))
+            {
+                lastTurnScanTick = physicsTick;
                 AnalyzeUpcomingPathAndTurn();
             }
 
@@ -787,12 +799,14 @@ namespace TrafficSystem
             Vector3 projection = from + edge * t;
             Vector3 offset = pos - projection;
             if (Mathf.Abs(offset.y) > 2f || offset.x * offset.x + offset.z * offset.z > 16f ||
-                Vector3.Dot(waypoint - pos, forward) <= 0f)
+                Vector3.Dot(waypoint - pos, forward) <= 0f ||
+                IsLodOverlapBlocked(pos))
                 return false;
 
             currentWaypointIndex = index;
             lodHeightOffset = offset.y;
             lodSpeedMs = Mathf.Max(0f, Vector3.Dot(rb.linearVelocity, forward));
+            lodVelocity = forward * lodSpeedMs;
             savedLodInterpolation = rb.interpolation;
             savedLodCollisionMode = rb.collisionDetectionMode;
             SetMotorTorque(0f);
@@ -829,7 +843,10 @@ namespace TrafficSystem
             Vector3 delta = target - position;
             float remaining = delta.magnitude;
             if (remaining <= 0.0001f)
+            {
+                lodVelocity = Vector3.zero;
                 return true;
+            }
 
             Vector3 direction = delta / remaining;
             // One simple heading-based speed cap instead of wheel/turn prediction.
@@ -839,6 +856,8 @@ namespace TrafficSystem
                 return false;
             flat.Normalize();
             float alignment = Vector3.Dot(GetPlanarTravelForward(), flat);
+            if (alignment < -0.2f || Mathf.Abs(direction.y) > 0.5f)
+                return false;
             float cruise = Mathf.Max(0f, ApplyTimeOfDayEffects(ApplyWeatherEffects(targetSpeed))) / 3.6f;
             float desired = cruise * Mathf.Lerp(0.35f, 1f, Mathf.Clamp01(alignment));
             if (currentWaypointIndex >= currentSegment.waypoints.Count - 2)
@@ -850,15 +869,20 @@ namespace TrafficSystem
             float travel = Vector3.Distance(position, next);
             // Conservative short sweep. On a blocked or saturated query, hand back to
             // dynamic sensing instead of passing through traffic or static geometry.
-            if (travel > 0f && IsLodMovementBlocked(position, direction, travel))
+            if ((travel > 0f && IsLodMovementBlocked(position, direction, travel)) ||
+                (TrafficSimulationOptimizer.IsScheduledPhysicsTick(physicsTick, PhysicsPhase, 5) &&
+                    IsLodOverlapBlocked(position)))
             {
                 lodSpeedMs = 0f;
+                lodVelocity = Vector3.zero;
                 return false;
             }
 
-            lodSpeedMs = travel / Mathf.Max(0.001f, dt);
+            // Preserve cruise acceleration across short final steps at waypoint boundaries.
+            lodSpeedMs = nextSpeed;
+            lodVelocity = (next - position) / Mathf.Max(0.001f, dt);
             rb.MovePosition(next);
-            rb.MoveRotation(Quaternion.RotateTowards(rb.rotation, Quaternion.LookRotation(flat, Vector3.up), 90f * dt));
+            rb.MoveRotation(Quaternion.RotateTowards(rb.rotation, Quaternion.LookRotation(direction, Vector3.up), 90f * dt));
             return true;
         }
 
@@ -905,7 +929,23 @@ namespace TrafficSystem
             for (int i = 0; i < count; i++)
             {
                 Collider collider = sharedSphereCastBuffer[i].collider;
-                if (IsVehicleCollider(collider) || IsStaticWorldObstacle(collider))
+                if (IsVehicleCollider(collider) || IsStaticWorldObstacle(collider, true))
+                    return true;
+            }
+            return false;
+        }
+
+        private bool IsLodOverlapBlocked(Vector3 position)
+        {
+            int count = Physics.OverlapSphereNonAlloc(position + Vector3.up * 0.7f,
+                Mathf.Max(1f, vehicleDetectionRadius), sharedOverlapBuffer, obstacleLayerMask,
+                QueryTriggerInteraction.Ignore);
+            if (count >= sharedOverlapBuffer.Length)
+                return true;
+            for (int i = 0; i < count; i++)
+            {
+                Collider collider = sharedOverlapBuffer[i];
+                if (IsVehicleCollider(collider) || IsStaticWorldObstacle(collider, true))
                     return true;
             }
             return false;
@@ -951,10 +991,12 @@ namespace TrafficSystem
                 RestoreLodWheel(frontRightCollider, 2, lodWheelMask);
                 RestoreLodWheel(rearLeftCollider, 4, lodWheelMask);
                 RestoreLodWheel(rearRightCollider, 8, lodWheelMask);
-                rb.linearVelocity = resumeMotion ? GetWorldForward() * lodSpeedMs : Vector3.zero;
+                rb.linearVelocity = resumeMotion ? lodVelocity : Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
                 rb.WakeUp();
             }
+            lodSpeedMs = 0f;
+            lodVelocity = Vector3.zero;
             InvalidateDrivePlan();
         }
 
@@ -1362,6 +1404,7 @@ namespace TrafficSystem
         {
             ExitWaypointLod(false);
             InvalidateDrivePlan();
+            nextLodEntryTime = Time.time + 1f;
             isObstacleDetected = false;
             obstacleDistance = float.MaxValue;
             mustStopForVehicle = false;
@@ -2240,7 +2283,10 @@ namespace TrafficSystem
             Rigidbody otherRigidbody = ResolveAttachedRigidbody(vehicleCollider);
             Vector3 forward = GetWorldForward();
             float currentForwardSpeed = Mathf.Max(0f, Vector3.Dot(rb.linearVelocity, forward));
-            float otherForwardSpeed = otherRigidbody != null ? Vector3.Dot(otherRigidbody.linearVelocity, forward) : 0f;
+            NpcCarAgent otherAgent = otherRigidbody != null ? otherRigidbody.GetComponent<NpcCarAgent>() : null;
+            Vector3 otherVelocity = otherAgent != null ? otherAgent.SimulationVelocity :
+                otherRigidbody != null && !otherRigidbody.isKinematic ? otherRigidbody.linearVelocity : Vector3.zero;
+            float otherForwardSpeed = Vector3.Dot(otherVelocity, forward);
             float closingSpeed = currentForwardSpeed - otherForwardSpeed;
 
             float safeStopDistance = CalculateVehicleStopDistance(closingSpeed, currentForwardSpeed);
@@ -2394,9 +2440,9 @@ namespace TrafficSystem
                    (collider.attachedRigidbody != null && !collider.attachedRigidbody.isKinematic);
         }
 
-        private bool IsStaticWorldObstacle(Collider collider)
+        private bool IsStaticWorldObstacle(Collider collider, bool lodSafety = false)
         {
-            if (!enableStaticObstacleRecovery || collider == null)
+            if ((!enableStaticObstacleRecovery && !lodSafety) || collider == null)
             {
                 return false;
             }
@@ -3050,13 +3096,10 @@ namespace TrafficSystem
         {
             if (otherVehicle == null) return 0f;
 
-            Rigidbody otherRb = otherVehicle.rb != null ? otherVehicle.rb : otherVehicle.GetComponent<Rigidbody>();
-            if (otherRb == null) return 0f;
-
             Vector3 relativePos = otherVehicle.transform.position - transform.position;
             if (relativePos.sqrMagnitude < 0.01f) return 0f;
 
-            Vector3 relativeVel = rb.linearVelocity - otherRb.linearVelocity;
+            Vector3 relativeVel = SimulationVelocity - otherVehicle.SimulationVelocity;
             return Vector3.Dot(relativeVel, relativePos.normalized);
         }
 

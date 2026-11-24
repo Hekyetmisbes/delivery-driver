@@ -309,13 +309,15 @@ namespace DeliveryDriver.Optimization
         public bool TryGetPlayerDistance(NpcCarAgent npc, out float distance)
         {
             distance = 0f;
-            if (playerTransform == null || npc == null)
+            if (playerTransform == null || !playerTransform.gameObject.activeInHierarchy || npc == null)
                 return false;
 
             Vector3 delta = playerTransform.position - npc.transform.position;
             delta.y = 0f;
             distance = delta.magnitude;
-            return !float.IsNaN(distance) && !float.IsInfinity(distance);
+            if (!float.IsNaN(distance) && !float.IsInfinity(distance)) return true;
+            distance = 0f;
+            return false;
         }
 
         public bool ShouldUseWaypointLod(NpcCarAgent npc, bool alreadyLightweight, out float distance)
