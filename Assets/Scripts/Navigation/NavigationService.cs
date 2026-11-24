@@ -126,6 +126,13 @@ namespace DeliveryDriver.Navigation
         private Vector3 lastRequestedRouteStart;
         private Vector3 lastRequestedRouteObjective;
         private float nextAsyncRouteAllowedTime;
+
+        // Development diagnostics for comparing route planners on the same map.
+        public int LastSearchExpandedNodes { get; private set; }
+        public int LastSearchQueuePops { get; private set; }
+        public double LastSearchPeakSliceMilliseconds { get; private set; }
+        public double LastSearchComputeMilliseconds { get; private set; }
+        public double LastSearchWallMilliseconds { get; private set; }
         private bool hasRequestedRoute;
 
         // Diagnostics
@@ -521,12 +528,18 @@ namespace DeliveryDriver.Navigation
             return playerMovedEnough || objectiveMovedEnough;
         }
 
+        private static double ElapsedMilliseconds(long started) =>
+            (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000d / System.Diagnostics.Stopwatch.Frequency;
+
         private IEnumerator BuildRouteAsync(Vector3 start, Vector3 end)
         {
             needsRouteBuild = false;
             lastObjectivePosition = end;
 
             bool found = false;
+            LastSearchExpandedNodes = LastSearchQueuePops = 0;
+            LastSearchPeakSliceMilliseconds = LastSearchComputeMilliseconds = LastSearchWallMilliseconds = 0;
+            long searchStarted = System.Diagnostics.Stopwatch.GetTimestamp();
 
             if (initialAsyncRouteDelay > 0f)
             {
@@ -550,12 +563,18 @@ namespace DeliveryDriver.Navigation
                         end = CurrentObjective.WorldPosition;
                     }
 
+                    long setupStarted = System.Diagnostics.Stopwatch.GetTimestamp();
                     RoadGraphPathfinder.IncrementalPathSearchSession session =
                         RoadGraphPathfinder.StartIncrementalSearch(graph, start, end, TransferDistances[step]);
+                    double setupMilliseconds = ElapsedMilliseconds(setupStarted);
+                    LastSearchComputeMilliseconds += setupMilliseconds;
+                    LastSearchPeakSliceMilliseconds = System.Math.Max(LastSearchPeakSliceMilliseconds, setupMilliseconds);
 
                     while (session != null && session.Status == RoadGraphPathfinder.IncrementalSearchStatus.Running)
                     {
                         session.Step(Mathf.Max(16, pathSearchIterationsPerFrame), pathSearchMillisecondsPerFrame);
+                        LastSearchComputeMilliseconds += session.LastStepMilliseconds;
+                        LastSearchPeakSliceMilliseconds = System.Math.Max(LastSearchPeakSliceMilliseconds, session.LastStepMilliseconds);
                         if (session.Status == RoadGraphPathfinder.IncrementalSearchStatus.Running)
                         {
                             yield return null;
@@ -565,6 +584,11 @@ namespace DeliveryDriver.Navigation
                     List<Vector3> path = session != null && session.Status == RoadGraphPathfinder.IncrementalSearchStatus.Succeeded
                         ? session.Path
                         : null;
+                    if (session != null)
+                    {
+                        LastSearchExpandedNodes += session.ExpandedNodes;
+                        LastSearchQueuePops += session.QueuePops;
+                    }
                     transferStepsTried++;
                     if (path != null && path.Count >= 2)
                     {
@@ -595,6 +619,8 @@ namespace DeliveryDriver.Navigation
                     }
                 }
             }
+
+            LastSearchWallMilliseconds = ElapsedMilliseconds(searchStarted);
 
             if (!found)
             {
