@@ -19,10 +19,10 @@ Target: preserve the existing phone mission, delivery parking, multi-stop, econo
 |---|---|---|
 | 0 | Baseline, automated tests, build and profiler capture | Started; Editor and build verification pending |
 | 1 | Save integrity, quest completion/failure guards, safe vehicle switching | Initial implementation and vehicle rollback committed; PlayMode verification pending |
-| 2 | SQLite transaction boundaries, event separation, data ownership/migration | Typed SQLite, snapshot transaction, cadence and explicit balance read policy committed; durable cross-store writes/migration pending |
+| 2 | SQLite transaction boundaries, event separation, data ownership/migration | Typed SQLite, snapshots, balance precedence and pending absolute-balance replay committed; full cross-store migration and atomic rewards pending |
 | 3 | Low-allocation improvements, profiling and traffic fixed-tick scheduler | FIFO pool, ground queries, fuel binding and physics-tick scheduling committed; profiler and traffic regression pending |
 | 4 | Split NpcCarAgent, QuestManager, DeliveryManager by responsibility | First independent modules extracted; motor/AI, lifecycle and spawn orchestration still pending |
-| 5 | Road graph baking, navigation, world culling and camera rendering | Stable heap, bounded spatial index cache and minimap renderer filter committed; baking and GPU validation pending |
+| 5 | Road graph baking, navigation, world culling and camera rendering | Stable heap, cache, minimap filter, dead search cleanup and cooperative time budget committed; RTA* study, baking and GPU validation pending |
 | 6 | UI presenters, assembly boundaries, package audit and CI | Planned; no scene or visual redesign |
 
 ## First implementation
@@ -66,6 +66,15 @@ Target: preserve the existing phone mission, delivery parking, multi-stop, econo
 - Failed SQLite writes are logged; the existing local fallback remains. A failed write followed by a successful read of stale SQLite can still lose the newer fallback balance. Durable pending-write reconciliation, migration of ambiguous legacy profiles and cross-store crash-atomic rewards are not yet implemented.
 - Added characterization tests for parking, quest presentation, route ordering, traffic time policy, heap ordering (5,000 interleaved operations), two-entry cache eviction/invalidation, and balance precedence.
 
+## Fourth implementation wave
+
+- Persist a pending absolute-balance write marker alongside the existing PlayerPrefs balance before SQLite write. On startup/refresh, replay that balance before accepting an older DB value. Retry every five unscaled seconds if ready. Successful commit clears the marker. Explicit startup profile balance reset clears the old marker.
+- SetPlayerBalance now uses one SQLite upsert instead of EnsurePlayer plus UPDATE, preserving existing player metadata when the row exists. Replay is idempotent for the absolute balance, not an atomic reward/XP/quest/history transaction. PlayerPrefs is not a transactional journal; crash recovery and external writer behavior still need integration tests. Legacy conflicts without an explicit pending marker use the existing source precedence.
+- Remove 309 lines of unreferenced private synchronous pathfinding implementations before additions. The sole active incremental A* search receives a configurable default 1.5 ms cooperative per-step budget alongside the existing iteration limit. No route cost or edge rules changed.
+- Add navigation diagnostics for expanded nodes, queue pops, compute/wall time and largest individual setup/step. These are per completed request/attempt, not whole-frame timing; setup and individual expansions can exceed the slice budget.
+- See [RTA_STAR_EVALUATION.md](RTA_STAR_EVALUATION.md) for literature review, repository-specific suitability, and experiment gates. RTA* is not deployed; evaluate it or RTAA*/TBA* against the current planner before replacing production navigation.
+- Add four balance precedence cases and a directed-graph route equivalence test for tiny vs unlimited search slices.
+
 ## Validation gates (not yet run)
 
 Open Unity Hub with editor 6000.3.12f1 and ensure Git LFS has materialized Assets/Scenes/Game.unity. In Window > General > Test Runner, select EditMode and run DeliveryDriver.EditMode.Tests.
@@ -88,6 +97,8 @@ Open Unity Hub with editor 6000.3.12f1 and ensure Git LFS has materialized Asset
 - [ ] Test parking at rotated bays, collider/renderer fallback, triggers, vehicle switching and boundary tolerances.
 - [ ] Verify minimap with zero NPCs, pooled NPCs, rapid scene changes, and intentionally disabled renderers; compare CPU/GC and GPU render time separately.
 - [ ] Exercise balance precedence with legacy saves, legitimate lower/zero balances, unavailable SQLite and failed writes on copied profiles. Do not migrate live profiles yet.
+- [ ] Force a failed DB write, close/reopen with pending balance, restore DB and verify replay does not duplicate money; check explicit profile reset and external DB writers.
+- [ ] Compare search diagnostics and complete-route equivalence under 1.5 ms, node-only and tiny budgets. Record projection/index build separately and compare frame-time percentiles. Use the RTA* evaluation protocol before changing algorithm.
 - [ ] Profile same route, vehicle, weather and NPC count at 30/60/120 FPS. Record main thread, render thread, GPU frame times, GC allocations, memory, P95/P99 frame time and startup time. Compare equivalent Development builds.
 
 ## Pending decisions
