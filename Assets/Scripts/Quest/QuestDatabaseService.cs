@@ -145,15 +145,12 @@ namespace DeliveryDriver.Quest
                 return false;
             }
 
-            if (!EnsurePlayer(playerId))
-            {
-                return false;
-            }
-
-            const string sql = @"UPDATE players
-            SET money_balance=@balance,
-                last_login_at=datetime('now')
-            WHERE player_id=@id;";
+            // One atomic SQL statement, including initial creation of a missing player row.
+            const string sql = @"INSERT INTO players
+            (player_id,display_name,created_at,last_login_at,level,xp,xp_to_next_level,money_balance,reputation_score)
+            VALUES (@id,'Player',datetime('now'),datetime('now'),1,0,100,@balance,0)
+            ON CONFLICT(player_id) DO UPDATE SET money_balance=excluded.money_balance,
+                last_login_at=excluded.last_login_at;";
             return ExecuteNonQuery(sql, new Dictionary<string, object>
             {
                 ["@id"] = playerId,
@@ -208,6 +205,8 @@ namespace DeliveryDriver.Quest
                 Debug.LogError("[QuestDatabaseService] Failed to reset default player balance for startup profile.");
                 return false;
             }
+
+            PlayerProgressionManager.ResetPersistedBalanceAfterProfileReset();
 
             if (!EnsureDefaultCompanyProfile(DefaultPlayerId, resolvedCompanyName))
             {

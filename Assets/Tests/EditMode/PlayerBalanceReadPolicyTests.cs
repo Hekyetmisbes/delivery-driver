@@ -15,5 +15,14 @@ namespace DeliveryDriver.Tests
         {
             Assert.That(PlayerBalanceReadPolicy.Resolve(database, preferences, snapshot), Is.EqualTo(expected));
         }
+        [TestCase(500, 0, 0)]
+        [TestCase(0, 200, 200)]
+        [TestCase(500, 100, 100)]
+        [TestCase(500, null, 500)]
+        public void PendingAbsoluteBalance_WinsUntilReplayed(int database, int? preferences, int expected)
+        {
+            Assert.That(PlayerBalanceReadPolicy.Resolve(database, preferences, 1000, true),
+                Is.EqualTo(expected));
+        }
     }
 }
