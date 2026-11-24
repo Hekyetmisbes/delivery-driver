@@ -349,6 +349,10 @@ namespace TrafficSystem
         private bool hasPlannedContinuation;
         private float smoothedTargetSteerAngle;
         private bool hasSmoothedTargetSteerAngle;
+        private bool hasDrivePlan;
+        private bool hasSteeringTarget;
+        private float requestedSteerAngle;
+        private float plannedTargetSpeed;
 
         // Priority 3: Environmental Awareness
         private float weatherSpeedMultiplier = 1f;
@@ -527,6 +531,7 @@ namespace TrafficSystem
 
         private void OnDisable()
         {
+            InvalidateDrivePlan();
             if (TrafficCommunicationSystem.Instance != null)
             {
                 TrafficCommunicationSystem.Instance.UnregisterVehicle(this);
@@ -614,34 +619,67 @@ namespace TrafficSystem
 
         private void FixedUpdate()
         {
-            if (!isInitialized || currentSegment?.waypoints == null ||
+            if (!isInitialized || rb == null || currentSegment?.waypoints == null ||
                 currentSegment.waypoints.Count == 0)
+            {
+                InvalidateDrivePlan();
                 return;
+            }
 
             unchecked { physicsTick++; }
             TrafficSimulationOptimizer optimizer = TrafficSimulationOptimizer.Instance;
+            bool dynamicBody = !rb.isKinematic;
+            if (!dynamicBody)
+                InvalidateDrivePlan();
 
-            // A separate physics tick advances even when this agent's AI is throttled.
-            // Keep urgent, dynamic traffic responsive regardless of the distance tier.
-            bool needsResponsiveSimulation = rb != null && !rb.isKinematic && NeedsHighFrequencySimulation();
-            if (optimizer != null && !needsResponsiveSimulation && !optimizer.ShouldNPCUpdate(this))
-                return;
+            // Preserve the existing decision cadence. A newly spawned/repositioned/woken
+            // dynamic body must acquire a fresh plan before applying wheel commands.
+            bool needsResponsiveSimulation = dynamicBody && NeedsHighFrequencySimulation();
+            bool runDecision = optimizer == null || needsResponsiveSimulation ||
+                (dynamicBody && !hasDrivePlan) || optimizer.ShouldNPCUpdate(this);
 
+            if (runDecision)
+                UpdateDrivingDecisions(optimizer, dynamicBody);
+
+            if (dynamicBody)
+            {
+                ApplySteering();
+                ApplyStability();
+            }
+
+            // Steering and stability are updated before calculating the new speed target,
+            // as in the original full tick. Expensive merge/turn/traffic logic is not repeated
+            // on the intervening actuator-only ticks.
+            if (runDecision)
+            {
+                plannedTargetSpeed = isReversing ? 0f : CalculateEffectiveTargetSpeed();
+                hasDrivePlan = dynamicBody;
+            }
+
+            if (dynamicBody && hasDrivePlan)
+                ApplyThrottle(plannedTargetSpeed);
+        }
+
+        private void InvalidateDrivePlan()
+        {
+            hasDrivePlan = false;
+            hasSteeringTarget = false;
+            predictionQuerySource = null;
+        }
+
+        private void UpdateDrivingDecisions(TrafficSimulationOptimizer optimizer, bool dynamicBody)
+        {
             predictionQuerySource = null;
             predictiveSpeedLimiter = 1f;
             imminentCollisionRisk = false;
             fixedUpdateCounter++;
 
-            // FIX: Periodically reacquire a valid nearby forward waypoint before progressing path.
             ReacquireWaypointIfNeeded();
             UpdatePath();
             UpdateIntersectionCommitment();
 
-            // Decimate expensive checks for distant, low-risk NPCs while keeping nearby traffic responsive.
             if (ShouldRunAdaptiveCheck(OffRoadCheckInterval, optimizer))
-            {
                 UpdateOffRoadStatus();
-            }
 
             if (ShouldRunAdaptiveCheck(WeatherCheckInterval, optimizer))
             {
@@ -669,11 +707,10 @@ namespace TrafficSystem
                 isColliding = false;
             }
 
-            ApplySeparationForce();
+            if (dynamicBody)
+                ApplySeparationForce();
             UpdateLaneChange();
-            ApplySteering();
-            ApplyStability();
-            ApplyThrottle();
+            UpdateSteeringTarget();
         }
 
         private bool ShouldRunAdaptiveCheck(int baseInterval, TrafficSimulationOptimizer optimizer)
@@ -1113,6 +1150,7 @@ namespace TrafficSystem
 
         private void ResetTransientSpawnState()
         {
+            InvalidateDrivePlan();
             isObstacleDetected = false;
             obstacleDistance = float.MaxValue;
             mustStopForVehicle = false;
@@ -1621,9 +1659,11 @@ namespace TrafficSystem
         /// <summary>
         /// Pure Pursuit steering algorithm
         /// </summary>
-        private void ApplySteering()
+        private void UpdateSteeringTarget()
         {
-            if (currentSegment == null || currentWaypointIndex >= currentSegment.waypoints.Count)
+            hasSteeringTarget = false;
+            if (currentSegment?.waypoints == null || currentWaypointIndex < 0 ||
+                currentWaypointIndex >= currentSegment.waypoints.Count)
                 return;
 
             // Find lookahead point
@@ -1638,8 +1678,17 @@ namespace TrafficSystem
             Vector3 localTarget = Quaternion.Inverse(GetVehicleRotation()) * (flatLookAhead - transform.position);
             float safeMaxSteerAngle = Mathf.Max(1f, maxSteerAngle);
             float targetSteerAngle = Mathf.Atan2(localTarget.x, localTarget.z) * Mathf.Rad2Deg;
-            targetSteerAngle = Mathf.Clamp(targetSteerAngle, -safeMaxSteerAngle, safeMaxSteerAngle);
+            requestedSteerAngle = Mathf.Clamp(targetSteerAngle, -safeMaxSteerAngle, safeMaxSteerAngle);
+            hasSteeringTarget = true;
+        }
 
+        private void ApplySteering()
+        {
+            if (!hasSteeringTarget)
+                return;
+
+            float safeMaxSteerAngle = Mathf.Max(1f, maxSteerAngle);
+            float targetSteerAngle = Mathf.Clamp(requestedSteerAngle, -safeMaxSteerAngle, safeMaxSteerAngle);
             if (!hasSmoothedTargetSteerAngle)
             {
                 smoothedTargetSteerAngle = targetSteerAngle;
@@ -3018,15 +3067,8 @@ namespace TrafficSystem
         /// <summary>
         /// Apply throttle and braking based on target speed and obstacles
         /// </summary>
-        private void ApplyThrottle()
+        private float CalculateEffectiveTargetSpeed()
         {
-            if (isReversing)
-            {
-                ApplyReverseThrottle();
-                return;
-            }
-
-            float currentSpeed = CurrentSpeed;
             float effectiveTargetSpeed = GetTurnLimitedTargetSpeed();
 
             // OVERTAKING BOOST: Maintain or increase speed when overtaking
@@ -3093,14 +3135,30 @@ namespace TrafficSystem
             // Enforce low minimum only in clear road conditions.
             bool trafficConstrained = isFollowing || isObstacleDetected || imminentCollisionRisk || isColliding;
             float minAllowedSpeed = mustStopForVehicle ? 0f : (trafficConstrained ? trafficConstrainedMinSpeed : freeFlowMinSpeed);
-            effectiveTargetSpeed = Mathf.Max(effectiveTargetSpeed, minAllowedSpeed);
+            return Mathf.Max(effectiveTargetSpeed, minAllowedSpeed);
+        }
+
+        private void ApplyThrottle(float effectiveTargetSpeed)
+        {
+            if (isReversing)
+            {
+                ApplyReverseThrottle();
+                return;
+            }
+
+            // Use the current rigidbody speed and honor stop flags even with a cached plan.
+            float currentSpeed = CurrentSpeed;
+            if (mustStopForVehicle)
+                effectiveTargetSpeed = 0f;
+            if (imminentCollisionRisk)
+                effectiveTargetSpeed = Mathf.Min(effectiveTargetSpeed, 12f);
 
             float speedDifference = effectiveTargetSpeed - currentSpeed;
             float currentSafeDistance = CalculateSafeFollowingDistance();
             bool tooCloseToLead = isFollowing && distanceToVehicleAhead < currentSafeDistance;
 
             // Apply motor torque or braking
-            if (speedDifference > speedTolerance)
+            if (!mustStopForVehicle && speedDifference > speedTolerance)
             {
                 // Need to accelerate - use personalized acceleration
                 float motorTorque = personalityAcceleration * Mathf.Clamp01(speedDifference / 20f);
@@ -3224,7 +3282,7 @@ namespace TrafficSystem
                 rb.AddForce(downDirection * requestedDownforce, ForceMode.Force);
             }
 
-            if (antiRollStiffness > 0f && (fixedUpdateCounter + npcId) % StabilityCheckInterval == 0)
+            if (antiRollStiffness > 0f && TrafficSimulationOptimizer.IsScheduledPhysicsTick(physicsTick, PhysicsPhase, StabilityCheckInterval))
             {
                 ApplyAntiRoll(frontLeftCollider, frontRightCollider, antiRollStiffness);
                 ApplyAntiRoll(rearLeftCollider, rearRightCollider, antiRollStiffness);
@@ -3274,7 +3332,8 @@ namespace TrafficSystem
         }
 
         private static float GetSuspensionTravel(WheelCollider wheel, WheelHit hit) =>
-            (-wheel.transform.InverseTransformPoint(hit.point).y - wheel.radius) / wheel.suspensionDistance;
+            Mathf.Clamp01((-wheel.transform.InverseTransformPoint(hit.point).y - wheel.radius) /
+                Mathf.Max(0.001f, wheel.suspensionDistance));
 
         private void CacheWheelGeometry()
         {
@@ -3322,6 +3381,7 @@ namespace TrafficSystem
         {
             currentSegment = segment;
             currentWaypointIndex = waypointIndex;
+            InvalidateDrivePlan();
             ClearPlannedContinuation();
             hasSmoothedTargetSteerAngle = false;
             ApplyLaneCenteringPolicyForCurrentSegment();
