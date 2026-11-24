@@ -221,6 +221,8 @@ namespace TrafficSystem
         [SerializeField] private bool useLocalDownforceDirection = true;
         [Tooltip("Anti-roll stiffness - higher prevents rollovers")]
         [SerializeField] private float antiRollStiffness = 12000f;
+        [Tooltip("Optional artificial self-leveling torque. Basic NPC physics uses WheelCollider suspension and angular damping without this assist.")]
+        [SerializeField] private bool enableSupplementalTiltCorrection = false;
 
         [Header("Physics")]
         [Tooltip("Rigidbody interpolation mode")]
@@ -3271,12 +3273,10 @@ namespace TrafficSystem
         {
             if (!enableStability || rb == null) return;
 
-            float speed = rb.linearVelocity.magnitude;
-            
-            // Apply downforce - always apply some base downforce plus speed-based
+            // Squared speed is sufficient for the existing quadratic downforce.
             if (downforceCoefficient > 0f)
             {
-                float speedDownforce = Mathf.Max(0f, downforceCoefficient) * speed * speed;
+                float speedDownforce = downforceCoefficient * rb.linearVelocity.sqrMagnitude;
                 float requestedDownforce = Mathf.Max(0f, baseDownforce) + speedDownforce;
 
                 float maxDownforce = cachedWeight * Mathf.Max(0f, maxDownforceWeightFraction);
@@ -3295,29 +3295,28 @@ namespace TrafficSystem
                 ApplyAntiRoll(rearLeftCollider, rearRightCollider, antiRollStiffness);
             }
 
-            // Limit angular velocity to prevent excessive spinning
-            if (rb.angularVelocity.magnitude > 2f)
+            // Keep basic angular damping; avoid repeated rigidbody reads/writes.
+            Vector3 angular = rb.angularVelocity;
+            Vector3 limitedAngular = Vector3.ClampMagnitude(angular, 2f);
+            Vector3 up = transform.up;
+            float upDot = up.y;
+            if (upDot < 0.95f && upDot > 0.3f)
             {
-                rb.angularVelocity = rb.angularVelocity.normalized * 2f;
-            }
+                if (enableSupplementalTiltCorrection)
+                {
+                    Vector3 tiltAxis = Vector3.Cross(up, Vector3.up);
+                    rb.AddTorque(tiltAxis.normalized * (3000f * (1f - upDot)), ForceMode.Force);
+                }
 
-            // Active tilt correction - apply corrective torque when tilted
-            float upDot = Vector3.Dot(transform.up, Vector3.up);
-            if (upDot < 0.95f && upDot > 0.3f) // Between 18 and 70 degrees tilt
-            {
-                // Calculate corrective torque to level the vehicle
-                Vector3 tiltAxis = Vector3.Cross(transform.up, Vector3.up);
-                float correctionStrength = 3000f * (1f - upDot); // Stronger correction for more tilt
-                rb.AddTorque(tiltAxis.normalized * correctionStrength, ForceMode.Force);
-                
-                // Also dampen angular velocity when tilted
-                rb.angularVelocity *= 0.9f;
+                limitedAngular *= 0.9f;
             }
             else if (upDot < 0.3f)
             {
-                // Severely tilted - strong damping
-                rb.angularVelocity *= 0.8f;
+                limitedAngular *= 0.8f;
             }
+
+            if (!limitedAngular.Equals(angular))
+                rb.angularVelocity = limitedAngular;
         }
 
         private void ApplyAntiRoll(WheelCollider left, WheelCollider right, float stiffness)
@@ -3331,6 +3330,8 @@ namespace TrafficSystem
             float rightTravel = rightGrounded ? GetSuspensionTravel(right, hitR) : 1f;
 
             float antiRollForce = (leftTravel - rightTravel) * stiffness;
+            if (antiRollForce == 0f)
+                return;
 
             if (leftGrounded)
                 rb.AddForceAtPosition(left.transform.up * -antiRollForce, left.transform.position);
@@ -3610,16 +3611,7 @@ namespace TrafficSystem
                     Debug.LogWarning($"[NpcCarAgent] {name} collided with {collision.collider.name}");
                 }
 
-                // Calculate separation direction
-                Vector3 collisionNormal = Vector3.zero;
-                foreach (ContactPoint contact in collision.contacts)
-                {
-                    collisionNormal += contact.normal;
-                }
-                if (collisionNormal.sqrMagnitude > 0.01f)
-                {
-                    separationDirection = collisionNormal.normalized;
-                }
+                SetCollisionSeparationDirection(collision);
             }
             else if (IsStaticWorldObstacle(collision.collider))
             {
@@ -3714,10 +3706,8 @@ namespace TrafficSystem
         private void SetCollisionSeparationDirection(Collision collision)
         {
             Vector3 collisionNormal = Vector3.zero;
-            foreach (ContactPoint contact in collision.contacts)
-            {
-                collisionNormal += contact.normal;
-            }
+            for (int i = 0; i < collision.contactCount; i++)
+                collisionNormal += collision.GetContact(i).normal;
 
             if (collisionNormal.sqrMagnitude > 0.01f)
             {
