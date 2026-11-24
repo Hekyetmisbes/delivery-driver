@@ -144,7 +144,6 @@ namespace DeliveryDriver.Quest
                 Debug.Log("[PlayerProgressionManager] SaveManager not found. Starting with default values.");
             }
 
-            IsSaveReady = true;
             StartCoroutine(InitializeMoneyFromDatabaseRoutine());
         }
 
@@ -563,13 +562,14 @@ namespace DeliveryDriver.Quest
                 return false;
             }
 
-            int databaseBalance = database.GetDefaultPlayerBalance(currentMoney);
-            if (databaseBalance != currentMoney)
-            {
-                currentMoney = Mathf.Max(0, databaseBalance);
-                PersistMoneyPrefsFallback();
+            if (!database.TryGetPlayerBalance(QuestDatabaseService.DefaultPlayerId, out int databaseBalance))
+                return false;
+
+            bool changed = databaseBalance != currentMoney;
+            currentMoney = databaseBalance;
+            PersistMoneyPrefsFallback();
+            if (changed)
                 OnMoneyChanged.Invoke(currentMoney);
-            }
 
             Debug.Log($"[PlayerProgressionManager] Active balance refreshed from database: ${currentMoney}");
             return true;
@@ -805,14 +805,17 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
-            currentMoney = data.Money;
-            LoadMoneyFromPrefsFallback(preferHigherBalance: true);
             QuestDatabaseService database = QuestDatabaseService.Instance;
-            if (database != null && database.IsReady)
-            {
-                currentMoney = database.GetDefaultPlayerBalance(currentMoney);
+            int? databaseBalance = database != null &&
+                database.TryGetPlayerBalance(QuestDatabaseService.DefaultPlayerId, out int persistedBalance)
+                ? persistedBalance : (int?)null;
+            int? preferencesBalance = PlayerPrefs.HasKey(MoneyPrefsVersionKey)
+                ? PlayerPrefs.GetInt(MoneyPrefsKey, data.Money) : (int?)null;
+
+            currentMoney = PlayerBalanceReadPolicy.Resolve(databaseBalance, preferencesBalance, data.Money);
+            // Never replace the fallback with a database query failure.
+            if (databaseBalance.HasValue)
                 PersistMoneyPrefsFallback();
-            }
 
             currentLevel = data.Level;
             currentXP = data.XP;
@@ -834,7 +837,7 @@ namespace DeliveryDriver.Quest
             levelSnapshots = data.LevelSnapshots ?? new List<LevelSnapshot>();
 
             // Load unlocked achievements
-            foreach (string achievementID in data.UnlockedAchievements)
+            foreach (string achievementID in data.UnlockedAchievements ?? new List<string>())
             {
                 Achievement achievement = achievements.FirstOrDefault(a => a.AchievementID == achievementID);
                 if (achievement != null && !achievement.IsUnlocked)
@@ -852,72 +855,58 @@ namespace DeliveryDriver.Quest
 
         private IEnumerator InitializeMoneyFromDatabaseRoutine()
         {
-            float timeoutAt = Time.realtimeSinceStartup + DatabaseReadyWaitTimeoutSeconds;
-
-            while ((QuestDatabaseService.Instance == null || !QuestDatabaseService.Instance.IsReady) &&
-                   Time.realtimeSinceStartup < timeoutAt)
+            try
             {
-                yield return null;
+                float timeoutAt = Time.realtimeSinceStartup + DatabaseReadyWaitTimeoutSeconds;
+                while ((QuestDatabaseService.Instance == null || !QuestDatabaseService.Instance.IsReady) &&
+                       Time.realtimeSinceStartup < timeoutAt)
+                    yield return null;
+
+                QuestDatabaseService database = QuestDatabaseService.Instance;
+                if (database == null || !database.IsReady)
+                    yield break;
+
+                bool playerExisted = database.PlayerExists(QuestDatabaseService.DefaultPlayerId);
+                if (!database.EnsureDefaultPlayer())
+                    yield break;
+
+                if (!playerExisted && currentMoney > 0)
+                {
+                    if (!database.SetDefaultPlayerBalance(currentMoney))
+                        Debug.LogWarning("[PlayerProgressionManager] Initial balance could not be written to SQLite.");
+                }
+                else
+                {
+                    RefreshMoneyFromDatabase();
+                }
             }
-
-            QuestDatabaseService database = QuestDatabaseService.Instance;
-            if (database == null || !database.IsReady)
+            finally
             {
-                yield break;
-            }
-
-            bool playerExisted = database.PlayerExists(QuestDatabaseService.DefaultPlayerId);
-            if (!database.EnsureDefaultPlayer())
-            {
-                yield break;
-            }
-
-            int databaseBalance = database.GetDefaultPlayerBalance(currentMoney);
-            bool shouldSeedDatabaseBalance = !playerExisted && currentMoney > 0;
-
-            if (shouldSeedDatabaseBalance)
-            {
-                database.SetDefaultPlayerBalance(currentMoney);
-            }
-            else
-            {
-                RefreshMoneyFromDatabase();
+                // JSON autosave must not capture a provisional startup balance.
+                IsSaveReady = true;
             }
         }
 
         private void SyncMoneyToDatabase()
         {
             PersistMoneyPrefsFallback();
-
             QuestDatabaseService database = QuestDatabaseService.Instance;
             if (database == null || !database.IsReady)
-            {
                 return;
-            }
 
-            database.EnsureDefaultPlayer();
-            database.SetDefaultPlayerBalance(currentMoney);
+            if (!database.SetDefaultPlayerBalance(currentMoney))
+                Debug.LogWarning("[PlayerProgressionManager] Balance retained in PlayerPrefs; SQLite write failed.");
         }
 
-        private bool LoadMoneyFromPrefsFallback(bool preferHigherBalance = false)
+        private bool LoadMoneyFromPrefsFallback()
         {
             if (!PlayerPrefs.HasKey(MoneyPrefsVersionKey))
-            {
                 return false;
-            }
 
-            int persistedMoney = Mathf.Max(0, PlayerPrefs.GetInt(MoneyPrefsKey, currentMoney));
-            if (preferHigherBalance)
-            {
-                if (persistedMoney <= currentMoney)
-                {
-                    return false;
-                }
-            }
-            else if (persistedMoney == currentMoney)
-            {
+            int persistedMoney = PlayerBalanceReadPolicy.Resolve(null,
+                PlayerPrefs.GetInt(MoneyPrefsKey, currentMoney), currentMoney);
+            if (persistedMoney == currentMoney)
                 return false;
-            }
 
             currentMoney = persistedMoney;
             return true;

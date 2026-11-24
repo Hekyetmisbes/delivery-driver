@@ -113,18 +113,25 @@ namespace DeliveryDriver.Quest
             return CvI(result, 0) > 0;
         }
 
-        public int GetPlayerBalance(string playerId, int fallback = 0)
+        public bool TryGetPlayerBalance(string playerId, out int balance)
         {
+            balance = 0;
             if (!IsReady || string.IsNullOrWhiteSpace(playerId))
-            {
-                return fallback;
-            }
+                return false;
 
             object result = ExecuteScalar(
                 "SELECT money_balance FROM players WHERE player_id=@id LIMIT 1;",
                 new Dictionary<string, object> { ["@id"] = playerId });
-            return CvI(result, fallback);
+            // Zero is a valid balance; a missing row or failed query is not.
+            if (result == null || result == DBNull.Value)
+                return false;
+
+            balance = CvI(result, -1);
+            return balance >= 0;
         }
+
+        public int GetPlayerBalance(string playerId, int fallback = 0) =>
+            TryGetPlayerBalance(playerId, out int balance) ? balance : fallback;
 
         public int GetDefaultPlayerBalance(int fallback = 0)
         {

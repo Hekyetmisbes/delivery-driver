@@ -1961,9 +1961,6 @@ namespace DeliveryDriver.Quest
             return quest;
         }
 
-        /// <summary>
-        /// Optimizes route using nearest-neighbor algorithm
-        /// </summary>
         #endregion
 
         #region Task 9.4: Special Quest Types
