@@ -648,8 +648,7 @@ namespace TrafficSystem
 
             if (ShouldRunAdaptiveCheck(ObstacleCheckInterval, optimizer))
             {
-                AnalyzeUpcomingPath();
-                DetectUpcomingTurn();
+                AnalyzeUpcomingPathAndTurn();
                 CheckPredictiveCollisions();
                 CheckObstacles();
                 CheckRearObstacles();
@@ -953,40 +952,23 @@ namespace TrafficSystem
             int waypointCount = currentSegment.waypoints.Count;
             currentWaypointIndex = Mathf.Clamp(currentWaypointIndex, 0, waypointCount - 1);
 
-            Vector3 flatForward = GetWorldForward();
-            flatForward.y = 0f;
-            if (flatForward.sqrMagnitude > 0.0001f)
-            {
-                flatForward.Normalize();
-            }
-            else
-            {
-                flatForward = Vector3.forward;
-            }
+            Vector3 flatForward = GetPlanarTravelForward();
 
             float dynamicPassDist = Mathf.Max(waypointPassDistance, personalityLookAhead * 0.25f);
+            Vector3 position = transform.position;
 
             // FIX: Advance waypoint both when close enough and when the waypoint is already behind us.
             while (currentWaypointIndex < waypointCount)
             {
                 Waypoint currentWp = currentSegment.waypoints[currentWaypointIndex];
-                Vector3 toWp = currentWp.position - transform.position;
+                Vector3 toWp = currentWp.position - position;
                 toWp.y = 0f;
 
-                float distanceToWaypoint = toWp.magnitude;
-                bool isCloseEnough = distanceToWaypoint <= dynamicPassDist;
-
-                bool isBehind = false;
-                if (toWp.sqrMagnitude > 0.0001f)
-                {
-                    float dot = Vector3.Dot(flatForward, toWp.normalized);
-                    isBehind = dot < waypointPassedDotThreshold;
-                }
-
-                if (!isCloseEnough && !isBehind)
-                {
+                float distanceSqr = toWp.sqrMagnitude;
+                bool isCloseEnough = Mathf.Sqrt(distanceSqr) <= dynamicPassDist;
+                if (!isCloseEnough && (distanceSqr <= 0.0001f ||
+                    Vector3.Dot(flatForward, toWp.normalized) >= waypointPassedDotThreshold))
                     break;
-                }
 
                 currentWaypointIndex++;
 
@@ -1016,16 +998,7 @@ namespace TrafficSystem
             currentWaypointIndex = Mathf.Clamp(currentWaypointIndex, 0, waypointCount - 1);
 
             Vector3 pos = GetReferencePosition();
-            Vector3 flatForward = GetWorldForward();
-            flatForward.y = 0f;
-            if (flatForward.sqrMagnitude > 0.0001f)
-            {
-                flatForward.Normalize();
-            }
-            else
-            {
-                flatForward = Vector3.forward;
-            }
+            Vector3 flatForward = GetPlanarTravelForward();
 
             int searchBehind = hasPlannedContinuation ? 0 : reacquireSearchBehind;
             int start = Mathf.Clamp(currentWaypointIndex - searchBehind, 0, waypointCount - 1);
@@ -1707,16 +1680,7 @@ namespace TrafficSystem
             Vector3 carPos = transform.position;
 
             // FIX: Skip clearly behind waypoints so lookahead starts from a forward anchor.
-            Vector3 flatForward = GetWorldForward();
-            flatForward.y = 0f;
-            if (flatForward.sqrMagnitude > 0.0001f)
-            {
-                flatForward.Normalize();
-            }
-            else
-            {
-                flatForward = Vector3.forward;
-            }
+            Vector3 flatForward = GetPlanarTravelForward();
 
             for (int i = startIndex; i < waypointCount; i++)
             {
@@ -2565,51 +2529,40 @@ namespace TrafficSystem
         /// <summary>
         /// Analyze upcoming path for turns, intersections, and obstacles
         /// </summary>
-        private void AnalyzeUpcomingPath()
+        private void AnalyzeUpcomingPathAndTurn()
         {
-            if (currentSegment == null || currentWaypointIndex >= currentSegment.waypoints.Count)
-            {
-                currentLookaheadData = new LookaheadData();
+            currentLookaheadData = default;
+            currentTurnInfo = default;
+            if (currentSegment?.waypoints == null || currentWaypointIndex < 0 ||
+                currentWaypointIndex >= currentSegment.waypoints.Count)
                 return;
-            }
 
-            LookaheadData data = new LookaheadData();
-            int waypointCount = 15; // Look ahead 15 waypoints
-            int endIndex = Mathf.Min(currentWaypointIndex + waypointCount, currentSegment.waypoints.Count - 1);
+            Vector3 position = transform.position;
+            bool committedTurn = currentSegment.waypoints.Count >= 2 &&
+                TryGetCommittedTurnInfo(position, out currentTurnInfo);
+            bool scanLocalTurn = !committedTurn && currentWaypointIndex < currentSegment.waypoints.Count - 3;
+            NpcPathTurnScan scan = NpcPathTurnScanner.Scan(currentSegment.waypoints, currentWaypointIndex, scanLocalTurn);
 
-            // Analyze waypoints ahead
-            float maxAngleChange = 0f;
-            bool hasIntersection = false;
-
-            for (int i = currentWaypointIndex; i < endIndex - 1; i++)
+            var data = new LookaheadData
             {
-                Waypoint current = currentSegment.waypoints[i];
-                Waypoint next = currentSegment.waypoints[i + 1];
-
-                // Check for sharp turns
-                float angleChange = Vector3.Angle(current.forward, next.forward);
-                if (angleChange > maxAngleChange)
-                {
-                    maxAngleChange = angleChange;
-                }
-            }
-
-            // Check if approaching end of segment (intersection)
-            if (currentSegment.connections != null && currentSegment.connections.Count > 0)
-            {
-                int distanceToEnd = currentSegment.waypoints.Count - currentWaypointIndex;
-                if (distanceToEnd < waypointCount)
-                {
-                    hasIntersection = true;
-                }
-            }
-
-            data.hasSharpTurn = maxAngleChange > 15f;
-            data.turnSharpness = maxAngleChange;
-            data.hasIntersection = hasIntersection;
+                hasSharpTurn = scan.MaxLookaheadAngle > 15f,
+                turnSharpness = scan.MaxLookaheadAngle,
+                hasIntersection = currentSegment.connections != null && currentSegment.connections.Count > 0 &&
+                    currentSegment.waypoints.Count - currentWaypointIndex < 15
+            };
             data.recommendedSpeed = CalculatePlannedSpeed(data);
-
             currentLookaheadData = data;
+
+            if (scan.LastTurnIndex >= 0)
+            {
+                currentTurnInfo = new TurnInfo
+                {
+                    isTurn = true,
+                    distanceToTurn = Vector3.Distance(position, currentSegment.waypoints[scan.LastTurnIndex].position),
+                    turnAngle = scan.MaxLocalTurnAngle,
+                    recommendedSpeed = CalculateTurnSpeed(scan.MaxLocalTurnAngle)
+                };
+            }
         }
 
         /// <summary>
@@ -2634,68 +2587,6 @@ namespace TrafficSystem
             }
 
             return speed;
-        }
-
-        // ============================================================================
-        // PRIORITY 2: Predictive Behavior - Turn Planning (Step 3.3)
-        // ============================================================================
-
-        /// <summary>
-        /// Detect upcoming turns and plan deceleration
-        /// </summary>
-        private void DetectUpcomingTurn()
-        {
-            if (currentSegment == null || currentSegment.waypoints == null || currentSegment.waypoints.Count < 2)
-            {
-                currentTurnInfo = new TurnInfo();
-                return;
-            }
-
-            TurnInfo turnInfo = new TurnInfo();
-            Vector3 currentPos = transform.position;
-
-            if (TryGetCommittedTurnInfo(currentPos, out turnInfo))
-            {
-                currentTurnInfo = turnInfo;
-                return;
-            }
-
-            if (currentWaypointIndex >= currentSegment.waypoints.Count - 3)
-            {
-                currentTurnInfo = new TurnInfo();
-                return;
-            }
-
-            // Look ahead 5-10 waypoints
-            int lookAheadCount = 10;
-            int endIndex = Mathf.Min(currentWaypointIndex + lookAheadCount, currentSegment.waypoints.Count - 1);
-
-            float distanceToTurn = 0f;
-            float maxAngle = 0f;
-
-            for (int i = currentWaypointIndex; i < endIndex - 1; i++)
-            {
-                Waypoint wp1 = currentSegment.waypoints[i];
-                Waypoint wp2 = currentSegment.waypoints[i + 1];
-
-                float angle = Vector3.Angle(wp1.forward, wp2.forward);
-
-                if (angle > 15f) // Significant turn
-                {
-                    turnInfo.isTurn = true;
-                    distanceToTurn = Vector3.Distance(currentPos, wp1.position);
-                    maxAngle = Mathf.Max(maxAngle, angle);
-                }
-            }
-
-            if (turnInfo.isTurn)
-            {
-                turnInfo.distanceToTurn = distanceToTurn;
-                turnInfo.turnAngle = maxAngle;
-                turnInfo.recommendedSpeed = CalculateTurnSpeed(maxAngle);
-            }
-
-            currentTurnInfo = turnInfo;
         }
 
         private bool TryGetCommittedTurnInfo(Vector3 currentPos, out TurnInfo turnInfo)
@@ -3552,6 +3443,13 @@ namespace TrafficSystem
         private Quaternion GetVehicleRotation()
         {
             return transform.rotation;
+        }
+
+        private Vector3 GetPlanarTravelForward()
+        {
+            Vector3 forward = GetWorldForward();
+            forward.y = 0f;
+            return forward.sqrMagnitude > 0.0001f ? forward.normalized : Vector3.forward;
         }
 
         private Vector3 GetFlattenedForward(Vector3 forward)
