@@ -281,6 +281,9 @@ namespace TrafficSystem
         private static int nextNpcId = 0;
         private int npcId;
         private int fixedUpdateCounter;
+        private uint physicsTick;
+        internal uint PhysicsTick => physicsTick;
+        internal uint PhysicsPhase => unchecked((uint)npcId);
         private const int ObstacleCheckInterval = 3;    // Check obstacles every 3 FixedUpdates
         private const int OffRoadCheckInterval = 10;     // Check off-road every 10 FixedUpdates
         private const int NearbyVehicleCheckInterval = 2;  // 25Hz at 50Hz physics
@@ -615,41 +618,18 @@ namespace TrafficSystem
 
         private void FixedUpdate()
         {
+            if (!isInitialized || currentSegment?.waypoints == null ||
+                currentSegment.waypoints.Count == 0)
+                return;
+
+            unchecked { physicsTick++; }
             TrafficSimulationOptimizer optimizer = TrafficSimulationOptimizer.Instance;
 
-            // Performance optimization: Distance-based update throttling (single check)
-            if (optimizer != null &&
-                !optimizer.ShouldNPCUpdate(this))
-            {
+            // A separate physics tick advances even when this agent's AI is throttled.
+            // Keep urgent, dynamic traffic responsive regardless of the distance tier.
+            bool needsResponsiveSimulation = rb != null && !rb.isKinematic && NeedsHighFrequencySimulation();
+            if (optimizer != null && !needsResponsiveSimulation && !optimizer.ShouldNPCUpdate(this))
                 return;
-            }
-
-            if (!isInitialized)
-            {
-                if (Time.frameCount % 120 == 0) // Log every 2 seconds
-                {
-                    // Debug.LogWarning($"[NpcCarAgent] {name} - Not initialized!");
-                }
-                return;
-            }
-
-            if (currentSegment == null)
-            {
-                if (Time.frameCount % 120 == 0) // Log every 2 seconds
-                {
-                    // Debug.LogWarning($"[NpcCarAgent] {name} - No current segment!");
-                }
-                return;
-            }
-
-            if (currentSegment.waypoints == null || currentSegment.waypoints.Count == 0)
-            {
-                if (Time.frameCount % 120 == 0) // Log every 2 seconds
-                {
-                    // Debug.LogWarning($"[NpcCarAgent] {name} - Segment '{currentSegment.name}' has no waypoints!");
-                }
-                return;
-            }
 
             predictiveSpeedLimiter = 1f;
             imminentCollisionRisk = false;

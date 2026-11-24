@@ -12,16 +12,16 @@ namespace DeliveryDriver.Optimization
     public class TrafficSimulationOptimizer : MonoBehaviour
     {
         [Header("Update Throttling")]
-        [Tooltip("Near distance: update every frame")]
+        [Tooltip("Near distance: update every physics tick")]
         public float nearDistance = 50f;
 
-        [Tooltip("Mid distance: update every 2-4 frames")]
+        [Tooltip("Mid distance: update every 2 physics ticks")]
         public float midDistance = 150f;
 
-        [Tooltip("Far distance: update every 8-10 frames")]
+        [Tooltip("Far distance: update every 4 physics ticks")]
         public float farDistance = 300f;
 
-        [Tooltip("Very far distance: event-driven only")]
+        [Tooltip("Beyond far distance: update every 8-16 physics ticks")]
         public float veryFarDistance = 500f;
 
         [Header("Simulation Quality")]
@@ -69,7 +69,6 @@ namespace DeliveryDriver.Optimization
         // Spatial partitioning - delegated to TrafficCommunicationSystem (single grid)
 
         // Statistics
-        private int frameCounter = 0;
         private float lastStatsUpdate = 0f;
         private float lastStateUpdate = 0f;
         private GUIStyle perfHeaderStyle;
@@ -164,8 +163,6 @@ namespace DeliveryDriver.Optimization
         {
             if (playerTransform == null) return;
 
-            frameCounter++;
-
             if (Time.time - lastStateUpdate >= stateUpdateInterval)
             {
                 lastStateUpdate = Time.time;
@@ -225,15 +222,15 @@ namespace DeliveryDriver.Optimization
         private int DetermineUpdateIntervalSqr(float sqrDistance, float nearSqr, float midSqr, float farSqr, float veryFarSqr)
         {
             if (sqrDistance < nearSqr)
-                return 1; // Every frame
+                return 1; // Every physics tick
             else if (sqrDistance < midSqr)
-                return 2; // Every 2 frames
+                return 2; // Every 2 physics ticks
             else if (sqrDistance < farSqr)
-                return 4; // Every 4 frames
+                return 4; // Every 4 physics ticks
             else if (sqrDistance < veryFarSqr)
-                return 8; // Every 8 frames
+                return 8; // Every 8 physics ticks
             else
-                return 16; // Every 16 frames (event-driven)
+                return 16; // Every 16 physics ticks
         }
 
         private void ApplyNPCOptimizations(NpcCarAgent npc, float sqrDistance, float farSqr, float veryFarSqr)
@@ -355,12 +352,22 @@ namespace DeliveryDriver.Optimization
         }
 
         /// <summary>
-        /// Check if an NPC should update this frame
+        /// Check if an NPC is scheduled for its current physics tick.
         /// </summary>
         public bool ShouldNPCUpdate(NpcCarAgent npc)
         {
             return !npcUpdateIntervals.TryGetValue(npc, out int interval) ||
-                   frameCounter % interval == 0;
+                   IsScheduledPhysicsTick(npc.PhysicsTick, npc.PhysicsPhase, interval);
+        }
+
+        public static bool IsScheduledPhysicsTick(uint tick, uint phase, int interval)
+        {
+            if (interval <= 1)
+                return true;
+
+            // Stagger agents across ticks to avoid synchronized bursts.
+            uint period = (uint)interval;
+            return ((ulong)(tick % period) + phase % period) % period == 0;
         }
 
         /// <summary>

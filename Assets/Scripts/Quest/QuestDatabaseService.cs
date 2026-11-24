@@ -451,12 +451,16 @@ namespace DeliveryDriver.Quest
             )
             ON CONFLICT(quest_instance_id) DO UPDATE SET
               quest_status=excluded.quest_status,
-              completed_at=excluded.completed_at,
-              failed_at=excluded.failed_at,
+              completed_at=CASE WHEN excluded.quest_status='Completed'
+                  THEN COALESCE(quest_instances.completed_at,excluded.completed_at) ELSE NULL END,
+              failed_at=CASE WHEN excluded.quest_status='Failed'
+                  THEN COALESCE(quest_instances.failed_at,excluded.failed_at) ELSE NULL END,
               time_limit_sec=excluded.time_limit_sec,
               time_remaining_sec=excluded.time_remaining_sec,
               current_delivery_index=excluded.current_delivery_index,
               has_picked_up_cargo=excluded.has_picked_up_cargo,
+              pickup_location_id=excluded.pickup_location_id,
+              pickup_neighborhood_id=excluded.pickup_neighborhood_id,
               selected_cargo_type_id=excluded.selected_cargo_type_id,
               cargo_health=excluded.cargo_health,
               collision_count=excluded.collision_count,
@@ -523,7 +527,12 @@ namespace DeliveryDriver.Quest
         {
             const string sql = @"INSERT INTO wallet_transactions
             (player_id,quest_instance_id,tx_type,amount,balance_after,created_at,description)
-            VALUES (@pid,@qid,@type,@amount,@bal,datetime('now'),@desc);";
+            SELECT @pid,@qid,@type,@amount,@bal,datetime('now'),@desc
+            WHERE @qid IS NULL OR @type NOT IN ('QUEST_REWARD','PENALTY')
+               OR NOT EXISTS (
+                   SELECT 1 FROM wallet_transactions
+                   WHERE player_id=@pid AND quest_instance_id=@qid AND tx_type=@type
+               );";
             return ExecuteNonQuery(sql, new Dictionary<string, object>
             {
                 ["@pid"] = playerId, ["@qid"] = Db(questId), ["@type"] = txType,
