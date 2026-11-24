@@ -173,12 +173,7 @@ namespace DeliveryDriver.Quest
         private float timeSinceLastRefresh = 0f;
         private float lastManualRefreshTime = -999f;
 
-        private int lastTimeRemainingSeconds = -1;
-        private int lastDeliveryIndex = -1;
-        private bool lastHasPickedUpCargo = false;
-        private float lastCargoHealth = -1f;
-        private string lastQuestId = string.Empty;
-        private bool questUiDirty = true;
+        private readonly QuestUiUpdateTracker questUiUpdateTracker = new QuestUiUpdateTracker();
         private Coroutine startupInitCoroutine;
         public bool IsSaveReady { get; private set; }
         private QuestLocationAssignmentService questLocationAssignmentService;
@@ -1571,53 +1566,15 @@ namespace DeliveryDriver.Quest
             return quest != null && quest.PickupAuthority != QuestPickupAuthority.PhysicalBox;
         }
 
-        private void MarkQuestUiDirty()
-        {
-            questUiDirty = true;
-        }
+        private void MarkQuestUiDirty() => questUiUpdateTracker.MarkDirty();
 
         private void TryNotifyQuestUpdated()
         {
-            if (currentQuest == null)
-            {
-                return;
-            }
-
-            int timeRemainingSeconds = Mathf.CeilToInt(currentQuest.TimeRemaining);
-            float cargoHealth = currentQuest.Cargo != null && currentQuest.Cargo.IsFragile
-                ? currentQuest.Cargo.CargoHealth
-                : -1f;
-
-            bool isDirty = questUiDirty ||
-                           !string.Equals(currentQuest.QuestID, lastQuestId, StringComparison.Ordinal) ||
-                           timeRemainingSeconds != lastTimeRemainingSeconds ||
-                           currentQuest.CurrentDeliveryIndex != lastDeliveryIndex ||
-                           currentQuest.HasPickedUpCargo != lastHasPickedUpCargo ||
-                           Mathf.Abs(cargoHealth - lastCargoHealth) > 0.1f;
-
-            if (!isDirty)
-            {
-                return;
-            }
-
-            CacheQuestUiState(currentQuest);
-            OnQuestUpdated.Invoke(currentQuest);
+            if (questUiUpdateTracker.TryCaptureChanged(currentQuest))
+                OnQuestUpdated.Invoke(currentQuest);
         }
 
-        private void CacheQuestUiState(QuestData quest)
-        {
-            if (quest == null)
-            {
-                return;
-            }
-
-            lastQuestId = quest.QuestID ?? string.Empty;
-            lastTimeRemainingSeconds = Mathf.CeilToInt(quest.TimeRemaining);
-            lastDeliveryIndex = quest.CurrentDeliveryIndex;
-            lastHasPickedUpCargo = quest.HasPickedUpCargo;
-            lastCargoHealth = quest.Cargo != null && quest.Cargo.IsFragile ? quest.Cargo.CargoHealth : -1f;
-            questUiDirty = false;
-        }
+        private void CacheQuestUiState(QuestData quest) => questUiUpdateTracker.Capture(quest);
 
         public QuestSaveData GetSaveData()
         {
@@ -1938,7 +1895,7 @@ namespace DeliveryDriver.Quest
             }
 
             // Optimize route using nearest-neighbor algorithm
-            List<QuestLocation> optimizedRoute = OptimizeRoute(pickup, deliveryLocations);
+            List<QuestLocation> optimizedRoute = QuestRouteOrdering.Optimize(pickup, deliveryLocations);
 
             // Calculate total route distance
             float totalDistance = 0f;
@@ -2007,60 +1964,6 @@ namespace DeliveryDriver.Quest
         /// <summary>
         /// Optimizes route using nearest-neighbor algorithm
         /// </summary>
-        private List<QuestLocation> OptimizeRoute(QuestLocation start, List<QuestLocation> stops)
-        {
-            List<QuestLocation> optimized = new List<QuestLocation>();
-            List<QuestLocation> remaining = new List<QuestLocation>(stops);
-            QuestLocation current = start;
-
-            while (remaining.Count > 0)
-            {
-                QuestLocation nearest = FindNearest(current, remaining);
-                if (nearest != null)
-                {
-                    optimized.Add(nearest);
-                    remaining.Remove(nearest);
-                    current = nearest;
-                }
-                else
-                {
-                    // Fallback: just add the first remaining
-                    optimized.Add(remaining[0]);
-                    remaining.RemoveAt(0);
-                }
-            }
-
-            return optimized;
-        }
-
-        /// <summary>
-        /// Finds nearest location from a list
-        /// </summary>
-        private QuestLocation FindNearest(QuestLocation current, List<QuestLocation> candidates)
-        {
-            if (candidates == null || candidates.Count == 0 || current == null)
-            {
-                return null;
-            }
-
-            QuestLocation nearest = null;
-            float minDistance = float.MaxValue;
-
-            foreach (QuestLocation candidate in candidates)
-            {
-                if (candidate == null) continue;
-
-                float distance = Vector3.Distance(current.Position, candidate.Position);
-                if (distance < minDistance)
-                {
-                    minDistance = distance;
-                    nearest = candidate;
-                }
-            }
-
-            return nearest;
-        }
-
         #endregion
 
         #region Task 9.4: Special Quest Types
@@ -2606,7 +2509,7 @@ namespace DeliveryDriver.Quest
             // Notify listeners so UI/HUD updates immediately for externally started quests.
             OnQuestStarted?.Invoke(quest);
             OnQuestUpdated?.Invoke(quest);
-            questUiDirty = true;
+            MarkQuestUiDirty();
 
             Debug.Log($"[QuestManager] Started quest: {quest.QuestName}");
         }

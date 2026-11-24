@@ -1140,144 +1140,18 @@ public class DeliveryManager : MonoBehaviour
         return Quaternion.identity;
     }
 
+    private readonly DeliveryParkingValidator parkingValidator = new DeliveryParkingValidator();
+
     private bool IsPlayerFullyInsideDeliveryParkingBay(Transform player)
     {
         if (!isDeliveryActive || player == null)
-        {
             return false;
-        }
 
-        Quaternion parkingRotation = currentDeliveryParkingRotation == Quaternion.identity
+        Quaternion rotation = currentDeliveryParkingRotation == Quaternion.identity
             ? ResolveDeliveryParkingRotation(currentDeliveryPoint)
             : currentDeliveryParkingRotation;
-        Vector3 bayCenter = ResolveGroundPoint(currentDeliveryPoint);
-        Quaternion inverseRotation = Quaternion.Inverse(parkingRotation);
-        float halfWidth = Mathf.Max(1f, deliveryParkingSize.x) * 0.5f + Mathf.Max(0f, deliveryParkingCompletionTolerance);
-        float halfLength = Mathf.Max(deliveryParkingSize.x, deliveryParkingSize.y) * 0.5f + Mathf.Max(0f, deliveryParkingCompletionTolerance);
-
-        if (!TryGetVehicleFootprintCorners(player, out Vector3[] corners))
-        {
-            Vector3 local = inverseRotation * (player.position - bayCenter);
-            return Mathf.Abs(local.x) <= halfWidth && Mathf.Abs(local.z) <= halfLength;
-        }
-
-        for (int i = 0; i < corners.Length; i++)
-        {
-            Vector3 local = inverseRotation * (corners[i] - bayCenter);
-            if (Mathf.Abs(local.x) > halfWidth || Mathf.Abs(local.z) > halfLength)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static bool TryGetVehicleFootprintCorners(Transform player, out Vector3[] corners)
-    {
-        corners = null;
-        if (player == null)
-        {
-            return false;
-        }
-
-        float minX = float.MaxValue;
-        float maxX = float.MinValue;
-        float minZ = float.MaxValue;
-        float maxZ = float.MinValue;
-        bool hasBounds = false;
-
-        Collider[] colliders = player.GetComponentsInChildren<Collider>(false);
-        for (int i = 0; i < colliders.Length; i++)
-        {
-            Collider col = colliders[i];
-            if (col == null || col.isTrigger || col is WheelCollider)
-            {
-                continue;
-            }
-
-            EncapsulateBoundsInVehicleSpace(player, col.bounds, ref minX, ref maxX, ref minZ, ref maxZ, ref hasBounds);
-        }
-
-        if (!hasBounds)
-        {
-            Renderer[] renderers = player.GetComponentsInChildren<Renderer>(false);
-            for (int i = 0; i < renderers.Length; i++)
-            {
-                Renderer renderer = renderers[i];
-                if (renderer == null || ShouldIgnoreVehicleFootprintRenderer(renderer))
-                {
-                    continue;
-                }
-
-                EncapsulateBoundsInVehicleSpace(player, renderer.bounds, ref minX, ref maxX, ref minZ, ref maxZ, ref hasBounds);
-            }
-        }
-
-        if (!hasBounds)
-        {
-            return false;
-        }
-
-        corners = new[]
-        {
-            player.TransformPoint(new Vector3(minX, 0f, minZ)),
-            player.TransformPoint(new Vector3(minX, 0f, maxZ)),
-            player.TransformPoint(new Vector3(maxX, 0f, maxZ)),
-            player.TransformPoint(new Vector3(maxX, 0f, minZ))
-        };
-        return true;
-    }
-
-    private static bool ShouldIgnoreVehicleFootprintRenderer(Renderer renderer)
-    {
-        if (renderer is ParticleSystemRenderer || renderer is LineRenderer || renderer is TrailRenderer)
-        {
-            return true;
-        }
-
-        string lowerName = renderer.name.ToLowerInvariant();
-        return lowerName.Contains("smoke") ||
-               lowerName.Contains("exhaust") ||
-               lowerName.Contains("trail") ||
-               lowerName.Contains("effect") ||
-               lowerName.Contains("hologram") ||
-               lowerName.Contains("marker");
-    }
-
-    private static void EncapsulateBoundsInVehicleSpace(
-        Transform vehicle,
-        Bounds bounds,
-        ref float minX,
-        ref float maxX,
-        ref float minZ,
-        ref float maxZ,
-        ref bool hasBounds)
-    {
-        Vector3 min = bounds.min;
-        Vector3 max = bounds.max;
-        Vector3[] points =
-        {
-            new Vector3(min.x, min.y, min.z),
-            new Vector3(min.x, min.y, max.z),
-            new Vector3(min.x, max.y, min.z),
-            new Vector3(min.x, max.y, max.z),
-            new Vector3(max.x, min.y, min.z),
-            new Vector3(max.x, min.y, max.z),
-            new Vector3(max.x, max.y, min.z),
-            new Vector3(max.x, max.y, max.z)
-        };
-
-        for (int i = 0; i < points.Length; i++)
-        {
-            Vector3 local = vehicle.InverseTransformPoint(points[i]);
-            minX = Mathf.Min(minX, local.x);
-            maxX = Mathf.Max(maxX, local.x);
-            minZ = Mathf.Min(minZ, local.z);
-            maxZ = Mathf.Max(maxZ, local.z);
-        }
-
-        hasBounds = true;
+        return parkingValidator.ContainsVehicle(player, ResolveGroundPoint(currentDeliveryPoint),
+            rotation, deliveryParkingSize, deliveryParkingCompletionTolerance);
     }
 
     private void TryCompleteCurrentDeliveryStop()

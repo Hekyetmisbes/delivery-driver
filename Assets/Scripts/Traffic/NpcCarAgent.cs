@@ -293,7 +293,6 @@ namespace TrafficSystem
 
         // Collision handling
         private static Collider[] sharedOverlapBuffer = new Collider[32];
-        private static readonly RaycastHit[] GroundHitBuffer = new RaycastHit[32];
         private static RaycastHit[] sharedSphereCastBuffer = new RaycastHit[16];
         private bool isColliding;
         private float collisionTimer;
@@ -3318,48 +3317,8 @@ namespace TrafficSystem
         /// <summary>
         /// Get speed multiplier based on time of day
         /// </summary>
-        private float GetTimeOfDayMultiplier()
-        {
-            int hour = System.DateTime.Now.Hour;
-
-            // Rush hour (7-9 AM, 5-7 PM): more aggressive, higher speeds
-            if ((hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 19))
-            {
-                // Adjust based on personality - aggressive drivers go faster in rush hour
-                if (personality != null && personality.riskTolerance > 0.6f)
-                {
-                    return 1.15f; // Aggressive drivers speed up in rush hour
-                }
-                return 1.05f; // Normal drivers slightly faster
-            }
-
-            // Night (10 PM - 6 AM): slower, more cautious
-            if (hour >= 22 || hour <= 6)
-            {
-                return 0.85f; // 15% slower at night
-            }
-
-            // Daytime (normal)
-            return 1.0f;
-        }
-
-        /// <summary>
-        /// Check if it's currently rush hour
-        /// </summary>
-        private bool IsRushHour()
-        {
-            int hour = System.DateTime.Now.Hour;
-            return (hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 19);
-        }
-
-        /// <summary>
-        /// Check if it's currently night time
-        /// </summary>
-        private bool IsNightTime()
-        {
-            int hour = System.DateTime.Now.Hour;
-            return hour >= 22 || hour <= 6;
-        }
+        private float GetTimeOfDayMultiplier() =>
+            NpcTimeOfDayPolicy.GetSpeedMultiplier(System.DateTime.Now.Hour, personality != null && personality.riskTolerance > 0.6f);
 
         /// <summary>
         /// Apply time of day effects to speed
@@ -3735,39 +3694,9 @@ namespace TrafficSystem
             }
         }
 
-        private Vector3 GetGroundedPosition(Vector3 desiredPosition)
-        {
-            Vector3 origin = desiredPosition + Vector3.up * groundRaycastHeight;
-            float maxDistance = groundRaycastHeight + groundRaycastDistance;
-            RaycastHit[] hits = GroundHitBuffer;
-            int count = Physics.RaycastNonAlloc(origin, Vector3.down, hits, maxDistance,
-                groundMask, QueryTriggerInteraction.Ignore);
-            // NonAlloc can omit a closer hit when full. Preserve correctness with a rare fallback.
-            if (count == hits.Length)
-            {
-                hits = Physics.RaycastAll(origin, Vector3.down, maxDistance, groundMask,
-                    QueryTriggerInteraction.Ignore);
-                count = hits.Length;
-            }
-
-            float closestDistance = float.PositiveInfinity;
-            Vector3 closestPoint = desiredPosition;
-            for (int i = 0; i < count; i++)
-            {
-                RaycastHit hit = hits[i];
-                Collider collider = hit.collider;
-                if (collider == null || collider.transform.IsChildOf(transform) ||
-                    hit.distance >= closestDistance)
-                    continue;
-
-                closestDistance = hit.distance;
-                closestPoint = hit.point;
-            }
-
-            return float.IsPositiveInfinity(closestDistance)
-                ? desiredPosition
-                : closestPoint + Vector3.up * GetGroundClearanceOffset();
-        }
+        private Vector3 GetGroundedPosition(Vector3 desiredPosition) =>
+            NpcGroundingService.GetGroundedPosition(transform, desiredPosition, groundRaycastHeight,
+                groundRaycastDistance, groundMask, GetGroundClearanceOffset());
 
         private void ConfigureGroundMaskIfNeeded()
         {
