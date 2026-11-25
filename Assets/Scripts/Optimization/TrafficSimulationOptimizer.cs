@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections.Generic;
+using DeliveryDriver.Company;
 using TrafficSystem;
 
 namespace DeliveryDriver.Optimization
@@ -88,6 +89,8 @@ namespace DeliveryDriver.Optimization
             get { return instance; }
         }
 
+        public int RegisteredNpcCount => registeredNPCs.Count;
+
         private void Awake()
         {
             if (instance == null)
@@ -97,20 +100,32 @@ namespace DeliveryDriver.Optimization
             else
             {
                 Debug.LogWarning("[TrafficSimulationOptimizer] Multiple instances detected");
+                Destroy(gameObject);
+                return;
+            }
+        }
+
+        private void OnEnable()
+        {
+            PlayerVehicleManager.ActiveVehicleChanged += HandleActiveVehicleChanged;
+        }
+
+        private void OnDisable()
+        {
+            PlayerVehicleManager.ActiveVehicleChanged -= HandleActiveVehicleChanged;
+        }
+
+        private void OnDestroy()
+        {
+            if (instance == this)
+            {
+                instance = null;
             }
         }
 
         private void Start()
         {
-            if (playerTransform == null && autoFindPlayer)
-            {
-                GameObject player = GameObject.FindGameObjectWithTag("Player");
-                if (player != null)
-                {
-                    playerTransform = player.transform;
-                    Debug.Log("[TrafficSimulationOptimizer] Auto-found player");
-                }
-            }
+            ResolvePlayerTransform();
 
             // Auto-register existing NPCs
             AutoRegisterNPCs();
@@ -162,7 +177,14 @@ namespace DeliveryDriver.Optimization
 
         private void Update()
         {
-            if (playerTransform == null) return;
+            if (playerTransform == null)
+            {
+                ResolvePlayerTransform();
+                if (playerTransform == null)
+                {
+                    return;
+                }
+            }
 
             frameCounter++;
 
@@ -178,6 +200,39 @@ namespace DeliveryDriver.Optimization
                 lastStatsUpdate = Time.time;
                 UpdateStatistics();
             }
+        }
+
+        private void ResolvePlayerTransform()
+        {
+            if (!autoFindPlayer || playerTransform != null)
+            {
+                return;
+            }
+
+            if (PlayerVehicleManager.Instance != null &&
+                PlayerVehicleManager.Instance.ActiveVehicleController != null)
+            {
+                playerTransform = PlayerVehicleManager.Instance.ActiveVehicleController.transform;
+                return;
+            }
+
+            GameObject player = GameObject.FindGameObjectWithTag("Player");
+            if (player != null)
+            {
+                playerTransform = player.transform;
+                return;
+            }
+
+            CarController carController = FindFirstObjectByType<CarController>();
+            if (carController != null)
+            {
+                playerTransform = carController.transform;
+            }
+        }
+
+        private void HandleActiveVehicleChanged(CarController controller)
+        {
+            playerTransform = controller != null ? controller.transform : null;
         }
 
         private void UpdateNPCStates()

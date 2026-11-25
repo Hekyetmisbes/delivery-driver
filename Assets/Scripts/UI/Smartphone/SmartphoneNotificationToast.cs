@@ -1,5 +1,6 @@
 using System;
 using DeliveryDriver.UI;
+using DeliveryDriver.UIKit;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -12,6 +13,7 @@ namespace DeliveryDriver.UI.Smartphone
     /// </summary>
     public class SmartphoneNotificationToast : MonoBehaviour
     {
+        private const float ToastBottomOffset = 370f;
         private RectTransform rootRect;
         private CanvasGroup canvasGroup;
         private TextMeshProUGUI titleText;
@@ -33,8 +35,8 @@ namespace DeliveryDriver.UI.Smartphone
             rootRect.anchorMin = new Vector2(1f, 0f);
             rootRect.anchorMax = new Vector2(1f, 0f);
             rootRect.pivot = new Vector2(1f, 0f);
-            rootRect.anchoredPosition = new Vector2(-28f, 105f); // Directly above HUD Phone Button
-            rootRect.sizeDelta = new Vector2(320f, 68f);
+            rootRect.anchoredPosition = new Vector2(-28f, ToastBottomOffset);
+            rootRect.sizeDelta = new Vector2(360f, 76f);
 
             canvasGroup = toastObj.GetComponent<CanvasGroup>();
             canvasGroup.alpha = 0f;
@@ -42,8 +44,11 @@ namespace DeliveryDriver.UI.Smartphone
             canvasGroup.blocksRaycasts = false;
 
             Image bg = toastObj.GetComponent<Image>();
-            bg.color = new Color(0.08f, 0.12f, 0.18f, 0.95f);
-            bg.sprite = fallbackSprite;
+            bg.sprite = DDUIVisuals.LoadComponent("toast_default");
+            bg.color = bg.sprite != null ? Color.white : DDUITheme.Surface;
+            if (bg.sprite == null) bg.sprite = fallbackSprite;
+            bg.type = bg.sprite != null && bg.sprite.border.sqrMagnitude > 0f
+                ? Image.Type.Sliced : Image.Type.Simple;
 
             clickButton = toastObj.GetComponent<Button>();
             clickButton.onClick.AddListener(HandleToastClicked);
@@ -88,7 +93,7 @@ namespace DeliveryDriver.UI.Smartphone
 
             titleText = titleObj.GetComponent<TextMeshProUGUI>();
             titleText.text = LocalizationTable.Get("phone_toast_offer_title");
-            titleText.fontSize = 13f;
+            titleText.fontSize = 16f;
             titleText.fontStyle = FontStyles.Bold;
             titleText.color = new Color(0.95f, 0.98f, 1f, 1f);
             titleText.alignment = TextAlignmentOptions.Left;
@@ -105,7 +110,7 @@ namespace DeliveryDriver.UI.Smartphone
 
             subtitleText = subObj.GetComponent<TextMeshProUGUI>();
             subtitleText.text = LocalizationTable.Get("phone_toast_hint");
-            subtitleText.fontSize = 11f;
+            subtitleText.fontSize = 12f;
             subtitleText.color = new Color(0.7f, 0.85f, 0.95f, 0.9f);
             subtitleText.alignment = TextAlignmentOptions.Left;
             subtitleText.raycastTarget = false;
@@ -153,8 +158,8 @@ namespace DeliveryDriver.UI.Smartphone
             canvasGroup.interactable = true;
             canvasGroup.blocksRaycasts = true;
 
-            Vector2 targetPos = new Vector2(-28f, 105f);
-            Vector2 startPos = new Vector2(100f, 105f);
+            Vector2 targetPos = new Vector2(-28f, ToastBottomOffset);
+            Vector2 startPos = new Vector2(100f, ToastBottomOffset);
 
             UIAnimationHelper.SlideIn(this, rootRect, startPos, targetPos, 0.25f);
             UIAnimationHelper.FadeIn(this, canvasGroup, 0.25f);

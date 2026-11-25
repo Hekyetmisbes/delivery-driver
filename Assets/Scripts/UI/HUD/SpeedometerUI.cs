@@ -6,6 +6,7 @@ using DeliveryDriver.Quest;
 using DeliveryDriver.UI;
 using DeliveryDriver.Company;
 using DeliveryDriver.Vehicle;
+using DeliveryDriver.UIKit;
 
 /// <summary>
 /// Modern araç hız göstergesi (Speedometer HUD).
@@ -57,6 +58,7 @@ public class SpeedometerUI : MonoBehaviour
     private Rigidbody playerRigidbody;
     private CarController activeCarController;
     private Image[] tickImages;
+    private bool hasPackDial;
     private int frameCounter;
     private int lastDisplayedSpeed = -1;
     private string lastGearDisplay = "";
@@ -191,10 +193,13 @@ public class SpeedometerUI : MonoBehaviour
         rootRect.sizeDelta = panelSize;
 
         panelImage = panelObject.GetComponent<Image>();
-        panelImage.color = panelColor;
+        Sprite packDial = DDUIVisuals.LoadComponent("speedometer_dial");
+        hasPackDial = packDial != null;
+        panelImage.color = hasPackDial ? Color.white : panelColor;
         panelImage.raycastTarget = false;
-        panelImage.sprite = fallback;
+        panelImage.sprite = hasPackDial ? packDial : fallback;
         panelImage.type = Image.Type.Simple;
+        panelImage.preserveAspect = hasPackDial;
 
         BuildGaugeTicks(panelObject.transform, fallback);
         BuildSpeedTexts(panelObject.transform);
@@ -266,7 +271,7 @@ public class SpeedometerUI : MonoBehaviour
 
         speedValueText = speedTextObject.GetComponent<TextMeshProUGUI>();
         speedValueText.alignment = TextAlignmentOptions.Center;
-        speedValueText.fontSize = Mathf.Max(48, speedFontSize);
+        speedValueText.fontSize = hasPackDial ? 84f : Mathf.Max(48, speedFontSize);
         speedValueText.fontStyle = FontStyles.Bold;
         speedValueText.textWrappingMode = TextWrappingModes.NoWrap;
         speedValueText.outlineWidth = 0.2f;
@@ -283,7 +288,7 @@ public class SpeedometerUI : MonoBehaviour
 
         unitText = unitTextObject.GetComponent<TextMeshProUGUI>();
         unitText.alignment = TextAlignmentOptions.Center;
-        unitText.fontSize = Mathf.Max(16, unitFontSize);
+        unitText.fontSize = hasPackDial ? 22f : Mathf.Max(16, unitFontSize);
         unitText.fontStyle = FontStyles.Bold;
         unitText.textWrappingMode = TextWrappingModes.NoWrap;
         unitText.outlineWidth = 0.16f;
@@ -406,7 +411,7 @@ public class SpeedometerUI : MonoBehaviour
             tickRect.localRotation = Quaternion.Euler(0f, 0f, angleDeg - 90f);
 
             Image tickImg = tickObject.GetComponent<Image>();
-            tickImg.color = inactiveTickColor;
+            tickImg.color = hasPackDial ? Color.clear : inactiveTickColor;
             tickImg.raycastTarget = false;
             tickImg.sprite = fallbackSprite;
             tickImg.type = Image.Type.Simple;
@@ -431,7 +436,7 @@ public class SpeedometerUI : MonoBehaviour
             }
             else
             {
-                tick.color = inactiveTickColor;
+                tick.color = hasPackDial ? Color.clear : inactiveTickColor;
             }
         }
     }
@@ -439,8 +444,6 @@ public class SpeedometerUI : MonoBehaviour
     private Color EvaluateSpeedColor(float normalized, float shownSpeed)
     {
         float threshold = displayMph ? redThresholdMph : redThresholdKmh;
-        float safeT = Mathf.Clamp01(normalized);
-
         if (shownSpeed >= threshold)
         {
             Color forcedRed = Color.Lerp(highSpeedColor, new Color(1f, 0.1f, 0.1f, 1f), (shownSpeed - threshold) / 30f);
@@ -449,10 +452,7 @@ public class SpeedometerUI : MonoBehaviour
         }
 
         float thresholdT = Mathf.Clamp01(shownSpeed / threshold);
-        float hue = Mathf.Lerp(0.56f, 0.04f, thresholdT);
-        float sat = Mathf.Lerp(0.96f, 0.9f, safeT);
-        float val = Mathf.Lerp(0.98f, 0.94f, safeT);
-        Color visible = Color.HSVToRGB(hue, sat, val);
+        Color visible = Color.Lerp(DDUITheme.Primary, DDUITheme.Warning, thresholdT);
         visible.a = 1f;
         return visible;
     }

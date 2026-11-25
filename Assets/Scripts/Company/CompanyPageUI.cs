@@ -177,8 +177,8 @@ namespace DeliveryDriver.Company
 
             Image panelImage = panelObject.GetComponent<Image>();
             panelImage.color = UIThemeConstants.PanelBackground;
-            panelImage.sprite = DeliveryUiSpriteHelper.GetFallbackSprite();
-            panelImage.type = Image.Type.Sliced;
+            panelImage.sprite = null;
+            panelImage.type = Image.Type.Simple;
 
             VerticalLayoutGroup panelLayout = panelObject.GetComponent<VerticalLayoutGroup>();
             panelLayout.padding = new RectOffset(32, 32, 28, 28);
@@ -193,8 +193,10 @@ namespace DeliveryDriver.Company
             Transform infoSection = CreateSection(panelObject.transform, "SirketBilgileri");
             companyNameValueText = CreateInfoRow(infoSection, LocalizationTable.Get("company_label_name"));
             balanceValueText = CreateInfoRow(infoSection, LocalizationTable.Get("company_label_balance"));
-            vehicleTypeDropdown = CreateVehicleDropdownRow(infoSection, LocalizationTable.Get("company_label_vehicle_type"));
-            vehicleTypeDropdown.onValueChanged.AddListener(OnVehicleTypeChanged);
+            
+            // Araç seçimi kaldırıldı - Başlangıçta sadece kamyonet seçilecek
+            // vehicleTypeDropdown = CreateVehicleDropdownRow(infoSection, LocalizationTable.Get("company_label_vehicle_type"));
+            // vehicleTypeDropdown.onValueChanged.AddListener(OnVehicleTypeChanged);
 
             statusText = CreateStatusText(panelObject.transform);
             Transform footerRow = CreateFooterRow(panelObject.transform);
@@ -212,10 +214,13 @@ namespace DeliveryDriver.Company
             companyNameValueText.text = profile.CompanyName;
             balanceValueText.text = $"${profile.Balance:N0}";
 
-            suppressDropdownCallbacks = true;
-            vehicleTypeDropdown.SetValueWithoutNotify(GetDropdownIndexForVehicleType(profile.SelectedVehicleType));
-            vehicleTypeDropdown.RefreshShownValue();
-            suppressDropdownCallbacks = false;
+            if (vehicleTypeDropdown != null)
+            {
+                suppressDropdownCallbacks = true;
+                vehicleTypeDropdown.SetValueWithoutNotify(GetDropdownIndexForVehicleType(profile.SelectedVehicleType));
+                vehicleTypeDropdown.RefreshShownValue();
+                suppressDropdownCallbacks = false;
+            }
         }
 
         private void SetLoadingState(string message)
@@ -397,24 +402,26 @@ namespace DeliveryDriver.Company
                 availableVehicleTypes.Add(VehicleType.Van);
             }
 
-            List<string> labels = new List<string>(availableVehicleTypes.Count);
-            for (int i = 0; i < availableVehicleTypes.Count; i++)
-            {
-                labels.Add(VehicleTypeExtensions.ToDisplayLabel(availableVehicleTypes[i]));
-            }
-
-            suppressDropdownCallbacks = true;
-            vehicleTypeDropdown.ClearOptions();
-            vehicleTypeDropdown.AddOptions(labels);
-            vehicleTypeDropdown.interactable = availableVehicleTypes.Count > 1;
-
             VehicleType resolvedVehicleType = availableVehicleTypes.Contains(preferredVehicleType)
                 ? preferredVehicleType
                 : availableVehicleTypes[0];
 
-            vehicleTypeDropdown.SetValueWithoutNotify(GetDropdownIndexForVehicleType(resolvedVehicleType));
-            vehicleTypeDropdown.RefreshShownValue();
-            suppressDropdownCallbacks = false;
+            if (vehicleTypeDropdown != null)
+            {
+                List<string> labels = new List<string>(availableVehicleTypes.Count);
+                for (int i = 0; i < availableVehicleTypes.Count; i++)
+                {
+                    labels.Add(VehicleTypeExtensions.ToDisplayLabel(availableVehicleTypes[i]));
+                }
+
+                suppressDropdownCallbacks = true;
+                vehicleTypeDropdown.ClearOptions();
+                vehicleTypeDropdown.AddOptions(labels);
+                vehicleTypeDropdown.interactable = availableVehicleTypes.Count > 1;
+                vehicleTypeDropdown.SetValueWithoutNotify(GetDropdownIndexForVehicleType(resolvedVehicleType));
+                vehicleTypeDropdown.RefreshShownValue();
+                suppressDropdownCallbacks = false;
+            }
 
             return resolvedVehicleType;
         }
@@ -759,8 +766,8 @@ namespace DeliveryDriver.Company
 
             Image buttonImage = buttonObject.GetComponent<Image>();
             buttonImage.color = color;
-            buttonImage.sprite = DeliveryUiSpriteHelper.GetFallbackSprite();
-            buttonImage.type = Image.Type.Sliced;
+            buttonImage.sprite = null;
+            buttonImage.type = Image.Type.Simple;
 
             Button button = buttonObject.GetComponent<Button>();
 

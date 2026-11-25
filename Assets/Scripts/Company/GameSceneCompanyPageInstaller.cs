@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using DeliveryDriver.UI;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -79,6 +80,15 @@ namespace DeliveryDriver.Company
                 Destroy(gameObject);
                 return;
             }
+
+            // Ensure SignText is updated
+            AutoSignTextSetter signSetter = FindAnyObjectByType<AutoSignTextSetter>();
+            if (signSetter == null)
+            {
+                GameObject signSetterObj = new GameObject("AutoSignTextSetter");
+                signSetter = signSetterObj.AddComponent<AutoSignTextSetter>();
+            }
+            signSetter.ApplySignText();
 
             if (vehicleManager == null)
             {

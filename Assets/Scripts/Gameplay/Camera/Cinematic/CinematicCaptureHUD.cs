@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -45,6 +46,7 @@ namespace DeliveryDriver.Cinematic
         private GUIStyle recordStyle;
         private GUIStyle helpStyle;
         private bool stylesInitialized = false;
+        private bool isGameplayScene;
 
         public bool CleanFootageOnRecord
         {
@@ -80,9 +82,25 @@ namespace DeliveryDriver.Cinematic
             }
         }
 
+        private void OnEnable()
+        {
+            SceneManager.activeSceneChanged += HandleActiveSceneChanged;
+            isGameplayScene = IsGameplayScene(SceneManager.GetActiveScene());
+        }
+
+        private void OnDisable()
+        {
+            SceneManager.activeSceneChanged -= HandleActiveSceneChanged;
+        }
+
+        private void HandleActiveSceneChanged(Scene previous, Scene next)
+        {
+            isGameplayScene = IsGameplayScene(next);
+        }
+
         private void Update()
         {
-            HandleHotkeys();
+            if (ShouldShowGameplayControls()) HandleHotkeys();
 
             if (IsRecordingActive)
             {
@@ -339,6 +357,7 @@ namespace DeliveryDriver.Cinematic
 
         private void OnGUI()
         {
+            if (!ShouldShowGameplayControls()) return;
             // Eğer kayıt yapılıyorsa ve temiz çekim aktifse HUD çizilmez
             if (IsRecordingActive && cleanFootageOnRecord) return;
             if (!showHUD) return;
@@ -406,6 +425,18 @@ namespace DeliveryDriver.Cinematic
             }
 
             GUILayout.EndArea();
+        }
+
+        private bool ShouldShowGameplayControls()
+        {
+            return isGameplayScene && Time.timeScale > 0f &&
+                   !DeliveryDriver.UI.SceneTransitionManager.IsTransitioning;
+        }
+
+        private static bool IsGameplayScene(Scene scene)
+        {
+            return scene.name.Equals("Game", StringComparison.OrdinalIgnoreCase) ||
+                   scene.name.Equals("GameScene", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

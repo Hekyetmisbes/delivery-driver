@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS company_profiles (
   player_id TEXT NOT NULL UNIQUE REFERENCES players(player_id) ON DELETE CASCADE,
   company_name TEXT NOT NULL,
   selected_vehicle_type TEXT NOT NULL DEFAULT 'Van' CHECK (selected_vehicle_type IN ('Van', 'Truck')),
+  owned_vehicles TEXT NOT NULL DEFAULT 'Van',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

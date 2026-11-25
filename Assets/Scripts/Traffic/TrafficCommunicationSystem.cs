@@ -182,7 +182,7 @@ namespace TrafficSystem
             }
 
             state.velocity = rb != null ? rb.linearVelocity : Vector3.zero;
-            state.speed = vehicle.CurrentSpeed;
+            state.speed = vehicle.CurrentSpeedKmh;
             state.forward = vehicle.transform.forward;
         }
 

@@ -178,6 +178,38 @@ namespace DeliveryDriver.EditorTools
                 }
             }
 
+            EditorGUILayout.Space(6f);
+            GUI.backgroundColor = new Color(0.7f, 1f, 0.7f);
+            if (GUILayout.Button("Add Colliders To All Buildings In Scene (Tum Binalara Collider Ekle)", GUILayout.Height(32f)))
+            {
+                AddCollidersToExistingBuildings();
+            }
+
+            EditorGUILayout.Space(4f);
+            GUI.backgroundColor = new Color(1f, 0.45f, 0.45f);
+            if (GUILayout.Button("Remove All Natures_Grass Fence (Sahnedeki Tum Citleri Sil)", GUILayout.Height(34f)))
+            {
+                RemoveAllGrassFencesFromScene();
+            }
+            GUI.backgroundColor = Color.white;
+
+            EditorGUILayout.Space(4f);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUI.backgroundColor = new Color(0.65f, 0.9f, 1f);
+                if (GUILayout.Button("Align Grass Fences Parallel (Citleri Yola Paralel Yap)", GUILayout.Height(28f)))
+                {
+                    AlignGrassFencesParallelToRoad();
+                }
+
+                GUI.backgroundColor = new Color(1f, 0.65f, 0.65f);
+                if (GUILayout.Button("Clean Colliders From Roads", GUILayout.Height(28f)))
+                {
+                    RemoveCollidersFromRoads();
+                }
+                GUI.backgroundColor = Color.white;
+            }
+
             EditorGUILayout.EndScrollView();
         }
 
@@ -407,8 +439,15 @@ namespace DeliveryDriver.EditorTools
             }
 
             Vector3 right = Vector3.Cross(Vector3.up, tangent.normalized).normalized;
-            // Binalar hizasında, kaldırım kenarı veya bina ön cephesi arasına yerleştir
-            float lateralOffset = roadHalfWidth + sidewalkWidth + Random.Range(0.2f, buildingSetback + 0.5f);
+
+            GameObject prefab = greeneryPrefabs[Random.Range(0, greeneryPrefabs.Count)];
+            string pName = prefab.name.ToLowerInvariant();
+            bool isFenceOrBar = pName.Contains("fence") || pName.Contains("bar");
+
+            // Çit veya bar ise kaldırım kenarına paralel, doğal çalı ise bina arasına yerleştir
+            float lateralOffset = isFenceOrBar
+                ? roadHalfWidth + sidewalkWidth + 0.35f
+                : roadHalfWidth + sidewalkWidth + Random.Range(0.2f, buildingSetback + 0.5f);
             Vector3 position = center + right * side * lateralOffset;
 
             if (!TrySnapToGround(position, out position))
@@ -416,7 +455,6 @@ namespace DeliveryDriver.EditorTools
                 return false;
             }
 
-            GameObject prefab = greeneryPrefabs[Random.Range(0, greeneryPrefabs.Count)];
             GameObject instance = InstantiatePrefab(prefab, parent);
             if (instance == null)
             {
@@ -424,9 +462,21 @@ namespace DeliveryDriver.EditorTools
             }
 
             Undo.RegisterCreatedObjectUndo(instance, "Place Between-Building Greenery");
-            Quaternion rotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
+
+            Quaternion rotation;
+            if (isFenceOrBar)
+            {
+                // Yola tam paralel: modelin uzun kenarını yol teğetine (tangent) paralel yapıyoruz
+                Quaternion roadFacing = Quaternion.LookRotation(tangent.normalized, Vector3.up);
+                rotation = roadFacing * Quaternion.Euler(0f, 90f, 0f);
+            }
+            else
+            {
+                rotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
+            }
+
             instance.transform.SetPositionAndRotation(position, rotation);
-            float scale = Random.Range(greeneryScaleMin, greeneryScaleMax);
+            float scale = isFenceOrBar ? 1.0f : Random.Range(greeneryScaleMin, greeneryScaleMax);
             instance.transform.localScale *= scale;
             instance.isStatic = true;
             placedGreenery++;
@@ -831,39 +881,347 @@ namespace DeliveryDriver.EditorTools
         public void AddCollidersToExistingBuildings()
         {
             Scene scene = SceneManager.GetActiveScene();
-            Transform root = ResolveOutputRoot(scene);
-            if (root == null)
+            int count = 0;
+            List<GameObject> candidates = new List<GameObject>();
+
+            // 1. Kullanıcı sahnede bir parent veya obje seçtiyse önce seçili nesneleri tara
+            if (Selection.gameObjects != null && Selection.gameObjects.Length > 0)
             {
-                EditorUtility.DisplayDialog("Add Colliders", "Generated buildings root bulunamadi.", "OK");
+                for (int i = 0; i < Selection.gameObjects.Length; i++)
+                {
+                    FindBuildingsRecursive(Selection.gameObjects[i].transform, candidates);
+                }
+            }
+
+            // 2. Sahnedeki tüm kök objeleri tara
+            GameObject[] rootObjects = scene.GetRootGameObjects();
+            for (int r = 0; r < rootObjects.Length; r++)
+            {
+                GameObject rootGo = rootObjects[r];
+                if (rootGo == null) continue;
+
+                // Yol hiyerarşilerini, arabaları veya kameraları atla
+                if (rootGo.name == "Generated Spline Roads" || rootGo.name == "Generated Road Intersections") continue;
+                if (rootGo.GetComponent<SplineRoad>() != null || rootGo.GetComponent<RoadIntersection>() != null) continue;
+
+                string rLower = rootGo.name.ToLowerInvariant();
+                if (rLower.Contains("car") || rLower.Contains("vehicle") || rLower.Contains("player") || rLower.Contains("terrain"))
+                {
+                    continue;
+                }
+
+                FindBuildingsRecursive(rootGo.transform, candidates);
+            }
+
+            // 3. Bulunan tüm bina objelerine hassas BoxCollider uygula
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                GameObject bld = candidates[i];
+                if (bld == null) continue;
+
+                EnsureBuildingCollider(bld, true);
+                count++;
+            }
+
+            EditorSceneManager.MarkSceneDirty(scene);
+            EditorUtility.DisplayDialog("Building Colliders", $"Sahnedeki {count} adet binaya model sinirlarina tam oturan BoxCollider basariyla eklendi/guncellendi.", "OK");
+            Debug.Log($"[RoadsideBuildingPlacementTool] Added/updated BoxColliders for {count} buildings.");
+        }
+
+        private void FindBuildingsRecursive(Transform current, List<GameObject> results)
+        {
+            if (current == null) return;
+            GameObject go = current.gameObject;
+
+            // Kesinlikle çit, lamba, ağaç, yol, araba, kamera olmamalı
+            string lower = go.name.ToLowerInvariant();
+            if (lower.Contains("tree") || lower.Contains("bush") || lower.Contains("plant") || lower.Contains("greenery") ||
+                lower.Contains("fence") || lower.Contains("bar") || lower.Contains("light") || lower.Contains("lamp") ||
+                lower.Contains("prop") || lower.Contains("camera") || lower.Contains("waypoint") || lower.Contains("direction") ||
+                lower.StartsWith("splineroad") || lower.StartsWith("roadintersection"))
+            {
                 return;
             }
 
-            int count = 0;
-            for (int i = 0; i < root.childCount; i++)
+            // Eğer bu objenin adı doğrudan bir bina ismiyse ve mesh içeriyorsa listeye ekle
+            if (IsBuildingName(lower) && go.GetComponentInChildren<MeshFilter>(true) != null)
             {
-                Transform group = root.GetChild(i);
-                for (int j = 0; j < group.childCount; j++)
+                if (!results.Contains(go))
                 {
-                    Transform b = group.GetChild(j);
-                    if (b == null)
-                    {
-                        continue;
-                    }
+                    results.Add(go);
+                }
+                return; // Alt objelerine ayrı ayrı collider ekleme, ana binaya ekle
+            }
 
-                    string lower = b.name.ToLowerInvariant();
-                    if (lower.Contains("tree") || lower.Contains("bush") || lower.Contains("plant") || lower.Contains("greenery"))
-                    {
-                        continue;
-                    }
+            // Aksi halde child'ları gez
+            for (int i = 0; i < current.childCount; i++)
+            {
+                FindBuildingsRecursive(current.GetChild(i), results);
+            }
+        }
 
-                    // forceUpdate = true vererek sahnede daha önce oluşturulmuş şişmiş/taşmış collider'ları da tam duvar sınırlarına çekiyoruz!
-                    EnsureBuildingCollider(b.gameObject, true);
-                    count++;
+        private static bool IsBuildingName(string lower)
+        {
+            return lower.StartsWith("building") ||
+                   lower.StartsWith("house") ||
+                   lower.StartsWith("shop") ||
+                   lower.Contains("residential") ||
+                   lower.Contains("bakery") ||
+                   lower.Contains("restaurant") ||
+                   lower.Contains("fruits") ||
+                   lower.Contains("fast food") ||
+                   lower.Contains("auto service") ||
+                   lower.Contains("pizza") ||
+                   lower.Contains("market") ||
+                   lower.Contains("store") ||
+                   lower.Contains("factory") ||
+                   lower.Contains("office") ||
+                   lower.Contains("hotel") ||
+                   lower.Contains("hospital") ||
+                   lower.Contains("bank") ||
+                   lower.Contains("pharmacy") ||
+                   lower.Contains("gas station") ||
+                   lower.Contains("stadium") ||
+                   lower.Contains("clothing");
+        }
+
+        public void AlignGrassFencesParallelToRoad()
+        {
+            Scene scene = SceneManager.GetActiveScene();
+            SplineRoad[] roads = Object.FindObjectsByType<SplineRoad>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            if (roads.Length == 0)
+            {
+                EditorUtility.DisplayDialog("Align Fences", "Sahnede SplineRoad bulunamadi.", "OK");
+                return;
+            }
+
+            int alignedCount = 0;
+            GameObject[] rootObjects = scene.GetRootGameObjects();
+
+            for (int r = 0; r < rootObjects.Length; r++)
+            {
+                GameObject rootGo = rootObjects[r];
+                if (rootGo == null) continue;
+
+                Transform[] allChildren = rootGo.GetComponentsInChildren<Transform>(true);
+                for (int i = 0; i < allChildren.Length; i++)
+                {
+                    Transform t = allChildren[i];
+                    if (t == null) continue;
+
+                    string lower = t.name.ToLowerInvariant();
+                    if (lower.Contains("grass fence") || lower.Contains("grass bar") || lower.Contains("grass_fence") || lower.Contains("grass_bar"))
+                    {
+                        Vector3 pos = t.position;
+                        SplineRoad bestRoad = null;
+                        float bestDistance = float.MaxValue;
+                        float bestT = 0f;
+
+                        for (int j = 0; j < roads.Length; j++)
+                        {
+                            SplineRoad road = roads[j];
+                            if (road == null || !road.IsUsable) continue;
+
+                            int samples = Mathf.Max(12, road.SegmentCount * 6);
+                            for (int s = 0; s <= samples; s++)
+                            {
+                                float tVal = s / (float)samples;
+                                Vector3 roadPt = road.GetPoint(tVal);
+                                float d = Vector3.Distance(pos, roadPt);
+                                if (d < bestDistance)
+                                {
+                                    bestDistance = d;
+                                    bestRoad = road;
+                                    bestT = tVal;
+                                }
+                            }
+                        }
+
+                        if (bestRoad != null)
+                        {
+                            Undo.RecordObject(t, "Align Grass Fence Parallel");
+                            Vector3 tangent = bestRoad.GetTangent(bestT);
+                            tangent.y = 0f;
+                            if (tangent.sqrMagnitude > 0.0001f)
+                            {
+                                // Yola tam paralel hizalama
+                                Quaternion roadFacing = Quaternion.LookRotation(tangent.normalized, Vector3.up);
+                                t.rotation = roadFacing * Quaternion.Euler(0f, 90f, 0f);
+                                alignedCount++;
+                            }
+                        }
+                    }
                 }
             }
 
             EditorSceneManager.MarkSceneDirty(scene);
-            EditorUtility.DisplayDialog("Building Colliders", $"{count} binanin BoxCollider'i tam model sinirlarina gore guncellendi ve duzeltildi.", "OK");
+            EditorUtility.DisplayDialog("Align Grass Fences", $"Sahnedeki {alignedCount} adet Grass Fence / Bar basariyla yola paralel hizalandi!", "OK");
+            Debug.Log($"[RoadsideBuildingPlacementTool] Aligned {alignedCount} grass fence/bar objects parallel to road.");
+        }
+
+        private static bool IsLikelyBuilding(GameObject candidate)
+        {
+            if (candidate == null) return false;
+            if (IsRoadOrIntersectionObject(candidate)) return false;
+
+            string lower = candidate.name.ToLowerInvariant();
+            if (lower.Contains("tree") || lower.Contains("bush") || lower.Contains("plant") || lower.Contains("greenery") ||
+                lower.Contains("fence") || lower.Contains("bar") || lower.Contains("light") || lower.Contains("lamp") ||
+                lower.Contains("prop") || lower.Contains("camera") || lower.Contains("spawner") || lower.Contains("manager"))
+            {
+                return false;
+            }
+
+            bool hasBuildingName = lower.StartsWith("building") ||
+                                   lower.StartsWith("house") ||
+                                   lower.StartsWith("shop") ||
+                                   lower.Contains("residential") ||
+                                   lower.Contains("bakery") ||
+                                   lower.Contains("restaurant") ||
+                                   lower.Contains("fruits") ||
+                                   lower.Contains("fast food") ||
+                                   lower.Contains("auto service") ||
+                                   lower.Contains("pizza") ||
+                                   lower.Contains("market") ||
+                                   lower.Contains("office");
+
+            if (!hasBuildingName) return false;
+
+            return candidate.GetComponentInChildren<MeshFilter>(true) != null;
+        }
+
+        public void RemoveCollidersFromRoads()
+        {
+            Scene scene = SceneManager.GetActiveScene();
+            int removedCount = 0;
+
+            // 1. Sahnedeki tüm SplineRoad nesneleri ve altındaki BoxCollider'ları temizle
+            SplineRoad[] roads = Object.FindObjectsByType<SplineRoad>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            for (int i = 0; i < roads.Length; i++)
+            {
+                if (roads[i] == null) continue;
+                BoxCollider[] boxes = roads[i].GetComponentsInChildren<BoxCollider>(true);
+                for (int j = 0; j < boxes.Length; j++)
+                {
+                    if (boxes[j] != null)
+                    {
+                        Undo.DestroyObjectImmediate(boxes[j]);
+                        removedCount++;
+                    }
+                }
+            }
+
+            // 2. Sahnedeki tüm RoadIntersection nesneleri ve altındaki BoxCollider'ları temizle
+            RoadIntersection[] intersections = Object.FindObjectsByType<RoadIntersection>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            for (int i = 0; i < intersections.Length; i++)
+            {
+                if (intersections[i] == null) continue;
+                BoxCollider[] boxes = intersections[i].GetComponentsInChildren<BoxCollider>(true);
+                for (int j = 0; j < boxes.Length; j++)
+                {
+                    if (boxes[j] != null)
+                    {
+                        Undo.DestroyObjectImmediate(boxes[j]);
+                        removedCount++;
+                    }
+                }
+            }
+
+            // 3. Adı "Generated Spline Roads", "Road", "Intersection", "Spline" olan tüm root nesneleri ve altını tara
+            GameObject[] rootObjects = scene.GetRootGameObjects();
+            for (int i = 0; i < rootObjects.Length; i++)
+            {
+                GameObject rootGo = rootObjects[i];
+                if (rootGo == null) continue;
+                string rName = rootGo.name.ToLowerInvariant();
+                if (rName.Contains("spline") || rName.Contains("road") || rName.Contains("intersection"))
+                {
+                    BoxCollider[] boxes = rootGo.GetComponentsInChildren<BoxCollider>(true);
+                    for (int j = 0; j < boxes.Length; j++)
+                    {
+                        if (boxes[j] != null)
+                        {
+                            Undo.DestroyObjectImmediate(boxes[j]);
+                            removedCount++;
+                        }
+                    }
+                }
+            }
+
+            EditorSceneManager.MarkSceneDirty(scene);
+            EditorUtility.DisplayDialog("Clean Road Colliders", $"Yollardan ve kavsaklardan {removedCount} adet hatali BoxCollider basariyla temizlendi! Artik araba havada gitmeyecek, asfalta tam oturacak.", "OK");
+            Debug.Log($"[RoadsideBuildingPlacementTool] Cleaned {removedCount} BoxColliders from road and intersection objects.");
+        }
+
+        public void RemoveAllGrassFencesFromScene()
+        {
+            Scene scene = SceneManager.GetActiveScene();
+            int removedCount = 0;
+
+            List<GameObject> toDestroy = new List<GameObject>();
+            GameObject[] rootObjects = scene.GetRootGameObjects();
+
+            for (int r = 0; r < rootObjects.Length; r++)
+            {
+                GameObject rootGo = rootObjects[r];
+                if (rootGo == null) continue;
+
+                Transform[] allChildren = rootGo.GetComponentsInChildren<Transform>(true);
+                for (int i = 0; i < allChildren.Length; i++)
+                {
+                    Transform t = allChildren[i];
+                    if (t == null) continue;
+
+                    string lower = t.name.ToLowerInvariant();
+                    if (lower.Contains("grass fence") || 
+                        lower.Contains("grass_fence") || 
+                        lower.Contains("grassfence") || 
+                        lower.Contains("natures_grass fence") ||
+                        lower.Contains("grass bar") || 
+                        lower.Contains("grass_bar") ||
+                        lower.Contains("grassbar") ||
+                        (lower.Contains("grass") && lower.Contains("fence")))
+                    {
+                        if (!toDestroy.Contains(t.gameObject))
+                        {
+                            toDestroy.Add(t.gameObject);
+                        }
+                    }
+                }
+            }
+
+            for (int i = toDestroy.Count - 1; i >= 0; i--)
+            {
+                if (toDestroy[i] != null)
+                {
+                    Undo.DestroyObjectImmediate(toDestroy[i]);
+                    removedCount++;
+                }
+            }
+
+            EditorSceneManager.MarkSceneDirty(scene);
+            EditorUtility.DisplayDialog("Grass Fence Temizliği", $"Sahneden toplam {removedCount} adet 'Natures_Grass Fence' ve 'Grass Bar' basariyla silindi!", "OK");
+            Debug.Log($"[RoadsideBuildingPlacementTool] Removed {removedCount} grass fence/bar objects across the whole scene.");
+        }
+
+        private static bool IsRoadOrIntersectionObject(GameObject candidate)
+        {
+            if (candidate == null) return false;
+
+            // Eğer isimde building, house, shop, roadside geçiyorsa kesinlikle yol objesi değildir!
+            string name = candidate.name.ToLowerInvariant();
+            if (name.Contains("building") || name.Contains("house") || name.Contains("shop") || name.Contains("roadside"))
+            {
+                return false;
+            }
+
+            if (candidate.GetComponent<SplineRoad>() != null || candidate.GetComponent<RoadIntersection>() != null) return true;
+            if (candidate.GetComponentInParent<SplineRoad>() != null || candidate.GetComponentInParent<RoadIntersection>() != null) return true;
+
+            return name.StartsWith("splineroad") || 
+                   name.StartsWith("roadintersection") || 
+                   name == "generated spline roads" || 
+                   name == "generated road intersections";
         }
 
         private static bool HasSolidColliderInHierarchy(Transform root)
@@ -1014,14 +1372,25 @@ namespace DeliveryDriver.EditorTools
                 return false;
             }
 
-            if (candidate.GetComponent<RoadIntersection>() != null)
+            if (candidate.GetComponent<RoadIntersection>() != null || candidate.GetComponent<SplineRoad>() != null)
+            {
+                return true;
+            }
+
+            if (candidate.GetComponentInParent<RoadIntersection>() != null || candidate.GetComponentInParent<SplineRoad>() != null)
+            {
+                return true;
+            }
+
+            string name = candidate.name.ToLowerInvariant();
+            if (name.Contains("road") || name.Contains("intersection") || name.Contains("spline"))
             {
                 return true;
             }
 
             bool containsIntersections = candidate.GetComponentsInChildren<RoadIntersection>(true).Length > 0;
             bool containsRoads = candidate.GetComponentsInChildren<SplineRoad>(true).Length > 0;
-            return containsIntersections && !containsRoads;
+            return containsIntersections || containsRoads;
         }
 
         private Transform EnsureGeneratedRoot(Scene scene)
@@ -1160,10 +1529,13 @@ namespace DeliveryDriver.EditorTools
             }
 
             string lowerName = prefabName.ToLowerInvariant();
+            if (lowerName.Contains("fence") || lowerName.Contains("bar") || lowerName.Contains("box") || lowerName.Contains("cube"))
+            {
+                return false;
+            }
+
             return lowerName.Contains("bush") ||
                    lowerName.Contains("pot") ||
-                   lowerName.Contains("grass bar") ||
-                   lowerName.Contains("grass fence") ||
                    lowerName.Contains("flower");
         }
     }
