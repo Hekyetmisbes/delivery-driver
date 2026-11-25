@@ -1,0 +1,697 @@
+{
+  "mode": "transparent PNG sprites (editable SVG sources provided)",
+  "sprite_9slice_recommendation": {
+    "button_primary": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "button_secondary": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "button_outline": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "button_disabled": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "button_danger": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "button_focus": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "panel_large": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "panel_medium": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "panel_small": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "card_default": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "card_selected": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "card_alert": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "input_default": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "input_focus": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "tab_idle": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "tab_active": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "tooltip": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "modal_window": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "toast_default": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "toast_success": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "toast_warning": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "toast_danger": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "badge_success": {
+      "left": 22,
+      "bottom": 22,
+      "right": 22,
+      "top": 22
+    },
+    "badge_warning": {
+      "left": 22,
+      "bottom": 22,
+      "right": 22,
+      "top": 22
+    },
+    "badge_danger": {
+      "left": 22,
+      "bottom": 22,
+      "right": 22,
+      "top": 22
+    },
+    "badge_info": {
+      "left": 22,
+      "bottom": 22,
+      "right": 22,
+      "top": 22
+    },
+    "progress_track": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    },
+    "progress_fill_orange": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    },
+    "progress_fill_mint": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    },
+    "progress_fill_red": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    },
+    "progress_fill_cyan": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    },
+    "slider_track": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    },
+    "slider_thumb": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    },
+    "toggle_on": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    },
+    "toggle_off": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    },
+    "phone_shell": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    },
+    "hud_stat_tile": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "minimap_frame": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "nav_banner": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "speedometer_dial": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    },
+    "world_marker_pickup": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    },
+    "world_marker_dropoff": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    },
+    "world_marker_warning": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    },
+    "divider_line": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    },
+    "keycap": {
+      "left": 20,
+      "bottom": 20,
+      "right": 20,
+      "top": 20
+    },
+    "notification_dot": {
+      "left": 0,
+      "bottom": 0,
+      "right": 0,
+      "top": 0
+    }
+  },
+  "components": [
+    {
+      "id": "button_primary",
+      "size": [
+        488,
+        116
+      ],
+      "srcSvg": "02_Components/SVG/button_primary.svg",
+      "srcPng": "02_Components/PNG/button_primary.png"
+    },
+    {
+      "id": "button_secondary",
+      "size": [
+        488,
+        116
+      ],
+      "srcSvg": "02_Components/SVG/button_secondary.svg",
+      "srcPng": "02_Components/PNG/button_secondary.png"
+    },
+    {
+      "id": "button_outline",
+      "size": [
+        488,
+        116
+      ],
+      "srcSvg": "02_Components/SVG/button_outline.svg",
+      "srcPng": "02_Components/PNG/button_outline.png"
+    },
+    {
+      "id": "button_disabled",
+      "size": [
+        488,
+        116
+      ],
+      "srcSvg": "02_Components/SVG/button_disabled.svg",
+      "srcPng": "02_Components/PNG/button_disabled.png"
+    },
+    {
+      "id": "button_danger",
+      "size": [
+        488,
+        116
+      ],
+      "srcSvg": "02_Components/SVG/button_danger.svg",
+      "srcPng": "02_Components/PNG/button_danger.png"
+    },
+    {
+      "id": "button_focus",
+      "size": [
+        488,
+        116
+      ],
+      "srcSvg": "02_Components/SVG/button_focus.svg",
+      "srcPng": "02_Components/PNG/button_focus.png"
+    },
+    {
+      "id": "panel_large",
+      "size": [
+        896,
+        512
+      ],
+      "srcSvg": "02_Components/SVG/panel_large.svg",
+      "srcPng": "02_Components/PNG/panel_large.png"
+    },
+    {
+      "id": "panel_medium",
+      "size": [
+        640,
+        380
+      ],
+      "srcSvg": "02_Components/SVG/panel_medium.svg",
+      "srcPng": "02_Components/PNG/panel_medium.png"
+    },
+    {
+      "id": "panel_small",
+      "size": [
+        384,
+        192
+      ],
+      "srcSvg": "02_Components/SVG/panel_small.svg",
+      "srcPng": "02_Components/PNG/panel_small.png"
+    },
+    {
+      "id": "card_default",
+      "size": [
+        488,
+        234
+      ],
+      "srcSvg": "02_Components/SVG/card_default.svg",
+      "srcPng": "02_Components/PNG/card_default.png"
+    },
+    {
+      "id": "card_selected",
+      "size": [
+        488,
+        234
+      ],
+      "srcSvg": "02_Components/SVG/card_selected.svg",
+      "srcPng": "02_Components/PNG/card_selected.png"
+    },
+    {
+      "id": "card_alert",
+      "size": [
+        488,
+        234
+      ],
+      "srcSvg": "02_Components/SVG/card_alert.svg",
+      "srcPng": "02_Components/PNG/card_alert.png"
+    },
+    {
+      "id": "input_default",
+      "size": [
+        500,
+        80
+      ],
+      "srcSvg": "02_Components/SVG/input_default.svg",
+      "srcPng": "02_Components/PNG/input_default.png"
+    },
+    {
+      "id": "input_focus",
+      "size": [
+        500,
+        80
+      ],
+      "srcSvg": "02_Components/SVG/input_focus.svg",
+      "srcPng": "02_Components/PNG/input_focus.png"
+    },
+    {
+      "id": "tab_idle",
+      "size": [
+        260,
+        78
+      ],
+      "srcSvg": "02_Components/SVG/tab_idle.svg",
+      "srcPng": "02_Components/PNG/tab_idle.png"
+    },
+    {
+      "id": "tab_active",
+      "size": [
+        260,
+        78
+      ],
+      "srcSvg": "02_Components/SVG/tab_active.svg",
+      "srcPng": "02_Components/PNG/tab_active.png"
+    },
+    {
+      "id": "tooltip",
+      "size": [
+        484,
+        138
+      ],
+      "srcSvg": "02_Components/SVG/tooltip.svg",
+      "srcPng": "02_Components/PNG/tooltip.png"
+    },
+    {
+      "id": "modal_window",
+      "size": [
+        660,
+        510
+      ],
+      "srcSvg": "02_Components/SVG/modal_window.svg",
+      "srcPng": "02_Components/PNG/modal_window.png"
+    },
+    {
+      "id": "toast_default",
+      "size": [
+        620,
+        156
+      ],
+      "srcSvg": "02_Components/SVG/toast_default.svg",
+      "srcPng": "02_Components/PNG/toast_default.png"
+    },
+    {
+      "id": "toast_success",
+      "size": [
+        620,
+        156
+      ],
+      "srcSvg": "02_Components/SVG/toast_success.svg",
+      "srcPng": "02_Components/PNG/toast_success.png"
+    },
+    {
+      "id": "toast_warning",
+      "size": [
+        620,
+        156
+      ],
+      "srcSvg": "02_Components/SVG/toast_warning.svg",
+      "srcPng": "02_Components/PNG/toast_warning.png"
+    },
+    {
+      "id": "toast_danger",
+      "size": [
+        620,
+        156
+      ],
+      "srcSvg": "02_Components/SVG/toast_danger.svg",
+      "srcPng": "02_Components/PNG/toast_danger.png"
+    },
+    {
+      "id": "badge_success",
+      "size": [
+        230,
+        54
+      ],
+      "srcSvg": "02_Components/SVG/badge_success.svg",
+      "srcPng": "02_Components/PNG/badge_success.png"
+    },
+    {
+      "id": "badge_warning",
+      "size": [
+        230,
+        54
+      ],
+      "srcSvg": "02_Components/SVG/badge_warning.svg",
+      "srcPng": "02_Components/PNG/badge_warning.png"
+    },
+    {
+      "id": "badge_danger",
+      "size": [
+        230,
+        54
+      ],
+      "srcSvg": "02_Components/SVG/badge_danger.svg",
+      "srcPng": "02_Components/PNG/badge_danger.png"
+    },
+    {
+      "id": "badge_info",
+      "size": [
+        230,
+        54
+      ],
+      "srcSvg": "02_Components/SVG/badge_info.svg",
+      "srcPng": "02_Components/PNG/badge_info.png"
+    },
+    {
+      "id": "progress_track",
+      "size": [
+        520,
+        32
+      ],
+      "srcSvg": "02_Components/SVG/progress_track.svg",
+      "srcPng": "02_Components/PNG/progress_track.png"
+    },
+    {
+      "id": "progress_fill_orange",
+      "size": [
+        520,
+        32
+      ],
+      "srcSvg": "02_Components/SVG/progress_fill_orange.svg",
+      "srcPng": "02_Components/PNG/progress_fill_orange.png"
+    },
+    {
+      "id": "progress_fill_mint",
+      "size": [
+        520,
+        32
+      ],
+      "srcSvg": "02_Components/SVG/progress_fill_mint.svg",
+      "srcPng": "02_Components/PNG/progress_fill_mint.png"
+    },
+    {
+      "id": "progress_fill_red",
+      "size": [
+        520,
+        32
+      ],
+      "srcSvg": "02_Components/SVG/progress_fill_red.svg",
+      "srcPng": "02_Components/PNG/progress_fill_red.png"
+    },
+    {
+      "id": "progress_fill_cyan",
+      "size": [
+        520,
+        32
+      ],
+      "srcSvg": "02_Components/SVG/progress_fill_cyan.svg",
+      "srcPng": "02_Components/PNG/progress_fill_cyan.png"
+    },
+    {
+      "id": "slider_track",
+      "size": [
+        520,
+        23
+      ],
+      "srcSvg": "02_Components/SVG/slider_track.svg",
+      "srcPng": "02_Components/PNG/slider_track.png"
+    },
+    {
+      "id": "slider_thumb",
+      "size": [
+        80,
+        80
+      ],
+      "srcSvg": "02_Components/SVG/slider_thumb.svg",
+      "srcPng": "02_Components/PNG/slider_thumb.png"
+    },
+    {
+      "id": "toggle_on",
+      "size": [
+        160,
+        74
+      ],
+      "srcSvg": "02_Components/SVG/toggle_on.svg",
+      "srcPng": "02_Components/PNG/toggle_on.png"
+    },
+    {
+      "id": "toggle_off",
+      "size": [
+        160,
+        74
+      ],
+      "srcSvg": "02_Components/SVG/toggle_off.svg",
+      "srcPng": "02_Components/PNG/toggle_off.png"
+    },
+    {
+      "id": "phone_shell",
+      "size": [
+        420,
+        820
+      ],
+      "srcSvg": "02_Components/SVG/phone_shell.svg",
+      "srcPng": "02_Components/PNG/phone_shell.png"
+    },
+    {
+      "id": "hud_stat_tile",
+      "size": [
+        340,
+        126
+      ],
+      "srcSvg": "02_Components/SVG/hud_stat_tile.svg",
+      "srcPng": "02_Components/PNG/hud_stat_tile.png"
+    },
+    {
+      "id": "minimap_frame",
+      "size": [
+        400,
+        400
+      ],
+      "srcSvg": "02_Components/SVG/minimap_frame.svg",
+      "srcPng": "02_Components/PNG/minimap_frame.png"
+    },
+    {
+      "id": "nav_banner",
+      "size": [
+        740,
+        128
+      ],
+      "srcSvg": "02_Components/SVG/nav_banner.svg",
+      "srcPng": "02_Components/PNG/nav_banner.png"
+    },
+    {
+      "id": "speedometer_dial",
+      "size": [
+        420,
+        420
+      ],
+      "srcSvg": "02_Components/SVG/speedometer_dial.svg",
+      "srcPng": "02_Components/PNG/speedometer_dial.png"
+    },
+    {
+      "id": "world_marker_pickup",
+      "size": [
+        190,
+        235
+      ],
+      "srcSvg": "02_Components/SVG/world_marker_pickup.svg",
+      "srcPng": "02_Components/PNG/world_marker_pickup.png"
+    },
+    {
+      "id": "world_marker_dropoff",
+      "size": [
+        190,
+        235
+      ],
+      "srcSvg": "02_Components/SVG/world_marker_dropoff.svg",
+      "srcPng": "02_Components/PNG/world_marker_dropoff.png"
+    },
+    {
+      "id": "world_marker_warning",
+      "size": [
+        190,
+        235
+      ],
+      "srcSvg": "02_Components/SVG/world_marker_warning.svg",
+      "srcPng": "02_Components/PNG/world_marker_warning.png"
+    },
+    {
+      "id": "divider_line",
+      "size": [
+        550,
+        8
+      ],
+      "srcSvg": "02_Components/SVG/divider_line.svg",
+      "srcPng": "02_Components/PNG/divider_line.png"
+    },
+    {
+      "id": "keycap",
+      "size": [
+        84,
+        76
+      ],
+      "srcSvg": "02_Components/SVG/keycap.svg",
+      "srcPng": "02_Components/PNG/keycap.png"
+    },
+    {
+      "id": "notification_dot",
+      "size": [
+        56,
+        56
+      ],
+      "srcSvg": "02_Components/SVG/notification_dot.svg",
+      "srcPng": "02_Components/PNG/notification_dot.png"
+    }
+  ]
+}

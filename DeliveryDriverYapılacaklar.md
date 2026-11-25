@@ -1,0 +1,26 @@
+- [ ] Trafik sistemi düzeltilecek (npcler refactor edilecek)
+- [ ] SFX
+- [ ] Drift dumanı eklenecek
+- [ ] Farklı kargo araçları eklenecek
+- [ ] Farklı hava koşulları eklenecek (Sonraki adım)
+- [ ] Şehir ışıkları harita içerisine eklenecek (Sonraki adım)
+- [ ] Gece/Gündüz döngüsü/modu eklenecek (Sonraki adım)
+- [ ] Kargoların hikayeleri eklenecek (Sonraki adım)
+- [ ] Araç performans modifikasyonları eklenecek
+- [ ] Veri tabanına farklı seviyede görevler ekle
+- [ ] Çevre tasarımını toparla
+- [ ] Uçak ekleyelim.
+- [ ] İnşaat halinde bina ekleyelim.
+- [ ] Oyuna hikaye eklenecek
+- [ ] Oyuna npc insanlar eklenecek
+- [ ] Para kazanmanın bir amacı olmalı
+- [ ] ELEKTRİKLİ ARABA EKLE (Sonraki adım)
+- [ ] Görev paneli eklenecek pop up kaldırılacak
+- [ ] Farklı kargo firmaları ile kapışma
+- [ ] Madalya sistemi ile seviyeler atlanacak
+- [ ] Assetler md
+- [ ] Telefon eklenecek (teslimatlar, firmaların listesi, mesajlar, banka uygulaması)
+- [ ] Gemi Eklenecek
+- [ ] Satın alınabilir yapılar eklenecek
+- [ ] Farklı yerlere şube açma eklenecek
+- [ ] Hava limanı ve limanda kiralanabilir alanlar olacak (kargo şubesi adına)

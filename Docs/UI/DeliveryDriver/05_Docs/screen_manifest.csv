@@ -1,0 +1,53 @@
+﻿category,id,title_tr,source_scripts,svg,png,resolution,kind
+01_Menus,main_menu,Ana Menü,MainMenuRuntimeUI,01_Screens/SVG/01_Menus/main_menu.svg,01_Screens/PNG/01_Menus/main_menu.png,1600x900,UI concept mockup
+01_Menus,pause_menu,Duraklatma,PauseMenuUI;PauseMenuRuntimeView;PauseMenuRuntimeViewBuilder,01_Screens/SVG/01_Menus/pause_menu.svg,01_Screens/PNG/01_Menus/pause_menu.png,1600x900,UI concept mockup
+01_Menus,settings_general,Genel Ayarlar,SettingsMenuUI,01_Screens/SVG/01_Menus/settings_general.svg,01_Screens/PNG/01_Menus/settings_general.png,1600x900,UI concept mockup
+01_Menus,settings_graphics,Grafik Ayarları,SettingsMenuUI,01_Screens/SVG/01_Menus/settings_graphics.svg,01_Screens/PNG/01_Menus/settings_graphics.png,1600x900,UI concept mockup
+01_Menus,settings_audio,Ses Ayarları,SettingsMenuUI,01_Screens/SVG/01_Menus/settings_audio.svg,01_Screens/PNG/01_Menus/settings_audio.png,1600x900,UI concept mockup
+01_Menus,settings_controls,Tuş Atamaları,SettingsMenuUI,01_Screens/SVG/01_Menus/settings_controls.svg,01_Screens/PNG/01_Menus/settings_controls.png,1600x900,UI concept mockup
+01_Menus,settings_gameplay,Oynanış Ayarları,SettingsMenuUI,01_Screens/SVG/01_Menus/settings_gameplay.svg,01_Screens/PNG/01_Menus/settings_gameplay.png,1600x900,UI concept mockup
+01_Menus,settings_accessibility,Erişilebilirlik,AccessibilityManager,01_Screens/SVG/01_Menus/settings_accessibility.svg,01_Screens/PNG/01_Menus/settings_accessibility.png,1600x900,UI concept mockup
+01_Menus,save_load,Kayıt Yükleme,SaveLoadUI,01_Screens/SVG/01_Menus/save_load.svg,01_Screens/PNG/01_Menus/save_load.png,1600x900,UI concept mockup
+01_Menus,loading_screen,Yükleme,LoadingScreenUI;SceneTransitionManager,01_Screens/SVG/01_Menus/loading_screen.svg,01_Screens/PNG/01_Menus/loading_screen.png,1600x900,UI concept mockup
+01_Menus,credits,Yapımcılar,CreditsSceneRuntimeUI,01_Screens/SVG/01_Menus/credits.svg,01_Screens/PNG/01_Menus/credits.png,1600x900,UI concept mockup
+02_Vehicle,gameplay_hud,Ana Sürüş HUD,GameplayHUD;BalanceHudUI;FuelHudUI;SpeedometerUI,01_Screens/SVG/02_Vehicle/gameplay_hud.svg,01_Screens/PNG/02_Vehicle/gameplay_hud.png,1600x900,UI concept mockup
+02_Vehicle,speedometer_detail,Hız Göstergesi,SpeedometerUI,01_Screens/SVG/02_Vehicle/speedometer_detail.svg,01_Screens/PNG/02_Vehicle/speedometer_detail.png,1600x900,UI concept mockup
+02_Vehicle,reverse_camera,Geri Görüş,ReverseCameraHUD,01_Screens/SVG/02_Vehicle/reverse_camera.svg,01_Screens/PNG/02_Vehicle/reverse_camera.png,1600x900,UI concept mockup
+02_Vehicle,fuel_low_warning,Düşük Yakıt Uyarısı,FuelHudUI,01_Screens/SVG/02_Vehicle/fuel_low_warning.svg,01_Screens/PNG/02_Vehicle/fuel_low_warning.png,1600x900,UI concept mockup
+02_Vehicle,fuel_station,Yakıt İkmali,FuelStationUI,01_Screens/SVG/02_Vehicle/fuel_station.svg,01_Screens/PNG/02_Vehicle/fuel_station.png,1600x900,UI concept mockup
+02_Vehicle,damage_indicator,Çarpışma Hasarı,DamageIndicatorHUD,01_Screens/SVG/02_Vehicle/damage_indicator.svg,01_Screens/PNG/02_Vehicle/damage_indicator.png,1600x900,UI concept mockup
+02_Vehicle,world_boundary,Harita Sınırı,BorderRespawnGuard,01_Screens/SVG/02_Vehicle/world_boundary.svg,01_Screens/PNG/02_Vehicle/world_boundary.png,1600x900,UI concept mockup
+02_Vehicle,respawn_transition,Güvenli Konuma Dönüş,BorderRespawnGuard,01_Screens/SVG/02_Vehicle/respawn_transition.svg,01_Screens/PNG/02_Vehicle/respawn_transition.png,1600x900,UI concept mockup
+03_Navigation,minimap_route,Mini Harita,MinimapUI,01_Screens/SVG/03_Navigation/minimap_route.svg,01_Screens/PNG/03_Navigation/minimap_route.png,1600x900,UI concept mockup
+03_Navigation,compass_navigation,Pusula,CompassUI,01_Screens/SVG/03_Navigation/compass_navigation.svg,01_Screens/PNG/03_Navigation/compass_navigation.png,1600x900,UI concept mockup
+03_Navigation,full_navigation_map,Tam Harita (öneri),NavigationService,01_Screens/SVG/03_Navigation/full_navigation_map.svg,01_Screens/PNG/03_Navigation/full_navigation_map.png,1600x900,UI concept mockup
+04_Quests,active_quest,Aktif Görev,ActiveQuestUI;DeliveryUI,01_Screens/SVG/04_Quests/active_quest.svg,01_Screens/PNG/04_Quests/active_quest.png,1600x900,UI concept mockup
+04_Quests,mission_offer,Görev Teklifi,PhoneMissionUI,01_Screens/SVG/04_Quests/mission_offer.svg,01_Screens/PNG/04_Quests/mission_offer.png,1600x900,UI concept mockup
+04_Quests,quest_board,Görev Panosu,QuestListUI;QuestEntryUI,01_Screens/SVG/04_Quests/quest_board.svg,01_Screens/PNG/04_Quests/quest_board.png,1600x900,UI concept mockup
+04_Quests,quest_success,Görev Başarısı,QuestCompleteUI,01_Screens/SVG/04_Quests/quest_success.svg,01_Screens/PNG/04_Quests/quest_success.png,1600x900,UI concept mockup
+04_Quests,quest_failure,Görev Başarısızlığı,QuestCompleteUI,01_Screens/SVG/04_Quests/quest_failure.svg,01_Screens/PNG/04_Quests/quest_failure.png,1600x900,UI concept mockup
+04_Quests,quest_statistics,Görev İstatistikleri,QuestStatisticsUI;SimpleBarChart,01_Screens/SVG/04_Quests/quest_statistics.svg,01_Screens/PNG/04_Quests/quest_statistics.png,1600x900,UI concept mockup
+04_Quests,tutorial_highlight,Öğretici,TutorialUI,01_Screens/SVG/04_Quests/tutorial_highlight.svg,01_Screens/PNG/04_Quests/tutorial_highlight.png,1600x900,UI concept mockup
+05_Company,new_company_setup,Şirket Kurulumu,CompanyPageUI,01_Screens/SVG/05_Company/new_company_setup.svg,01_Screens/PNG/05_Company/new_company_setup.png,1600x900,UI concept mockup
+05_Company,fleet_my_vehicles,Araçlarım,FleetManagementUI,01_Screens/SVG/05_Company/fleet_my_vehicles.svg,01_Screens/PNG/05_Company/fleet_my_vehicles.png,1600x900,UI concept mockup
+05_Company,fleet_gallery,Araç Galerisi,FleetManagementUI,01_Screens/SVG/05_Company/fleet_gallery.svg,01_Screens/PNG/05_Company/fleet_gallery.png,1600x900,UI concept mockup
+05_Company,fleet_upgrades,Araç Yükseltme,FleetManagementUI,01_Screens/SVG/05_Company/fleet_upgrades.svg,01_Screens/PNG/05_Company/fleet_upgrades.png,1600x900,UI concept mockup
+05_Company,company_profile,Şirket Profili,CompanyPageUI;AutoSignTextSetter,01_Screens/SVG/05_Company/company_profile.svg,01_Screens/PNG/05_Company/company_profile.png,1600x900,UI concept mockup
+06_Smartphone,smartphone_home,Telefon Ana Ekranı,SmartphoneUI;SmartphoneIconRegistry,01_Screens/SVG/06_Smartphone/smartphone_home.svg,01_Screens/PNG/06_Smartphone/smartphone_home.png,1600x900,UI concept mockup
+06_Smartphone,smartphone_deliveries,Kurye Express,SmartphoneDeliveryApp,01_Screens/SVG/06_Smartphone/smartphone_deliveries.svg,01_Screens/PNG/06_Smartphone/smartphone_deliveries.png,1600x900,UI concept mockup
+06_Smartphone,smartphone_bank,QuickPay,SmartphoneBankApp,01_Screens/SVG/06_Smartphone/smartphone_bank.svg,01_Screens/PNG/06_Smartphone/smartphone_bank.png,1600x900,UI concept mockup
+06_Smartphone,smartphone_garage,Garajım & Filo,SmartphoneGarageApp,01_Screens/SVG/06_Smartphone/smartphone_garage.svg,01_Screens/PNG/06_Smartphone/smartphone_garage.png,1600x900,UI concept mockup
+06_Smartphone,smartphone_messages,Mesajlar,SmartphoneMessagesApp,01_Screens/SVG/06_Smartphone/smartphone_messages.svg,01_Screens/PNG/06_Smartphone/smartphone_messages.png,1600x900,UI concept mockup
+06_Smartphone,smartphone_notification,Telefon Bildirimleri,SmartphoneNotificationToast,01_Screens/SVG/06_Smartphone/smartphone_notification.svg,01_Screens/PNG/06_Smartphone/smartphone_notification.png,1600x900,UI concept mockup
+07_Progression,balance_reward,Bakiye Değişimi,BalanceHudUI,01_Screens/SVG/07_Progression/balance_reward.svg,01_Screens/PNG/07_Progression/balance_reward.png,1600x900,UI concept mockup
+07_Progression,level_up,Seviye Atlama,ProgressionUI,01_Screens/SVG/07_Progression/level_up.svg,01_Screens/PNG/07_Progression/level_up.png,1600x900,UI concept mockup
+07_Progression,skill_tree,Yetenek Ağacı,ProgressionSkillTreeUI,01_Screens/SVG/07_Progression/skill_tree.svg,01_Screens/PNG/07_Progression/skill_tree.png,1600x900,UI concept mockup
+07_Progression,achievement_unlocked,Başarım,AchievementNotificationUI,01_Screens/SVG/07_Progression/achievement_unlocked.svg,01_Screens/PNG/07_Progression/achievement_unlocked.png,1600x900,UI concept mockup
+08_World_System,notification_center,Bildirim Kuyruğu,NotificationQueue,01_Screens/SVG/08_World_System/notification_center.svg,01_Screens/PNG/08_World_System/notification_center.png,1600x900,UI concept mockup
+08_World_System,confirmation_dialog,Onay Diyaloğu,ConfirmationDialog,01_Screens/SVG/08_World_System/confirmation_dialog.svg,01_Screens/PNG/08_World_System/confirmation_dialog.png,1600x900,UI concept mockup
+08_World_System,tooltip_state,Bilgi İpucu,TooltipUI,01_Screens/SVG/08_World_System/tooltip_state.svg,01_Screens/PNG/08_World_System/tooltip_state.png,1600x900,UI concept mockup
+08_World_System,neighborhood_banner,Mahalle Adı,NeighborhoodUI,01_Screens/SVG/08_World_System/neighborhood_banner.svg,01_Screens/PNG/08_World_System/neighborhood_banner.png,1600x900,UI concept mockup
+08_World_System,delivery_world_marker,Dünya Teslimat İşareti,DeliveryIndicator,01_Screens/SVG/08_World_System/delivery_world_marker.svg,01_Screens/PNG/08_World_System/delivery_world_marker.png,1600x900,UI concept mockup
+08_World_System,cinematic_capture,Sinematik HUD,CinematicCaptureHUD,01_Screens/SVG/08_World_System/cinematic_capture.svg,01_Screens/PNG/08_World_System/cinematic_capture.png,1600x900,UI concept mockup
+08_World_System,accessibility_colorblind,Renk Körlüğü Kontrolü,AccessibilityManager,01_Screens/SVG/08_World_System/accessibility_colorblind.svg,01_Screens/PNG/08_World_System/accessibility_colorblind.png,1600x900,UI concept mockup
+08_World_System,localization_preview,TR/EN Yerelleştirme,LocalizationTable,01_Screens/SVG/08_World_System/localization_preview.svg,01_Screens/PNG/08_World_System/localization_preview.png,1600x900,UI concept mockup

@@ -1,0 +1,522 @@
+[
+  {
+    "category": "01_Menus",
+    "id": "main_menu",
+    "title_tr": "Ana Menü",
+    "source_scripts": "MainMenuRuntimeUI",
+    "svg": "01_Screens/SVG/01_Menus/main_menu.svg",
+    "png": "01_Screens/PNG/01_Menus/main_menu.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "01_Menus",
+    "id": "pause_menu",
+    "title_tr": "Duraklatma",
+    "source_scripts": "PauseMenuUI;PauseMenuRuntimeView;PauseMenuRuntimeViewBuilder",
+    "svg": "01_Screens/SVG/01_Menus/pause_menu.svg",
+    "png": "01_Screens/PNG/01_Menus/pause_menu.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "01_Menus",
+    "id": "settings_general",
+    "title_tr": "Genel Ayarlar",
+    "source_scripts": "SettingsMenuUI",
+    "svg": "01_Screens/SVG/01_Menus/settings_general.svg",
+    "png": "01_Screens/PNG/01_Menus/settings_general.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "01_Menus",
+    "id": "settings_graphics",
+    "title_tr": "Grafik Ayarları",
+    "source_scripts": "SettingsMenuUI",
+    "svg": "01_Screens/SVG/01_Menus/settings_graphics.svg",
+    "png": "01_Screens/PNG/01_Menus/settings_graphics.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "01_Menus",
+    "id": "settings_audio",
+    "title_tr": "Ses Ayarları",
+    "source_scripts": "SettingsMenuUI",
+    "svg": "01_Screens/SVG/01_Menus/settings_audio.svg",
+    "png": "01_Screens/PNG/01_Menus/settings_audio.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "01_Menus",
+    "id": "settings_controls",
+    "title_tr": "Tuş Atamaları",
+    "source_scripts": "SettingsMenuUI",
+    "svg": "01_Screens/SVG/01_Menus/settings_controls.svg",
+    "png": "01_Screens/PNG/01_Menus/settings_controls.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "01_Menus",
+    "id": "settings_gameplay",
+    "title_tr": "Oynanış Ayarları",
+    "source_scripts": "SettingsMenuUI",
+    "svg": "01_Screens/SVG/01_Menus/settings_gameplay.svg",
+    "png": "01_Screens/PNG/01_Menus/settings_gameplay.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "01_Menus",
+    "id": "settings_accessibility",
+    "title_tr": "Erişilebilirlik",
+    "source_scripts": "AccessibilityManager",
+    "svg": "01_Screens/SVG/01_Menus/settings_accessibility.svg",
+    "png": "01_Screens/PNG/01_Menus/settings_accessibility.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "01_Menus",
+    "id": "save_load",
+    "title_tr": "Kayıt Yükleme",
+    "source_scripts": "SaveLoadUI",
+    "svg": "01_Screens/SVG/01_Menus/save_load.svg",
+    "png": "01_Screens/PNG/01_Menus/save_load.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "01_Menus",
+    "id": "loading_screen",
+    "title_tr": "Yükleme",
+    "source_scripts": "LoadingScreenUI;SceneTransitionManager",
+    "svg": "01_Screens/SVG/01_Menus/loading_screen.svg",
+    "png": "01_Screens/PNG/01_Menus/loading_screen.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "01_Menus",
+    "id": "credits",
+    "title_tr": "Yapımcılar",
+    "source_scripts": "CreditsSceneRuntimeUI",
+    "svg": "01_Screens/SVG/01_Menus/credits.svg",
+    "png": "01_Screens/PNG/01_Menus/credits.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "02_Vehicle",
+    "id": "gameplay_hud",
+    "title_tr": "Ana Sürüş HUD",
+    "source_scripts": "GameplayHUD;BalanceHudUI;FuelHudUI;SpeedometerUI",
+    "svg": "01_Screens/SVG/02_Vehicle/gameplay_hud.svg",
+    "png": "01_Screens/PNG/02_Vehicle/gameplay_hud.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "02_Vehicle",
+    "id": "speedometer_detail",
+    "title_tr": "Hız Göstergesi",
+    "source_scripts": "SpeedometerUI",
+    "svg": "01_Screens/SVG/02_Vehicle/speedometer_detail.svg",
+    "png": "01_Screens/PNG/02_Vehicle/speedometer_detail.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "02_Vehicle",
+    "id": "reverse_camera",
+    "title_tr": "Geri Görüş",
+    "source_scripts": "ReverseCameraHUD",
+    "svg": "01_Screens/SVG/02_Vehicle/reverse_camera.svg",
+    "png": "01_Screens/PNG/02_Vehicle/reverse_camera.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "02_Vehicle",
+    "id": "fuel_low_warning",
+    "title_tr": "Düşük Yakıt Uyarısı",
+    "source_scripts": "FuelHudUI",
+    "svg": "01_Screens/SVG/02_Vehicle/fuel_low_warning.svg",
+    "png": "01_Screens/PNG/02_Vehicle/fuel_low_warning.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "02_Vehicle",
+    "id": "fuel_station",
+    "title_tr": "Yakıt İkmali",
+    "source_scripts": "FuelStationUI",
+    "svg": "01_Screens/SVG/02_Vehicle/fuel_station.svg",
+    "png": "01_Screens/PNG/02_Vehicle/fuel_station.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "02_Vehicle",
+    "id": "damage_indicator",
+    "title_tr": "Çarpışma Hasarı",
+    "source_scripts": "DamageIndicatorHUD",
+    "svg": "01_Screens/SVG/02_Vehicle/damage_indicator.svg",
+    "png": "01_Screens/PNG/02_Vehicle/damage_indicator.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "02_Vehicle",
+    "id": "world_boundary",
+    "title_tr": "Harita Sınırı",
+    "source_scripts": "BorderRespawnGuard",
+    "svg": "01_Screens/SVG/02_Vehicle/world_boundary.svg",
+    "png": "01_Screens/PNG/02_Vehicle/world_boundary.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "02_Vehicle",
+    "id": "respawn_transition",
+    "title_tr": "Güvenli Konuma Dönüş",
+    "source_scripts": "BorderRespawnGuard",
+    "svg": "01_Screens/SVG/02_Vehicle/respawn_transition.svg",
+    "png": "01_Screens/PNG/02_Vehicle/respawn_transition.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "03_Navigation",
+    "id": "minimap_route",
+    "title_tr": "Mini Harita",
+    "source_scripts": "MinimapUI",
+    "svg": "01_Screens/SVG/03_Navigation/minimap_route.svg",
+    "png": "01_Screens/PNG/03_Navigation/minimap_route.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "03_Navigation",
+    "id": "compass_navigation",
+    "title_tr": "Pusula",
+    "source_scripts": "CompassUI",
+    "svg": "01_Screens/SVG/03_Navigation/compass_navigation.svg",
+    "png": "01_Screens/PNG/03_Navigation/compass_navigation.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "03_Navigation",
+    "id": "full_navigation_map",
+    "title_tr": "Tam Harita (öneri)",
+    "source_scripts": "NavigationService",
+    "svg": "01_Screens/SVG/03_Navigation/full_navigation_map.svg",
+    "png": "01_Screens/PNG/03_Navigation/full_navigation_map.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "04_Quests",
+    "id": "active_quest",
+    "title_tr": "Aktif Görev",
+    "source_scripts": "ActiveQuestUI;DeliveryUI",
+    "svg": "01_Screens/SVG/04_Quests/active_quest.svg",
+    "png": "01_Screens/PNG/04_Quests/active_quest.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "04_Quests",
+    "id": "mission_offer",
+    "title_tr": "Görev Teklifi",
+    "source_scripts": "PhoneMissionUI",
+    "svg": "01_Screens/SVG/04_Quests/mission_offer.svg",
+    "png": "01_Screens/PNG/04_Quests/mission_offer.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "04_Quests",
+    "id": "quest_board",
+    "title_tr": "Görev Panosu",
+    "source_scripts": "QuestListUI;QuestEntryUI",
+    "svg": "01_Screens/SVG/04_Quests/quest_board.svg",
+    "png": "01_Screens/PNG/04_Quests/quest_board.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "04_Quests",
+    "id": "quest_success",
+    "title_tr": "Görev Başarısı",
+    "source_scripts": "QuestCompleteUI",
+    "svg": "01_Screens/SVG/04_Quests/quest_success.svg",
+    "png": "01_Screens/PNG/04_Quests/quest_success.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "04_Quests",
+    "id": "quest_failure",
+    "title_tr": "Görev Başarısızlığı",
+    "source_scripts": "QuestCompleteUI",
+    "svg": "01_Screens/SVG/04_Quests/quest_failure.svg",
+    "png": "01_Screens/PNG/04_Quests/quest_failure.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "04_Quests",
+    "id": "quest_statistics",
+    "title_tr": "Görev İstatistikleri",
+    "source_scripts": "QuestStatisticsUI;SimpleBarChart",
+    "svg": "01_Screens/SVG/04_Quests/quest_statistics.svg",
+    "png": "01_Screens/PNG/04_Quests/quest_statistics.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "04_Quests",
+    "id": "tutorial_highlight",
+    "title_tr": "Öğretici",
+    "source_scripts": "TutorialUI",
+    "svg": "01_Screens/SVG/04_Quests/tutorial_highlight.svg",
+    "png": "01_Screens/PNG/04_Quests/tutorial_highlight.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "05_Company",
+    "id": "new_company_setup",
+    "title_tr": "Şirket Kurulumu",
+    "source_scripts": "CompanyPageUI",
+    "svg": "01_Screens/SVG/05_Company/new_company_setup.svg",
+    "png": "01_Screens/PNG/05_Company/new_company_setup.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "05_Company",
+    "id": "fleet_my_vehicles",
+    "title_tr": "Araçlarım",
+    "source_scripts": "FleetManagementUI",
+    "svg": "01_Screens/SVG/05_Company/fleet_my_vehicles.svg",
+    "png": "01_Screens/PNG/05_Company/fleet_my_vehicles.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "05_Company",
+    "id": "fleet_gallery",
+    "title_tr": "Araç Galerisi",
+    "source_scripts": "FleetManagementUI",
+    "svg": "01_Screens/SVG/05_Company/fleet_gallery.svg",
+    "png": "01_Screens/PNG/05_Company/fleet_gallery.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "05_Company",
+    "id": "fleet_upgrades",
+    "title_tr": "Araç Yükseltme",
+    "source_scripts": "FleetManagementUI",
+    "svg": "01_Screens/SVG/05_Company/fleet_upgrades.svg",
+    "png": "01_Screens/PNG/05_Company/fleet_upgrades.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "05_Company",
+    "id": "company_profile",
+    "title_tr": "Şirket Profili",
+    "source_scripts": "CompanyPageUI;AutoSignTextSetter",
+    "svg": "01_Screens/SVG/05_Company/company_profile.svg",
+    "png": "01_Screens/PNG/05_Company/company_profile.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "06_Smartphone",
+    "id": "smartphone_home",
+    "title_tr": "Telefon Ana Ekranı",
+    "source_scripts": "SmartphoneUI;SmartphoneIconRegistry",
+    "svg": "01_Screens/SVG/06_Smartphone/smartphone_home.svg",
+    "png": "01_Screens/PNG/06_Smartphone/smartphone_home.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "06_Smartphone",
+    "id": "smartphone_deliveries",
+    "title_tr": "Kurye Express",
+    "source_scripts": "SmartphoneDeliveryApp",
+    "svg": "01_Screens/SVG/06_Smartphone/smartphone_deliveries.svg",
+    "png": "01_Screens/PNG/06_Smartphone/smartphone_deliveries.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "06_Smartphone",
+    "id": "smartphone_bank",
+    "title_tr": "QuickPay",
+    "source_scripts": "SmartphoneBankApp",
+    "svg": "01_Screens/SVG/06_Smartphone/smartphone_bank.svg",
+    "png": "01_Screens/PNG/06_Smartphone/smartphone_bank.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "06_Smartphone",
+    "id": "smartphone_garage",
+    "title_tr": "Garajım & Filo",
+    "source_scripts": "SmartphoneGarageApp",
+    "svg": "01_Screens/SVG/06_Smartphone/smartphone_garage.svg",
+    "png": "01_Screens/PNG/06_Smartphone/smartphone_garage.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "06_Smartphone",
+    "id": "smartphone_messages",
+    "title_tr": "Mesajlar",
+    "source_scripts": "SmartphoneMessagesApp",
+    "svg": "01_Screens/SVG/06_Smartphone/smartphone_messages.svg",
+    "png": "01_Screens/PNG/06_Smartphone/smartphone_messages.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "06_Smartphone",
+    "id": "smartphone_notification",
+    "title_tr": "Telefon Bildirimleri",
+    "source_scripts": "SmartphoneNotificationToast",
+    "svg": "01_Screens/SVG/06_Smartphone/smartphone_notification.svg",
+    "png": "01_Screens/PNG/06_Smartphone/smartphone_notification.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "07_Progression",
+    "id": "balance_reward",
+    "title_tr": "Bakiye Değişimi",
+    "source_scripts": "BalanceHudUI",
+    "svg": "01_Screens/SVG/07_Progression/balance_reward.svg",
+    "png": "01_Screens/PNG/07_Progression/balance_reward.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "07_Progression",
+    "id": "level_up",
+    "title_tr": "Seviye Atlama",
+    "source_scripts": "ProgressionUI",
+    "svg": "01_Screens/SVG/07_Progression/level_up.svg",
+    "png": "01_Screens/PNG/07_Progression/level_up.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "07_Progression",
+    "id": "skill_tree",
+    "title_tr": "Yetenek Ağacı",
+    "source_scripts": "ProgressionSkillTreeUI",
+    "svg": "01_Screens/SVG/07_Progression/skill_tree.svg",
+    "png": "01_Screens/PNG/07_Progression/skill_tree.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "07_Progression",
+    "id": "achievement_unlocked",
+    "title_tr": "Başarım",
+    "source_scripts": "AchievementNotificationUI",
+    "svg": "01_Screens/SVG/07_Progression/achievement_unlocked.svg",
+    "png": "01_Screens/PNG/07_Progression/achievement_unlocked.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "08_World_System",
+    "id": "notification_center",
+    "title_tr": "Bildirim Kuyruğu",
+    "source_scripts": "NotificationQueue",
+    "svg": "01_Screens/SVG/08_World_System/notification_center.svg",
+    "png": "01_Screens/PNG/08_World_System/notification_center.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "08_World_System",
+    "id": "confirmation_dialog",
+    "title_tr": "Onay Diyaloğu",
+    "source_scripts": "ConfirmationDialog",
+    "svg": "01_Screens/SVG/08_World_System/confirmation_dialog.svg",
+    "png": "01_Screens/PNG/08_World_System/confirmation_dialog.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "08_World_System",
+    "id": "tooltip_state",
+    "title_tr": "Bilgi İpucu",
+    "source_scripts": "TooltipUI",
+    "svg": "01_Screens/SVG/08_World_System/tooltip_state.svg",
+    "png": "01_Screens/PNG/08_World_System/tooltip_state.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "08_World_System",
+    "id": "neighborhood_banner",
+    "title_tr": "Mahalle Adı",
+    "source_scripts": "NeighborhoodUI",
+    "svg": "01_Screens/SVG/08_World_System/neighborhood_banner.svg",
+    "png": "01_Screens/PNG/08_World_System/neighborhood_banner.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "08_World_System",
+    "id": "delivery_world_marker",
+    "title_tr": "Dünya Teslimat İşareti",
+    "source_scripts": "DeliveryIndicator",
+    "svg": "01_Screens/SVG/08_World_System/delivery_world_marker.svg",
+    "png": "01_Screens/PNG/08_World_System/delivery_world_marker.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "08_World_System",
+    "id": "cinematic_capture",
+    "title_tr": "Sinematik HUD",
+    "source_scripts": "CinematicCaptureHUD",
+    "svg": "01_Screens/SVG/08_World_System/cinematic_capture.svg",
+    "png": "01_Screens/PNG/08_World_System/cinematic_capture.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "08_World_System",
+    "id": "accessibility_colorblind",
+    "title_tr": "Renk Körlüğü Kontrolü",
+    "source_scripts": "AccessibilityManager",
+    "svg": "01_Screens/SVG/08_World_System/accessibility_colorblind.svg",
+    "png": "01_Screens/PNG/08_World_System/accessibility_colorblind.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  },
+  {
+    "category": "08_World_System",
+    "id": "localization_preview",
+    "title_tr": "TR/EN Yerelleştirme",
+    "source_scripts": "LocalizationTable",
+    "svg": "01_Screens/SVG/08_World_System/localization_preview.svg",
+    "png": "01_Screens/PNG/08_World_System/localization_preview.png",
+    "resolution": "1600x900",
+    "kind": "UI concept mockup"
+  }
+]

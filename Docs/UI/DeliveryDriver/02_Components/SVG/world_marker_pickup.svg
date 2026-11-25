@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="190" height="235" viewBox="0 0 190 235"><defs>
+  <linearGradient id="night" x2="0.8" y2="1"><stop stop-color="#102F41"/><stop offset=".47" stop-color="#15303F"/><stop offset="1" stop-color="#0B1724"/></linearGradient>
+  <linearGradient id="sunset" x2=".2" y2="1"><stop stop-color="#385071"/><stop offset=".52" stop-color="#C46B51"/><stop offset="1" stop-color="#F8B16A"/></linearGradient>
+  <linearGradient id="btn" x2="1" y2="1"><stop stop-color="#E97A11"/><stop offset="1" stop-color="#B94D12"/></linearGradient>
+  <linearGradient id="glass" x2="1" y2="1"><stop stop-color="#172B3A" stop-opacity=".97"/><stop offset="1" stop-color="#0D1823" stop-opacity=".96"/></linearGradient>
+  <linearGradient id="steel" x2="0" y2="1"><stop stop-color="#D6E2E8"/><stop offset=".64" stop-color="#819DAE"/><stop offset="1" stop-color="#546C7F"/></linearGradient>
+  <linearGradient id="tarmac" x2="0" y2="1"><stop stop-color="#263E4B"/><stop offset="1" stop-color="#101922"/></linearGradient>
+  <filter id="shadow"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#01070B" flood-opacity=".5"/></filter>
+  <filter id="soft"><feGaussianBlur stdDeviation="11"/></filter>
+  <clipPath id="screenClip"><rect width="1600" height="900" rx="0"/></clipPath>
+ </defs><path d="M95 10 C42 10 16 42 16 96 C16 151 95 219 95 219 C95 219 174 151 174 96 C174 42 148 10 95 10Z" fill="#52D7DF" opacity="1" stroke="#F6F9FA" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" /><circle cx="95" cy="94" r="37" fill="#172B37" opacity="1"/><g transform="translate(71.0,70.0) scale(2.0)" stroke="#52D7DF" fill="none" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></g></svg>
