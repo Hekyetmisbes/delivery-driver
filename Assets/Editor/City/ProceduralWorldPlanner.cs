@@ -398,6 +398,35 @@ namespace DeliveryDriver.EditorTools
             return settings.earthworkPreference*(sum/Mathf.Max(1,((path.Count+1)/2)*3)+max*.25f);
         }
 
+        private static string EarthworkSummary(Plan p,string sector,Settings settings)
+        {
+            double cut=0,fill=0,total=0,extra=0;
+            float peak=0;
+            foreach(Edge edge in p.edges.Where(e=>e.sector==sector))
+            for(int i=1;i<edge.points.Count;i++)
+            {
+                Vector3 a=edge.points[i-1],b=edge.points[i];
+                float length=Vector2.Distance(XZ(a),XZ(b));
+                Vector3 mid=(a+b)*.5f;
+                if(length<.001f)continue;
+                Vector2 tangent=(XZ(b)-XZ(a)).normalized;
+                Vector2 side=new Vector2(-tangent.y,tangent.x)*(settings.width*.5f+settings.sidewalk);
+                float worst=0;
+                for(int j=-1;j<=1;j++)
+                {
+                    if(!p.layout.TryHeight(XZ(mid)+side*j,out float ground))continue;
+                    float d=mid.y-.12f-ground;
+                    cut+=Mathf.Max(0,-d)*length/3.0;
+                    fill+=Mathf.Max(0,d)*length/3.0;
+                    worst=Mathf.Max(worst,Mathf.Abs(d));
+                }
+                peak=Mathf.Max(peak,worst);total+=length;
+                if(worst>settings.maxCutFill+.01f)extra+=length;
+            }
+            return total<.01?"no roads": "mean cut "+(cut/total).ToString("F2")+" m, mean fill "+(fill/total).ToString("F2")+
+                " m, peak "+peak.ToString("F1")+" m, extra grading "+(extra/total*100).ToString("F1")+"% of sampled road length";
+        }
+
         private static int Coverage(Plan p,string sector)
         {
             var edges=p.edges.Where(e=>e.sector==sector).ToList();
@@ -442,6 +471,7 @@ namespace DeliveryDriver.EditorTools
             }
             finally { settings.terrainDesign=true; }
             if(adaptive==null&&baseline==null)throw adaptiveError??new InvalidOperationException("No preview.");
+            string comparison = adaptive!=null && baseline!=null ? "Ankara grading (sampled, not volumes): V4 " + EarthworkSummary(baseline,"Ankara",settings) + "; V5 " + EarthworkSummary(adaptive,"Ankara",settings) + ". Authored proposals V4/V5: " + baseline.authoredLinks.Count + "/" + adaptive.authoredLinks.Count + "." : null;
             if(baseline!=null && (adaptive==null ||
                 adaptive.BridgeCount<baseline.BridgeCount ||
                 (GatesConnected(baseline)&&!GatesConnected(adaptive)) ||
@@ -452,8 +482,10 @@ namespace DeliveryDriver.EditorTools
                 if(adaptive!=null)baseline.terrainCells.AddRange(adaptive.terrainCells);
                 else baseline.terrainCells.AddRange(AnalyzeOnly(settings,layout,scene).terrainCells);
                 baseline.warnings.Insert(0,"V5 coverage guard selected the V4 layout: adaptive candidate lost coverage or connectivity. Disable guard to inspect the V5 candidate."+(adaptiveError!=null?" "+adaptiveError.Message:""));
+                if(comparison!=null)baseline.notes.Insert(0,comparison);
                 return baseline;
             }
+            if(comparison!=null)adaptive.notes.Insert(0,comparison);
             adaptive.notes.Insert(0,baseline!=null?"V5 coverage guard: adaptive layout retained (same-seed V4 coverage/connectivity comparison).":"V5 adaptive layout retained; V4 comparison unavailable.");
             return adaptive;
         }
