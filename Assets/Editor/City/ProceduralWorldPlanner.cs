@@ -14,9 +14,11 @@ namespace DeliveryDriver.EditorTools
         internal sealed class Settings
         {
             public int seed = 4281, maxNodesPerCity = 170;
-            public float spacing = 110f, width = 8.5f, sidewalk = 2.2f, grade = 0.10f;
+            public float spacing = 95f, width = 8.5f, sidewalk = 2.2f, grade = 0.10f;
             public float maxCutFill = 6f, blend = 10f, seaY, bridgeClearance = 8f;
-            public float curve = 0.65f, loops = 0.55f;
+            public float curve = 0.35f, loops = 0.75f;
+            public float arterialSpacing = 600f, collectorSpacing = 250f, straightPreference = .70f, bridgeSeparation = .65f;
+            public int nodesPerTile = 180, authoredLinkTarget = 4;
             public bool ankaraLow = true, protectKizilay = true, buildAnkara = true, buildIstanbul = true, bridges = true;
             public Transform ankara, istanbul;
         }
@@ -70,11 +72,14 @@ namespace DeliveryDriver.EditorTools
             public int degree;
         }
 
+        internal enum RoadKind { Arterial, Collector, Local, Bridge, AuthoredLink }
+
         internal sealed class Edge
         {
             public Node a, b;
             public List<Vector3> points;
             public string sector;
+            public RoadKind kind = RoadKind.Local;
             public bool Bridge => sector == "Highways";
         }
 
@@ -84,6 +89,8 @@ namespace DeliveryDriver.EditorTools
             public readonly List<Node> nodes = new List<Node>();
             public readonly List<Edge> edges = new List<Edge>();
             public readonly List<string> warnings = new List<string>();
+            public readonly List<string> notes = new List<string>();
+            public readonly List<Edge> authoredLinks = new List<Edge>();
             public readonly List<Rect> protectedAreas = new List<Rect>();
             public Func<Vector2, float, bool> manualRoadNear;
             public int BridgeCount => edges.Count(e => e.Bridge);
@@ -253,8 +260,8 @@ namespace DeliveryDriver.EditorTools
             planner.plan.manualRoadNear = planner.obstacles.Near;
             if (settings.bridges && settings.buildAnkara && settings.buildIstanbul)
                 planner.PlanBridges();
-            if (settings.buildAnkara) planner.PlanCity("Ankara", layout.Ankara(settings.ankaraLow));
-            if (settings.buildIstanbul) planner.PlanCity("İstanbul", layout.Istanbul(settings.ankaraLow));
+            if (settings.buildAnkara) planner.PlanHierarchy("Ankara", layout.Ankara(settings.ankaraLow));
+            if (settings.buildIstanbul) planner.PlanHierarchy("İstanbul", layout.Istanbul(settings.ankaraLow));
             if (planner.plan.edges.Count == 0) throw new InvalidOperationException("No valid roads. Increase spacing or cut/fill tolerance, or check the terrain.");
             return planner.plan;
         }
@@ -285,6 +292,8 @@ namespace DeliveryDriver.EditorTools
             float separation = Mathf.Max(35f, RoadClearance * 4f);
             var failures = new int[5];
             var accepted = new List<BridgeCandidate>();
+            BridgeCandidate bestA = null, bestB = null;
+            float bestGap = -1f, desiredGap = span * settings.bridgeSeparation;
             int attempts = 0;
             // Prefer well-separated crossings, but permit both in the same free coastal district.
             // Search both sides independently; the gap's actual measured width is used.
@@ -326,22 +335,27 @@ namespace DeliveryDriver.EditorTools
                         var candidate = new BridgeCandidate { path = path, acrossMin = candidateMin, acrossMax = candidateMax };
                         // Disjoint lateral envelopes guarantee that the two straight crossings
                         // and their approach ramps cannot cross each other.
-                        BridgeCandidate partner = accepted.FirstOrDefault(c =>
-                            c.acrossMax + separation <= candidate.acrossMin ||
-                            candidate.acrossMax + separation <= c.acrossMin);
-                        if (partner != null)
+                        foreach (BridgeCandidate partner in accepted)
                         {
-                            AddBridge(partner.path);
-                            AddBridge(candidate.path);
-                            plan.warnings.Add("Bridge search: two routes found after " + attempts +
-                                " candidates. Sea Y=" + settings.seaY.ToString("F1") +
-                                ", grade limit=" + (settings.grade * 100f).ToString("F1") + "%.");
-                            return;
+                            float gap = Mathf.Max(candidate.acrossMin - partner.acrossMax,
+                                partner.acrossMin - candidate.acrossMax);
+                            if (gap < separation || gap <= bestGap) continue;
+                            bestGap = gap; bestA = partner; bestB = candidate;
                         }
                         accepted.Add(candidate);
-                        break; // Other ramp lengths at this lane cannot improve lateral separation.
+                        break;
                     }
                 }
+                if (bestGap >= desiredGap) break;
+            }
+            if (bestA != null)
+            {
+                AddBridge(bestA.path); AddBridge(bestB.path);
+                string report = "Bridge separation: " + bestGap.ToString("F0") + " m (" +
+                    (bestGap / span * 100f).ToString("F0") + "% of shoreline), " + attempts + " candidates.";
+                if (bestGap < desiredGap) plan.warnings.Add(report + " Target separation unavailable.");
+                else plan.notes.Add(report);
+                return;
             }
             throw new BridgePlanningException("Could not plan two separated bridges after " + attempts +
                 " candidates (usable corridors: " + accepted.Count + "). " +
@@ -473,6 +487,361 @@ namespace DeliveryDriver.EditorTools
                 if (!GradeOk(result[i - 1], result[i])) return false;
             points = result;
             return true;
+        }
+
+        private sealed class AxisLine
+        {
+            public float position;
+            public RoadKind kind;
+        }
+        private sealed class StreetCandidate
+        {
+            public Node a, b;
+            public RoadKind kind;
+            public float length;
+        }
+
+        // Coherent nested streets, instead of connecting arbitrary scattered points.
+        private List<AxisLine> MakeStreetAxis(float min, float max, float local)
+        {
+            float size = max - min;
+            int main = Mathf.Max(1, Mathf.RoundToInt(size / Mathf.Max(settings.arterialSpacing, settings.collectorSpacing * 1.5f)));
+            var primary = new List<float> { min };
+            for (int i = 1; i < main; i++) primary.Add(min + size * (i + (Next() - .5f) * .22f) / main);
+            primary.Add(max);
+            var result = new List<AxisLine>();
+            for (int i = 0; i < primary.Count - 1; i++)
+            {
+                float a = primary[i], b = primary[i + 1];
+                result.Add(new AxisLine { position = a, kind = RoadKind.Arterial });
+                int count = Mathf.Max(1, Mathf.RoundToInt((b - a) / Mathf.Max(local * 1.7f, settings.collectorSpacing)));
+                var secondary = new List<float> { a };
+                for (int j = 1; j < count; j++) secondary.Add(Mathf.Lerp(a, b, (j + (Next() - .5f) * .25f) / count));
+                secondary.Add(b);
+                for (int j = 0; j < secondary.Count - 1; j++)
+                {
+                    float start = secondary[j], end = secondary[j + 1];
+                    if (j > 0) result.Add(new AxisLine { position = start, kind = RoadKind.Collector });
+                    int small = Mathf.Max(1, Mathf.RoundToInt((end - start) / local));
+                    for (int k = 1; k < small; k++)
+                        result.Add(new AxisLine { position = Mathf.Lerp(start, end, (k + (Next() - .5f) * .24f) / small), kind = RoadKind.Local });
+                }
+            }
+            result.Add(new AxisLine { position = max, kind = RoadKind.Arterial });
+            return result;
+        }
+
+        private (float density, float bend, float jitter) StreetStyle(Vector2 p)
+        {
+            foreach (District district in districts)
+            {
+                if (!district.area.Contains(p)) continue;
+                string n = district.name.ToLowerInvariant();
+                if (n.Contains("ostim") || n.Contains("liman") || n.Contains("sanayi")) return (.58f, .12f, .20f);
+                if (n.Contains("hamam") || n.Contains("galata") || n.Contains("taksim")) return (1f, .85f, .85f);
+                if (n.Contains("atakule")) return (.55f, .75f, .75f);
+                if (n.Contains("yama") || n.Contains("ulus")) return (.78f, .90f, .75f);
+                if (n.Contains("plato") || n.Contains("sıhhiye") || n.Contains("sihhiye")) return (.92f, .20f, .30f);
+            }
+            return (.85f, .45f, .55f);
+        }
+
+        private sealed class StreetIndex
+        {
+            private const float Cell = 160f;
+            private readonly Dictionary<Vector2Int, List<Edge>> cells = new Dictionary<Vector2Int, List<Edge>>();
+            private readonly Dictionary<Node, List<Edge>> incident = new Dictionary<Node, List<Edge>>();
+            private static int I(float v) => Mathf.FloorToInt(v / Cell);
+            public void Add(Edge e)
+            {
+                Rect r = BoundsOf(e.points, 0f);
+                for (int x = I(r.xMin); x <= I(r.xMax); x++)
+                for (int y = I(r.yMin); y <= I(r.yMax); y++)
+                {
+                    var key = new Vector2Int(x, y);
+                    if (!cells.TryGetValue(key, out List<Edge> list)) cells[key] = list = new List<Edge>();
+                    list.Add(e);
+                }
+                foreach (Node n in new[] { e.a, e.b })
+                {
+                    if (!incident.TryGetValue(n, out List<Edge> list)) incident[n] = list = new List<Edge>();
+                    list.Add(e);
+                }
+            }
+            public IEnumerable<Edge> At(Node n) =>
+                incident.TryGetValue(n, out List<Edge> list) ? (IEnumerable<Edge>)list : Enumerable.Empty<Edge>();
+            public HashSet<Edge> Query(Rect r)
+            {
+                var result = new HashSet<Edge>();
+                for (int x = I(r.xMin); x <= I(r.xMax); x++)
+                for (int y = I(r.yMin); y <= I(r.yMax); y++)
+                    if (cells.TryGetValue(new Vector2Int(x, y), out List<Edge> list))
+                        foreach (Edge e in list) result.Add(e);
+                return result;
+            }
+        }
+
+        private void PlanHierarchy(string sector, Rect bounds)
+        {
+            var gates = plan.nodes.Where(n => n.sector == sector && n.gate).ToList();
+            var nodes = new List<Node>(gates);
+            var index = new StreetIndex();
+            foreach (Edge edge in plan.edges) index.Add(edge);
+            float local = Mathf.Max(52f, settings.spacing);
+            float margin = RoadClearance + 14f;
+            if (bounds.width < margin * 2f + local || bounds.height < margin * 2f + local)
+                throw new InvalidOperationException(sector + ": terrain too small for street spacing.");
+            int budget = settings.nodesPerTile * 12;
+            var xs = MakeStreetAxis(bounds.xMin + margin, bounds.xMax - margin, local);
+            var zs = MakeStreetAxis(bounds.yMin + margin, bounds.yMax - margin, local);
+            // No silent 170-node cap. Report any adjustment needed by the explicit tile-scaled budget.
+            while ((long)xs.Count * zs.Count > budget)
+            {
+                local *= 1.12f;
+                xs = MakeStreetAxis(bounds.xMin + margin, bounds.xMax - margin, local);
+                zs = MakeStreetAxis(bounds.yMin + margin, bounds.yMax - margin, local);
+            }
+            if (local > settings.spacing + 1f)
+                plan.warnings.Add(sector + ": local spacing adjusted to " + local.ToString("F0") + " m to fit " + budget + " candidate nodes.");
+            var grid = new Node[xs.Count, zs.Count];
+            float phase = Next() * Mathf.PI * 2f, phase2 = Next() * Mathf.PI * 2f;
+            for (int x = 0; x < xs.Count; x++)
+            for (int z = 0; z < zs.Count; z++)
+            {
+                Vector2 pos = new Vector2(xs[x].position, zs[z].position);
+                var style = StreetStyle(pos);
+                float warp = Mathf.Min(18f, local * .25f * settings.curve);
+                pos.x += Mathf.Sin((pos.y - bounds.yMin) / 340f + phase) * warp;
+                pos.y += Mathf.Sin((pos.x - bounds.xMin) / 420f + phase2) * warp;
+                if (xs[x].kind == RoadKind.Local && zs[z].kind == RoadKind.Local)
+                    pos += new Vector2(Next() - .5f, Next() - .5f) * local * .24f * style.jitter;
+                if (!Contains(bounds, pos, -RoadClearance) || IsProtected(pos, RoadClearance) ||
+                    obstacles.Near(pos, RoadClearance * 2f) ||
+                    gates.Any(g => Vector2.Distance(pos, XZ(g.position)) < RoadClearance * 3f) ||
+                    !plan.layout.TryHeight(pos, out _)) continue;
+                Node node = AddLandNode(pos, sector);
+                grid[x, z] = node; nodes.Add(node);
+            }
+            var candidates = new List<StreetCandidate>();
+            var unique = new HashSet<(int, int)>();
+            void AddCandidate(Node a, Node b, RoadKind kind)
+            {
+                if (a == null || b == null || a == b) return;
+                float len = Vector2.Distance(XZ(a.position), XZ(b.position));
+                if (len < RoadClearance * 2.5f || len > local * 3.5f) return;
+                if (!unique.Add((Mathf.Min(a.id,b.id),Mathf.Max(a.id,b.id)))) return;
+                candidates.Add(new StreetCandidate { a = a, b = b, length = len, kind = kind });
+            }
+            for (int x = 0; x < xs.Count; x++)
+            for (int z = 0; z < zs.Count; z++)
+            {
+                Node n = grid[x,z];
+                if (x+1 < xs.Count) AddCandidate(n,grid[x+1,z],zs[z].kind);
+                if (z+1 < zs.Count) AddCandidate(n,grid[x,z+1],xs[x].kind);
+            }
+            var groups = nodes.ToDictionary(n => n, n => n);
+            Node Find(Node n)
+            {
+                Node root = n;
+                while (groups[root] != root) root = groups[root];
+                while (groups[n] != n) { Node next = groups[n]; groups[n] = root; n = next; }
+                return root;
+            }
+            var built = new HashSet<(int,int)>();
+            int attempts = 0;
+            bool TryBuild(StreetCandidate c)
+            {
+                var key = (Mathf.Min(c.a.id,c.b.id),Mathf.Max(c.a.id,c.b.id));
+                if (built.Contains(key) || c.a.degree >= DegreeLimit(c.a) || c.b.degree >= DegreeLimit(c.b)) return false;
+                if (++attempts % 80 == 0 && EditorUtility.DisplayCancelableProgressBar("Procedural World",
+                    sector + ": hierarchy candidates " + attempts, .30f)) throw new OperationCanceledException();
+                if (!TryStreet(c.a,c.b,bounds,c.kind,index,false,out List<Vector3> path)) return false;
+                var edge = new Edge { a=c.a,b=c.b,sector=sector,kind=c.kind,points=path };
+                plan.edges.Add(edge); index.Add(edge); built.Add(key);
+                c.a.degree++; c.b.degree++; groups[Find(c.b)] = Find(c.a);
+                return true;
+            }
+
+            // Attach bridge gates first to ensure local roads cannot block them.
+            foreach (Node gate in gates)
+            {
+                foreach (Node n in nodes.Where(n=>!n.gate).OrderBy(n=>(XZ(n.position)-XZ(gate.position)).sqrMagnitude).Take(64))
+                {
+                    float len = Vector2.Distance(XZ(n.position),XZ(gate.position));
+                    if (len < RoadClearance*2.5f || len > Mathf.Max(500f,local*5f)) continue;
+                    if (TryBuild(new StreetCandidate { a=gate,b=n,kind=RoadKind.Arterial,length=len })) break;
+                }
+            }
+            foreach (RoadKind kind in new[] {RoadKind.Arterial,RoadKind.Collector})
+                foreach (StreetCandidate c in candidates.Where(c=>c.kind==kind).OrderBy(c=>c.length)) TryBuild(c);
+
+            var locals = candidates.Where(c=>c.kind==RoadKind.Local).OrderBy(c=>c.length).ToList();
+            foreach (StreetCandidate c in locals)
+            {
+                var style = StreetStyle((XZ(c.a.position)+XZ(c.b.position))*.5f);
+                if (Find(c.a)==Find(c.b) && Next()>style.density*settings.loops) continue;
+                if (c.a.degree==0 && c.b.degree==0 && Next()>style.density) continue;
+                TryBuild(c);
+            }
+            // Repair gaps without converting the road layout into a triangulated graph.
+            foreach (StreetCandidate c in locals)
+                if (Find(c.a)!=Find(c.b) && (c.a.degree>0 || c.b.degree>0)) TryBuild(c);
+            for (int x=0;x<xs.Count;x++)
+            for (int z=0;z<zs.Count;z++)
+            {
+                Node n=grid[x,z];
+                if(n==null||n.degree==0)continue;
+                foreach(Vector2Int o in new[]{new Vector2Int(1,1),new Vector2Int(1,-1),new Vector2Int(2,0),new Vector2Int(0,2)})
+                {
+                    int xx=x+o.x,zz=z+o.y;
+                    if(xx>=xs.Count||zz<0||zz>=zs.Count)continue;
+                    Node other=grid[xx,zz];
+                    if(other==null||other.degree==0||Find(n)==Find(other))continue;
+                    float len=Vector2.Distance(XZ(n.position),XZ(other.position));
+                    if(len<=local*2.4f)TryBuild(new StreetCandidate{a=n,b=other,kind=RoadKind.Collector,length=len});
+                }
+            }
+            var active=nodes.Where(n=>n.degree>0).ToList();
+            Node keep=gates.Count>0?Find(gates[0]):active.GroupBy(Find).OrderByDescending(g=>g.Count()).ThenBy(g=>g.Key.id).Select(g=>g.Key).FirstOrDefault();
+            if(keep==null||gates.Any(g=>g.degree<2||Find(g)!=keep))
+            {
+                if(gates.Count>0)throw new BridgePlanningException(sector+": bridge approaches could not both join the new street hierarchy. Try a different seed or spacing.");
+                throw new InvalidOperationException(sector+": no connected street component.");
+            }
+            int dropped=0;
+            foreach(Edge e in plan.edges.Where(e=>e.sector==sector&&Find(e.a)!=keep).ToList())
+            {
+                e.a.degree--;e.b.degree--;plan.edges.Remove(e);dropped++;
+            }
+            if(!plan.edges.Any(e=>e.sector==sector))throw new InvalidOperationException(sector+": no connected streets.");
+            if(dropped>0)plan.warnings.Add(sector+": "+dropped+" disconnected segments excluded.");
+            plan.notes.Add(sector+": "+plan.edges.Count(e=>e.sector==sector)+" street segments; local scaffold "+local.ToString("F0")+" m, "+nodes.Count+"/"+budget+" candidate nodes.");
+            index=new StreetIndex();
+            foreach(Edge e in plan.edges)index.Add(e);
+            ProposeLinks(sector,bounds,nodes.Where(n=>n.degree>0&&!n.gate&&n.degree<4).ToList(),index);
+        }
+
+        private bool TryStreet(Node a,Node b,Rect bounds,RoadKind kind,StreetIndex index,bool authored,out List<Vector3> points)
+        {
+            points=null;
+            Vector2 start=XZ(a.position),end=XZ(b.position);
+            float len=Vector2.Distance(start,end);
+            if(len<1f)return false;
+            Vector2 dir=(end-start).normalized,side=new Vector2(-dir.y,dir.x);
+            var style=StreetStyle((start+end)*.5f);
+            float bend=Mathf.Min(len*.13f,22f)*settings.curve*style.bend;
+            if(kind==RoadKind.Arterial)bend*=.22f;
+            if(kind==RoadKind.Collector)bend*=.6f;
+            if(Next()<.5f)bend=-bend;
+            bool straight=kind==RoadKind.Arterial||Next()<settings.straightPreference;
+            foreach(float offset in straight?new[]{0f,bend,-bend,bend*2f,-bend*2f}:new[]{bend,-bend,0f,bend*2f,-bend*2f})
+            {
+                int steps=Mathf.Max(2,Mathf.CeilToInt(len/3f));
+                var path=new List<Vector3>(steps+1);bool valid=true;
+                for(int i=0;i<=steps;i++)
+                {
+                    float t=(float)i/steps;
+                    Vector2 pos=Vector2.Lerp(start,end,t)+side*(4f*t*(1f-t)*offset);
+                    float fromAnchor=Vector2.Distance(pos,start);
+                    if(!Contains(bounds,pos,-RoadClearance)||
+                        (!(authored&&fromAnchor<=55f)&&IsProtected(pos,RoadClearance))||
+                        (!(authored&&fromAnchor<=RoadClearance*2.2f)&&obstacles.Near(pos,authored?RoadClearance*1.4f:RoadClearance*2f))||
+                        !plan.layout.TryHeight(pos,out float ground))
+                    {valid=false;break;}
+                    path.Add(XYZ(pos,ground+.12f));
+                }
+                if(!valid)continue;
+                path[0]=a.position;path[path.Count-1]=b.position;
+                if(!SolveElevation(path)||!StreetAngles(a,b,path,index)||StreetCrosses(a,b,path,index))continue;
+                if(authored&&!ProtectedSurfaceOk(path))continue;
+                points=path;return true;
+            }
+            return false;
+        }
+
+        private bool StreetAngles(Node a,Node b,List<Vector3> path,StreetIndex index)
+        {
+            foreach(Node n in new[]{a,b})
+            {
+                Vector2 dir=n==a?XZ(path[1]-path[0]).normalized:XZ(path[path.Count-2]-path[path.Count-1]).normalized;
+                foreach(Edge e in index.At(n))
+                {
+                    Vector2 old=e.a==n?XZ(e.points[1]-e.points[0]).normalized:XZ(e.points[e.points.Count-2]-e.points[e.points.Count-1]).normalized;
+                    if(Vector2.Angle(dir,old)<(e.Bridge?100f:48f))return false;
+                }
+            }
+            return true;
+        }
+
+        private bool StreetCrosses(Node a,Node b,List<Vector3> path,StreetIndex index)
+        {
+            float gap=RoadClearance*2f;
+            Rect box=BoundsOf(path,gap);
+            foreach(Edge e in index.Query(box))
+            {
+                if(!box.Overlaps(BoundsOf(e.points,gap)))continue;
+                Node shared=e.a==a||e.b==a?a:e.a==b||e.b==b?b:null;
+                for(int i=0;i<path.Count;i++)
+                {
+                    Vector2 pos=XZ(path[i]);
+                    if(shared!=null&&Vector2.Distance(pos,XZ(shared.position))<gap*1.6f)continue;
+                    for(int j=1;j<e.points.Count;j++)
+                        if(DistanceSquared(pos,XZ(e.points[j-1]),XZ(e.points[j]))<gap*gap)return true;
+                }
+            }
+            return false;
+        }
+
+        private sealed class LinkCandidate
+        {
+            public Vector3 position;
+            public Node target;
+            public float score;
+        }
+
+        // Green proposals are deliberately separate from the graph; no manual road is split in preview.
+        private void ProposeLinks(string sector,Rect bounds,List<Node> targets,StreetIndex index)
+        {
+            if(settings.authoredLinkTarget<=0||targets.Count==0)return;
+            var links=new List<LinkCandidate>();bool hasManual=false;
+            foreach(var road in manualRoads)
+            {
+                if(!Contains(bounds,XZ(road.GetPoint(.5f))))continue;
+                hasManual=true;
+                float length=road.GetTotalLength();
+                int count=Mathf.Max(1,Mathf.CeilToInt(length/18f));
+                for(int i=0;i<=count;i++)
+                {
+                    float t=road.DistanceToT(length*i/count);
+                    Vector3 point=road.GetPoint(t);Vector2 pos=XZ(point);
+                    if(!Contains(bounds,pos,-RoadClearance)||protectedAreas.Any(r=>Contains(r,pos,-45f)))continue;
+                    Vector2 tangent=XZ(road.GetTangent(t)).normalized;
+                    foreach(Node target in targets.OrderBy(n=>(XZ(n.position)-pos).sqrMagnitude).Take(5))
+                    {
+                        Vector2 delta=XZ(target.position)-pos;
+                        float dist=delta.magnitude;
+                        if(dist<RoadClearance*2.5f||dist>Mathf.Max(260f,settings.spacing*3f))continue;
+                        float angle=Vector2.Angle(tangent,delta);
+                        bool endpoint=i==0||i==count;
+                        if(!endpoint&&(angle<55f||angle>125f))continue;
+                        links.Add(new LinkCandidate{position=point,target=target,score=dist+(endpoint?0f:10f)+Mathf.Abs(point.y-target.position.y)*3f});
+                    }
+                }
+            }
+            if(!hasManual)return;
+            int made=0,attempts=0;
+            foreach(LinkCandidate link in links.OrderBy(c=>c.score))
+            {
+                if(made>=settings.authoredLinkTarget||attempts>=250)break;
+                if(plan.authoredLinks.Any(e=>e.sector==sector&&(Vector2.Distance(XZ(e.a.position),XZ(link.position))<85f||e.b==link.target)))continue;
+                attempts++;
+                Node anchor=new Node{id=-1,sector=sector,position=link.position};
+                if(!TryStreet(anchor,link.target,bounds,RoadKind.AuthoredLink,index,true,out List<Vector3> path))continue;
+                var proposal=new Edge{a=anchor,b=link.target,points=path,sector=sector,kind=RoadKind.AuthoredLink};
+                plan.authoredLinks.Add(proposal);index.Add(proposal);made++;
+            }
+            string report=sector+": "+made+"/"+settings.authoredLinkTarget+" existing-road connection proposals (green; preview only).";
+            if(made<settings.authoredLinkTarget)plan.warnings.Add(report);else plan.notes.Add(report);
         }
 
         private void PlanCity(string sector, Rect bounds)
@@ -816,7 +1185,7 @@ namespace DeliveryDriver.EditorTools
         }
         private void AddEdge(Node a, Node b, List<Vector3> points, string sector)
         {
-            plan.edges.Add(new Edge { a = a, b = b, points = points, sector = sector });
+            plan.edges.Add(new Edge { a = a, b = b, points = points, sector = sector, kind = sector == "Highways" ? RoadKind.Bridge : RoadKind.Local });
             a.degree++; b.degree++;
         }
         private float Next() => (float)random.NextDouble();
