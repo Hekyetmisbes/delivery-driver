@@ -12,7 +12,7 @@ namespace DeliveryDriver.EditorTools
     {
         internal sealed class Settings
         {
-            public int seed = 4281;
+            public int seed = 4281, maxNodesPerCity = 170;
             public float spacing = 110f, width = 8.5f, sidewalk = 2.2f, grade = 0.10f;
             public float maxCutFill = 6f, blend = 10f, seaY, bridgeClearance = 8f;
             public float curve = 0.65f, loops = 0.55f;
@@ -82,6 +82,8 @@ namespace DeliveryDriver.EditorTools
             public readonly List<Node> nodes = new List<Node>();
             public readonly List<Edge> edges = new List<Edge>();
             public readonly List<string> warnings = new List<string>();
+            public readonly List<Rect> protectedAreas = new List<Rect>();
+            public Func<Vector2, float, bool> manualRoadNear;
             public int BridgeCount => edges.Count(e => e.Bridge);
         }
 
@@ -219,6 +221,8 @@ namespace DeliveryDriver.EditorTools
         internal static Plan Build(Settings settings, Layout layout, Scene scene)
         {
             var planner = new ProceduralWorldPlanner(settings, layout, scene);
+            planner.plan.protectedAreas.AddRange(planner.protectedAreas);
+            planner.plan.manualRoadNear = planner.obstacles.Near;
             if (settings.bridges && settings.buildAnkara && settings.buildIstanbul)
                 planner.PlanBridges();
             if (settings.buildAnkara) planner.PlanCity("Ankara", layout.Ankara(settings.ankaraLow));
@@ -296,7 +300,7 @@ namespace DeliveryDriver.EditorTools
         private void PlanCity(string sector, Rect bounds)
         {
             var nodes = plan.nodes.Where(n => n.sector == sector).ToList();
-            float spacing = Mathf.Max(settings.spacing, Mathf.Sqrt(bounds.width * bounds.height / 170f));
+            float spacing = Mathf.Max(settings.spacing, Mathf.Sqrt(bounds.width * bounds.height / settings.maxNodesPerCity));
             if (spacing > settings.spacing + 1f)
                 plan.warnings.Add(sector + ": spacing increased to " + spacing.ToString("F0") + " m for MVP road budget.");
             float inset = RoadClearance + 3f;
@@ -306,7 +310,7 @@ namespace DeliveryDriver.EditorTools
                 if (Contains(bounds, p, -inset) && CanPlaceNode(p, nodes, spacing * .55f))
                     nodes.Add(AddLandNode(p, sector));
             }
-            int target = Mathf.Clamp(Mathf.RoundToInt(bounds.width * bounds.height / (spacing * spacing)), 8, 170);
+            int target = Mathf.Clamp(Mathf.RoundToInt(bounds.width * bounds.height / (spacing * spacing)), 8, settings.maxNodesPerCity);
             for (int i = 0; i < target * 45 && nodes.Count < target; i++)
             {
                 Vector2 p = new Vector2(Mathf.Lerp(bounds.xMin + inset, bounds.xMax - inset, Next()),
@@ -497,10 +501,25 @@ namespace DeliveryDriver.EditorTools
                 path[0] = a.position;
                 path[path.Count - 1] = b.position;
                 if (!SolveElevation(path) || !AnglesOk(a, b, path) || CrossesRoad(a, b, path)) continue;
+                if (!ProtectedSurfaceOk(path)) continue;
                 points = path;
                 return true;
             }
             return false;
+        }
+
+        private bool ProtectedSurfaceOk(List<Vector3> path)
+        {
+            for (int i = 0; i < path.Count; i++)
+            {
+                Vector2 p = XZ(path[i]);
+                if (!IsProtected(p, RoadClearance) && !obstacles.Near(p, RoadClearance * 2f)) continue;
+                Vector2 tangent = XZ(path[Mathf.Min(i + 1, path.Count - 1)]) - XZ(path[Mathf.Max(0, i - 1)]);
+                Vector2 right = new Vector2(-tangent.y, tangent.x).normalized;
+                for (int side = -1; side <= 1; side++)
+                    if (!plan.layout.TryHeight(p + right * side * settings.width * .5f, out float ground) || ground > path[i].y + .02f) return false;
+            }
+            return true;
         }
 
         private bool SolveElevation(List<Vector3> path)
