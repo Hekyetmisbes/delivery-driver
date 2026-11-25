@@ -24,6 +24,7 @@ namespace DeliveryDriver.EditorTools
             public bool connected;
             public string message;
         }
+        [Serializable]
         internal sealed class UrbanArea
         {
             public AreaKind kind;
@@ -34,6 +35,7 @@ namespace DeliveryDriver.EditorTools
             public string prefab;
             public float frontage, depth, foundationRelief, accessGrade;
         }
+        [Serializable]
         internal sealed class AnalysisLine
         {
             public Vector3 a, b;
@@ -346,7 +348,7 @@ namespace DeliveryDriver.EditorTools
             BuildAnalysisLines();
             BuildEarthworkLines();
             BuildParcels();
-            if(settings.qualityDesign) EvaluateOpenSpaceAccess();
+            if(settings.qualityDesign) { EvaluateOpenSpaceAccess(); BuildGradingZones(); }
             ValidateUrbanPlan();
             foreach(var anchor in settings.accessAnchors)
             {
@@ -498,7 +500,7 @@ namespace DeliveryDriver.EditorTools
                             if(sectorCount>=perCity)break;
                             float halfWidth=10f,depth=22f;
                             if(StreetStyle(p).density<.65f){halfWidth=14f;depth=30f;}
-                            var model=catalog==null?default:catalog.Where(m=>m.size.x<=halfWidth*2f && m.size.y<=depth)
+                            (string name,Vector2 size) model=catalog==null?default:catalog.Where(m=>m.size.x+2f<=halfWidth*2f && m.size.y+2f<=depth)
                                 .OrderByDescending(m=>m.size.x*m.size.y).FirstOrDefault();
                             if(catalog!=null && catalog.Count>0 && string.IsNullOrEmpty(model.name))continue;
                             if(!string.IsNullOrEmpty(model.name)){halfWidth=Mathf.Max(3f,model.size.x*.5f+1f);depth=Mathf.Max(6f,model.size.y+2f);}

@@ -174,10 +174,10 @@ namespace DeliveryDriver.EditorTools
         private readonly List<Rect> protectedAreas = new List<Rect>();
         private readonly List<SplineRoad> manualRoads = new List<SplineRoad>();
 
-        private ProceduralWorldPlanner(Settings settings, Layout layout, Scene scene)
+        private ProceduralWorldPlanner(Settings settings, Layout layout, Scene scene, Plan existingPlan = null)
         {
             this.settings = settings;
-            plan = new Plan { layout = layout };
+            plan = existingPlan ?? new Plan { layout = layout };
             random = new System.Random(settings.seed);
             foreach (GameObject root in scene.GetRootGameObjects())
             {
@@ -281,6 +281,7 @@ namespace DeliveryDriver.EditorTools
             return layout;
         }
 
+        [Serializable]
         internal sealed class TerrainAnalysisCell
         {
             public Rect area;
@@ -298,6 +299,7 @@ namespace DeliveryDriver.EditorTools
         internal static Plan AnalyzeOnly(Settings settings, Layout layout, Scene scene)
         {
             var planner = new ProceduralWorldPlanner(settings, layout, scene);
+            layout.rawTerrainCache.Clear();
             planner.AnalyzeTerrain();
             planner.BuildAnalysisLines();
             return planner.plan;
@@ -582,10 +584,25 @@ namespace DeliveryDriver.EditorTools
                 .OrderBy(x => Mathf.Min(Mathf.Abs((x - min) / span - .18f), Mathf.Abs((x - min) / span - .82f)))
                 .ToList();
             float[] depths = { .08f, .16f, .26f, .38f, .52f, .68f, .82f };
-            int protectedPrefilter=0;
+            int protectedPrefilter=0, curvedAttempts=0, curvedAccepted=0;
             var depthPairs = (from low in depths from high in depths
                               orderby low + high, Mathf.Max(low, high)
                               select (low, high)).ToList();
+            void Consider(List<Vector3> path, float candidateMin, float candidateMax)
+            {
+                var candidate = new BridgeCandidate { path=path, acrossMin=candidateMin, acrossMax=candidateMax,
+                    score=settings.urbanDesign?BridgeApproachCost(path):0f };
+                foreach(var partner in accepted)
+                {
+                    float gap=Mathf.Max(candidate.acrossMin-partner.acrossMax,partner.acrossMin-candidate.acrossMax);
+                    if(gap<separation)continue;
+                    float score=gap-(candidate.score+partner.score)*(settings.qualityDesign&&settings.urbanDesign?.035f:.18f);
+                    if(settings.urbanDesign&&gap>=desiredGap)score+=span;
+                    if(settings.urbanDesign?score<=bestPairScore:gap<=bestGap)continue;
+                    bestPairScore=score;bestGap=gap;bestA=partner;bestB=candidate;
+                }
+                accepted.Add(candidate);
+            }
             // First test perpendicular crossings, then diagonals to reach a free corridor
             // when one city's coastline is blocked by existing content.
             foreach (float diagonal in (settings.qualityDesign && settings.urbanDesign ? new[]{0f,.07f,-.07f,.15f,-.15f,.25f,-.25f,.36f,-.36f} : new[] { 0f, .07f, -.07f, .15f, -.15f, .25f, -.25f }))
@@ -613,33 +630,42 @@ namespace DeliveryDriver.EditorTools
                             failures[(int)rejection]++;
                             continue;
                         }
-                        var candidate = new BridgeCandidate { path = path, acrossMin = candidateMin, acrossMax = candidateMax,
-                            score = settings.urbanDesign ? BridgeApproachCost(path) : 0f };
-                        // Disjoint lateral envelopes guarantee that the two straight crossings
-                        // and their approach ramps cannot cross each other.
-                        foreach (BridgeCandidate partner in accepted)
-                        {
-                            float gap = Mathf.Max(candidate.acrossMin - partner.acrossMax,
-                                partner.acrossMin - candidate.acrossMax);
-                            if (gap < separation) continue;
-                            float score = gap - (candidate.score + partner.score) * (settings.qualityDesign && settings.urbanDesign?.035f:.18f);
-                            // Meeting the requested separation takes precedence over approach cost.
-                            if (settings.urbanDesign && gap >= desiredGap) score += span;
-                            if (settings.urbanDesign ? score <= bestPairScore : gap <= bestGap) continue;
-                            bestPairScore = score; bestGap = gap; bestA = partner; bestB = candidate;
-                        }
-                        accepted.Add(candidate);
+                        Consider(path,candidateMin,candidateMax);
                         if (!settings.urbanDesign || ++feasibleAtLane >= 3) break;
                     }
                 }
                 if (bestGap >= desiredGap && (!settings.urbanDesign || Mathf.Abs(diagonal) >= .07f)) break;
+            }
+            // Try bowed land-only approaches at well separated shoreline lanes.
+            // The sea segment remains straight. Full sampled corridor and actual
+            // per-segment grade are checked before accepting any alternative.
+            if(settings.qualityDesign&&settings.urbanDesign&&bestGap<desiredGap)
+            {
+                foreach(float across in lanes.OrderBy(v=>Mathf.Min(v-min,min+span-v)).Take(16))
+                {
+                    foreach(float depth in new[]{.16f,.26f,.38f})
+                    foreach(float bow in new[]{120f,-120f,240f,-240f})
+                    {
+                        if(curvedAttempts>=192)break;
+                        curvedAttempts++;
+                        if(curvedAttempts%16==0&&EditorUtility.DisplayCancelableProgressBar("Procedural World","Alternative bridge approaches "+curvedAttempts,.09f))throw new OperationCanceledException();
+                        Vector2 a=l.Point(l.AlongMax(l.low)-Mathf.Clamp(lowDepth*depth,margin,lowDepth-margin),across);
+                        Vector2 b=l.Point(l.AlongMin(l.high)+Mathf.Clamp(highDepth*depth,margin,highDepth-margin),across);
+                        float lowBow=settings.ankaraLow?bow:0f,highBow=settings.ankaraLow?0f:bow;
+                        if(!TryBridge(a,b,out List<Vector3> path,out BridgeRejection rejected,lowBow,highBow)){failures[(int)rejected]++;continue;}
+                        if(!RadiusOk(path,RoadKind.Arterial))continue;
+                        float cmin=path.Min(v=>l.rowsOnX?v.z:v.x),cmax=path.Max(v=>l.rowsOnX?v.z:v.x);
+                        Consider(path,cmin,cmax);curvedAccepted++;
+                    }
+                    if(bestGap>=desiredGap)break;
+                }
             }
             if (bestA != null)
             {
                 AddBridge(bestA.path); AddBridge(bestB.path);
                 string report = "Bridge separation: " + bestGap.ToString("F0") + " m (" +
                     (bestGap / span * 100f).ToString("F0") + "% of shoreline), " + attempts + " candidates.";
-                if(settings.qualityDesign && settings.urbanDesign)report += " Protected prefilter: "+protectedPrefilter+"; rejected protected/existing/grade: "+failures[(int)BridgeRejection.ProtectedDistrict]+"/"+failures[(int)BridgeRejection.ExistingRoad]+"/"+failures[(int)BridgeRejection.GradeOrHeight]+".";
+                if(settings.qualityDesign && settings.urbanDesign)report += " Curved approach candidates "+curvedAccepted+"/"+curvedAttempts+". Protected prefilter: "+protectedPrefilter+"; rejected protected/existing/grade: "+failures[(int)BridgeRejection.ProtectedDistrict]+"/"+failures[(int)BridgeRejection.ExistingRoad]+"/"+failures[(int)BridgeRejection.GradeOrHeight]+".";
                 if (bestGap < desiredGap) plan.warnings.Add(report + " Target separation unavailable.");
                 else plan.notes.Add(report);
                 return;
@@ -664,7 +690,7 @@ namespace DeliveryDriver.EditorTools
             AddEdge(first, last, path, "Highways");
         }
 
-        private bool TryBridge(Vector2 a, Vector2 b, out List<Vector3> points, out BridgeRejection rejection)
+        private bool TryBridge(Vector2 a, Vector2 b, out List<Vector3> points, out BridgeRejection rejection, float lowBow=0f, float highBow=0f)
         {
             points = null;
             rejection = BridgeRejection.MissingLand;
@@ -675,16 +701,37 @@ namespace DeliveryDriver.EditorTools
             if (length < 1f) return false;
             Vector2 right = new Vector2(-delta.y, delta.x).normalized;
             float halfWidth = settings.width * .5f + settings.sidewalk;
-            int steps = Mathf.Max(2, Mathf.CeilToInt(length / 2.5f));
+            bool curved=Mathf.Abs(lowBow)+Mathf.Abs(highBow)>.001f;
+            int steps = Mathf.Max(2, Mathf.CeilToInt((length+2f*(Mathf.Abs(lowBow)+Mathf.Abs(highBow))) / 2.5f));
             float step = length / steps;
+            Vector2 Position(float t)
+            {
+                Vector2 pos=Vector2.Lerp(a,b,t);
+                if(!curved)return pos;
+                float along=l.rowsOnX?pos.x:pos.y, start=l.rowsOnX?a.x:a.y, end=l.rowsOnX?b.x:b.y;
+                float bow=0f;
+                // sin^2 gives a continuous tangent where the land ramp meets the sea.
+                if(along<l.AlongMax(l.low))bow=lowBow*Mathf.Pow(Mathf.Sin(Mathf.PI*Mathf.InverseLerp(start,l.AlongMax(l.low),along)),2f);
+                else if(along>l.AlongMin(l.high))bow=highBow*Mathf.Pow(Mathf.Sin(Mathf.PI*Mathf.InverseLerp(l.AlongMin(l.high),end,along)),2f);
+                return pos+(l.rowsOnX?Vector2.up:Vector2.right)*bow;
+            }
             var lower = new float[steps + 1];
             var upper = new float[steps + 1];
             var preferred = new float[steps + 1];
             var positions = new Vector2[steps + 1];
+            var rises = new float[steps+1];
+            for(int i=0;i<=steps;i++)positions[i]=Position(i/(float)steps);
             for (int i = 0; i <= steps; i++)
             {
-                Vector2 p = Vector2.Lerp(a, b, i / (float)steps);
-                positions[i] = p;
+                Vector2 p=positions[i];
+                if(i>0)rises[i]=(curved?Vector2.Distance(positions[i-1],p):step)*settings.grade;
+                if(curved)
+                {
+                    Vector2 tangent=(positions[Mathf.Min(i+1,steps)]-positions[Mathf.Max(i-1,0)]).normalized;
+                    right=new Vector2(-tangent.y,tangent.x);
+                    if(i>0&&protectedAreas.Any(r=>SegmentHitsRect(positions[i-1],p,r,RoadClearance)))
+                    {rejection=BridgeRejection.ProtectedDistrict;return false;}
+                }
                 if (IsProtected(p, RoadClearance))
                 {
                     rejection = BridgeRejection.ProtectedDistrict;
@@ -738,17 +785,16 @@ namespace DeliveryDriver.EditorTools
             if (yA + .001f < lower[0] || yB + .001f < lower[steps]) return false;
             lower[0] = upper[0] = yA;
             lower[steps] = upper[steps] = yB;
-            float rise = step * settings.grade;
             for (int i = 1; i <= steps; i++)
             {
-                lower[i] = Mathf.Max(lower[i], lower[i - 1] - rise);
-                upper[i] = Mathf.Min(upper[i], upper[i - 1] + rise);
+                lower[i] = Mathf.Max(lower[i], lower[i - 1] - rises[i]);
+                upper[i] = Mathf.Min(upper[i], upper[i - 1] + rises[i]);
                 if (lower[i] > upper[i] + .0001f) return false;
             }
             for (int i = steps - 1; i >= 0; i--)
             {
-                lower[i] = Mathf.Max(lower[i], lower[i + 1] - rise);
-                upper[i] = Mathf.Min(upper[i], upper[i + 1] + rise);
+                lower[i] = Mathf.Max(lower[i], lower[i + 1] - rises[i+1]);
+                upper[i] = Mathf.Min(upper[i], upper[i + 1] + rises[i+1]);
                 if (lower[i] > upper[i] + .0001f) return false;
             }
 
@@ -763,8 +809,8 @@ namespace DeliveryDriver.EditorTools
             for (int i = 1; i < steps; i++)
             {
                 float last = result[i - 1].y;
-                float lo = Mathf.Max(lower[i], last - rise);
-                float hi = Mathf.Min(upper[i], last + rise);
+                float lo = Mathf.Max(lower[i], last - rises[i]);
+                float hi = Mathf.Min(upper[i], last + rises[i]);
                 if (lo > hi + .0001f) return false;
                 float y = Mathf.Clamp(preferred[i], lo, Mathf.Max(lo, hi));
                 result.Add(XYZ(positions[i], y));

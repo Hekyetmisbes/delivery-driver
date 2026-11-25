@@ -26,6 +26,7 @@ namespace DeliveryDriver.EditorTools
         // If it cannot produce a plan, invoke its original fallback workflow.
         internal static Plan Build(Settings settings,Layout layout,Scene scene)
         {
+            layout.rawTerrainCache.Clear();
             if(!settings.qualityDesign||!settings.urbanDesign)
             {
                 bool old=settings.qualityDesign;settings.qualityDesign=false;
@@ -61,17 +62,19 @@ namespace DeliveryDriver.EditorTools
                     candidate.accessResults.Count(x=>x.connected)<baseline.accessResults.Count(x=>x.connected))regressions.Add("existing-road access");
                 if(candidate.detachedEdges.Count>baseline.detachedEdges.Count)regressions.Add("detached streets");
                 if(a.roadKm<b.roadKm*.75f)regressions.Add("network length");
+                if(a.bridgeGap+1f<b.bridgeGap)regressions.Add("bridge separation");
                 if(a.extraFraction>b.extraFraction+.01f||a.peak>b.peak+.25f||
                     a.meanCut+a.meanFill>b.meanCut+b.meanFill+.10f)regressions.Add("earthworks");
             }
             string compare=candidate!=null&&baseline!=null?
                 "V6 / V7 Ankara sampled grading: "+EarthworkSummary(baseline,"Ankara",settings)+" / "+EarthworkSummary(candidate,"Ankara",settings)+
-                "; quality "+baseline.quality.score.ToString("F1")+" / "+candidate.quality.score.ToString("F1")+".":null;
+                ". Baseline parcel/park fit was not screened with V7 rules; quality scores are not directly comparable.":null;
             Plan selected=baseline!=null&&regressions.Count>0?baseline:candidate;
             if(selected==null)throw error??new InvalidOperationException("No quality preview.");
             if(selected==baseline)
             {
-                selected.version="V6 fallback";
+                selected.version=selected.version.StartsWith("V6")?"V6 fallback":selected.version+" (V7 fallback)";
+                selected.warnings.Add("Fallback uses baseline road geometry and unscreened V6 parcel/park data; V7 score is diagnostic only.");
                 selected.warnings.Insert(0,"V7 guard rejected candidate: "+string.Join(", ",regressions)+". Disable Preserve V6 quality to inspect V7.");
             }
             else selected.notes.Insert(0,baseline!=null?"V7 passed V6 quality guard (same-seed raw V6 comparison).":"V7 candidate without baseline comparison.");
@@ -249,12 +252,24 @@ namespace DeliveryDriver.EditorTools
             plan.notes.Add("V7 geometry cleanup: "+pruned+" short non-essential local stubs removed; road class targets are by length, backbone protected.");
         }
 
+        private void BuildGradingZones()
+        {
+            plan.gradingZones.Clear();
+            foreach(var line in plan.earthworks)
+            {
+                float magnitude=Mathf.Abs(line.value);
+                int band=magnitude<=3f?0:magnitude<=settings.maxCutFill?1:magnitude<=10f?2:magnitude<=settings.preferredGrading?3:4;
+                plan.gradingZones.Add(new AnalysisLine{a=line.a,b=line.b,value=band});
+            }
+        }
+
         private void EvaluateOpenSpaceAccess()
         {
             var index=new StreetIndex();
             foreach(var e in plan.edges.Where(e=>!e.Bridge))index.Add(e);
             foreach(var space in plan.openSpaces)
             {
+                space.accessible=false;
                 Rect r=space.bounds;const float reach=55f;
                 Rect query=Rect.MinMaxRect(r.xMin-reach,r.yMin-reach,r.xMax+reach,r.yMax+reach);
                 foreach(var e in index.Query(query).Where(e=>e.sector==space.sector))
@@ -284,7 +299,7 @@ namespace DeliveryDriver.EditorTools
         {
             var q=new QualityReport();
             q.ankaraTiles=Coverage(p,"Ankara");q.istanbulTiles=Coverage(p,"İstanbul");
-            q.bridgeGraphConnected=GatesConnected(p);
+            q.bridgeGraphConnected=GatesConnected(p) && (!s.bridges||!s.buildAnkara||!s.buildIstanbul||p.BridgeCount==2);
             double cut=0,fill=0,extra=0,total=0;
             int nonBridge=0;
             foreach(var e in p.edges)
