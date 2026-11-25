@@ -178,6 +178,11 @@ namespace DeliveryDriver.EditorTools
                 var samples=new[]{r.center,new Vector2(r.xMin,r.yMin),new Vector2(r.xMax,r.yMin),
                     new Vector2(r.xMax,r.yMax),new Vector2(r.xMin,r.yMax)};
                 if(samples.Any(p=>obstacles.Near(p,RoadClearance*2f)))continue;
+                bool authoredOverlap=false;
+                for(float x=r.xMin;x<=r.xMax&&!authoredOverlap;x+=12f)
+                for(float z=r.yMin;z<=r.yMax;z+=12f)
+                    if(obstacles.Near(new Vector2(x,z),RoadClearance*2f)){authoredOverlap=true;break;}
+                if(authoredOverlap)continue;
                 // Reserve steep interior blocks as green space; occasional flatter plaza.
                 var cell=AnalysisAt(r.center);
                 float slope=cell?.slope??0f;
@@ -256,7 +261,7 @@ namespace DeliveryDriver.EditorTools
                         // options. Geometry checks prevent overlapping junction approaches.
                         if(cell!=null&&cell.slope>.04f&&settings.urbanMode!=UrbanMode.DistrictBased)
                             foreach(var offset in new[]{new Vector2Int(1,1),new Vector2Int(1,-1)})
-                                if(interior.TryGetValue(pair.Key+offset,out Node other))add(pair.Value,other,RoadKind.Local);
+                                if(interior.TryGetValue(pair.Key+offset,out Node diagonal))add(pair.Value,diagonal,RoadKind.Local);
                         Node n=pair.Value;
                         foreach(Node b in boundary.Where(b=>Contains(block,XZ(b.position),local*.35f))
                             .OrderBy(b=>Vector2.Distance(XZ(b.position),XZ(n.position))+
@@ -407,9 +412,14 @@ namespace DeliveryDriver.EditorTools
                 for(int z=Mathf.FloorToInt(r.yMin/cellSize);z<=Mathf.FloorToInt(r.yMax/cellSize);z++)
                     yield return new Vector2Int(x,z);
             }
+            var counts=new Dictionary<string,int>();
+            int perCity=settings.buildAnkara&&settings.buildIstanbul?1500:3000;
             foreach(var e in plan.edges.Where(e=>!e.Bridge).OrderBy(e=>e.kind==RoadKind.Local?0:1).ThenBy(e=>e.a.id))
             {
                 if(plan.parcels.Count>=3000)break;
+                counts.TryGetValue(e.sector,out int sectorCount);
+                if(sectorCount>=perCity)continue;
+                Rect city=e.sector=="Ankara"?plan.layout.Ankara(settings.ankaraLow):plan.layout.Istanbul(settings.ankaraLow);
                 float distance=0f,next=24f;
                 for(int i=1;i<e.points.Count&&plan.parcels.Count<3000;i++)
                 {
@@ -422,6 +432,7 @@ namespace DeliveryDriver.EditorTools
                         Vector2 forward=XZ(b-a).normalized, right=new Vector2(-forward.y,forward.x);
                         foreach(int sign in new[]{-1,1})
                         {
+                            if(sectorCount>=perCity)break;
                             float halfWidth=10f,depth=22f;
                             if(StreetStyle(p).density<.65f){halfWidth=14f;depth=30f;}
                             Vector2 front=p+right*sign*(RoadClearance+4f);
@@ -429,7 +440,7 @@ namespace DeliveryDriver.EditorTools
                             var corners=new[]{front-forward*halfWidth,front+forward*halfWidth,
                                 back+forward*halfWidth,back-forward*halfWidth};
                             Rect box=Rect.MinMaxRect(corners.Min(v=>v.x),corners.Min(v=>v.y),corners.Max(v=>v.x),corners.Max(v=>v.y));
-                            if(plan.openSpaces.Any(r=>r.bounds.Overlaps(box))||protectedAreas.Any(r=>r.Overlaps(box)))continue;
+                            if(corners.Any(q=>!Contains(city,q,0f))||plan.openSpaces.Any(r=>r.bounds.Overlaps(box))||protectedAreas.Any(r=>r.Overlaps(box)))continue;
                             if(Cells(box).Any(k=>occupied.TryGetValue(k,out List<Rect> list)&&list.Any(r=>r.Overlaps(box))))continue;
                             var samples=corners.Concat(new[]{(front+back)*.5f,(corners[0]+corners[1])*.5f,
                                 (corners[2]+corners[3])*.5f,(corners[1]+corners[2])*.5f,(corners[0]+corners[3])*.5f}).ToList();
@@ -454,7 +465,7 @@ namespace DeliveryDriver.EditorTools
                                 box.xMax+RoadClearance,box.yMax+RoadClearance)).Any(r=>r.points.Any(q=>Contains(box,XZ(q),RoadClearance))))continue;
                             var lot=new UrbanArea{kind=AreaKind.BuildingLot,sector=e.sector,district=DistrictName(p,e.sector),
                                 bounds=box,corners=corners.Select(q=>{plan.layout.TryHeight(q,out float y);return XYZ(q,y+.5f);}).ToArray()};
-                            plan.parcels.Add(lot);
+                            plan.parcels.Add(lot);sectorCount++;counts[e.sector]=sectorCount;
                             foreach(var k in Cells(box))
                             {if(!occupied.TryGetValue(k,out List<Rect> list))occupied[k]=list=new List<Rect>();list.Add(box);}
                         }

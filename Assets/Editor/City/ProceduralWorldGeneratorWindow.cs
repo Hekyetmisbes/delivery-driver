@@ -28,6 +28,15 @@ namespace DeliveryDriver.EditorTools
         private bool showDetached = true;
         private bool showGrading = true, xrayPreview = true;
         private bool showTerrainAnalysis = false, analysisOnly = false;
+        private enum TerrainLayer { Slope, Elevation, Buildability, Contours, Seams, Earthworks }
+        private TerrainLayer terrainLayer = TerrainLayer.Slope;
+        private bool showParcels = false, showOpenSpaces = true, pickAnchor, fastPreview = true;
+        private SplineRoad anchorRoad;
+        private float anchorT = .5f;
+        private readonly Dictionary<int,Vector3[]> lineBatches = new Dictionary<int,Vector3[]>();
+        private readonly Dictionary<ProceduralWorldPlanner.TerrainAnalysisCell,Vector3[]> cellQuads = new Dictionary<ProceduralWorldPlanner.TerrainAnalysisCell,Vector3[]>();
+        private float elevationMin,elevationMax;
+        private List<(SplineRoad road,float t,Vector3 point)> anchorSamples;
         private bool busy;
 
         [MenuItem("Tools/Delivery Driver/City/Procedural World Generator", false, 1)]
@@ -41,12 +50,15 @@ namespace DeliveryDriver.EditorTools
         private void OnEnable()
         {
             SceneView.duringSceneGui += DrawPreview;
+            SceneView.duringSceneGui += PickAnchorInScene;
             Undo.undoRedoPerformed += OnUndoRedo;
         }
 
         private void OnDisable()
         {
             SceneView.duringSceneGui -= DrawPreview;
+            SceneView.duringSceneGui -= PickAnchorInScene;
+            anchorSamples=null;pickAnchor=false;
             Undo.undoRedoPerformed -= OnUndoRedo;
         }
 
@@ -62,7 +74,7 @@ namespace DeliveryDriver.EditorTools
         private void OnGUI()
         {
             scroll = EditorGUILayout.BeginScrollView(scroll);
-            EditorGUILayout.LabelField("Procedural World Generator V5 - Terrain Design Preview", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Procedural World Generator V6 - Urban Design Preview", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("Preview iteration only. No scene, mesh or terrain asset changes. Generation is intentionally locked until the road layout is approved.", MessageType.Info);
             using (new EditorGUI.DisabledScope(busy || EditorApplication.isPlayingOrWillChangePlaymode))
             {
@@ -101,6 +113,17 @@ namespace DeliveryDriver.EditorTools
                 settings.sidewalk = Mathf.Clamp(EditorGUILayout.FloatField("Sidewalk width (m)", settings.sidewalk), .5f, 3f);
 
                 EditorGUILayout.Space();
+                EditorGUILayout.LabelField("V6 Urban Design", EditorStyles.boldLabel);
+                settings.urbanDesign = EditorGUILayout.Toggle("Enable V6 urban design", settings.urbanDesign);
+                using (new EditorGUI.DisabledScope(!settings.urbanDesign))
+                {
+                    settings.urbanMode = (ProceduralWorldPlanner.UrbanMode)EditorGUILayout.EnumPopup("Planning mode", settings.urbanMode);
+                    settings.contourPreference = EditorGUILayout.Slider("Contour road preference", settings.contourPreference, 0f, 1f);
+                    settings.gradingOptimization = EditorGUILayout.Slider("Earthwork optimization", settings.gradingOptimization, 0f, 1f);
+                    settings.openSpaceFraction = EditorGUILayout.Slider("Open space target (%)", settings.openSpaceFraction*100f, 0f, 30f)/100f;
+                    settings.urbanGuard = EditorGUILayout.Toggle("Preserve V5 coverage", settings.urbanGuard);
+                }
+                EditorGUILayout.HelpBox("V6 separates neighborhood streets inside the major-road framework. Open-space area and access count are targets, not guarantees. Guard can select V5 if connectivity or coverage regresses.", MessageType.Info);
                 EditorGUILayout.LabelField("Terrain intelligence", EditorStyles.boldLabel);
                 settings.terrainDesign = EditorGUILayout.Toggle("Terrain-adaptive city design", settings.terrainDesign);
                 using (new EditorGUI.DisabledScope(!settings.terrainDesign))
@@ -131,6 +154,7 @@ namespace DeliveryDriver.EditorTools
                     preview = null;
                     SceneView.RepaintAll();
                 }
+                DrawAnchorControls();
                 showPreview = EditorGUILayout.Toggle("Show Scene View preview", showPreview);
                 EditorGUI.BeginChangeCheck();
                 xrayPreview = EditorGUILayout.Toggle("X-ray road preview", xrayPreview);
@@ -141,20 +165,39 @@ namespace DeliveryDriver.EditorTools
                 showLinks = EditorGUILayout.Toggle("Existing-road proposals (green)", showLinks);
                 showDetached = EditorGUILayout.Toggle("Detached roads (purple)", showDetached);
                 showGrading = EditorGUILayout.Toggle("Extra grading markers (red)", showGrading);
-                showTerrainAnalysis = EditorGUILayout.Toggle("Terrain slope map", showTerrainAnalysis);
+                showTerrainAnalysis = EditorGUILayout.Toggle("Show terrain analysis layer", showTerrainAnalysis);
+                terrainLayer = (TerrainLayer)EditorGUILayout.EnumPopup("Analysis layer", terrainLayer);
+                showOpenSpaces = EditorGUILayout.Toggle("Park / plaza reservations", showOpenSpaces);
+                showParcels = EditorGUILayout.Toggle("Building lot preview", showParcels);
+                fastPreview = EditorGUILayout.Toggle("Fast overview rendering", fastPreview);
                 if (EditorGUI.EndChangeCheck()) SceneView.RepaintAll();
 
                 EditorGUILayout.Space();
                 if (GUILayout.Button("Analyze Terrain (read only)", GUILayout.Height(28f))) Run(AnalyzeOnly);
                 if (GUILayout.Button("Preview Layout (no scene changes)", GUILayout.Height(32f))) Run(PlanOnly);
                 if (showTerrainAnalysis)
-                    EditorGUILayout.HelpBox("Slope map: green = ground slope under half the selected grade, amber = between half and the grade, red = above it. Gray = protected or near authored road. Raw terrain, not road feasibility.", MessageType.Info);
+                {
+                    string legend = terrainLayer == TerrainLayer.Slope ? "Slope: green < half grade, amber < selected grade, red above. Gray protected." :
+                        terrainLayer == TerrainLayer.Elevation ? "Elevation: blue low, tan high (combined land range)." :
+                        terrainLayer == TerrainLayer.Buildability ? "Buildability screening: green gentle/smooth, amber moderate, red steep/rough, gray protected. Not a foundation certification." :
+                        terrainLayer == TerrainLayer.Contours ? "Contours: 10 m interval, sampled independently per terrain tile." :
+                        terrainLayer == TerrainLayer.Seams ? "Seams: green <=1 m, orange <=6 m, red >6 m sampled height discontinuity." :
+                        "Earthworks: red cut, blue fill; brighter = beyond ordinary road grading budget. Available after V6 road preview.";
+                    EditorGUILayout.HelpBox(legend, MessageType.Info);
+                }
                 if (preview != null && analysisOnly)
                 {
                     foreach (string note in preview.notes) EditorGUILayout.HelpBox(note, MessageType.Info);
                 }
                 if (preview != null && !analysisOnly)
                 {
+                    EditorGUILayout.LabelField("Selected layout", preview.version);
+                    EditorGUILayout.LabelField("Park/plaza reservations", preview.openSpaces.Count.ToString());
+                    EditorGUILayout.LabelField("Building lot proposals", preview.parcels.Count.ToString());
+                    EditorGUILayout.LabelField("Manual anchor proposals", preview.accessResults.Count(a=>a.connected) + "/" + preview.accessResults.Count);
+                    foreach(var result in preview.accessResults)
+                        EditorGUILayout.HelpBox((result.anchor.road!=null?result.anchor.road.name:"Missing road")+": "+result.message,
+                            result.connected?MessageType.Info:MessageType.Warning);
                     EditorGUILayout.LabelField("Retained road segments", preview.edges.Count.ToString());
                     EditorGUILayout.LabelField("Detached preview segments", preview.detachedEdges.Count.ToString());
                     if (preview.detachedEdges.Count > 0)
@@ -272,6 +315,7 @@ namespace DeliveryDriver.EditorTools
             preview = ProceduralWorldPlanner.AnalyzeOnly(settings, layout, scene);
             analysisOnly = true;
             showTerrainAnalysis = true;
+            terrainLayer = TerrainLayer.Slope;
             SetStatus("Read-only terrain analysis ready: " + preview.terrainCells.Count + " samples. No scene assets changed.");
         }
 
@@ -305,7 +349,7 @@ namespace DeliveryDriver.EditorTools
                     settings.bridges = false;
                     preview = ProceduralWorldPlanner.Build(settings, layout, scene);
                     preview.warnings.Insert(0, "BRIDGES NOT PLANNED: " + ex.Message);
-                    SetStatus("City-only preview shown. Adjust bridge settings or try another seed to preview both bridge links. Scene generation is locked during V2.", MessageType.Warning);
+                    SetStatus("City-only preview shown. Adjust bridge settings or try another seed to preview both bridge links. Scene generation is locked during preview iteration.", MessageType.Warning);
                     Debug.LogWarning("[ProceduralWorld] " + ex.Message);
                 }
                 finally { settings.bridges = requested; }
@@ -615,24 +659,25 @@ namespace DeliveryDriver.EditorTools
                 DrawArea(layout.sea, layout.SeaTerrainCount == 0 ? "Sea (empty corridor)" : "Sea (4 tiles)");
                 if (cachedPreview != preview)
                 {
-                    previewGeometry.Clear();
+                    previewGeometry.Clear();lineBatches.Clear();cellQuads.Clear();
                     cachedPreview = preview;
+                    elevationMin=preview!=null&&preview.terrainCells.Count>0?preview.terrainCells.Min(c=>c.center.y):0f;
+                    elevationMax=preview!=null&&preview.terrainCells.Count>0?preview.terrainCells.Max(c=>c.center.y):1f;
                 }
                 if (preview == null) return;
-                if (showTerrainAnalysis)
+                if (showTerrainAnalysis) DrawAnalysisLayer();
+                if (!analysisOnly)
                 {
-                    foreach (var cell in preview.terrainCells)
+                    if (showOpenSpaces)
+                        foreach(var space in preview.openSpaces)
+                            Handles.DrawSolidRectangleWithOutline(space.corners,
+                                space.kind==ProceduralWorldPlanner.AreaKind.Plaza?new Color(.85f,.71f,.32f,.30f):new Color(.12f,.8f,.25f,.28f),
+                                new Color(.30f,.92f,.38f,.7f));
+                    if (showParcels)
                     {
-                        Rect r = cell.area;
-                        float y = cell.center.y + 1.2f;
-                        Color fill = cell.protectedLand ? new Color(.5f,.5f,.5f,.24f) :
-                            cell.slope > settings.grade ? new Color(.93f,.21f,.16f,.32f) :
-                            cell.slope > settings.grade*.5f ? new Color(1f,.65f,.12f,.26f) :
-                            new Color(.2f,.8f,.35f,.22f);
-                        Handles.DrawSolidRectangleWithOutline(new[] {
-                            new Vector3(r.xMin,y,r.yMin),new Vector3(r.xMax,y,r.yMin),
-                            new Vector3(r.xMax,y,r.yMax),new Vector3(r.xMin,y,r.yMax)
-                        },fill,Color.clear);
+                        Handles.color=new Color(.87f,.78f,.52f,.8f);
+                        Handles.DrawLines(Batch(100,()=>preview.parcels.SelectMany(l=>new[]{l.corners[0],l.corners[1],
+                            l.corners[1],l.corners[2],l.corners[2],l.corners[3],l.corners[3],l.corners[0]})));
                     }
                 }
                 if (analysisOnly) return;
@@ -655,7 +700,9 @@ namespace DeliveryDriver.EditorTools
                         default:
                             Handles.color = new Color(.88f, .91f, .93f, .82f); thickness = 1.4f; break;
                     }
-                    foreach (var edge in preview.edges)
+                    if(fastPreview && sceneView.size>350f && kind!=ProceduralWorldPlanner.RoadKind.Bridge)
+                        Handles.DrawLines(Batch(10+(int)kind,()=>Segments(preview.edges.Where(e=>e.kind==kind))));
+                    else foreach (var edge in preview.edges)
                     {
                         if (edge.kind != kind) continue;
                         Handles.DrawAAPolyLine(thickness, PreviewPoints(edge));
@@ -664,17 +711,26 @@ namespace DeliveryDriver.EditorTools
                 if (showDetached)
                 {
                     Handles.color = new Color(.92f, .35f, .95f, .9f);
-                    foreach (var edge in preview.detachedEdges)
+                    if(fastPreview && sceneView.size>350f)Handles.DrawLines(Batch(20,()=>Segments(preview.detachedEdges)));
+                    else foreach (var edge in preview.detachedEdges)
                         Handles.DrawAAPolyLine(2f, PreviewPoints(edge));
                 }
                 if (showGrading)
                 {
                     Handles.color = new Color(1f, .24f, .20f, .95f);
-                    foreach (Vector3 point in preview.gradingMarkers)
-                        Handles.DrawLine(point + Vector3.up * 2f, point + Vector3.up * 9f, 2f);
+                    Handles.DrawLines(Batch(21,()=>preview.gradingMarkers.SelectMany(point=>new[]{point+Vector3.up*2f,point+Vector3.up*9f})));
                 }
                 if (showLinks)
                 {
+                    foreach(var anchor in settings.accessAnchors)
+                    {
+                        if(anchor.road==null||!anchor.road.IsUsable)continue;
+                        var result=preview.accessResults.FirstOrDefault(r=>r.anchor==anchor);
+                        Handles.color=result!=null&&result.connected?Color.green:Color.red;
+                        Vector3 at=anchor.road.GetPoint(anchor.t)+Vector3.up*1.5f;
+                        Handles.SphereHandleCap(0,at,Quaternion.identity,HandleUtility.GetHandleSize(at)*.14f,EventType.Repaint);
+                    }
+                    Handles.color = new Color(.24f, 1f, .35f, 1f);
                     Handles.color = new Color(.24f, 1f, .35f, 1f);
                     foreach (var link in preview.authoredLinks)
                     {
@@ -686,6 +742,173 @@ namespace DeliveryDriver.EditorTools
                 }
             }
             finally { Handles.zTest = oldZTest; }
+        }
+
+        private void InvalidateAnchorPreview()
+        {
+            preview=null;Repaint();SceneView.RepaintAll();
+        }
+
+        private void DrawAnchorControls()
+        {
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Manual existing-road anchors (preview only)",EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("Choose an existing spline and position, or arm Scene View picking then Shift+left click near its road. Select coastal/district boundary access points. No roads are split.",MessageType.Info);
+            using(new EditorGUI.DisabledScope(!settings.urbanDesign))
+            {
+                anchorRoad=(SplineRoad)EditorGUILayout.ObjectField("Existing spline road",anchorRoad,typeof(SplineRoad),true);
+                anchorT=EditorGUILayout.Slider("Normalized spline position",anchorT,0f,1f);
+                using(new EditorGUI.DisabledScope(anchorRoad==null || !anchorRoad.IsUsable))
+                    if(GUILayout.Button("Add selected access anchor"))AddAnchor(anchorRoad,anchorT);
+                if(GUILayout.Button(pickAnchor?"Cancel Scene View anchor picking":"Pick anchor in Scene View (Shift+click)"))
+                {
+                    pickAnchor=!pickAnchor;anchorSamples=null;
+                    if(pickAnchor)CacheAnchorSamples();
+                    SceneView.RepaintAll();
+                }
+                for(int i=0;i<settings.accessAnchors.Count;i++)
+                {
+                    var a=settings.accessAnchors[i];
+                    EditorGUILayout.BeginHorizontal();
+                    EditorGUILayout.LabelField((i+1)+". "+(a.road!=null?a.road.name:"Missing spline")+" @ "+a.t.ToString("F3"));
+                    bool remove=GUILayout.Button("Remove",GUILayout.Width(70));
+                    EditorGUILayout.EndHorizontal();
+                    if(remove){settings.accessAnchors.RemoveAt(i);InvalidateAnchorPreview();break;}
+                }
+                if(settings.accessAnchors.Count>0&&GUILayout.Button("Clear preview anchors"))
+                {settings.accessAnchors.Clear();InvalidateAnchorPreview();}
+            }
+        }
+
+        private void AddAnchor(SplineRoad road,float t)
+        {
+            if(road==null||!road.IsUsable||road.gameObject.scene!=SceneManager.GetActiveScene())return;
+            t=Mathf.Clamp01(t);
+            Vector3 point=road.GetPoint(t);
+            if(settings.accessAnchors.Any(a=>a.road!=null&&Vector3.Distance(a.road.GetPoint(a.t),point)<8f))return;
+            settings.accessAnchors.Add(new ProceduralWorldPlanner.AccessAnchor{road=road,t=t});
+            InvalidateAnchorPreview();
+        }
+
+        private void CacheAnchorSamples()
+        {
+            anchorSamples=new List<(SplineRoad,float,Vector3)>();
+            foreach(var road in FindComponents<SplineRoad>(SceneManager.GetActiveScene()))
+            {
+                if(!road.IsUsable)continue;
+                float length=road.GetTotalLength();
+                int count=Mathf.Clamp(Mathf.CeilToInt(length/6f),2,300);
+                for(int i=0;i<=count;i++)
+                {
+                    float t=road.DistanceToT(length*i/count);
+                    anchorSamples.Add((road,t,road.GetPoint(t)));
+                }
+            }
+        }
+
+        private void PickAnchorInScene(SceneView view)
+        {
+            if(!pickAnchor||!settings.urbanDesign||EditorApplication.isPlayingOrWillChangePlaymode)return;
+            Event evt=Event.current;
+            if(evt.type==EventType.KeyDown&&evt.keyCode==KeyCode.Escape)
+            {pickAnchor=false;anchorSamples=null;evt.Use();Repaint();return;}
+            if(evt.type==EventType.Layout&&evt.shift)HandleUtility.AddDefaultControl(GUIUtility.GetControlID(FocusType.Passive));
+            if(evt.type!=EventType.MouseDown||evt.button!=0||!evt.shift||evt.alt||view.camera==null)return;
+            if(anchorSamples==null)CacheAnchorSamples();
+            SplineRoad best=null;float t=0f,dist=22f*22f;
+            foreach(var sample in anchorSamples)
+            {
+                if(sample.road==null)continue;
+                Vector3 screen=view.camera.WorldToScreenPoint(sample.point);
+                if(screen.z<=0f)continue;
+                float d=(HandleUtility.WorldToGUIPoint(sample.point)-evt.mousePosition).sqrMagnitude;
+                if(d>=dist)continue;
+                best=sample.road;t=sample.t;dist=d;
+            }
+            if(best!=null)
+            {
+                float step=.025f;
+                for(int pass=0;pass<4;pass++,step*=.25f)
+                    foreach(float sign in new[]{-1f,1f})
+                    {
+                        float candidate=Mathf.Clamp01(t+step*sign);
+                        float d=(HandleUtility.WorldToGUIPoint(best.GetPoint(candidate))-evt.mousePosition).sqrMagnitude;
+                        if(d<dist){dist=d;t=candidate;}
+                    }
+                AddAnchor(best,t);pickAnchor=false;anchorSamples=null;evt.Use();
+            }
+            else SetStatus("No usable existing road within 22 screen pixels. Zoom closer or use the road field.",MessageType.Warning);
+        }
+
+        private Vector3[] Batch(int key,Func<IEnumerable<Vector3>> create)
+        {
+            if(!lineBatches.TryGetValue(key,out Vector3[] result))
+            {result=create().ToArray();lineBatches.Add(key,result);}
+            return result;
+        }
+
+        private IEnumerable<Vector3> Segments(IEnumerable<ProceduralWorldPlanner.Edge> edges)
+        {
+            foreach(var e in edges)
+            {
+                Vector3[] points=PreviewPoints(e);
+                for(int i=1;i<points.Length;i++){yield return points[i-1];yield return points[i];}
+            }
+        }
+
+        private void DrawAnalysisLayer()
+        {
+            if(terrainLayer==TerrainLayer.Contours||terrainLayer==TerrainLayer.Seams||terrainLayer==TerrainLayer.Earthworks)
+            {
+                if(terrainLayer==TerrainLayer.Contours)
+                {
+                    Handles.color=new Color(.92f,.88f,.51f,.85f);
+                    Handles.DrawLines(Batch(30,()=>preview.contours.SelectMany(l=>new[]{l.a,l.b})));
+                }
+                else if(terrainLayer==TerrainLayer.Seams)
+                {
+                    for(int i=0;i<3;i++)
+                    {
+                        int band=i;
+                        Handles.color=i==0?new Color(.3f,.8f,.4f,.9f):i==1?new Color(1f,.65f,.15f,1f):Color.red;
+                        Handles.DrawLines(Batch(31+i,()=>preview.seams.Where(l=>(l.value<=1f?0:l.value<=6f?1:2)==band)
+                            .SelectMany(l=>new[]{l.a,l.b})));
+                    }
+                }
+                else
+                {
+                    for(int i=0;i<4;i++)
+                    {
+                        int band=i;
+                        Handles.color=i==0?new Color(.8f,.35f,.24f,.65f):i==1?Color.red:
+                            i==2?new Color(.30f,.55f,.9f,.65f):new Color(.10f,.50f,1f,1f);
+                        Handles.DrawLines(Batch(34+i,()=>preview.earthworks.Where(l=>(l.value<0f?0:2)+(Mathf.Abs(l.value)>settings.maxCutFill?1:0)==band)
+                            .SelectMany(l=>new[]{l.a+Vector3.up*1.5f,l.b+Vector3.up*1.5f})));
+                    }
+                }
+                return;
+            }
+            foreach(var cell in preview.terrainCells)
+            {
+                Color fill;
+                if(cell.protectedLand)fill=new Color(.5f,.5f,.5f,.26f);
+                else if(terrainLayer==TerrainLayer.Elevation)
+                    fill=Color.Lerp(new Color(.16f,.46f,.83f,.36f),new Color(.94f,.69f,.32f,.36f),
+                        Mathf.InverseLerp(elevationMin,elevationMax,cell.center.y));
+                else if(terrainLayer==TerrainLayer.Buildability)
+                    fill=cell.slope>.12f||cell.roughness>2f?new Color(.92f,.23f,.18f,.32f):
+                        cell.slope>.05f||cell.roughness>.6f?new Color(1f,.65f,.12f,.28f):new Color(.2f,.8f,.35f,.24f);
+                else fill=cell.slope>settings.grade?new Color(.93f,.21f,.16f,.32f):
+                    cell.slope>settings.grade*.5f?new Color(1f,.65f,.12f,.26f):new Color(.2f,.8f,.35f,.22f);
+                if(!cellQuads.TryGetValue(cell,out Vector3[] quad))
+                {
+                    Rect r=cell.area;float y=cell.center.y+1.2f;
+                    quad=new[]{new Vector3(r.xMin,y,r.yMin),new Vector3(r.xMax,y,r.yMin),
+                        new Vector3(r.xMax,y,r.yMax),new Vector3(r.xMin,y,r.yMax)};
+                    cellQuads.Add(cell,quad);
+                }
+                Handles.DrawSolidRectangleWithOutline(quad,fill,Color.clear);
+            }
         }
 
         private Vector3[] PreviewPoints(ProceduralWorldPlanner.Edge edge)

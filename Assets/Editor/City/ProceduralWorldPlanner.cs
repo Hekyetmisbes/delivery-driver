@@ -387,7 +387,8 @@ namespace DeliveryDriver.EditorTools
                 float along=cell.slope*Mathf.Abs(Vector2.Dot(direction,cell.uphill));
                 penalty+=Mathf.Max(0f,along-settings.grade*.5f)*6f+cell.roughness*.07f;
             }
-            return c.length*(1f+settings.terrainInfluence*penalty/3f);
+            float contour = settings.urbanDesign ? ContourPenalty(a,b) : 0f;
+            return c.length*(1f+settings.terrainInfluence*penalty/3f+contour);
         }
 
         // A sampled cost proxy, not a cubic-meter earthworks estimate.
@@ -507,7 +508,7 @@ namespace DeliveryDriver.EditorTools
             var planner = new ProceduralWorldPlanner(settings, layout, scene);
             planner.plan.protectedAreas.AddRange(planner.protectedAreas);
             planner.plan.manualRoadNear = planner.obstacles.Near;
-            if (settings.terrainDesign) planner.AnalyzeTerrain();
+            if (settings.terrainDesign || settings.urbanDesign) planner.AnalyzeTerrain();
             if (settings.bridges && settings.buildAnkara && settings.buildIstanbul)
                 planner.PlanBridges();
             if (settings.buildAnkara) planner.PlanHierarchy("Ankara", layout.Ankara(settings.ankaraLow));
@@ -1978,7 +1979,11 @@ namespace DeliveryDriver.EditorTools
                     lo[i] = Mathf.Max(lo[i], cross + .12f - sideBudget);
                     hi[i] = Mathf.Min(hi[i], cross + .12f + sideBudget);
                 }
-                target[i] = (settings.urbanDesign ? Mathf.Lerp(PreferredGround(p,h), h, settings.gradingOptimization*.70f) : PreferredGround(p,h)) + .12f;
+                float rawTarget = h;
+                if (settings.urbanDesign && plan.layout.TryHeight(p-right*roadHalf,out float leftGround) &&
+                    plan.layout.TryHeight(p+right*roadHalf,out float rightGround))
+                    rawTarget = (h + leftGround + rightGround) / 3f;
+                target[i] = (settings.urbanDesign ? Mathf.Lerp(PreferredGround(p,h), rawTarget, settings.gradingOptimization*.70f) : PreferredGround(p,h)) + .12f;
                 if (i > 0) step[i] = Vector2.Distance(XZ(path[i - 1]), p) * settings.grade;
                 if (lo[i] > hi[i]) return false;
             }
