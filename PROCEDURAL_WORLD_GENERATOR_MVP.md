@@ -47,3 +47,7 @@ Branch: feature/procedural-world-generator-mvp
 - [ ] Drive across both bridges and verify NPC/GPS behavior in both directions.
 - [ ] Save/reopen scene copy; generated meshes and TerrainData still exist.
 - [ ] Clear restores original TerrainData and preserves manual roads/buildings; Undo works.
+
+### Bridge preview troubleshooting
+
+The bridge planner searches independent approach lengths and perpendicular/diagonal corridors, with a grade-bounded elevation profile rather than a fixed flat deck. It preserves existing roads and protected districts, and reports rejection counts for protected areas, existing roads, missing terrain, width/bounds and grade/height. Check Sea surface Y against the water plane. If two bridges cannot be planned, Preview can still display city roads without bridges, explicitly marked as a fallback. Generate remains strict unless Connect with two bridges is unchecked. No bridge is silently omitted during generation.

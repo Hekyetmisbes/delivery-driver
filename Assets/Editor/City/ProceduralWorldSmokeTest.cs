@@ -71,6 +71,17 @@ namespace DeliveryDriver.EditorTools
                 Require(!emptySea.TryHeight(emptySea.sea.center, out _), "Empty sea unexpectedly reports terrain.");
                 var emptyPlan = ProceduralWorldPlanner.Build(settings, emptySea, scene);
                 Verify(emptyPlan, settings, 2);
+                // Raise the high-side city by 18m. The deck must adapt to asymmetric
+                // endpoint heights and still respect the same maximum grade.
+                foreach (var tile in emptySea.tiles.Where(t => t.row > 3))
+                {
+                    float[,] heights = new float[33, 33];
+                    for (int z = 0; z < 33; z++)
+                    for (int x = 0; x < 33; x++) heights[z, x] = 18f / 80f;
+                    tile.terrain.terrainData.SetHeights(0, 0, heights);
+                }
+                var asymmetric = ProceduralWorldPlanner.Build(settings, emptySea, scene);
+                Verify(asymmetric, settings, 2);
                 // Rotate the placement convention (not the Terrain objects): the same layout must work on Z.
                 foreach (var tile in emptySea.tiles)
                 {

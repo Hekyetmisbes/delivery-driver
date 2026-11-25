@@ -109,6 +109,8 @@ namespace DeliveryDriver.EditorTools
                 {
                     EditorGUILayout.LabelField("Planned roads", preview.edges.Count.ToString());
                     EditorGUILayout.LabelField("Planned bridge links", preview.BridgeCount.ToString());
+                    if (settings.bridges && settings.buildAnkara && settings.buildIstanbul && preview.BridgeCount != 2)
+                        EditorGUILayout.HelpBox("Preview only: requested bridge links are missing. Generate requires two valid bridges, or explicitly disable bridges.", MessageType.Warning);
                     EditorGUILayout.LabelField("Road length", (preview.edges.Sum(e => PathLength(e.points)) / 1000f).ToString("F2") + " km");
                     foreach (string warning in preview.warnings) EditorGUILayout.HelpBox(warning, MessageType.Warning);
                 }
@@ -212,7 +214,9 @@ namespace DeliveryDriver.EditorTools
             return true;
         }
 
-        private void PlanOnly()
+        private void PlanOnly() => PlanOnly(true);
+
+        private void PlanOnly(bool allowBridgeFallback)
         {
             Scene scene = SceneManager.GetActiveScene();
             if (FindStates(scene).Count > 0) throw new InvalidOperationException("Clear the previous build before previewing a new one.");
@@ -223,8 +227,28 @@ namespace DeliveryDriver.EditorTools
             if (!settings.buildAnkara && !settings.buildIstanbul) throw new InvalidOperationException("Select a city.");
             if (EditorUtility.DisplayCancelableProgressBar("Procedural World", "Planning safe roads and bridge approaches", .05f))
                 throw new OperationCanceledException();
-            preview = ProceduralWorldPlanner.Build(settings, layout, scene);
-            SetStatus("Preview ready: " + preview.edges.Count + " roads, " + preview.BridgeCount + " bridges. No scene assets changed.");
+            preview = null;
+            try
+            {
+                preview = ProceduralWorldPlanner.Build(settings, layout, scene);
+                SetStatus("Preview ready: " + preview.edges.Count + " roads, " + preview.BridgeCount + " bridges. No scene assets changed.");
+            }
+            catch (ProceduralWorldPlanner.BridgePlanningException ex) when (allowBridgeFallback)
+            {
+                // Show the city roads even if the bridge constraints are infeasible.
+                // Generation remains strict unless the user explicitly disables bridges.
+                bool requested = settings.bridges;
+                try
+                {
+                    settings.bridges = false;
+                    preview = ProceduralWorldPlanner.Build(settings, layout, scene);
+                    preview.warnings.Insert(0, "BRIDGES NOT PLANNED: " + ex.Message);
+                    SetStatus("City-only preview shown. Two-bridge generation is blocked until a valid bridge plan exists. " +
+                        "Adjust the bridge settings or explicitly uncheck Connect with two bridges to generate just city roads.", MessageType.Warning);
+                    Debug.LogWarning("[ProceduralWorld] " + ex.Message);
+                }
+                finally { settings.bridges = requested; }
+            }
         }
 
         private void ValidateRoots(Scene scene)
@@ -244,7 +268,7 @@ namespace DeliveryDriver.EditorTools
 
         private void Generate()
         {
-            PlanOnly();
+            PlanOnly(false);
             Scene scene = SceneManager.GetActiveScene();
             var managers = FindComponents<RoadNetworkManager>(scene);
             if (managers.Count != 1)

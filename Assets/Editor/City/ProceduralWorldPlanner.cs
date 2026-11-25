@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using DeliveryDriver.City;
 using TrafficSystem.Spline;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -258,78 +259,219 @@ namespace DeliveryDriver.EditorTools
             return planner.plan;
         }
 
+        internal sealed class BridgePlanningException : InvalidOperationException
+        {
+            public BridgePlanningException(string message) : base(message) { }
+        }
+
+        private enum BridgeRejection
+        {
+            ProtectedDistrict, ExistingRoad, MissingLand, RoadWidth, GradeOrHeight
+        }
+
+        private sealed class BridgeCandidate
+        {
+            public List<Vector3> path;
+            public float acrossMin, acrossMax;
+        }
+
         private void PlanBridges()
         {
             Layout l = plan.layout;
             float min = l.AcrossMin(l.sea), span = l.AcrossMax(l.sea) - min;
             float lowDepth = l.AlongMax(l.low) - l.AlongMin(l.low);
             float highDepth = l.AlongMax(l.high) - l.AlongMin(l.high);
-            var used = new List<float>();
-            // Search across the actual shore, not a fixed 220m offset.
-            float[] candidates = { .18f, .82f, .33f, .67f, .48f, .10f, .90f, .27f, .73f, .42f, .58f };
-            foreach (float fraction in candidates)
+            float margin = RoadClearance + 4f;
+            float separation = Mathf.Max(35f, RoadClearance * 4f);
+            var failures = new int[5];
+            var accepted = new List<BridgeCandidate>();
+            int attempts = 0;
+            // Prefer well-separated crossings, but permit both in the same free coastal district.
+            // Search both sides independently; the gap's actual measured width is used.
+            int laneCount = Mathf.Clamp(Mathf.CeilToInt(span / Mathf.Max(20f, separation * .5f)), 12, 48);
+            if (span <= margin * 2f)
+                throw new BridgePlanningException("The sea corridor is too narrow across its shoreline for the selected road width.");
+            var lanes = Enumerable.Range(0, laneCount + 1)
+                .Select(i => Mathf.Lerp(min + margin, min + span - margin, i / (float)laneCount))
+                .OrderBy(x => Mathf.Min(Mathf.Abs((x - min) / span - .18f), Mathf.Abs((x - min) / span - .82f)))
+                .ToList();
+            float[] depths = { .08f, .16f, .26f, .38f, .52f, .68f, .82f };
+            var depthPairs = (from low in depths from high in depths
+                              orderby low + high, Mathf.Max(low, high)
+                              select (low, high)).ToList();
+            // First test perpendicular crossings, then diagonals to reach a free corridor
+            // when one city's coastline is blocked by existing content.
+            foreach (float diagonal in new[] { 0f, .07f, -.07f, .15f, -.15f, .25f, -.25f })
             {
-                if (used.Any(v => Mathf.Abs(v - fraction) < .14f)) continue;
-                float across = min + span * fraction;
-                bool accepted = false;
-                foreach (float inset in new[] { .12f, .20f, .30f, .42f })
+                foreach (float across in lanes)
                 {
-                    Vector2 a = l.Point(l.AlongMax(l.low) - lowDepth * inset, across);
-                    Vector2 b = l.Point(l.AlongMin(l.high) + highDepth * inset, across);
-                    if (!TryBridge(a, b, out List<Vector3> path)) continue;
-                    Node first = AddNode(path[0], settings.ankaraLow ? "Ankara" : "İstanbul", true);
-                    Node last = AddNode(path[path.Count - 1], settings.ankaraLow ? "İstanbul" : "Ankara", true);
-                    AddEdge(first, last, path, "Highways");
-                    used.Add(fraction);
-                    accepted = true;
-                    break;
+                    float otherAcross = across + span * diagonal;
+                    if (otherAcross < min + margin || otherAcross > min + span - margin) continue;
+                    float candidateMin = Mathf.Min(across, otherAcross), candidateMax = Mathf.Max(across, otherAcross);
+                    if (accepted.Any(c => Mathf.Abs(c.acrossMin - candidateMin) < 2f &&
+                                          Mathf.Abs(c.acrossMax - candidateMax) < 2f)) continue;
+                    foreach (var pair in depthPairs)
+                    {
+                        if (++attempts % 128 == 0 &&
+                            EditorUtility.DisplayCancelableProgressBar("Procedural World",
+                                "Searching bridge approaches (" + attempts + " candidates)", .06f))
+                            throw new OperationCanceledException();
+                        Vector2 a = l.Point(l.AlongMax(l.low) - Mathf.Clamp(lowDepth * pair.low, margin, lowDepth - margin), across);
+                        Vector2 b = l.Point(l.AlongMin(l.high) + Mathf.Clamp(highDepth * pair.high, margin, highDepth - margin), otherAcross);
+                        if (!TryBridge(a, b, out List<Vector3> path, out BridgeRejection rejection))
+                        {
+                            failures[(int)rejection]++;
+                            continue;
+                        }
+                        var candidate = new BridgeCandidate { path = path, acrossMin = candidateMin, acrossMax = candidateMax };
+                        // Disjoint lateral envelopes guarantee that the two straight crossings
+                        // and their approach ramps cannot cross each other.
+                        BridgeCandidate partner = accepted.FirstOrDefault(c =>
+                            c.acrossMax + separation <= candidate.acrossMin ||
+                            candidate.acrossMax + separation <= c.acrossMin);
+                        if (partner != null)
+                        {
+                            AddBridge(partner.path);
+                            AddBridge(candidate.path);
+                            plan.warnings.Add("Bridge search: two routes found after " + attempts +
+                                " candidates. Sea Y=" + settings.seaY.ToString("F1") +
+                                ", grade limit=" + (settings.grade * 100f).ToString("F1") + "%.");
+                            return;
+                        }
+                        accepted.Add(candidate);
+                        break; // Other ramp lengths at this lane cannot improve lateral separation.
+                    }
                 }
-                if (accepted && used.Count == 2) return;
             }
-            throw new InvalidOperationException("Could not plan two safe bridges. Check Sea Level, protected Kizilay, grade, terrain height and existing roads. Try a higher cut/fill budget or lower bridge clearance.");
+            throw new BridgePlanningException("Could not plan two separated bridges after " + attempts +
+                " candidates (usable corridors: " + accepted.Count + "). " +
+                "Rejected: protected district=" + failures[(int)BridgeRejection.ProtectedDistrict] +
+                ", existing road=" + failures[(int)BridgeRejection.ExistingRoad] +
+                ", missing land=" + failures[(int)BridgeRejection.MissingLand] +
+                ", width/bounds=" + failures[(int)BridgeRejection.RoadWidth] +
+                ", grade/height=" + failures[(int)BridgeRejection.GradeOrHeight] +
+                ". Sea Y=" + settings.seaY.ToString("F1") +
+                ", clearance=" + settings.bridgeClearance.ToString("F1") +
+                " m, max grade=" + (settings.grade * 100f).ToString("F1") +
+                "%. Check Sea surface Y and the dominant rejection reason. Protected content and slope limits were not bypassed.");
         }
 
-        private bool TryBridge(Vector2 a, Vector2 b, out List<Vector3> points)
+        private void AddBridge(List<Vector3> path)
         {
-            points = new List<Vector3>();
+            Node first = AddNode(path[0], settings.ankaraLow ? "Ankara" : "İstanbul", true);
+            Node last = AddNode(path[path.Count - 1], settings.ankaraLow ? "İstanbul" : "Ankara", true);
+            AddEdge(first, last, path, "Highways");
+        }
+
+        private bool TryBridge(Vector2 a, Vector2 b, out List<Vector3> points, out BridgeRejection rejection)
+        {
+            points = null;
+            rejection = BridgeRejection.MissingLand;
             Layout l = plan.layout;
-            float shoreA = l.AlongMin(l.sea), shoreB = l.AlongMax(l.sea);
-            float alongA = l.rowsOnX ? a.x : a.y, alongB = l.rowsOnX ? b.x : b.y;
-            float across = l.rowsOnX ? a.y : a.x;
             if (!l.TryHeight(a, out float yA) || !l.TryHeight(b, out float yB)) return false;
-            float deck = settings.seaY + settings.bridgeClearance;
-            int seaSteps = Mathf.Max(2, Mathf.CeilToInt((shoreB - shoreA) / 4f));
-            for (int i = 0; i <= seaSteps; i++)
-            {
-                float along = Mathf.Lerp(shoreA, shoreB, (float)i / seaSteps);
-                for (int side = -1; side <= 1; side++)
-                    if (l.TryHeight(l.Point(along, across + side * settings.width * 0.5f), out float ground))
-                        deck = Mathf.Max(deck, ground + 3f);
-            }
-            yA += .12f; yB += .12f;
-            deck = Mathf.Max(deck, Mathf.Max(yA, yB));
-            int steps = Mathf.Max(2, Mathf.CeilToInt((alongB - alongA) / 2.5f));
+            Vector2 delta = b - a;
+            float length = delta.magnitude;
+            if (length < 1f) return false;
+            Vector2 right = new Vector2(-delta.y, delta.x).normalized;
+            float halfWidth = settings.width * .5f + settings.sidewalk;
+            int steps = Mathf.Max(2, Mathf.CeilToInt(length / 2.5f));
+            float step = length / steps;
+            var lower = new float[steps + 1];
+            var upper = new float[steps + 1];
+            var preferred = new float[steps + 1];
+            var positions = new Vector2[steps + 1];
             for (int i = 0; i <= steps; i++)
             {
-                float along = Mathf.Lerp(alongA, alongB, (float)i / steps);
-                Vector2 p = l.Point(along, across);
-                if (obstacles.Near(p, RoadClearance) || IsProtected(p, RoadClearance)) return false;
-                float y = along < shoreA ? Mathf.SmoothStep(yA, deck, (along - alongA) / (shoreA - alongA)) :
-                    along > shoreB ? Mathf.SmoothStep(deck, yB, (along - shoreB) / (alongB - shoreB)) : deck;
-                // No terrain under a bridge in the reserved water corridor is valid.
-                // Missing terrain anywhere on a land approach remains an error.
-                if (l.TryHeight(p, out float ground))
+                Vector2 p = Vector2.Lerp(a, b, i / (float)steps);
+                positions[i] = p;
+                if (IsProtected(p, RoadClearance))
                 {
-                    if (ground > y + settings.maxCutFill - .12f) return false;
-                }
-                else if (!l.sea.Contains(p))
-                {
+                    rejection = BridgeRejection.ProtectedDistrict;
                     return false;
                 }
-                Vector3 point = XYZ(p, y);
-                if (points.Count > 0 && !GradeOk(points[points.Count - 1], point)) return false;
-                points.Add(point);
+                if (obstacles.Near(p, RoadClearance))
+                {
+                    rejection = BridgeRejection.ExistingRoad;
+                    return false;
+                }
+                bool sea = Contains(l.sea, p);
+                bool hasGround = l.TryHeight(p, out float center);
+                if (!sea && !hasGround) return false;
+                float required = sea ? settings.seaY + settings.bridgeClearance : float.NegativeInfinity;
+                // A bridge may climb over its land approaches on supports, rather than
+                // requiring a constant high deck and two symmetric smoothstep ramps.
+                for (int side = -1; side <= 1; side++)
+                {
+                    Vector2 q = p + right * halfWidth * side;
+                    bool overSea = Contains(l.sea, q);
+                    bool overLand = Contains(l.low, q) || Contains(l.high, q);
+                    if (!overSea && !overLand)
+                    {
+                        rejection = BridgeRejection.RoadWidth;
+                        return false;
+                    }
+                    if (overSea) required = Mathf.Max(required, settings.seaY + settings.bridgeClearance);
+                    if (l.TryHeight(q, out float ground))
+                    {
+                        // Shore boundary samples can return land; the required water height
+                        // is independent of terrain and physical sea tiles remain untouched.
+                        float clearance = overSea && !overLand ? 3f : .20f - settings.maxCutFill;
+                        required = Mathf.Max(required, ground + clearance);
+                    }
+                    else if (!overSea)
+                    {
+                        rejection = BridgeRejection.MissingLand;
+                        return false;
+                    }
+                }
+                lower[i] = required;
+                upper[i] = float.PositiveInfinity;
+                preferred[i] = sea ? settings.seaY + settings.bridgeClearance : center + .12f;
             }
+
+            // Solve a grade-bounded profile over the entire crossing. A deck can slope
+            // across the sea, while both land endpoints stay at their own terrain heights.
+            rejection = BridgeRejection.GradeOrHeight;
+            yA += .12f;
+            yB += .12f;
+            if (yA + .001f < lower[0] || yB + .001f < lower[steps]) return false;
+            lower[0] = upper[0] = yA;
+            lower[steps] = upper[steps] = yB;
+            float rise = step * settings.grade;
+            for (int i = 1; i <= steps; i++)
+            {
+                lower[i] = Mathf.Max(lower[i], lower[i - 1] - rise);
+                upper[i] = Mathf.Min(upper[i], upper[i - 1] + rise);
+                if (lower[i] > upper[i] + .0001f) return false;
+            }
+            for (int i = steps - 1; i >= 0; i--)
+            {
+                lower[i] = Mathf.Max(lower[i], lower[i + 1] - rise);
+                upper[i] = Mathf.Min(upper[i], upper[i + 1] + rise);
+                if (lower[i] > upper[i] + .0001f) return false;
+            }
+
+            // Smooth the desired elevation before constraining it to the feasible envelope.
+            for (int pass = 0; pass < 8; pass++)
+            {
+                float[] old = (float[])preferred.Clone();
+                for (int i = 1; i < steps; i++)
+                    preferred[i] = (old[i - 1] + 2f * old[i] + old[i + 1]) * .25f;
+            }
+            var result = new List<Vector3>(steps + 1) { XYZ(a, yA) };
+            for (int i = 1; i < steps; i++)
+            {
+                float last = result[i - 1].y;
+                float lo = Mathf.Max(lower[i], last - rise);
+                float hi = Mathf.Min(upper[i], last + rise);
+                if (lo > hi + .0001f) return false;
+                float y = Mathf.Clamp(preferred[i], lo, Mathf.Max(lo, hi));
+                result.Add(XYZ(positions[i], y));
+            }
+            result.Add(XYZ(b, yB));
+            for (int i = 1; i < result.Count; i++)
+                if (!GradeOk(result[i - 1], result[i])) return false;
+            points = result;
             return true;
         }
 
@@ -625,7 +767,7 @@ namespace DeliveryDriver.EditorTools
                     Vector2 old = e.a == n ? XZ(e.points[1] - e.points[0]).normalized :
                         XZ(e.points[e.points.Count - 2] - e.points[e.points.Count - 1]).normalized;
                     // Avoid nearly overlapping approaches; bridge approach should be nearly straight.
-                    float minimum = e.Bridge ? 140f : 42f;
+                    float minimum = e.Bridge ? 105f : 42f;
                     if (Vector2.Angle(dir, old) < minimum) return false;
                 }
                 if (n.existing != null)
