@@ -577,6 +577,7 @@ GameObject:
   - component: {fileID: 1252004878}
   - component: {fileID: 1252004883}
   - component: {fileID: 1252004882}
+  - component: {fileID: 1252004884}
   m_Layer: 0
   m_Name: GlobalUIRoot
   m_TagString: Untagged
@@ -703,6 +704,10 @@ MonoBehaviour:
   routeThickness: 4
   routeSimplifyTolerance: 5
   routeMinSegmentScreenLength: 1.5
+  routeVisualSmoothingPasses: 2
+  routeOverlayRefreshInterval: 0.08
+  routeOverlayCameraRefreshDistance: 1.25
+  routePolylineCacheCameraInvalidationDistance: 24
   frameColor: {r: 0.05, g: 0.08, b: 0.13, a: 0.92}
   viewportTint: {r: 0.98, g: 1, b: 1, a: 0.98}
   badgeColor: {r: 0.08, g: 0.13, b: 0.2, a: 0.92}
@@ -710,9 +715,13 @@ MonoBehaviour:
   pickupMarkerColor: {r: 0.22, g: 0.72, b: 1, a: 1}
   deliveryMarkerColor: {r: 0.25, g: 0.98, b: 0.48, a: 1}
   routeColor: {r: 1, g: 0.86, b: 0.22, a: 0.9}
+  pickupRouteColor: {r: 0.2, g: 0.62, b: 1, a: 0.95}
   labelColor: {r: 0.92, g: 0.97, b: 1, a: 0.92}
   activeRouteSegmentCount: 0
   peakRouteSegmentCount: 0
+  overlayRefreshCount: 0
+  routeOverlayRebuildCount: 0
+  routePolylineCacheRebuildCount: 0
 --- !u!114 &1252004883
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -739,6 +748,27 @@ MonoBehaviour:
   fadeColor: {r: 0, g: 0, b: 0, a: 1}
   warningBackgroundColor: {r: 0.78, g: 0.16, b: 0.14, a: 0.92}
   warningTextColor: {r: 1, g: 0.97, b: 0.92, a: 1}
+--- !u!114 &1252004884
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1252004877}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b3c1037291ba44840b76cb3a16c6f18c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: GameScripts::FuelHudUI
+  anchoredPosition: {x: -40, y: 270}
+  panelSize: {x: 220, y: 70}
+  fuelFullColor: {r: 0.15, g: 0.85, b: 0.35, a: 1}
+  fuelLowColor: {r: 1, g: 0.85, b: 0.2, a: 1}
+  fuelEmptyColor: {r: 1, g: 0.25, b: 0.2, a: 1}
+  warningBackgroundColor: {r: 0.78, g: 0.55, b: 0.08, a: 0.92}
+  warningTextColor: {r: 1, g: 0.97, b: 0.92, a: 1}
+  lowFuelLitersThreshold: 25
+  lowFuelWarningBlinkSpeed: 6
 --- !u!1 &1437459816
 GameObject:
   m_ObjectHideFlags: 0
@@ -920,7 +950,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: GameScripts::MainMenuRuntimeUI
   gameSceneName: Game
   backgroundResourcesPath: UI/MainMenu/mainmenu_bg
-  backgroundAssetPath: Assets/Images/MainMenuImage.png
+  backgroundAssetPath: Assets/Art/Textures/UI/MainMenuImage.png
   developerName: hekye
   mainPanelSize: {x: 640, y: 560}
   mainPanelOffset: {x: 0, y: -150}
