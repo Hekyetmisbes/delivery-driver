@@ -7,7 +7,7 @@ using UnityEngine.SceneManagement;
 
 namespace DeliveryDriver.EditorTools
 {
-    public class SimpleRoadPlacementTool : EditorWindow
+    public partial class SimpleRoadPlacementTool : EditorWindow
     {
         private const string DefaultSidewalkMaterialPath = "Assets/ThirdParty/LowPolyCity/Materials/Road Concrete Tile.mat";
         private const string GeneratedMaterialFolderPath = "Assets/Art/Materials/RoadTools";
@@ -1725,6 +1725,7 @@ namespace DeliveryDriver.EditorTools
             AppendSidewalkSide(vertices, uvs, triangles, samples, -1f, halfRoad, bevelWidth, columnsPerSide, capStart, capEnd);
             AppendSidewalkSide(vertices, uvs, triangles, samples, 1f, halfRoad, bevelWidth, columnsPerSide, capStart, capEnd);
 
+            if (vertices.Count > 65535) mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
             mesh.SetVertices(vertices);
             mesh.SetUVs(0, uvs);
             mesh.SetTriangles(triangles, 0);
@@ -1787,6 +1788,7 @@ namespace DeliveryDriver.EditorTools
                 AppendContinuousLine(vertices, uvs, triangles, samples, cumulativeDistances, sideOffset, startMargin, endMargin);
             }
 
+            if (vertices.Count > 65535) mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
             mesh.SetVertices(vertices);
             mesh.SetUVs(0, uvs);
             mesh.SetTriangles(triangles, 0);
@@ -1974,6 +1976,7 @@ namespace DeliveryDriver.EditorTools
 
             AppendStrip(vertices, uvs, triangles, samples, leftOffset, rightOffset, roadCrossSegments, roadYOffset, false, capStart, capEnd);
 
+            if (vertices.Count > 65535) mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
             mesh.SetVertices(vertices);
             mesh.SetUVs(0, uvs);
             mesh.SetTriangles(triangles, 0);
@@ -2510,6 +2513,7 @@ namespace DeliveryDriver.EditorTools
                 }
             }
 
+            if (vertices.Count > 65535) mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
             mesh.SetVertices(vertices);
             mesh.SetUVs(0, uvs);
             mesh.SetTriangles(triangles, 0);
@@ -2606,6 +2610,7 @@ namespace DeliveryDriver.EditorTools
 
         private bool IsBridgeSample(Vector3 sample)
         {
+            if (batchSeaArea.HasValue && batchSeaArea.Value.Contains(new Vector2(sample.x, sample.z))) return true;
             if (!CanCreateBridges())
             {
                 return false;
@@ -3017,6 +3022,13 @@ namespace DeliveryDriver.EditorTools
 
         private float GetEndpointTrimDistance(Vector3 endpoint, float totalRoadDistance = 0f)
         {
+            if (batchEndpointDegrees != null)
+            {
+                if (!batchEndpointDegrees.TryGetValue(endpoint, out int degree) || degree < 3) return 0f;
+                float trim = Mathf.Max(intersectionRoadTrimDistance, roadWidth * 0.5f + sidewalkWidth + 0.5f);
+                if (totalRoadDistance > 0.5f) trim = Mathf.Min(trim, totalRoadDistance * 0.45f);
+                return Mathf.Max(0f, trim - 0.15f);
+            }
             Vector3 intersectionPos;
             if (!TryFindNearbyIntersectionOrVisual(endpoint, out intersectionPos, out int branchCount))
             {
@@ -4761,6 +4773,7 @@ namespace DeliveryDriver.EditorTools
                 AdjustRoadVertexToGround(center + right * half + forward * half, yOffset)
             };
 
+            if (vertices.Count > 65535) mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
             mesh.SetVertices(vertices);
             mesh.SetUVs(0, new List<Vector2>
             {
