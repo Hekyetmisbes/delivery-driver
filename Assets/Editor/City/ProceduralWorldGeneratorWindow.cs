@@ -18,6 +18,8 @@ namespace DeliveryDriver.EditorTools
         private readonly ProceduralWorldPlanner.Settings settings = new ProceduralWorldPlanner.Settings();
         private ProceduralWorldPlanner.Layout layout;
         private ProceduralWorldPlanner.Plan preview;
+        private ProceduralWorldPlanner.Plan cachedPreview;
+        private readonly Dictionary<ProceduralWorldPlanner.Edge, Vector3[]> previewGeometry = new Dictionary<ProceduralWorldPlanner.Edge, Vector3[]>();
         private Vector2 scroll;
         private string status = "Detect the 24 land tiles and optional 4 sea tiles in GameScene.";
         private MessageType statusType = MessageType.Info;
@@ -560,6 +562,11 @@ namespace DeliveryDriver.EditorTools
             DrawArea(layout.Istanbul(settings.ankaraLow), "Istanbul (12 tiles)");
             Handles.color = new Color(.25f, .45f, 1f, .8f);
             DrawArea(layout.sea, layout.SeaTerrainCount == 0 ? "Sea (empty corridor)" : "Sea (4 tiles)");
+            if (cachedPreview != preview)
+            {
+                previewGeometry.Clear();
+                cachedPreview = preview;
+            }
             if (preview == null) return;
             foreach (var kind in new[] { ProceduralWorldPlanner.RoadKind.Local, ProceduralWorldPlanner.RoadKind.Collector,
                 ProceduralWorldPlanner.RoadKind.Arterial, ProceduralWorldPlanner.RoadKind.Bridge })
@@ -583,7 +590,7 @@ namespace DeliveryDriver.EditorTools
                 foreach (var edge in preview.edges)
                 {
                     if (edge.kind != kind) continue;
-                    Handles.DrawAAPolyLine(thickness, edge.points.Select(p => p + Vector3.up * .5f).ToArray());
+                    Handles.DrawAAPolyLine(thickness, PreviewPoints(edge));
                 }
             }
             if (showLinks)
@@ -591,12 +598,23 @@ namespace DeliveryDriver.EditorTools
                 Handles.color = new Color(.24f, 1f, .35f, 1f);
                 foreach (var link in preview.authoredLinks)
                 {
-                    Handles.DrawAAPolyLine(4f, link.points.Select(p => p + Vector3.up * .8f).ToArray());
+                    Handles.DrawAAPolyLine(4f, PreviewPoints(link));
                     Vector3 anchor = link.points[0] + Vector3.up;
                     Handles.SphereHandleCap(0, anchor, Quaternion.identity,
                         HandleUtility.GetHandleSize(anchor) * .12f, EventType.Repaint);
                 }
             }
+        }
+
+        private Vector3[] PreviewPoints(ProceduralWorldPlanner.Edge edge)
+        {
+            if (!previewGeometry.TryGetValue(edge, out Vector3[] points))
+            {
+                float offset = edge.kind == ProceduralWorldPlanner.RoadKind.AuthoredLink ? .8f : .5f;
+                points = edge.points.Select(p => p + Vector3.up * offset).ToArray();
+                previewGeometry.Add(edge, points);
+            }
+            return points;
         }
 
         private void DrawArea(Rect r, string title)
