@@ -25,6 +25,7 @@ namespace DeliveryDriver.EditorTools
         private MessageType statusType = MessageType.Info;
         private bool showPreview = true;
         private bool showArterials = true, showCollectors = true, showLocals = true, showLinks = true, showBridgeLines = true;
+        private bool showDetached = true;
         private bool busy;
 
         [MenuItem("Tools/Delivery Driver/City/Procedural World Generator", false, 1)]
@@ -59,7 +60,7 @@ namespace DeliveryDriver.EditorTools
         private void OnGUI()
         {
             scroll = EditorGUILayout.BeginScrollView(scroll);
-            EditorGUILayout.LabelField("Procedural World Generator V2 - Preview", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Procedural World Generator V3 - Hillside Preview", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("Preview iteration only. No scene, mesh or terrain asset changes. Generation is intentionally locked until the road layout is approved.", MessageType.Info);
             using (new EditorGUI.DisabledScope(busy || EditorApplication.isPlayingOrWillChangePlaymode))
             {
@@ -99,6 +100,7 @@ namespace DeliveryDriver.EditorTools
 
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Terrain and bridges", EditorStyles.boldLabel);
+                settings.terrainRepair = EditorGUILayout.Toggle("Terrain-aware network repair", settings.terrainRepair);
                 settings.grade = EditorGUILayout.Slider("Maximum grade (%)", settings.grade * 100f, 4f, 15f) / 100f;
                 settings.maxCutFill = Mathf.Clamp(EditorGUILayout.FloatField("Max cut/fill (m)", settings.maxCutFill), 1f, 20f);
                 settings.blend = Mathf.Clamp(EditorGUILayout.FloatField("Terrain shoulder blend (m)", settings.blend), 3f, 30f);
@@ -116,13 +118,17 @@ namespace DeliveryDriver.EditorTools
                 showLocals = EditorGUILayout.Toggle("Local streets (gray)", showLocals);
                 showBridgeLines = EditorGUILayout.Toggle("Bridges (yellow)", showBridgeLines);
                 showLinks = EditorGUILayout.Toggle("Existing-road proposals (green)", showLinks);
+                showDetached = EditorGUILayout.Toggle("Detached roads (purple)", showDetached);
                 if (EditorGUI.EndChangeCheck()) SceneView.RepaintAll();
 
                 EditorGUILayout.Space();
                 if (GUILayout.Button("Preview Layout (no scene changes)", GUILayout.Height(32f))) Run(PlanOnly);
                 if (preview != null)
                 {
-                    EditorGUILayout.LabelField("Planned road segments", preview.edges.Count.ToString());
+                    EditorGUILayout.LabelField("Retained road segments", preview.edges.Count.ToString());
+                    EditorGUILayout.LabelField("Detached preview segments", preview.detachedEdges.Count.ToString());
+                    if (preview.detachedEdges.Count > 0)
+                        EditorGUILayout.HelpBox("Purple streets passed their individual path checks but do NOT connect to the retained network. They are diagnostic only.", MessageType.Warning);
                     EditorGUILayout.LabelField("Arterial / collector / local",
                         preview.edges.Count(e => e.kind == ProceduralWorldPlanner.RoadKind.Arterial) + " / " +
                         preview.edges.Count(e => e.kind == ProceduralWorldPlanner.RoadKind.Collector) + " / " +
@@ -137,7 +143,7 @@ namespace DeliveryDriver.EditorTools
                 }
                 bool hasBuild = FindStates(SceneManager.GetActiveScene()).Count > 0;
                 using (new EditorGUI.DisabledScope(true))
-                    GUILayout.Button("Generate Roads & Bridges (locked for V2 preview)", GUILayout.Height(36f));
+                    GUILayout.Button("Generate Roads & Bridges (locked for preview)", GUILayout.Height(36f));
                 EditorGUILayout.HelpBox("Road classes currently affect the plan and preview, not mesh widths. Green connections are proposals; existing roads are unchanged.", MessageType.Info);
                 using (new EditorGUI.DisabledScope(!hasBuild))
                 {
@@ -246,7 +252,7 @@ namespace DeliveryDriver.EditorTools
             try
             {
                 preview = ProceduralWorldPlanner.Build(settings, layout, scene);
-                SetStatus("Preview ready: " + preview.edges.Count + " roads, " + preview.BridgeCount + " bridges. No scene assets changed.");
+                SetStatus("Preview ready: " + preview.edges.Count + " retained segments, " + preview.detachedEdges.Count + " detached, " + preview.BridgeCount + " planned bridges. No scene assets changed.", preview.detachedEdges.Count > 0 ? MessageType.Warning : MessageType.Info);
             }
             catch (ProceduralWorldPlanner.BridgePlanningException ex) when (allowBridgeFallback)
             {
@@ -592,6 +598,12 @@ namespace DeliveryDriver.EditorTools
                     if (edge.kind != kind) continue;
                     Handles.DrawAAPolyLine(thickness, PreviewPoints(edge));
                 }
+            }
+            if (showDetached)
+            {
+                Handles.color = new Color(.92f, .35f, .95f, .9f);
+                foreach (var edge in preview.detachedEdges)
+                    Handles.DrawAAPolyLine(2f, PreviewPoints(edge));
             }
             if (showLinks)
             {
