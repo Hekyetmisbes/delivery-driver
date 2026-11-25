@@ -194,10 +194,17 @@ namespace DeliveryDriver.EditorTools
                 }
             }
         }
-        private void RefineLocalRoads(int mode)
+        private void RefineLocalRoads(int mode,IReadOnlyCollection<Edge> detachedScope=null)
         {
             var index=new StreetIndex();foreach(var e in plan.edges.Concat(plan.authoredLinks))index.Add(e);
-            var roads=plan.edges.Where(e=>!e.Bridge&&e.points.Count>3).Select(e=>(e,earth:RoadEarth(e.points),
+            if(detachedScope!=null)
+            {
+                if(detachedScope.Any(e=>e.Bridge||!plan.detachedEdges.Contains(e)))
+                    throw new InvalidOperationException("Detached smoothing scope contains a retained or invalid road.");
+                foreach(var e in detachedScope)index.Add(e);
+            }
+            IEnumerable<Edge> localEdges=detachedScope==null?(IEnumerable<Edge>)plan.edges:detachedScope;
+            var roads=localEdges.Where(e=>!e.Bridge&&e.points.Count>3).Select(e=>(e,earth:RoadEarth(e.points),
                 radius:MinimumRadius(e.points),vertical:VerticalStats(e.points,1f/settings.verticalRadius)))
                 .Where(x=>mode==0?x.e.sector=="Ankara"&&x.earth.peak>settings.preferredGrading:
                     mode==1?!RadiusOk(x.e.points,x.e.kind):x.vertical.count>0)
@@ -317,12 +324,56 @@ namespace DeliveryDriver.EditorTools
                     if(group.Any(e=>!RouteClear(e.points,CityBounds(city))||StreetCrosses(e.a,e.b,e.points,index)||!StreetAngles(e.a,e.b,e.points,index)))
                     {geometryReject++;plan.notes.Add(groupLabel+": geometry/protection rejected.");continue;}
                     var groupQuality=Measure(plan,settings);
+                    var savedPoints=group.ToDictionary(e=>e,e=>new List<Vector3>(e.points));
+                    var savedPositions=nodes.ToDictionary(n=>n,n=>n.position);
+                    void RestoreGroupGeometry()
+                    {
+                        foreach(var item in savedPositions)item.Key.position=item.Value;
+                        foreach(var item in savedPoints)item.Key.points=new List<Vector3>(item.Value);
+                    }
+                    float groupSeverity()=>group.Sum(e=>VerticalStats(e.points,1f/Mathf.Max(1f,settings.verticalRadius)).severity);
+                    int groupRadiusFlags()=>group.Count(e=>!RadiusOk(e.points,e.kind));
+                    float beforeSeverity=groupSeverity();
+                    int beforeRadius=groupRadiusFlags();
+                    // Detached geometry is not part of the retained reference. Prepare
+                    // only this group, with shared heights and locked external nodes.
+                    // If preparation is invalid, try the original shape instead.
+                    bool prepared=false;
+                    try
+                    {
+                        OptimizeSharedProfiles(Mathf.Max(16,settings.profileSweeps),true,group);
+                        RefineLocalRoads(1,group);
+                        RefineLocalRoads(2,group);
+                        var checkIndex=new StreetIndex();
+                        foreach(var e in plan.edges.Concat(plan.authoredLinks))checkIndex.Add(e);
+                        foreach(var e in group)checkIndex.Add(e);
+                        bool valid=group.All(e=>e.points[0].Equals(e.a.position)&&e.points[e.points.Count-1].Equals(e.b.position)&&LocalProfileSafe(e.points)&&RouteClear(e.points,CityBounds(city)));
+                        foreach(var e in group)
+                        {
+                            checkIndex.Remove(e);
+                            valid&=StreetAngles(e.a,e.b,e.points,checkIndex)&&!StreetCrosses(e.a,e.b,e.points,checkIndex);
+                            checkIndex.Add(e);
+                        }
+                        prepared=valid&&groupRadiusFlags()<=beforeRadius;
+                        if(!prepared)RestoreGroupGeometry();
+                    }
+                    catch(InvalidOperationException ex)
+                    {
+                        RestoreGroupGeometry();
+                        plan.notes.Add(groupLabel+": preparation fallback: "+ex.Message);
+                    }
+                    plan.notes.Add(groupLabel+": preparation "+(prepared?"VALID":"ORIGINAL")+
+                        "; radius flags "+beforeRadius+" -> "+groupRadiusFlags()+
+                        ", vertical severity "+beforeSeverity.ToString("F5")+" -> "+groupSeverity().ToString("F5")+".");
                     // Snapshot the lists, not the whole scene or sampled geometry. Trial
-                    // connections only change membership and degrees, never old paths.
+                    // connections only change membership and degrees, never old retained paths.
                     var oldEdges=plan.edges.ToList();
                     var oldDetached=plan.detachedEdges.ToList();
                     int groupStartAttempts=attempts,groupStartMeasured=measured;
                     int groupStartTerrain=terrainReject,groupStartQuality=qualityReject,groupStartGraph=graphReject;
+                    int noPath=0,profileFailures=0,radiusFailures=0,clearanceFailures=0,angleFailures=0,crossFailures=0;
+                    QualityReport bestRejected=null;
+                    float bestRejectedCost=float.PositiveInfinity;
                     // Detached degrees are diagnostic and may be stale after pruning.
                     var oldDegrees=nodes.ToDictionary(n=>n,n=>n.degree);
                     foreach(var n in nodes)n.degree=index.At(n).Count()+group.Count(e=>e.a==n||e.b==n);
@@ -356,7 +407,14 @@ namespace DeliveryDriver.EditorTools
                         int measuredInGroup=0;
                         int routedInGroup=0;
                         var hostHealthy=options.Select(x=>x.edge).Distinct().ToDictionary(e=>e,e=>RadiusOk(e.points,e.kind));
-                        foreach(var item in options.OrderBy(x=>hostHealthy[x.edge]?0:1).ThenBy(x=>x.cost).ThenBy(x=>x.edge.a.id).ThenBy(x=>x.edge.b.id).ThenBy(x=>x.sample).ThenBy(x=>x.source.id).Take(64))
+                        var nearest=options.OrderBy(x=>x.cost).ThenBy(x=>x.edge.a.id).ThenBy(x=>x.edge.b.id).ThenBy(x=>x.sample).ThenBy(x=>x.source.id).ToList();
+                        // Keep a nearest-first lane: healthy-first alone can starve
+                        // viable hosts. Then diversify source/host pairs before
+                        // using remaining slots on nearby samples of the same host.
+                        var diverse=nearest.GroupBy(x=>(x.source,x.edge)).Select(g=>g.First())
+                            .OrderBy(x=>hostHealthy[x.edge]?0:1).ThenBy(x=>x.cost);
+                        var ordered=nearest.Take(16).Concat(diverse).Concat(nearest).Distinct().Take(64);
+                        foreach(var item in ordered)
                         {
                             // Bound full city remeasurement independently of cheap
                             // connector attempts. Continue after the first viable route.
@@ -377,9 +435,12 @@ namespace DeliveryDriver.EditorTools
                                     TryRepairRoute(item.source,junction,CityBounds(city),index,ref routed,out path);
                                     routedInGroup+=routed-beforeRouted;
                                 }
-                                if(path==null||!LocalProfileSafe(path)||!RadiusOk(path,RoadKind.Collector)||!RouteClear(path,CityBounds(city))||
-                                    !StreetAngles(item.source,junction,path,index)||StreetCrosses(item.source,junction,path,index))
-                                {connectorReject++;continue;}
+                                if(path==null){noPath++;connectorReject++;continue;}
+                                if(!LocalProfileSafe(path)){profileFailures++;connectorReject++;continue;}
+                                if(!RadiusOk(path,RoadKind.Collector)){radiusFailures++;connectorReject++;continue;}
+                                if(!RouteClear(path,CityBounds(city))){clearanceFailures++;connectorReject++;continue;}
+                                if(!StreetAngles(item.source,junction,path,index)){angleFailures++;connectorReject++;continue;}
+                                if(StreetCrosses(item.source,junction,path,index)){crossFailures++;connectorReject++;continue;}
                                 var connector=new Edge{a=item.source,b=junction,sector=city,kind=RoadKind.Collector,points=path};
                                 int at=plan.edges.IndexOf(old);
                                 plan.edges[at]=a;plan.edges.Insert(at+1,b);
@@ -390,6 +451,8 @@ namespace DeliveryDriver.EditorTools
                                 {
                                     measured++;measuredInGroup++;
                                     var q=Measure(plan,settings);
+                                    float measuredCost=BalancedCost(q,settings);
+                                    if(measuredCost<bestRejectedCost){bestRejectedCost=measuredCost;bestRejected=q;}
                                     if(q.ankaraTiles<groupQuality.ankaraTiles||q.istanbulTiles<groupQuality.istanbulTiles||
                                         (groupQuality.bridgeGraphConnected&&!q.bridgeGraphConnected)||
                                         q.bridgeGap+.01f<groupQuality.bridgeGap||NetworkIdentityIssue(plan)!=null)
@@ -430,8 +493,22 @@ namespace DeliveryDriver.EditorTools
                             "; attempts "+(attempts-groupStartAttempts)+", measured "+(measured-groupStartMeasured)+
                             ", terrain rejects "+(terrainReject-groupStartTerrain)+", quality rejects "+(qualityReject-groupStartQuality)+
                             ", graph rejects "+(graphReject-groupStartGraph)+".");
+                        plan.notes.Add(groupLabel+": connector rejects by first failed check: no path "+noPath+", profile "+profileFailures+", radius "+radiusFailures+
+                            ", clearance "+clearanceFailures+", angle "+angleFailures+", crossing "+crossFailures+".");
+                        if(!success&&bestRejected!=null)
+                            plan.notes.Add(groupLabel+": lowest measured earthwork cost candidate (not accepted): cut/fill "+bestRejected.meanCut.ToString("F4")+"/"+bestRejected.meanFill.ToString("F4")+
+                                " m, extra "+(bestRejected.extraFraction*100f).ToString("F3")+"%, radius flags "+bestRejected.sharpRoads+
+                                ", vertical severity "+bestRejected.verticalSeverity.ToString("F5")+", junction flags "+bestRejected.junctionGradeFlags+".");
                     }
-                    finally{if(!success){foreach(var e in group)index.Remove(e);foreach(var n in nodes)n.degree=oldDegrees[n];}}
+                    finally
+                    {
+                        if(!success)
+                        {
+                            foreach(var e in group)index.Remove(e);
+                            foreach(var n in nodes)n.degree=oldDegrees[n];
+                            RestoreGroupGeometry();
+                        }
+                    }
                 }
             }
             gradingSurface=null;

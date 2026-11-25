@@ -252,10 +252,18 @@ namespace DeliveryDriver.EditorTools
         // One shared variable per junction, and one per interior road sample.
         // Feasible coordinate sweeps constrain each update against all incident
         // grades and cross-section bounds, with actual baseline as the starting point.
-        private void OptimizeSharedProfiles(int sweeps,bool balanced)
+        private void OptimizeSharedProfiles(int sweeps,bool balanced,IReadOnlyCollection<Edge> detachedScope=null)
         {
             var fixedNodes=new HashSet<Node>(plan.edges.Where(e=>e.Bridge).Concat(plan.authoredLinks).Concat(plan.detachedEdges)
                 .SelectMany(e=>new[]{e.a,e.b}));
+            if(detachedScope!=null)
+            {
+                var scope=new HashSet<Edge>(detachedScope);
+                if(scope.Any(e=>e.Bridge||!plan.detachedEdges.Contains(e)))
+                    throw new InvalidOperationException("Detached profile scope contains a retained or invalid road.");
+                fixedNodes=new HashSet<Node>(plan.edges.Concat(plan.authoredLinks).Concat(plan.detachedEdges.Where(e=>!scope.Contains(e)))
+                    .SelectMany(e=>new[]{e.a,e.b}));
+            }
             var junctions=new Dictionary<Node,HeightVar>();
             var vars=new List<HeightVar>();
             var paths=new Dictionary<Edge,HeightVar[]>();
@@ -269,7 +277,8 @@ namespace DeliveryDriver.EditorTools
                     junctions[n]=value=New(n.position,n.gate||fixedNodes.Contains(n));
                 return value;
             }
-            foreach(var edge in plan.edges.Where(e=>e.sector=="Ankara"&&!e.Bridge))
+            IEnumerable<Edge> profileEdges=detachedScope==null?plan.edges.Where(e=>e.sector=="Ankara"&&!e.Bridge):detachedScope;
+            foreach(var edge in profileEdges)
             {
                 var a=new HeightVar[edge.points.Count];
                 for(int i=0;i<a.Length;i++)
@@ -288,6 +297,22 @@ namespace DeliveryDriver.EditorTools
                     prev.adjacent.Add(pair);value.adjacent.Add(pair);
                 }
                 paths.Add(edge,a);
+            }
+            // Add a curvature penalty only for the detached preparation mode.
+            // Every term is the absolute linear change of adjacent slopes.
+            var localBends=new Dictionary<HeightVar,List<(HeightVar a,HeightVar b,HeightVar c,float dl,float dr)>>();
+            if(detachedScope!=null)
+            foreach(var path in paths.Values)
+            for(int i=1;i<path.Length-1;i++)
+            {
+                var a=path[i-1];var b=path[i];var c=path[i+1];
+                float dl=Vector2.Distance(a.pos,b.pos),dr=Vector2.Distance(b.pos,c.pos);
+                if(dl<.001f||dr<.001f)continue;
+                foreach(var v in new[]{a,b,c}.Distinct())
+                {
+                    if(!localBends.TryGetValue(v,out var list))localBends[v]=list=new List<(HeightVar,HeightVar,HeightVar,float,float)>();
+                    list.Add((a,b,c,dl,dr));
+                }
             }
             // A legacy sample can be slightly outside a newly sampled midpoint
             // bound. Freeze that segment instead of expanding its grading allowance.
@@ -327,6 +352,15 @@ namespace DeliveryDriver.EditorTools
                                 (balanced?4f:2f)*Mathf.Max(0,d-settings.preferredGrading));
                         }
                         foreach(float h in x.ground)total+=.1f*Mathf.Abs(y-h);
+                        if(detachedScope!=null&&localBends.TryGetValue(x,out var bends))
+                        {
+                            float Y(HeightVar v)=>v==x?y:v.y;
+                            foreach(var bend in bends)
+                            {
+                                float k=Mathf.Abs((Y(bend.c)-Y(bend.b))/bend.dr-(Y(bend.b)-Y(bend.a))/bend.dl)/((bend.dl+bend.dr)*.5f);
+                                total+=1200f*Mathf.Max(0f,k-1f/Mathf.Max(1f,settings.verticalRadius));
+                            }
+                        }
                         return total;
                     }
                     // Convex local objective; bounded ternary search, keeping old
@@ -340,7 +374,7 @@ namespace DeliveryDriver.EditorTools
             foreach(var j in junctions)j.Key.position=XYZ(j.Value.pos,j.Value.y);
             foreach(var item in paths)
                 for(int i=0;i<item.Value.Length;i++)item.Key.points[i]=XYZ(item.Value[i].pos,item.Value[i].y);
-            plan.notes.Add("Shared profile variables "+vars.Count+", junctions "+junctions.Count+", coordinate improvements "+moved+".");
+            plan.notes.Add((detachedScope==null?"Shared profile":"Detached shared profile")+" variables "+vars.Count+", junctions "+junctions.Count+", coordinate improvements "+moved+".");
         }
         private void ValidateStageGrades()
         {
