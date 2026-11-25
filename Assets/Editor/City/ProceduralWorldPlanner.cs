@@ -20,6 +20,8 @@ namespace DeliveryDriver.EditorTools
             public float arterialSpacing = 600f, collectorSpacing = 250f, straightPreference = .70f, bridgeSeparation = .65f;
             public int nodesPerTile = 180, authoredLinkTarget = 4;
             public bool terrainRepair = true;
+            public bool ankaraBackbone = true, districtGrading = true;
+            public float districtGradingLimit = 30f;
             public bool ankaraLow = true, protectKizilay = true, buildAnkara = true, buildIstanbul = true, bridges = true;
             public Transform ankara, istanbul;
         }
@@ -92,6 +94,7 @@ namespace DeliveryDriver.EditorTools
             public readonly List<string> warnings = new List<string>();
             public readonly List<string> notes = new List<string>();
             public readonly List<Edge> authoredLinks = new List<Edge>();
+            public readonly List<Vector3> gradingMarkers = new List<Vector3>();
             public readonly List<Edge> detachedEdges = new List<Edge>(); // Feasible individual roads, not connected to the retained network.
             public readonly List<Rect> protectedAreas = new List<Rect>();
             public Func<Vector2, float, bool> manualRoadNear;
@@ -263,6 +266,7 @@ namespace DeliveryDriver.EditorTools
             if (settings.bridges && settings.buildAnkara && settings.buildIstanbul)
                 planner.PlanBridges();
             if (settings.buildAnkara) planner.PlanHierarchy("Ankara", layout.Ankara(settings.ankaraLow));
+            planner.gradingSurface = null;
             if (settings.buildIstanbul) planner.PlanHierarchy("İstanbul", layout.Istanbul(settings.ankaraLow));
             if (planner.plan.edges.Count == 0) throw new InvalidOperationException("No valid roads. Increase spacing or cut/fill tolerance, or check the terrain.");
             return planner.plan;
@@ -592,6 +596,8 @@ namespace DeliveryDriver.EditorTools
         private void PlanHierarchy(string sector, Rect bounds)
         {
             diagnostics = new StreetDiagnostics();
+            bool backbone = sector == "Ankara" && settings.ankaraBackbone;
+            gradingSurface = backbone && settings.districtGrading ? new GradingSurface(plan.layout, bounds, settings.grade) : null;
             var gates = plan.nodes.Where(n => n.sector == sector && n.gate).ToList();
             var nodes = new List<Node>(gates);
             var index = new StreetIndex();
@@ -687,6 +693,72 @@ namespace DeliveryDriver.EditorTools
                     if (TryBuild(new StreetCandidate { a=gate,b=n,kind=RoadKind.Arterial,length=len })) break;
                 }
             }
+            Node backboneRoot = null;
+            if (backbone)
+            {
+                backboneRoot = gates.FirstOrDefault();
+                if (backboneRoot == null)
+                {
+                    // Prefer a reachable low-altitude coastal seed, not an arbitrary isolated summit.
+                    float shore = settings.ankaraLow ? plan.layout.AlongMax(bounds) : plan.layout.AlongMin(bounds);
+                    backboneRoot = nodes.Where(n => !n.gate)
+                        .OrderBy(n => Mathf.Abs((plan.layout.rowsOnX ? n.position.x : n.position.z) - shore)
+                            + Mathf.Abs((plan.layout.rowsOnX ? n.position.z : n.position.x) -
+                            (plan.layout.rowsOnX ? bounds.center.y : bounds.center.x)) * .18f)
+                        .ThenBy(n => n.id).FirstOrDefault();
+                }
+                if (backboneRoot != null)
+                {
+                    // Reserve long city-to-city-band routes before local streets occupy their space.
+                    var spineCandidates = new List<StreetCandidate>(candidates);
+                    for (int x=0;x<xs.Count;x++)
+                    for (int z=0;z<zs.Count;z++)
+                    {
+                        Node n=grid[x,z];
+                        if(n==null)continue;
+                        foreach(Vector2Int o in new[]{new Vector2Int(1,1),new Vector2Int(1,-1),new Vector2Int(2,1),
+                            new Vector2Int(2,-1),new Vector2Int(1,2),new Vector2Int(1,-2),new Vector2Int(2,0),new Vector2Int(0,2)})
+                        {
+                            int xx=x+o.x,zz=z+o.y;
+                            if(xx>=xs.Count||zz<0||zz>=zs.Count)continue;
+                            Node other=grid[xx,zz];
+                            if(other==null)continue;
+                            float length=Vector2.Distance(XZ(n.position),XZ(other.position));
+                            if(length>=RoadClearance*2.5f && length<=local*3.2f)
+                                spineCandidates.Add(new StreetCandidate{a=n,b=other,kind=RoadKind.Arterial,length=length});
+                        }
+                    }
+                    foreach(Node gate in gates)
+                    {
+                        foreach(Node n in nodes.Where(n=>!n.gate).OrderBy(n=>(XZ(n.position)-XZ(gate.position)).sqrMagnitude).Take(18))
+                        {
+                            float length=Vector2.Distance(XZ(n.position),XZ(gate.position));
+                            if(length>=RoadClearance*2.5f && length<=local*5f)
+                                spineCandidates.Add(new StreetCandidate{a=gate,b=n,kind=RoadKind.Arterial,length=length});
+                        }
+                    }
+                    PlanBackbone(bounds, backboneRoot, nodes, gates, spineCandidates, Find, TryBuild);
+                    // Grow new streets only from the connected backbone first; subsequent
+                    // diagnostic passes may still expose genuinely detached fragments.
+                    var frontier = candidates.OrderBy(c=>c.kind).ThenBy(c=>c.length).ToList();
+                    var rejected = new HashSet<StreetCandidate>();
+                    int attached = 0;
+                    for (int pass=0;pass<96;pass++)
+                    {
+                        int added=0;
+                        foreach(var c in frontier)
+                        {
+                            if(rejected.Contains(c))continue;
+                            bool ac=Find(c.a)==Find(backboneRoot),bc=Find(c.b)==Find(backboneRoot);
+                            if(ac==bc)continue;
+                            if(TryBuild(c)){added++;attached++;}
+                            else rejected.Add(c);
+                        }
+                        if(added==0)break;
+                    }
+                    plan.notes.Add("Ankara: "+attached+" street segments extended directly from the backbone.");
+                }
+            }
             foreach (RoadKind kind in new[] {RoadKind.Arterial,RoadKind.Collector})
                 foreach (StreetCandidate c in candidates.Where(c=>c.kind==kind).OrderBy(c=>c.length)) TryBuild(c);
 
@@ -745,7 +817,7 @@ namespace DeliveryDriver.EditorTools
                 RepairComponents(sector, bounds, local, nodes, Find, TryBuild, diagnostics);
             }
             var active=nodes.Where(n=>n.degree>0).ToList();
-            Node keep=gates.Count>0?Find(gates[0]):active.GroupBy(Find).OrderByDescending(g=>g.Count()).ThenBy(g=>g.Key.id).Select(g=>g.Key).FirstOrDefault();
+            Node keep=backboneRoot!=null && backboneRoot.degree>0?Find(backboneRoot):gates.Count>0?Find(gates[0]):active.GroupBy(Find).OrderByDescending(g=>g.Count()).ThenBy(g=>g.Key.id).Select(g=>g.Key).FirstOrDefault();
             if (keep == null) throw new InvalidOperationException(sector + ": no connected street component.");
             // Preview must show the attempted layout even when gate connectivity is incomplete.
             // Generation remains locked; detached roads/bridges are explicitly diagnosed.
@@ -764,9 +836,231 @@ namespace DeliveryDriver.EditorTools
                 ", geometry " + diagnostics.geometryRejected + "; skipped nodes: protected " +
                 diagnostics.protectedNodes + ", obstacles/bounds " + diagnostics.blockedNodes + ", missing terrain " + diagnostics.missingNodes + ".");
             AddCoverageReport(sector, bounds);
+            if (gradingSurface != null) ReportGrading(sector);
             index=new StreetIndex();
             foreach(Edge e in plan.edges)index.Add(e);
             ProposeLinks(sector,bounds,nodes.Where(n=>n.degree>0&&!n.gate&&n.degree<4).ToList(),index);
+            gradingSurface = null;
+        }
+
+        // Read-only, coarse virtual terrain surface. The grade envelopes reduce abrupt
+        // height bands; actual roads are still checked against original terrain + explicit budget.
+        private sealed class GradingSurface
+        {
+            private readonly Rect area;
+            private readonly int nx,nz;
+            private readonly float dx,dz;
+            private readonly float[,] heights;
+
+            public GradingSurface(Layout layout,Rect bounds,float grade)
+            {
+                area=bounds;
+                nx=Mathf.Clamp(Mathf.CeilToInt(bounds.width/40f)+1,3,161);
+                nz=Mathf.Clamp(Mathf.CeilToInt(bounds.height/40f)+1,3,161);
+                dx=bounds.width/(nx-1);dz=bounds.height/(nz-1);
+                var raw=new float[nx,nz];
+                for(int x=0;x<nx;x++)
+                for(int z=0;z<nz;z++)
+                {
+                    Vector2 pos=new Vector2(bounds.xMin+x*dx,bounds.yMin+z*dz);
+                    if(!layout.TryHeight(pos,out raw[x,z]))
+                        throw new InvalidOperationException("Missing land sample in Ankara virtual terrain at "+pos);
+                }
+                var smooth=(float[,])raw.Clone();
+                for(int pass=0;pass<6;pass++)
+                {
+                    var prev=(float[,])smooth.Clone();
+                    for(int x=0;x<nx;x++)
+                    for(int z=0;z<nz;z++)
+                    {
+                        float sum=prev[x,z]*4f;int weight=4;
+                        foreach(Vector2Int off in new[]{Vector2Int.left,Vector2Int.right,Vector2Int.up,Vector2Int.down})
+                        {
+                            int xx=x+off.x,zz=z+off.y;
+                            if(xx<0||xx>=nx||zz<0||zz>=nz)continue;
+                            sum+=prev[xx,zz];weight++;
+                        }
+                        smooth[x,z]=sum/weight;
+                    }
+                }
+                // Approximate lower/upper grade-limited envelopes on an 8-neighbor raster.
+                var lower=(float[,])smooth.Clone();
+                var upper=(float[,])smooth.Clone();
+                float limit=grade*.78f;
+                for(int pass=0;pass<4;pass++)
+                {
+                    bool reverse=pass%2==1;
+                    for(int ix=0;ix<nx;ix++)
+                    for(int iz=0;iz<nz;iz++)
+                    {
+                        int x=reverse?nx-1-ix:ix,z=reverse?nz-1-iz:iz;
+                        for(int ox=-1;ox<=1;ox++)
+                        for(int oz=-1;oz<=1;oz++)
+                        {
+                            if(ox==0&&oz==0)continue;
+                            int xx=x+ox,zz=z+oz;
+                            if(xx<0||xx>=nx||zz<0||zz>=nz)continue;
+                            float rise=Mathf.Sqrt(ox*ox*dx*dx+oz*oz*dz*dz)*limit;
+                            lower[x,z]=Mathf.Min(lower[x,z],lower[xx,zz]+rise);
+                            upper[x,z]=Mathf.Max(upper[x,z],upper[xx,zz]-rise);
+                        }
+                    }
+                }
+                heights=new float[nx,nz];
+                for(int x=0;x<nx;x++)
+                for(int z=0;z<nz;z++)heights[x,z]=(lower[x,z]+upper[x,z])*.5f;
+            }
+
+            public float Sample(Vector2 pos)
+            {
+                float x=Mathf.Clamp((pos.x-area.xMin)/dx,0f,nx-1);
+                float z=Mathf.Clamp((pos.y-area.yMin)/dz,0f,nz-1);
+                int ix=Mathf.Min(nx-2,Mathf.FloorToInt(x)),iz=Mathf.Min(nz-2,Mathf.FloorToInt(z));
+                return Mathf.Lerp(Mathf.Lerp(heights[ix,iz],heights[ix+1,iz],x-ix),
+                    Mathf.Lerp(heights[ix,iz+1],heights[ix+1,iz+1],x-ix),z-iz);
+            }
+        }
+
+        private GradingSurface gradingSurface;
+
+        private bool CanGradeDistrict(Vector2 pos) => gradingSurface!=null &&
+            !IsProtected(pos,RoadClearance+settings.blend) && !obstacles.Near(pos,RoadClearance*2f+settings.blend);
+
+        private float GradingBudget(Vector2 pos) => CanGradeDistrict(pos)?
+            Mathf.Max(settings.maxCutFill,settings.districtGradingLimit):settings.maxCutFill;
+
+        private float PreferredGround(Vector2 pos,float original)
+        {
+            if(!CanGradeDistrict(pos))return original;
+            float reserve=Mathf.Max(0f,settings.districtGradingLimit-settings.maxCutFill-1f);
+            return original+Mathf.Clamp(gradingSurface.Sample(pos)-original,-reserve,reserve);
+        }
+
+        private void ReportGrading(string sector)
+        {
+            int segments=0;float max=0f;
+            foreach(var edge in plan.edges.Where(e=>e.sector==sector).Concat(plan.detachedEdges.Where(e=>e.sector==sector)))
+            {
+                bool marked=false;
+                for(int i=0;i<edge.points.Count;i++)
+                {
+                    Vector3 point=edge.points[i];
+                    Vector2 pos=XZ(point);
+                    Vector2 tangent=XZ(edge.points[Mathf.Min(i+1,edge.points.Count-1)]-edge.points[Mathf.Max(0,i-1)]);
+                    Vector2 right=new Vector2(-tangent.y,tangent.x).normalized;
+                    float worst=0f;
+                    for(int side=-1;side<=1;side++)
+                    {
+                        Vector2 q=pos+right*side*(settings.width*.5f+settings.sidewalk);
+                        if(plan.layout.TryHeight(q,out float original))
+                            worst=Mathf.Max(worst,Mathf.Abs(point.y-.12f-original));
+                    }
+                    max=Mathf.Max(max,worst);
+                    if(worst>settings.maxCutFill+.01f)
+                    {
+                        marked=true;
+                        if(i%6==0||i==edge.points.Count-1)plan.gradingMarkers.Add(point+Vector3.up);
+                    }
+                }
+                if(marked)segments++;
+            }
+            plan.notes.Add(sector+": virtual grading needed on "+segments+" street segments; maximum sampled original-ground adjustment "+max.ToString("F1")+" m (incl. detached). Red markers are preview only.");
+        }
+
+        // Multi-source Dijkstra from the already connected component, routing to each
+        // land tile before minor roads. Failed geometry/grade edges are blacklisted and retried.
+        private void PlanBackbone(Rect bounds,Node root,List<Node> nodes,List<Node> gates,
+            List<StreetCandidate> candidates,Func<Node,Node> find,Func<StreetCandidate,bool,bool> build)
+        {
+            var adjacency=new Dictionary<Node,List<StreetCandidate>>();
+            foreach(var c in candidates)
+            {
+                foreach(Node n in new[]{c.a,c.b})
+                {
+                    if(!adjacency.TryGetValue(n,out List<StreetCandidate> list))adjacency[n]=list=new List<StreetCandidate>();
+                    list.Add(c);
+                }
+            }
+            var failed=new HashSet<(int,int)>();
+            var targets=new List<List<Node>>();
+            float shore= settings.ankaraLow?plan.layout.AlongMax(bounds):plan.layout.AlongMin(bounds);
+            foreach(Tile tile in plan.layout.tiles.Where(t=>Contains(bounds,t.area.center)).OrderBy(t=>
+                Mathf.Abs((plan.layout.rowsOnX?t.area.center.x:t.area.center.y)-shore)))
+            {
+                var group=nodes.Where(n=>!n.gate&&tile.area.Contains(XZ(n.position)))
+                    .OrderBy(n=>(XZ(n.position)-tile.area.center).sqrMagnitude).ThenBy(n=>n.id).Take(18).ToList();
+                if(group.Count>0)targets.Add(group);
+            }
+            foreach(Node gate in gates.Where(g=>g!=root))targets.Add(new List<Node>{gate});
+            int reached=0,links=0,routed=0;
+            foreach(var goalNodes in targets)
+            {
+                if(EditorUtility.DisplayCancelableProgressBar("Procedural World",
+                    "Ankara: reserving backbone corridor "+(reached+1)+"/"+targets.Count,.20f))
+                    throw new OperationCanceledException();
+                for(int retry=0;retry<18&&!goalNodes.Any(n=>find(n)==find(root)&&n.degree>0);retry++)
+                {
+                    var goals=new HashSet<Node>(goalNodes);
+                    var cost=new Dictionary<Node,float>();
+                    var previous=new Dictionary<Node,(Node from,StreetCandidate edge)>();
+                    var queue=new SortedSet<(float cost,int id,Node node)>(
+                        Comparer<(float cost,int id,Node node)>.Create((a,b)=>{
+                            int c=a.cost.CompareTo(b.cost);return c!=0?c:a.id.CompareTo(b.id);}));
+                    Node group=find(root);
+                    foreach(Node n in nodes.Where(n=>find(n)==group && (n.degree<DegreeLimit(n)||goals.Contains(n))))
+                    {cost[n]=0f;queue.Add((0f,n.id,n));}
+                    Node goal=null;
+                    while(queue.Count>0)
+                    {
+                        var item=queue.Min;queue.Remove(item);
+                        Node n=item.node;
+                        if(cost[n]<item.cost)continue;
+                        if(goals.Contains(n)&&n!=root){goal=n;break;}
+                        if(!adjacency.TryGetValue(n,out List<StreetCandidate> edges))continue;
+                        foreach(var c in edges)
+                        {
+                            Node next=c.a==n?c.b:c.a;
+                            var key=(Mathf.Min(n.id,next.id),Mathf.Max(n.id,next.id));
+                            if(failed.Contains(key))continue;
+                            bool same=find(n)==find(next);
+                            if(!same&&(n.degree>=DegreeLimit(n)||next.degree>=DegreeLimit(next)))continue;
+                            float rise=Mathf.Abs(n.position.y-next.position.y);
+                            if(!same&&rise>c.length*settings.grade+.01f)continue;
+                            float price=item.cost+(same?.001f:c.length*(c.kind==RoadKind.Arterial?.8f:c.kind==RoadKind.Collector?1f:1.18f)+rise*2f);
+                            if(cost.TryGetValue(next,out float old)&&old<=price)continue;
+                            cost[next]=price;previous[next]=(n,c);queue.Add((price,next.id,next));
+                        }
+                    }
+                    if(goal==null)break;
+                    var route=new List<StreetCandidate>();
+                    Node cursor=goal;
+                    while(previous.TryGetValue(cursor,out var prev)){route.Add(prev.edge);cursor=prev.from;}
+                    route.Reverse();
+                    if(route.Count==0)break;
+                    bool progress=false;
+                    foreach(var c in route)
+                    {
+                        if(find(c.a)==find(c.b))continue;
+                        var arterial=new StreetCandidate{a=c.a,b=c.b,kind=RoadKind.Arterial,length=c.length};
+                        bool accepted=build(arterial,false);
+                        if(!accepted&&routed<12&&settings.terrainRepair)
+                        {
+                            routed++;
+                            accepted=build(arterial,true);
+                        }
+                        if(!accepted)
+                        {
+                            failed.Add((Mathf.Min(c.a.id,c.b.id),Mathf.Max(c.a.id,c.b.id)));
+                            break;
+                        }
+                        progress=true;links++;
+                    }
+                    if(!progress&&route.All(c=>find(c.a)==find(c.b)))break;
+                }
+                if(goalNodes.Any(n=>find(n)==find(root)&&n.degree>0))reached++;
+            }
+            plan.notes.Add("Ankara backbone: "+reached+"/"+targets.Count+" tile-center / bridge targets reached before local streets, "+links+" reserved arterial segments, "+failed.Count+" rejected connections.");
+            if(reached<targets.Count)plan.warnings.Add("Ankara backbone could not reach every target at the selected grade and grading limits. Check coverage and red grading markers.");
         }
 
         // Repair the component graph before pruning. Long, terrain-aware connector
@@ -896,11 +1190,13 @@ namespace DeliveryDriver.EditorTools
                 if(len<.01f)return false;
                 int steps=Mathf.Max(1,Mathf.CeilToInt(len/8f));
                 if(!plan.layout.TryHeight(from,out float previous))return false;
+                previous=PreferredGround(from,previous);
                 float totalRise=0f;
                 for(int i=1;i<=steps;i++)
                 {
                     Vector2 pos=Vector2.Lerp(from,to,i/(float)steps);
                     if(!PointClear(pos)||!plan.layout.TryHeight(pos,out float h))return false;
+                    h=PreferredGround(pos,h);
                     float dy=Mathf.Abs(h-previous);
                     // A small amount of terrain cut/fill is allowed during search;
                     // the final solver enforces the actual road grade and full width.
@@ -1347,15 +1643,18 @@ namespace DeliveryDriver.EditorTools
                 if (!plan.layout.TryHeight(p, out float h)) return false;
                 Vector2 tangent = XZ(path[Mathf.Min(n - 1, i + 1)]) - XZ(path[Mathf.Max(0, i - 1)]);
                 Vector2 right = new Vector2(-tangent.y, tangent.x).normalized;
-                lo[i] = h + .12f - settings.maxCutFill;
-                hi[i] = h + .12f + settings.maxCutFill;
+                float budget = GradingBudget(p);
+                lo[i] = h + .12f - budget;
+                hi[i] = h + .12f + budget;
                 for (int s = -1; s <= 1; s += 2)
                 {
-                    if (!plan.layout.TryHeight(p + right * roadHalf * s, out float cross)) return false;
-                    lo[i] = Mathf.Max(lo[i], cross + .12f - settings.maxCutFill);
-                    hi[i] = Mathf.Min(hi[i], cross + .12f + settings.maxCutFill);
+                    Vector2 sidePoint = p + right * roadHalf * s;
+                    if (!plan.layout.TryHeight(sidePoint, out float cross)) return false;
+                    float sideBudget = GradingBudget(sidePoint);
+                    lo[i] = Mathf.Max(lo[i], cross + .12f - sideBudget);
+                    hi[i] = Mathf.Min(hi[i], cross + .12f + sideBudget);
                 }
-                target[i] = h + .12f;
+                target[i] = PreferredGround(p, h) + .12f;
                 if (i > 0) step[i] = Vector2.Distance(XZ(path[i - 1]), p) * settings.grade;
                 if (lo[i] > hi[i]) return false;
             }
@@ -1443,7 +1742,7 @@ namespace DeliveryDriver.EditorTools
         private Node AddLandNode(Vector2 p, string sector)
         {
             plan.layout.TryHeight(p, out float h);
-            return AddNode(XYZ(p, h + .12f), sector, false);
+            return AddNode(XYZ(p, PreferredGround(p, h) + .12f), sector, false);
         }
         private Node AddNode(Vector3 p, string sector, bool gate)
         {
