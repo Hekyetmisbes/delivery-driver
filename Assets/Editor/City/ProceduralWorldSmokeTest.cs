@@ -85,6 +85,13 @@ namespace DeliveryDriver.EditorTools
                 }
                 var asymmetric = ProceduralWorldPlanner.Build(settings, emptySea, scene);
                 Verify(asymmetric, settings, 2);
+                // V5 read-only analyzer: one sample raster per actual land tile.
+                var analysis = ProceduralWorldPlanner.AnalyzeOnly(settings, emptySea, scene);
+                Require(analysis.terrainCells.Count > 0 &&
+                    analysis.terrainCells.All(c => !emptySea.sea.Contains(ProceduralWorldPlanner.XZ(c.center))),
+                    "Terrain analyzer did not exclude the sea corridor.");
+                Require(analysis.terrainCells.All(c => c.slope >= 0f && !float.IsNaN(c.slope)),
+                    "Invalid slope sample.");
                 // Ankara regression: three height bands with sharp tile seams, on a
                 // temporary scene only. V4 should connect all three depth bands
                 // using the declared virtual grading budget, without editing terrain.
