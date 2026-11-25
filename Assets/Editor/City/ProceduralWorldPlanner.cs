@@ -20,6 +20,8 @@ namespace DeliveryDriver.EditorTools
             public float arterialSpacing = 600f, collectorSpacing = 250f, straightPreference = .70f, bridgeSeparation = .65f;
             public int nodesPerTile = 180, authoredLinkTarget = 4;
             public bool terrainRepair = true;
+            public bool terrainDesign = true, preserveV4Coverage = true;
+            public float terrainInfluence = .65f, districtVariation = .65f, earthworkPreference = .8f;
             public bool ankaraBackbone = true, districtGrading = true;
             public float districtGradingLimit = 30f;
             public bool ankaraLow = true, protectKizilay = true, buildAnkara = true, buildIstanbul = true, bridges = true;
@@ -95,6 +97,7 @@ namespace DeliveryDriver.EditorTools
             public readonly List<string> notes = new List<string>();
             public readonly List<Edge> authoredLinks = new List<Edge>();
             public readonly List<Vector3> gradingMarkers = new List<Vector3>();
+            public readonly List<TerrainAnalysisCell> terrainCells = new List<TerrainAnalysisCell>();
             public readonly List<Edge> detachedEdges = new List<Edge>(); // Feasible individual roads, not connected to the retained network.
             public readonly List<Rect> protectedAreas = new List<Rect>();
             public Func<Vector2, float, bool> manualRoadNear;
@@ -258,11 +261,200 @@ namespace DeliveryDriver.EditorTools
             return layout;
         }
 
+        internal sealed class TerrainAnalysisCell
+        {
+            public Rect area;
+            public Vector3 center;
+            public float slope, roughness;
+            public Vector2 uphill;
+            public bool protectedLand;
+        }
+
+        private readonly Dictionary<Tile, TerrainAnalysisCell[,]> terrainAnalysis =
+            new Dictionary<Tile, TerrainAnalysisCell[,]>();
+
+        // Preview-only sample raster; the original heightmap is still authoritative for
+        // the final road grade and cross-section constraints.
+        private void AnalyzeTerrain()
+        {
+            foreach (Tile tile in plan.layout.tiles)
+            {
+                if (tile.row == 3) continue;
+                int nx = Mathf.Clamp(Mathf.CeilToInt(tile.area.width / 85f), 3, 32);
+                int nz = Mathf.Clamp(Mathf.CeilToInt(tile.area.height / 85f), 3, 32);
+                float dx = tile.area.width / nx, dz = tile.area.height / nz;
+                var cells = new TerrainAnalysisCell[nx,nz];
+                for (int x=0;x<nx;x++)
+                for (int z=0;z<nz;z++)
+                {
+                    Rect r = new Rect(tile.area.xMin+x*dx,tile.area.yMin+z*dz,dx,dz);
+                    Vector2 c = r.center;
+                    float h = tile.Height(c);
+                    float radius = Mathf.Min(20f, Mathf.Min(dx,dz)*.35f);
+                    float left=tile.Height(c-Vector2.right*radius), right=tile.Height(c+Vector2.right*radius);
+                    float down=tile.Height(c-Vector2.up*radius), up=tile.Height(c+Vector2.up*radius);
+                    Vector2 gradient = new Vector2(right-left,up-down)/(2f*radius);
+                    var cell = new TerrainAnalysisCell { area=r, center=XYZ(c,h), slope=gradient.magnitude,
+                        roughness=Mathf.Max(Mathf.Abs((left+right)*.5f-h),Mathf.Abs((up+down)*.5f-h)),
+                        uphill=gradient.normalized,
+                        protectedLand=IsProtected(c,RoadClearance)||obstacles.Near(c,RoadClearance*2f) };
+                    cells[x,z]=cell; plan.terrainCells.Add(cell);
+                }
+                terrainAnalysis.Add(tile,cells);
+            }
+            foreach (var sector in new[] { "Ankara", "İstanbul" })
+            {
+                Rect bounds=sector=="Ankara"?plan.layout.Ankara(settings.ankaraLow):plan.layout.Istanbul(settings.ankaraLow);
+                var cells=plan.terrainCells.Where(c=>bounds.Contains(XZ(c.center))).ToList();
+                if(cells.Count==0)continue;
+                plan.notes.Add(sector+" terrain analysis: "+cells.Count+" samples, elevation "+
+                    cells.Min(c=>c.center.y).ToString("F1")+"–"+cells.Max(c=>c.center.y).ToString("F1")+
+                    " m; "+cells.Count(c=>c.slope>settings.grade)+" cells above selected road grade (raw ground, not final roads).");
+            }
+        }
+
+        private TerrainAnalysisCell AnalysisAt(Vector2 p)
+        {
+            foreach(var pair in terrainAnalysis)
+            {
+                if(!Contains(pair.Key.area,p,.001f))continue;
+                var a=pair.Value;
+                int x=Mathf.Clamp(Mathf.FloorToInt((p.x-pair.Key.area.xMin)/pair.Key.area.width*a.GetLength(0)),0,a.GetLength(0)-1);
+                int z=Mathf.Clamp(Mathf.FloorToInt((p.y-pair.Key.area.yMin)/pair.Key.area.height*a.GetLength(1)),0,a.GetLength(1)-1);
+                return a[x,z];
+            }
+            return null;
+        }
+
+        // Coherent district rotation field, smoothly fading near its boundary.
+        // Small displacement preserves neighbor relationships of the V4 scaffold.
+        private Vector2 ShapeStreetNode(Vector2 pos, Rect bounds, float local)
+        {
+            if(IsProtected(pos,RoadClearance*2f)||obstacles.Near(pos,RoadClearance*2f))return pos;
+            District district=districts.FirstOrDefault(d=>d.area.Contains(pos));
+            Rect area=district!=null?district.area:bounds;
+            string name=district!=null?district.name:"";
+            int hash=17;
+            unchecked { foreach(char ch in name)hash=hash*31+ch; hash=hash*31+settings.seed; }
+            float angle=((uint)hash%1001/1000f-.5f)*.75f;
+            var style=StreetStyle(pos);
+            angle*=settings.districtVariation*style.jitter;
+            TerrainAnalysisCell cell=AnalysisAt(pos);
+            if(cell!=null&&cell.slope>.015f)
+            {
+                Vector2 contour=new Vector2(-cell.uphill.y,cell.uphill.x);
+                float preferred=Mathf.Atan2(contour.y,contour.x);
+                preferred=Mathf.Repeat(preferred+Mathf.PI*.25f,Mathf.PI*.5f)-Mathf.PI*.25f;
+                float weight=Mathf.Clamp01(cell.slope/Mathf.Max(.01f,settings.grade))*settings.terrainInfluence;
+                angle=Mathf.Lerp(angle,preferred,weight);
+            }
+            Vector2 v=pos-area.center;
+            Vector2 rotated=new Vector2(v.x*Mathf.Cos(angle)-v.y*Mathf.Sin(angle),v.x*Mathf.Sin(angle)+v.y*Mathf.Cos(angle));
+            float boundary=Mathf.Min(Mathf.Min(pos.x-area.xMin,area.xMax-pos.x),Mathf.Min(pos.y-area.yMin,area.yMax-pos.y));
+            float fade=Mathf.SmoothStep(0f,1f,Mathf.Clamp01(boundary/(local*1.4f)));
+            Vector2 shift=Vector2.ClampMagnitude(rotated-v,local*.24f)*fade;
+            return pos+shift;
+        }
+
+        private float TerrainCandidateCost(StreetCandidate c)
+        {
+            Vector2 a=XZ(c.a.position),b=XZ(c.b.position);
+            Vector2 direction=(b-a).normalized;
+            float penalty=0f;
+            for(int i=1;i<=3;i++)
+            {
+                TerrainAnalysisCell cell=AnalysisAt(Vector2.Lerp(a,b,i*.25f));
+                if(cell==null)continue;
+                float along=cell.slope*Mathf.Abs(Vector2.Dot(direction,cell.uphill));
+                penalty+=Mathf.Max(0f,along-settings.grade*.5f)*6f+cell.roughness*.07f;
+            }
+            return c.length*(1f+settings.terrainInfluence*penalty/3f);
+        }
+
+        // A sampled cost proxy, not a cubic-meter earthworks estimate.
+        private float ProfileCost(List<Vector3> path)
+        {
+            float sum=0f, max=0f;
+            for(int i=0;i<path.Count;i+=2)
+            {
+                Vector3 p=path[i];
+                Vector2 center=XZ(p);
+                Vector2 tangent=XZ(path[Mathf.Min(i+1,path.Count-1)]-path[Mathf.Max(0,i-1)]);
+                Vector2 side=new Vector2(-tangent.y,tangent.x).normalized*(settings.width*.5f+settings.sidewalk);
+                for(int j=-1;j<=1;j++)
+                {
+                    if(!plan.layout.TryHeight(center+j*side,out float h))continue;
+                    float d=Mathf.Abs(p.y-.12f-h);
+                    sum+=d;max=Mathf.Max(max,d);
+                }
+            }
+            return settings.earthworkPreference*(sum/Mathf.Max(1,((path.Count+1)/2)*3)+max*.25f);
+        }
+
+        private static int Coverage(Plan p,string sector)
+        {
+            var edges=p.edges.Where(e=>e.sector==sector).ToList();
+            return p.layout.tiles.Count(t=>t.row!=3&&edges.Any(e=>e.points.Any(v=>t.area.Contains(XZ(v)))));
+        }
+
+        private static bool GatesConnected(Plan p)
+        {
+            if(p.BridgeCount==0)return true;
+            var links=new Dictionary<Node,List<Node>>();
+            foreach(Edge e in p.edges)
+            {
+                if(!links.TryGetValue(e.a,out List<Node> a))links[e.a]=a=new List<Node>();
+                if(!links.TryGetValue(e.b,out List<Node> b))links[e.b]=b=new List<Node>();
+                a.Add(e.b);b.Add(e.a);
+            }
+            Node start=p.edges.First(e=>e.Bridge).a;
+            var visited=new HashSet<Node>{start};
+            var queue=new Queue<Node>();queue.Enqueue(start);
+            while(queue.Count>0)
+                foreach(Node n in links[queue.Dequeue()])if(visited.Add(n))queue.Enqueue(n);
+            return p.edges.All(e=>visited.Contains(e.a)&&visited.Contains(e.b));
+        }
+
         internal static Plan Build(Settings settings, Layout layout, Scene scene)
+        {
+            if(!settings.terrainDesign || !settings.preserveV4Coverage)return BuildOnce(settings,layout,scene);
+            // Compare against the same-seed V4 algorithm, without modifying the scene.
+            // This is a coverage guard, not a claim of equal visual quality.
+            Plan adaptive=null,baseline=null;
+            Exception adaptiveError=null;
+            try { adaptive=BuildOnce(settings,layout,scene); }
+            catch(InvalidOperationException ex){adaptiveError=ex;}
+            try
+            {
+                settings.terrainDesign=false;
+                baseline=BuildOnce(settings,layout,scene);
+            }
+            catch(InvalidOperationException)
+            {
+                if(adaptive==null)throw;
+            }
+            finally { settings.terrainDesign=true; }
+            if(adaptive==null&&baseline==null)throw adaptiveError??new InvalidOperationException("No preview.");
+            if(baseline!=null && (adaptive==null ||
+                adaptive.BridgeCount<baseline.BridgeCount ||
+                (GatesConnected(baseline)&&!GatesConnected(adaptive)) ||
+                new[]{"Ankara","İstanbul"}.Any(s=>Coverage(adaptive,s)<Coverage(baseline,s)) ||
+                adaptive.detachedEdges.Count>baseline.detachedEdges.Count+Mathf.Max(10,baseline.edges.Count/20)))
+            {
+                if(adaptive!=null)baseline.terrainCells.AddRange(adaptive.terrainCells);
+                baseline.warnings.Insert(0,"V5 coverage guard selected the V4 layout: adaptive candidate lost coverage or connectivity. Disable guard to inspect the V5 candidate."+(adaptiveError!=null?" "+adaptiveError.Message:""));
+                return baseline;
+            }
+            adaptive.notes.Insert(0,baseline!=null?"V5 coverage guard: adaptive layout retained (same-seed V4 coverage/connectivity comparison).":"V5 adaptive layout retained; V4 comparison unavailable.");
+            return adaptive;
+        }
+
+        private static Plan BuildOnce(Settings settings, Layout layout, Scene scene)
         {
             var planner = new ProceduralWorldPlanner(settings, layout, scene);
             planner.plan.protectedAreas.AddRange(planner.protectedAreas);
             planner.plan.manualRoadNear = planner.obstacles.Near;
+            if (settings.terrainDesign) planner.AnalyzeTerrain();
             if (settings.bridges && settings.buildAnkara && settings.buildIstanbul)
                 planner.PlanBridges();
             if (settings.buildAnkara) planner.PlanHierarchy("Ankara", layout.Ankara(settings.ankaraLow));
@@ -598,6 +790,7 @@ namespace DeliveryDriver.EditorTools
             diagnostics = new StreetDiagnostics();
             bool backbone = sector == "Ankara" && settings.ankaraBackbone;
             gradingSurface = backbone && settings.districtGrading ? new GradingSurface(plan.layout, bounds, settings.grade) : null;
+            bool adaptive = settings.terrainDesign;
             var gates = plan.nodes.Where(n => n.sector == sector && n.gate).ToList();
             var nodes = new List<Node>(gates);
             var index = new StreetIndex();
@@ -630,6 +823,7 @@ namespace DeliveryDriver.EditorTools
                 pos.y += Mathf.Sin((pos.x - bounds.xMin) / 420f + phase2) * warp;
                 if (xs[x].kind == RoadKind.Local && zs[z].kind == RoadKind.Local)
                     pos += new Vector2(Next() - .5f, Next() - .5f) * local * .24f * style.jitter;
+                if (adaptive) pos = ShapeStreetNode(pos, bounds, local);
                 if (IsProtected(pos, RoadClearance)) { diagnostics.protectedNodes++; continue; }
                 if (!Contains(bounds, pos, -RoadClearance) || obstacles.Near(pos, RoadClearance * 2f) ||
                     gates.Any(g => Vector2.Distance(pos, XZ(g.position)) < RoadClearance * 3f))
@@ -663,12 +857,15 @@ namespace DeliveryDriver.EditorTools
                 while (groups[n] != n) { Node next = groups[n]; groups[n] = root; n = next; }
                 return root;
             }
+            if (adaptive && sector == "Ankara")
+                ProposeLinks(sector, bounds, nodes.Where(n => !n.gate).ToList(), index);
             var built = new HashSet<(int,int)>();
             int attempts = 0;
             bool TryBuild(StreetCandidate c, bool route = false)
             {
                 var key = (Mathf.Min(c.a.id,c.b.id),Mathf.Max(c.a.id,c.b.id));
-                if (built.Contains(key) || c.a.degree >= DegreeLimit(c.a) || c.b.degree >= DegreeLimit(c.b)) return false;
+                int Limit(Node n) => adaptive && plan.authoredLinks.Any(e => e.b == n) ? Mathf.Min(3, DegreeLimit(n)) : DegreeLimit(n);
+                if (built.Contains(key) || c.a.degree >= Limit(c.a) || c.b.degree >= Limit(c.b)) return false;
                 if (++attempts % 80 == 0 && EditorUtility.DisplayCancelableProgressBar("Procedural World",
                     sector + ": hierarchy candidates " + attempts, .30f)) throw new OperationCanceledException();
                 List<Vector3> path;
@@ -701,7 +898,8 @@ namespace DeliveryDriver.EditorTools
                 {
                     // Prefer a reachable low-altitude coastal seed, not an arbitrary isolated summit.
                     float shore = settings.ankaraLow ? plan.layout.AlongMax(bounds) : plan.layout.AlongMin(bounds);
-                    backboneRoot = nodes.Where(n => !n.gate)
+                    backboneRoot = adaptive ? plan.authoredLinks.Where(e=>e.sector==sector).Select(e=>e.b).FirstOrDefault() : null;
+                    if (backboneRoot == null) backboneRoot = nodes.Where(n => !n.gate)
                         .OrderBy(n => Mathf.Abs((plan.layout.rowsOnX ? n.position.x : n.position.z) - shore)
                             + Mathf.Abs((plan.layout.rowsOnX ? n.position.z : n.position.x) -
                             (plan.layout.rowsOnX ? bounds.center.y : bounds.center.x)) * .18f)
@@ -740,7 +938,7 @@ namespace DeliveryDriver.EditorTools
                     PlanBackbone(bounds, backboneRoot, nodes, gates, spineCandidates, Find, TryBuild);
                     // Grow new streets only from the connected backbone first; subsequent
                     // diagnostic passes may still expose genuinely detached fragments.
-                    var frontier = candidates.OrderBy(c=>c.kind).ThenBy(c=>c.length).ToList();
+                    var frontier = candidates.OrderBy(c=>c.kind).ThenBy(c=>adaptive?TerrainCandidateCost(c):c.length).ToList();
                     var rejected = new HashSet<StreetCandidate>();
                     int attached = 0;
                     for (int pass=0;pass<96;pass++)
@@ -760,9 +958,9 @@ namespace DeliveryDriver.EditorTools
                 }
             }
             foreach (RoadKind kind in new[] {RoadKind.Arterial,RoadKind.Collector})
-                foreach (StreetCandidate c in candidates.Where(c=>c.kind==kind).OrderBy(c=>c.length)) TryBuild(c);
+                foreach (StreetCandidate c in candidates.Where(c=>c.kind==kind).OrderBy(c=>adaptive?TerrainCandidateCost(c):c.length)) TryBuild(c);
 
-            var locals = candidates.Where(c=>c.kind==RoadKind.Local).OrderBy(c=>c.length).ToList();
+            var locals = candidates.Where(c=>c.kind==RoadKind.Local).OrderBy(c=>adaptive?TerrainCandidateCost(c):c.length).ToList();
             foreach (StreetCandidate c in locals)
             {
                 var style = StreetStyle((XZ(c.a.position)+XZ(c.b.position))*.5f);
@@ -836,10 +1034,12 @@ namespace DeliveryDriver.EditorTools
                 ", geometry " + diagnostics.geometryRejected + "; skipped nodes: protected " +
                 diagnostics.protectedNodes + ", obstacles/bounds " + diagnostics.blockedNodes + ", missing terrain " + diagnostics.missingNodes + ".");
             AddCoverageReport(sector, bounds);
+            if (adaptive) plan.authoredLinks.RemoveAll(e=>e.sector==sector && (e.b.degree==0 || Find(e.b)!=keep));
             if (backbone) ReportTerrainSeams(bounds);
             if (gradingSurface != null) ReportGrading(sector);
             index=new StreetIndex();
             foreach(Edge e in plan.edges)index.Add(e);
+            if (adaptive) foreach(Edge e in plan.authoredLinks) index.Add(e);
             ProposeLinks(sector,bounds,nodes.Where(n=>n.degree>0&&!n.gate&&n.degree<4).ToList(),index);
             gradingSurface = null;
         }
@@ -1056,7 +1256,7 @@ namespace DeliveryDriver.EditorTools
                             if(!same&&(n.degree>=DegreeLimit(n)||next.degree>=DegreeLimit(next)))continue;
                             float rise=Mathf.Abs(n.position.y-next.position.y);
                             if(!same&&rise>c.length*settings.grade+.01f)continue;
-                            float price = item.cost + (same ? .001f : c.length * (c.kind == RoadKind.Arterial ? .8f : c.kind == RoadKind.Collector ? 1f : 1.18f) + rise * 2f);
+                            float price = item.cost + (same ? .001f : (settings.terrainDesign ? TerrainCandidateCost(c) : c.length) * (c.kind == RoadKind.Arterial ? .8f : c.kind == RoadKind.Collector ? 1f : 1.18f) + rise * 2f);
                             if(cost.TryGetValue(next,out float old)&&old<=price)continue;
                             cost[next]=price;previous[next]=(n,c);queue.Add((price,next.id,next));
                         }
@@ -1325,6 +1525,7 @@ namespace DeliveryDriver.EditorTools
             if(kind==RoadKind.Collector)bend*=.6f;
             if(Next()<.5f)bend=-bend;
             bool straight=kind==RoadKind.Arterial||Next()<settings.straightPreference;
+            float bestCost = float.PositiveInfinity;
             foreach(float offset in straight?new[]{0f,bend,-bend,bend*2f,-bend*2f}:new[]{bend,-bend,0f,bend*2f,-bend*2f})
             {
                 int steps=Mathf.Max(2,Mathf.CeilToInt(len/3f));
@@ -1347,9 +1548,13 @@ namespace DeliveryDriver.EditorTools
                 if(!StreetAngles(a,b,path,index)||StreetCrosses(a,b,path,index))
                 { if (diagnostics != null) diagnostics.geometryRejected++; continue; }
                 if(authored&&!ProtectedSurfaceOk(path))continue;
-                points=path;return true;
+                if (!settings.terrainDesign) { points=path;return true; }
+                float cost = ProfileCost(path) + Mathf.Abs(offset) * .02f;
+                if (cost < bestCost) { bestCost=cost; points=path; }
+                // If the straight candidate needs negligible earthworks, avoid unnecessary bends.
+                if (cost < .08f && straight) break;
             }
-            return false;
+            return points != null;
         }
 
         private bool StreetAngles(Node a,Node b,List<Vector3> path,StreetIndex index)
@@ -1409,11 +1614,11 @@ namespace DeliveryDriver.EditorTools
                     Vector3 point=road.GetPoint(t);Vector2 pos=XZ(point);
                     if(!Contains(bounds,pos,-RoadClearance)||protectedAreas.Any(r=>Contains(r,pos,-45f)))continue;
                     Vector2 tangent=XZ(road.GetTangent(t)).normalized;
-                    foreach(Node target in targets.OrderBy(n=>(XZ(n.position)-pos).sqrMagnitude).Take(5))
+                    foreach(Node target in targets.OrderBy(n=>(XZ(n.position)-pos).sqrMagnitude).Take(settings.terrainDesign?12:5))
                     {
                         Vector2 delta=XZ(target.position)-pos;
                         float dist=delta.magnitude;
-                        if(dist<RoadClearance*2.5f||dist>Mathf.Max(260f,settings.spacing*3f))continue;
+                        if(dist<RoadClearance*2.5f||dist>Mathf.Max(settings.terrainDesign?380f:260f,settings.spacing*3f))continue;
                         float angle=Vector2.Angle(tangent,delta);
                         bool endpoint=i==0||i==count;
                         if(!endpoint&&(angle<55f||angle>125f))continue;
@@ -1422,7 +1627,7 @@ namespace DeliveryDriver.EditorTools
                 }
             }
             if(!hasManual)return;
-            int made=0,attempts=0;
+            int made=plan.authoredLinks.Count(e=>e.sector==sector),attempts=0;
             foreach(LinkCandidate link in links.OrderBy(c=>c.score))
             {
                 if(made>=settings.authoredLinkTarget||attempts>=250)break;
@@ -1434,7 +1639,8 @@ namespace DeliveryDriver.EditorTools
                 plan.authoredLinks.Add(proposal);index.Add(proposal);made++;
             }
             string report=sector+": "+made+"/"+settings.authoredLinkTarget+" existing-road connection proposals (green; preview only).";
-            if(made<settings.authoredLinkTarget)plan.warnings.Add(report);else plan.notes.Add(report);
+            if (!settings.terrainDesign || targets.Any(n=>n.degree>0))
+            { if(made<settings.authoredLinkTarget)plan.warnings.Add(report);else plan.notes.Add(report); }
         }
 
         private void PlanCity(string sector, Rect bounds)
