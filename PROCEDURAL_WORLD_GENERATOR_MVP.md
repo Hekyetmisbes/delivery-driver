@@ -1,4 +1,4 @@
-# Procedural World Generator V2 — preview iteration
+# Procedural World Generator V3 — hillside preview iteration
 
 **Branch:** feature/procedural-world-generator-mvp
 
@@ -61,3 +61,11 @@ The V1 scattered point graph has been replaced by a nested, variably spaced stre
 - [ ] Kizilay is preserved and proposed links are visible if feasible.
 - [ ] Compare bridge spacing and report any fallback or missing connection warnings.
 - [ ] Generate button remains disabled.
+
+## V3 hillside coverage and diagnostics
+
+The previous version discarded all street components except the one containing the bridge gates (or the largest component without bridges). In V3 isolated hillside nodes try contour-oriented neighbors first, then a component repair pass tries longer direct links and bounded terrain-aware A* connectors. Each accepted connector is checked against the existing elevation, clearance and junction-angle constraints. No grade limit is silently relaxed. The search is cancellable and bounded; it is not a guarantee of full terrain coverage.
+
+Purple lines represent individually feasible but detached street components, not a connected road network. These are kept separately from the retained graph. Preview displays connected/detached counts, covered terrain tiles, empty districts, elevation/geometry rejection counts, and protected/blocked/missing node counts. Bridge gate connectivity warnings remain visible instead of silently removing the inland layout. Generation remains locked.
+
+Start with Ankara only, Terrain-aware network repair enabled, grade 10%, cut/fill 6 m, then compare both-city preview. If necessary, explicitly try grade 12% and cut/fill 10 m as a separate preview experiment; do not treat higher values as a verified vehicle-safe setting.
