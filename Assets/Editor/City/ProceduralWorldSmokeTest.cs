@@ -199,6 +199,7 @@ namespace DeliveryDriver.EditorTools
                     Require(before[i].SequenceEqual(land[i].terrain.terrainData.GetHeights(0,0,33,33).Cast<float>()),
                         "V7.1 modified original terrain.");
                 settings.localOptimization=true;
+                TestExactRoadSplit();
                 var local=ProceduralWorldPlanner.Build(settings,emptySea,scene);
                 Verify(local,settings,0);
                 Require(local.version.StartsWith("V7.2")&&local.virtualReport!=null&&local.virtualSections.Count>0,"V7.2 virtual terrain missing.");
@@ -274,6 +275,21 @@ namespace DeliveryDriver.EditorTools
                 }
             }
             Require(plan.edges.All(e => visited.Contains(e.a) && visited.Contains(e.b)), "Disconnected road graph.");
+        }
+
+        private static void TestExactRoadSplit()
+        {
+            var a=new ProceduralWorldPlanner.Node{id=0,position=Vector3.zero};
+            var b=new ProceduralWorldPlanner.Node{id=1,position=new Vector3(20,0,0)};
+            var mid=new ProceduralWorldPlanner.Node{id=2,position=new Vector3(10,0,0)};
+            var before=new ProceduralWorldPlanner.Plan();before.nodes.AddRange(new[]{a,b});
+            before.edges.Add(new ProceduralWorldPlanner.Edge{a=a,b=b,sector="Ankara",points=new List<Vector3>{a.position,mid.position,b.position}});
+            var after=new ProceduralWorldPlanner.Plan();after.nodes.AddRange(new[]{a,b,mid});
+            after.edges.Add(new ProceduralWorldPlanner.Edge{a=a,b=mid,sector="Ankara",points=new List<Vector3>{a.position,mid.position}});
+            after.edges.Add(new ProceduralWorldPlanner.Edge{a=mid,b=b,sector="Ankara",points=new List<Vector3>{mid.position,b.position}});
+            Require(ProceduralWorldPlanner.PreservedNetwork(before,after,true,false),"Exact T-junction split rejected.");
+            after.edges[1].points[0]+=Vector3.up;
+            Require(!ProceduralWorldPlanner.PreservedNetwork(before,after,true,false),"Changed split geometry accepted.");
         }
 
         private static void Require(bool condition, string message)

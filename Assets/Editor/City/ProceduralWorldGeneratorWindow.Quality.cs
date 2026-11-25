@@ -104,6 +104,7 @@ namespace DeliveryDriver.EditorTools
                 {
                     var r=preview.virtualReport;
                     EditorGUILayout.LabelField("Virtual sections / missing",r.sections+" / "+r.missingSections);
+                    EditorGUILayout.LabelField("Missing shoulder samples",r.missingSamples.ToString());
                     EditorGUILayout.LabelField("Overlap cells / steep sections",r.conflictingCells+" / "+r.steepSections);
                     EditorGUILayout.LabelField("Protected / parcel samples",r.protectedSamples+" / "+r.parcelSamples);
                     DrawSectionInspector();
@@ -118,6 +119,11 @@ namespace DeliveryDriver.EditorTools
         private void DrawSectionInspector()
         {
             if(preview.virtualSections.Count==0)return;
+            if(GUILayout.Button("Focus largest hotspot")&&preview.hotspots.Count>0)
+            {
+                var hot=preview.hotspots.OrderByDescending(x=>x.value).First();var sv=SceneView.lastActiveSceneView;
+                if(sv!=null){sv.pivot=(hot.a+hot.b)*.5f;sv.size=50f;sv.Repaint();}
+            }
             virtualSectionIndex=EditorGUILayout.IntSlider("Inspect virtual section",Mathf.Clamp(virtualSectionIndex,0,preview.virtualSections.Count-1),0,preview.virtualSections.Count-1);
             var section=preview.virtualSections[virtualSectionIndex];
             EditorGUILayout.LabelField("Section position",section.proposed[3].ToString("F1"));
@@ -207,7 +213,7 @@ namespace DeliveryDriver.EditorTools
                 }
                 File.WriteAllText(Path.Combine(folder,"final.json"),JsonUtility.ToJson(
                     ProceduralWorldPlanner.Capture(plan,key,scenePath,finalStageSettings),false));
-                plan.notes.Add("V7.1 checkpoints saved to "+folder);
+                plan.notes.Add("Staged checkpoints saved to "+folder);
             }
             catch(Exception ex){plan.warnings.Add("Checkpoint write failed (preview retained): "+ex.Message);}
         }

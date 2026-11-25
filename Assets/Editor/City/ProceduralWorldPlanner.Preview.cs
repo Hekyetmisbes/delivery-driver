@@ -181,6 +181,8 @@ namespace DeliveryDriver.EditorTools
             result.stageReports.AddRange(saved.stageReports??new List<string>());result.previewCriteriaMet=saved.previewCriteriaMet;
             result.hotspots.AddRange(saved.hotspots??new List<AnalysisLine>());result.verticalFlags.AddRange(saved.verticalFlags??new List<AnalysisLine>());
             result.virtualSections.AddRange(saved.virtualSections??new List<VirtualSection>());result.virtualReport=saved.virtualReport;
+            if(result.virtualSections.Any(x=>x==null||x.original==null||x.proposed==null||x.original.Length!=7||x.proposed.Length!=7||
+                x.original.Any(v=>!Finite(v))||x.proposed.Any(v=>!Finite(v))))throw new InvalidOperationException("Invalid virtual terrain section.");
             foreach(var a in saved.access??new List<SavedAccess>())
             {
                 var anchor=s.accessAnchors.FirstOrDefault(x=>ObjectId(x.road)==a.roadId&&Mathf.Abs(x.t-a.t)<.0001f);
@@ -243,12 +245,21 @@ namespace DeliveryDriver.EditorTools
             clone.notes.Clear();clone.warnings.Clear();
             planner.BuildEarthworkLines();planner.BuildGradingZones();planner.BuildParcels();planner.EvaluateOpenSpaceAccess();
             planner.ReportGrading("Ankara");planner.ValidateUrbanPlan();
-            if(source.version.StartsWith("V7",StringComparison.Ordinal))planner.ValidateQualityGeometry();
+            if(source.version.StartsWith("V7.1",StringComparison.Ordinal)||source.version.StartsWith("V7.2",StringComparison.Ordinal))planner.ValidateStageGrades();
+            else if(source.version.StartsWith("V7",StringComparison.Ordinal))planner.ValidateQualityGeometry();
             clone.quality=Measure(clone,s);
             var previousQuality=source.quality??Measure(source,s);
             if(clone.quality.peak>previousQuality.peak+.25f||clone.quality.extraFraction>previousQuality.extraFraction+.005f||
                 clone.quality.meanCut+clone.quality.meanFill>previousQuality.meanCut+previousQuality.meanFill+.05f)
                 throw new InvalidOperationException("Regional candidate increased sampled grading cost. Previous preview retained.");
+            if(source.version.StartsWith("V7.2",StringComparison.Ordinal))
+            {
+                if(!NoTerrainRegression(previousQuality,clone.quality,s)||clone.quality.sharpRoads>previousQuality.sharpRoads||
+                    clone.quality.verticalSeverity>previousQuality.verticalSeverity+.0001f||clone.quality.junctionGradeFlags>previousQuality.junctionGradeFlags)
+                    throw new InvalidOperationException("Regional candidate regressed V7.2 quality; previous preview retained.");
+                planner.FindAlternateParkAccess();clone.quality=Measure(clone,s);
+                planner.BuildLocalDiagnostics();planner.BuildVirtualTerrain();clone.previewCriteriaMet=false;
+            }
             AddQualityNotes(clone);
             if(clone.detachedEdges.Count>0)clone.warnings.Add(clone.detachedEdges.Count+" detached diagnostics remain from source plan.");
             if(!clone.quality.bridgeGraphConnected)clone.warnings.Add("Requested bridge graph is incomplete.");

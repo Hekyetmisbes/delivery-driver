@@ -116,6 +116,10 @@ namespace DeliveryDriver.EditorTools
                     candidate.quality=Measure(candidate,s);
                     if(!StageGraphSafe(current,candidate,s,allowSplit,allowBridgeMove))reason="network/access regression";
                     else if(!NoTerrainRegression(current.quality,candidate.quality,s))reason="earthworks regression";
+                    else if(s.localOptimization&&name.StartsWith("5",StringComparison.Ordinal)&&name.Length>1&&char.IsLetter(name[1])&&
+                        (candidate.quality.meanCut>current.quality.meanCut+.005f||candidate.quality.meanFill>current.quality.meanFill+.005f||
+                         candidate.quality.sharpRoads>current.quality.sharpRoads||candidate.quality.verticalSeverity>current.quality.verticalSeverity+.0001f||
+                         candidate.quality.junctionGradeFlags>current.quality.junctionGradeFlags))reason="local quality regression";
                     else if(!benefit(current,candidate))reason="no measurable improvement";
                 }
                 catch(InvalidOperationException ex){reason=ex.Message;}
@@ -172,7 +176,7 @@ namespace DeliveryDriver.EditorTools
             current.notes.Clear();current.warnings.Clear();
             current.notes.Add((s.localOptimization?"V7.2":"V7.1")+" base vs final: "+StageMetrics(baseline)+" / "+StageMetrics(current));
             current.notes.Add("Mandatory preview checks: "+(current.previewCriteriaMet?"PASS":"NOT MET")+"; Generate remains locked.");
-            current.notes.Add("Original land graph and authored link paths preserved; V7.2 may split an unchanged road or replace a bridge at existing generated nodes. No protected-zone exception. Short stubs remain diagnostics.");
+            current.notes.Add(s.localOptimization?"Original land graph and authored link paths preserved; V7.2 may split an unchanged road or replace a bridge at existing generated nodes. No protected-zone exception. Short stubs remain diagnostics.":"Original graph and authored link paths preserved; bridge endpoints fixed. Short stubs remain diagnostics.");
             current.notes.Add(urbanScreened?"Park and lot overlays: "+current.parcels.Count+" sampled lots, "+current.quality.matchedLots+" measured prefab fits, "+current.quality.accessibleParks+"/"+current.openSpaces.Count+" screened park access.":"Urban screening rolled back; parcel/park data is historical and not verified for the final plan.");
             if(!validGrades)current.warnings.Add("Final mandatory sampled grade validation failed.");
             if(current.detachedEdges.Count>0)current.warnings.Add(current.detachedEdges.Count+" detached segments still unresolved; purple diagnostic only.");
@@ -185,7 +189,7 @@ namespace DeliveryDriver.EditorTools
             {
                 finalPlanner.BuildLocalDiagnostics();
                 finalPlanner.BuildVirtualTerrain();
-                if(current.quality.verticalDefects>0||current.quality.junctionGradeFlags>0||current.virtualReport.conflictingCells>0||current.virtualReport.protectedSamples>0||current.virtualReport.missingSections>0||current.virtualReport.parcelSamples>0||current.virtualReport.steepSections>0||current.quality.peak>s.preferredGrading+.01f)
+                if(current.quality.verticalDefects>0||current.quality.junctionGradeFlags>0||current.virtualReport.conflictingCells>0||current.virtualReport.protectedSamples>0||current.virtualReport.missingSections>0||current.virtualReport.missingSamples>0||current.virtualReport.parcelSamples>0||current.virtualReport.steepSections>0||current.quality.peak>s.preferredGrading+.01f)
                     current.previewCriteriaMet=false;
                 current.notes.RemoveAll(n=>n.StartsWith("Mandatory preview checks:"));
                 current.notes.Add("Mandatory preview checks: "+(current.previewCriteriaMet?"PASS":"NOT MET")+"; Generate remains locked.");

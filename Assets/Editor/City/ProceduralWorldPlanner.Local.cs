@@ -15,16 +15,17 @@ namespace DeliveryDriver.EditorTools
         }
         [Serializable] internal sealed class VirtualTerrainReport
         {
-            public int sections,missingSections,conflictingCells,steepSections,protectedSamples,parcelSamples;
+            public int sections,missingSections,missingSamples,conflictingCells,steepSections,protectedSamples,parcelSamples;
             public float spacing;
         }
 
         // A split is valid only when the concatenated geometry is byte-for-byte
         // (Vector3 equality via SequenceEqual) the old sampled path. No old land
         // connection may disappear. Bridges can move only in their own stage.
-        private static bool PreservedNetwork(Plan before,Plan after,bool allowSplit,bool allowBridgeMove)
+        internal static bool PreservedNetwork(Plan before,Plan after,bool allowSplit,bool allowBridgeMove)
         {
             var oldNodes=new HashSet<int>(before.nodes.Select(n=>n.id));
+            if(oldNodes.Count!=before.nodes.Count||after.nodes.Select(n=>n.id).Distinct().Count()!=after.nodes.Count)return false;
             var incident=after.edges.SelectMany(e=>new[]{(id:e.a.id,e),(id:e.b.id,e)})
                 .GroupBy(x=>x.id).ToDictionary(g=>g.Key,g=>g.Select(x=>x.e).ToList());
             foreach(var old in before.edges)
@@ -37,7 +38,7 @@ namespace DeliveryDriver.EditorTools
                 }
                 if(!incident.TryGetValue(old.a.id,out var start))return false;
                 if(start.Any(e=>e.a.id==old.a.id&&e.b.id==old.b.id&&e.kind==old.kind&&e.sector==old.sector&&
-                    e.a.position.Equals(old.a.position)&&e.b.position.Equals(old.b.position)))continue;
+                    e.a.position.Equals(old.a.position)&&e.b.position.Equals(old.b.position)&&e.points.SequenceEqual(old.points)))continue;
                 if(!allowSplit||old.Bridge)return false;
                 int cursor=0,id=old.a.id;
                 while(cursor<old.points.Count-1)
@@ -149,6 +150,31 @@ namespace DeliveryDriver.EditorTools
                 if(k>limit)q.junctionGradeFlags++;
             }
         }
+        // Refine a bounded interior window, projecting each height update into
+        // both neighboring grade bounds and the actual cross-section allowance.
+        // Endpoints and all samples outside the window are untouched.
+        private void FitLocalHeights(List<Vector3> path,int pivot,int window)
+        {
+            for(int pass=0;pass<8;pass++)
+            {
+                int first=Mathf.Max(1,pivot-window),last=Mathf.Min(path.Count-2,pivot+window);
+                for(int j=first;j<=last;j++)
+                {
+                    int i=pass%2==0?j:first+last-j;
+                    Vector3 p=path[i],a=path[i-1],b=path[i+1];
+                    float dl=Vector2.Distance(XZ(p),XZ(a)),dr=Vector2.Distance(XZ(p),XZ(b));
+                    if(dl<.001f||dr<.001f)continue;
+                    float[] ground;
+                    float lo,hi;
+                    try{ground=StageGround(XZ(p),XZ(b-a),out lo,out hi);}
+                    catch(InvalidOperationException){continue;}
+                    lo=Mathf.Max(lo,Mathf.Max(a.y-dl*settings.grade,b.y-dr*settings.grade));
+                    hi=Mathf.Min(hi,Mathf.Min(a.y+dl*settings.grade,b.y+dr*settings.grade));
+                    if(lo>hi)continue;
+                    p.y=Mathf.Clamp(Mathf.Lerp(p.y,ground.Average(),.65f),lo,hi);path[i]=p;
+                }
+            }
+        }
         private void RefineLocalRoads(int mode)
         {
             var index=new StreetIndex();foreach(var e in plan.edges.Concat(plan.authoredLinks))index.Add(e);
@@ -211,6 +237,31 @@ namespace DeliveryDriver.EditorTools
                             mode==1?radius>bestRadius+.01f:vertical.count<bestVertical.count||vertical.count==bestVertical.count&&vertical.severity<bestVertical.severity-.0001f;
                         if(better){best=path;bestEarth=earth;bestRadius=radius;bestVertical=vertical;}
                     }
+                    if(mode==0)
+                    {
+                        // Try genuine local lateral reroutes around the high-cost
+                        // sample, rather than restarting the complete road layout.
+                        foreach(int window in new[]{6,12,24})
+                        foreach(float offset in new[]{-18f,-9f,-4f,4f,9f,18f})
+                        {
+                            var trial=new List<Vector3>(original);
+                            for(int i=Mathf.Max(1,pivot-window);i<=Mathf.Min(trial.Count-2,pivot+window);i++)
+                            {
+                                Vector2 tangent=XZ(original[i+1]-original[i-1]).normalized;
+                                Vector2 side=new Vector2(-tangent.y,tangent.x);
+                                float f=Mathf.Clamp01(1f-Mathf.Abs(i-pivot)/(float)window);
+                                float shift=offset*Mathf.Pow(Mathf.Sin(Mathf.PI*.5f*f),2f);
+                                trial[i]=XYZ(XZ(original[i])+side*shift,original[i].y);
+                            }
+                            FitLocalHeights(trial,pivot,window);
+                            if(!RouteClear(trial,bounds)||!LocalProfileSafe(trial)||!StreetAngles(e.a,e.b,trial,index)||StreetCrosses(e.a,e.b,trial,index))continue;
+                            var earth=RoadEarth(trial);float radius=MinimumRadius(trial);var vertical=VerticalStats(trial,1f/settings.verticalRadius);
+                            if(earth.mean>baseEarth.mean+.001f||earth.extra>baseEarth.extra+.01f||vertical.severity>item.vertical.severity+.0001f||
+                                radius+.01f<Mathf.Min(item.radius,settings.minTurnRadius*(e.kind==RoadKind.Arterial?1.5f:e.kind==RoadKind.Collector?1.2f:1f)))continue;
+                            if(earth.peak<bestEarth.peak-.01f||earth.peak<=bestEarth.peak+.001f&&earth.mean<bestEarth.mean-.001f)
+                            {best=trial;bestEarth=earth;bestRadius=radius;bestVertical=vertical;}
+                        }
+                    }
                     if(best!=original){e.points=best;changed++;}
                 }
                 finally{index.Add(e);}
@@ -221,7 +272,7 @@ namespace DeliveryDriver.EditorTools
         private void RepairWithInteriorJunctions()
         {
             var index=new StreetIndex();foreach(var e in plan.edges.Concat(plan.authoredLinks))index.Add(e);
-            int attempts=0,promoted=0,splits=0,routed=0;
+            int attempts=0,promoted=0,splits=0,routed=0,groups=0,profileReject=0,geometryReject=0,connectorReject=0;
             foreach(string city in new[]{"Ankara","İstanbul"})
             {
                 if(!plan.detachedEdges.Any(e=>e.sector==city))continue;
@@ -237,8 +288,10 @@ namespace DeliveryDriver.EditorTools
                         var e=todo.Dequeue();group.Add(e);nodes.Add(e.a);nodes.Add(e.b);
                         foreach(var next in left.Where(x=>nodes.Contains(x.a)||nodes.Contains(x.b)).ToList()){left.Remove(next);todo.Enqueue(next);}
                     }
-                    if(group.Any(e=>!LocalProfileSafe(e.points)||!RouteClear(e.points,CityBounds(city))||
-                        StreetCrosses(e.a,e.b,e.points,index)||!StreetAngles(e.a,e.b,e.points,index)))continue;
+                    groups++;
+                    if(group.Any(e=>!LocalProfileSafe(e.points))){profileReject++;continue;}
+                    if(group.Any(e=>!RouteClear(e.points,CityBounds(city))||StreetCrosses(e.a,e.b,e.points,index)||!StreetAngles(e.a,e.b,e.points,index)))
+                    {geometryReject++;continue;}
                     // Detached degrees are diagnostic and may be stale after pruning.
                     var oldDegrees=nodes.ToDictionary(n=>n,n=>n.degree);
                     foreach(var n in nodes)n.degree=index.At(n).Count()+group.Count(e=>e.a==n||e.b==n);
@@ -276,7 +329,9 @@ namespace DeliveryDriver.EditorTools
                             {
                                 if(!TryStreet(item.source,junction,CityBounds(city),RoadKind.Collector,index,false,out path)&&routed<12&&settings.terrainRepair)
                                     TryRepairRoute(item.source,junction,CityBounds(city),index,ref routed,out path);
-                                if(path==null||!LocalProfileSafe(path)||!RadiusOk(path,RoadKind.Collector)||!RouteClear(path,CityBounds(city)))continue;
+                                if(path==null||!LocalProfileSafe(path)||!RadiusOk(path,RoadKind.Collector)||!RouteClear(path,CityBounds(city))||
+                                    !StreetAngles(item.source,junction,path,index)||StreetCrosses(item.source,junction,path,index))
+                                {connectorReject++;continue;}
                                 var connector=new Edge{a=item.source,b=junction,sector=city,kind=RoadKind.Collector,points=path};
                                 int at=plan.edges.IndexOf(old);plan.edges[at]=a;plan.edges.Insert(at+1,b);
                                 plan.nodes.Add(junction);junction.degree++;item.source.degree++;
@@ -291,7 +346,7 @@ namespace DeliveryDriver.EditorTools
                 }
             }
             gradingSurface=null;
-            plan.notes.Add("Interior T-junction repair: "+splits+" preview splits, "+promoted+" promoted segments, "+attempts+" candidates, "+routed+" routed attempts. No spline asset split.");
+            plan.notes.Add("Interior T-junction repair: "+splits+" preview splits, "+promoted+" promoted segments, "+attempts+" candidates, "+routed+" routed attempts; groups "+groups+", profile rejected "+profileReject+", geometry/protection rejected "+geometryReject+", connector rejects "+connectorReject+". No spline asset split.");
         }
 
         private void RelocateBridgeGate()
@@ -317,8 +372,9 @@ namespace DeliveryDriver.EditorTools
                 var high=plan.edges.Where(e=>!e.Bridge).SelectMany(e=>new[]{e.a,e.b}).Distinct()
                     .Where(n=>Contains(l.high,XZ(n.position),-RoadClearance)&&Along(n.position)-l.AlongMin(l.high)<900f&&
                         index.At(n).Count()==1&&!n.gate&&!IsProtected(XZ(n.position),RoadClearance)).ToList();
+                float otherMin=other.points.Min(Across),otherMax=other.points.Max(Across);
                 var pairs=low.SelectMany(a=>high.Where(b=>Mathf.Abs(Across(a.position)-Across(b.position))<700f).Select(b=>(a,b,
-                    gap:Mathf.Max(Mathf.Min(Across(a.position),Across(b.position))-other.points.Max(Across),other.points.Min(Across)-Mathf.Max(Across(a.position),Across(b.position))))))
+                    gap:Mathf.Max(Mathf.Min(Across(a.position),Across(b.position))-otherMax,otherMin-Mathf.Max(Across(a.position),Across(b.position))))))
                     .Where(x=>x.gap>originalGap+10f).OrderByDescending(x=>x.gap).ThenBy(x=>x.a.id).ThenBy(x=>x.b.id).Take(60).ToList();
                 index.Remove(old);
                 try
@@ -326,7 +382,8 @@ namespace DeliveryDriver.EditorTools
                     foreach(var pair in pairs)
                     foreach(float bow in new[]{0f,100f,-100f})
                     {
-                        if(++attempts>settings.localRepairBudget)break;
+                        if(attempts>=settings.localRepairBudget)break;
+                        attempts++;
                         if(attempts%12==0&&EditorUtility.DisplayCancelableProgressBar("V7.2","Bridge gate candidates "+attempts,.73f))throw new OperationCanceledException();
                         if(bow==0f&&protectedAreas.Any(r=>SegmentHitsRect(XZ(pair.a.position),XZ(pair.b.position),r,RoadClearance))){protectedReject++;continue;}
                         if(!TryBridge(XZ(pair.a.position),XZ(pair.b.position),out List<Vector3> path,out BridgeRejection rejection,
@@ -381,6 +438,9 @@ namespace DeliveryDriver.EditorTools
                     if(park.accessible)break;
                 }
             }
+            plan.warnings.RemoveAll(x=>x.StartsWith("Open spaces without screened access:"));
+            int missing=plan.openSpaces.Count(x=>!x.accessible);
+            if(missing>0)plan.warnings.Add("Open spaces without screened access: "+missing+" (amber overlay).");
             plan.notes.Add("Alternate park perimeter entrances: "+gained+" additional screened parks. No paths baked.");
         }
 
@@ -406,6 +466,7 @@ namespace DeliveryDriver.EditorTools
                     }
                 }
             }
+            plan.notes.Add("Short local stubs: "+plan.quality.shortStubs+" retained (no automatic demolition); inspect their access value before pruning.");
             plan.notes.Add("Local diagnostics: "+plan.hotspots.Count+" sampled intervals above preferred grading; "+plan.quality.verticalDefects+" vertical curvature flags and "+plan.quality.junctionGradeFlags+" straight-through junction pairs.");
             foreach(var h in plan.hotspots.OrderByDescending(x=>x.value).Take(10))
                 plan.notes.Add("Hotspot "+((h.a+h.b)*.5f).ToString("F1")+": "+h.value.ToString("F2")+" m adjustment.");
@@ -476,12 +537,18 @@ namespace DeliveryDriver.EditorTools
                         foreach(int j in new[]{0,6})
                         {
                             Vector3 outer=section.proposed[j],inner=section.proposed[j==0?1:5];
-                            Vector3 midpoint=(outer+inner)*.5f;Vector2 pos=XZ(midpoint);
-                            if(plan.layout.TryHeight(pos,out float ground)&&Mathf.Abs(midpoint.y-ground)>.5f)
+                            foreach(float f in new[]{.25f,.5f,.75f})
                             {
+                                Vector3 midpoint=Vector3.Lerp(inner,outer,f);Vector2 pos=XZ(midpoint);
+                                if(!plan.layout.TryHeight(pos,out float ground)){section.flagged=true;report.missingSamples++;continue;}
+                                if(Mathf.Abs(midpoint.y-ground)<=.5f)continue;
                                 if(IsProtected(pos,1f)||obstacles.Near(pos,2f)){report.protectedSamples++;section.flagged=true;}
                                 if(lots.TryGetValue(LotCell(pos),out var list)&&list.Any(l=>l.bounds.Contains(pos)))
                                 {report.parcelSamples++;section.flagged=true;}
+                                var key=new Vector2Int(Mathf.FloorToInt(pos.x/4f),Mathf.FloorToInt(pos.y/4f));
+                                if(cells.TryGetValue(key,out var old)&&old.owner!=e&&Mathf.Abs(old.y-midpoint.y)>.5f)
+                                {conflicts.Add(key);old.section.flagged=true;section.flagged=true;}
+                                else cells[key]=(midpoint.y,e,section);
                             }
                         }
                         plan.virtualSections.Add(section);
@@ -490,7 +557,7 @@ namespace DeliveryDriver.EditorTools
                 }
             }
             report.sections=plan.virtualSections.Count;report.conflictingCells=conflicts.Count;
-            plan.notes.Add("Virtual terrain: "+report.sections+" sampled cross-sections at nominal "+spacing.ToString("F1")+" m, "+report.missingSections+" missing; "+report.conflictingCells+" incompatible 4m sample cells, "+report.steepSections+" steep shoulder sections (retaining-wall candidates), "+report.protectedSamples+" protected/existing-road adjustment samples, "+report.parcelSamples+" parcel shoulder samples. Not a continuous heightmap or bake.");
+            plan.notes.Add("Virtual terrain: "+report.sections+" sampled cross-sections at nominal "+spacing.ToString("F1")+" m, "+report.missingSections+" missing sections, "+report.missingSamples+" missing shoulder samples; "+report.conflictingCells+" incompatible 4m sample cells, "+report.steepSections+" steep shoulder sections (retaining-wall candidates), "+report.protectedSamples+" protected/existing-road adjustment samples, "+report.parcelSamples+" parcel shoulder samples. Not a continuous heightmap or bake.");
         }
     }
 }
