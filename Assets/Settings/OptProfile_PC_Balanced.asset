@@ -12,21 +12,21 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a8590143ceaa254429cbc82f1d8f2a6c, type: 3}
   m_Name: OptProfile_PC_Balanced
   m_EditorClassIdentifier: GameScripts::DeliveryDriver.Optimization.OptimizationProfile
-  nearDistance: 50
-  midDistance: 150
-  farDistance: 300
-  veryFarDistance: 500
+  nearDistance: 80
+  midDistance: 220
+  farDistance: 400
+  veryFarDistance: 600
   stateUpdateInterval: 0.12
   cellSize: 50
   gridUpdateInterval: 0.1
   chunkSize: 64
-  nearRing: 90
-  midRing: 150
-  farRing: 170
-  chunkUpdateInterval: 0.35
-  maxChunkUpdatesPerFrame: 12
+  nearRing: 180
+  midRing: 320
+  farRing: 450
+  chunkUpdateInterval: 0.25
+  maxChunkUpdatesPerFrame: 20
   cacheRefreshInterval: 120
-  shadowDistance: 40
+  shadowDistance: 80
   shadowCascades: 2
   streamingMipmaps: 1
   antiAliasing: 2

@@ -44,7 +44,6 @@ namespace DeliveryDriver.Navigation
         [SerializeField] private float routePublishDistanceThreshold = 4f;
         [SerializeField] private float objectiveMoveThreshold = 3f;
         [SerializeField] private float playerResolveRetryInterval = 0.5f;
-        [SerializeField] private float roadGraphResolveRetryInterval = 1f;
 
         [Header("Reroute")]
         [SerializeField] private float offRouteDistanceThreshold = 14f;
@@ -57,9 +56,6 @@ namespace DeliveryDriver.Navigation
         [SerializeField] private float rerouteObjectiveMovementThreshold = 3f;
         [SerializeField] private float hardOffRouteDistanceThreshold = 26f;
         [SerializeField] private float initialAsyncRouteDelay = 0.02f;
-        [SerializeField] private int pathSearchIterationsPerFrame = 220;
-        [SerializeField] private int maxTransferStepsPerRequest = 1;
-        [SerializeField] private float continuedRouteAttemptDelay = 0.08f;
 
         // ────────────────────────────────────────────────────────────────────
         // Public state & events
@@ -87,7 +83,6 @@ namespace DeliveryDriver.Navigation
         // Cached references
         private Transform cachedPlayerTransform;
         private PlayerVehicleManager cachedVehicleManager;
-        private RoadGraphBuilder cachedRoadGraphBuilder;
 
         // Route data
         private readonly List<Vector3> routePoints = new List<Vector3>();
@@ -104,8 +99,6 @@ namespace DeliveryDriver.Navigation
         private Vector3 lastPublishedStart;
         private int lastPublishedSegmentIndex = -1;
         private RouteKind lastPublishedKind = RouteKind.None;
-        private int currentTransferStep;
-        private int baselineTransferStep;
         private bool needsRouteBuild = true;
 
         // Timers
@@ -114,8 +107,6 @@ namespace DeliveryDriver.Navigation
         private float nextRerouteTime;
         private float nextNotificationTime;
         private float nextPlayerResolveTime;
-        private float nextRoadGraphResolveTime;
-        private int pendingTransferStartStep;
 
         // Async reroute
         private Coroutine asyncRouteCoroutine;
@@ -276,75 +267,17 @@ namespace DeliveryDriver.Navigation
             needsRouteBuild = false;
             lastObjectivePosition = end;
 
-            // Try road graph path
-            if (TryResolveRoadGraph(out RoadGraph graph))
-            {
-                if (TryFindGraphRoute(graph, start, end))
-                {
-                    consecutiveFailures = 0;
-                    return;
-                }
-            }
-
-            // Graph route failed - try stale route
             if (TryUseStaleRoute(start))
             {
                 consecutiveFailures = 0;
                 return;
             }
 
-            // All failed - use fallback straight line
             consecutiveFailures++;
             PublishFallback(start, end);
             ScheduleRetry();
             LogRouteIssue("Rota hesaplanamadi.", start, end);
             ShowRerouteNotification();
-        }
-
-        private bool TryFindGraphRoute(RoadGraph graph, Vector3 start, Vector3 end)
-        {
-            int startStep = Mathf.Clamp(Mathf.Max(currentTransferStep, baselineTransferStep), 0, TransferDistances.Length - 1);
-            List<Vector3> path = null;
-            int resolvedStep = -1;
-            long budgetTicks = System.Diagnostics.Stopwatch.Frequency / 20; // ~50ms total budget
-            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
-
-            for (int step = startStep; step < TransferDistances.Length; step++)
-            {
-                path = RoadGraphPathfinder.FindPath(graph, start, end, TransferDistances[step]);
-                if (path != null && path.Count >= 2)
-                {
-                    resolvedStep = step;
-                    break;
-                }
-
-                // Don't burn more than ~50ms trying progressively wider transfers
-                if (System.Diagnostics.Stopwatch.GetTimestamp() - t0 > budgetTicks)
-                {
-                    break;
-                }
-            }
-
-            if (resolvedStep < 0 || path == null || path.Count < 2)
-            {
-                currentTransferStep = TransferDistances.Length - 1;
-                nextRerouteTime = Time.time + rerouteCooldown;
-                return false;
-            }
-
-            // Success
-            routePoints.Clear();
-            routePoints.AddRange(path);
-            lastGoodRoute.Clear();
-            lastGoodRoute.AddRange(path);
-            baselineTransferStep = Mathf.Max(0, resolvedStep - 1);
-            currentTransferStep = baselineTransferStep;
-            nextRouteRetryTime = 0f;
-            nextRerouteTime = Time.time + rerouteCooldown;
-
-            ProjectOnRoute(routePoints, start, out int segIdx, out Vector3 projected, out _);
-            PublishProjected(start, segIdx, projected, RouteKind.Graph, true);
-            return true;
         }
 
         private bool TryUseStaleRoute(Vector3 playerPos)
@@ -532,9 +465,6 @@ namespace DeliveryDriver.Navigation
             nextRouteRetryTime = 0f;
             nextRerouteTime = 0f;
             nextRouteLogTime = 0f;
-            currentTransferStep = 0;
-            baselineTransferStep = 0;
-            pendingTransferStartStep = 0;
             lastPublishedSegmentIndex = -1;
             lastPublishedKind = RouteKind.None;
             lastPublishedStart = Vector3.zero;
@@ -600,96 +530,27 @@ namespace DeliveryDriver.Navigation
             needsRouteBuild = false;
             lastObjectivePosition = end;
 
-            bool found = false;
+            if (initialAsyncRouteDelay > 0f) yield return null;
 
-            if (initialAsyncRouteDelay > 0f)
+            var pathResult = TrafficSystem.Spline.SplinePathfinder.FindPath(start, end, 5f);
+            System.Collections.Generic.List<Vector3> path = pathResult.worldPoints;
+
+            if (path != null && path.Count >= 2)
             {
-                yield return null;
+                routePoints.Clear();
+                routePoints.AddRange(path);
+                lastGoodRoute.Clear();
+                lastGoodRoute.AddRange(path);
+
+                nextRouteRetryTime = 0f;
+                nextRerouteTime = Time.time + rerouteCooldown;
+                consecutiveFailures = 0;
+
+                ProjectOnRoute(routePoints, start, out int segIdx, out Vector3 projected, out _);
+                PublishProjected(start, segIdx, projected, RouteKind.Graph, true);
             }
-
-            if (TryResolveRoadGraph(out RoadGraph graph))
+            else
             {
-                int startStep = Mathf.Clamp(
-                    Mathf.Max(pendingTransferStartStep, baselineTransferStep),
-                    0,
-                    TransferDistances.Length - 1);
-                int transferStepsTried = 0;
-
-                for (int step = startStep; step < TransferDistances.Length; step++)
-                {
-                    // Re-read player position for freshness
-                    if (ResolvePlayer(out Transform player) && CurrentObjective.IsValid)
-                    {
-                        start = player.position;
-                        end = CurrentObjective.WorldPosition;
-                    }
-
-                    RoadGraphPathfinder.IncrementalPathSearchSession session =
-                        RoadGraphPathfinder.StartIncrementalSearch(graph, start, end, TransferDistances[step]);
-
-                    while (session != null && session.Status == RoadGraphPathfinder.IncrementalSearchStatus.Running)
-                    {
-                        session.Step(Mathf.Max(16, pathSearchIterationsPerFrame));
-                        if (session.Status == RoadGraphPathfinder.IncrementalSearchStatus.Running)
-                        {
-                            yield return null;
-                        }
-                    }
-
-                    List<Vector3> path = session != null && session.Status == RoadGraphPathfinder.IncrementalSearchStatus.Succeeded
-                        ? session.Path
-                        : null;
-                    transferStepsTried++;
-                    if (path != null && path.Count >= 2)
-                    {
-                        routePoints.Clear();
-                        routePoints.AddRange(path);
-                        lastGoodRoute.Clear();
-                        lastGoodRoute.AddRange(path);
-                        baselineTransferStep = Mathf.Max(0, step - 1);
-                        currentTransferStep = baselineTransferStep;
-                        pendingTransferStartStep = baselineTransferStep;
-                        nextRouteRetryTime = 0f;
-                        nextRerouteTime = Time.time + rerouteCooldown;
-                        consecutiveFailures = 0;
-
-                        ProjectOnRoute(routePoints, start, out int segIdx, out Vector3 projected, out _);
-                        PublishProjected(start, segIdx, projected, RouteKind.Graph, true);
-                        found = true;
-                        break;
-                    }
-
-                    currentTransferStep = Mathf.Min(step + 1, TransferDistances.Length - 1);
-                    pendingTransferStartStep = currentTransferStep;
-
-                    if (transferStepsTried >= Mathf.Max(1, maxTransferStepsPerRequest) &&
-                        step < TransferDistances.Length - 1)
-                    {
-                        break;
-                    }
-                }
-            }
-
-            if (!found)
-            {
-                if (currentTransferStep < TransferDistances.Length - 1)
-                {
-                    needsRouteBuild = true;
-                    nextRouteRetryTime = Mathf.Min(nextRouteRetryTime <= 0f ? float.MaxValue : nextRouteRetryTime, Time.time + continuedRouteAttemptDelay);
-                    nextAsyncRouteAllowedTime = Time.time + Mathf.Max(0.01f, continuedRouteAttemptDelay);
-
-                    if (TryUseStaleRoute(start))
-                    {
-                        consecutiveFailures = 0;
-                    }
-
-                    asyncRouteCoroutine = null;
-                    yield break;
-                }
-
-                currentTransferStep = TransferDistances.Length - 1;
-                pendingTransferStartStep = currentTransferStep;
-
                 if (TryUseStaleRoute(start))
                 {
                     consecutiveFailures = 0;
@@ -705,7 +566,6 @@ namespace DeliveryDriver.Navigation
                     ShowRerouteNotification();
                 }
             }
-
             asyncRouteCoroutine = null;
         }
 
@@ -799,31 +659,7 @@ namespace DeliveryDriver.Navigation
         // Road graph resolution
         // ────────────────────────────────────────────────────────────────────
 
-        private bool TryResolveRoadGraph(out RoadGraph graph)
-        {
-            graph = null;
 
-            if (cachedRoadGraphBuilder == null && Time.unscaledTime >= nextRoadGraphResolveTime)
-            {
-                cachedRoadGraphBuilder = FindFirstObjectByType<RoadGraphBuilder>();
-                nextRoadGraphResolveTime = Time.unscaledTime + Mathf.Max(0.25f, roadGraphResolveRetryInterval);
-            }
-
-            if (cachedRoadGraphBuilder == null) return false;
-
-            if (cachedRoadGraphBuilder.HasBuiltRoadGraph)
-            {
-                graph = cachedRoadGraphBuilder.RoadGraph;
-                return graph != null && graph.roadSegments != null && graph.roadSegments.Count > 0;
-            }
-
-            // Trigger build if not pending
-            if (!cachedRoadGraphBuilder.HasPendingBuild)
-                cachedRoadGraphBuilder.BeginBuildWithDelay(0f);
-
-            nextRouteRetryTime = Mathf.Max(nextRouteRetryTime, Time.time + routeRetryInterval);
-            return false;
-        }
 
         // ────────────────────────────────────────────────────────────────────
         // Notifications & logging
@@ -845,18 +681,6 @@ namespace DeliveryDriver.Navigation
         {
             if (Time.time < nextRouteLogTime) return;
             nextRouteLogTime = Time.time + RouteLogCooldown;
-
-            if (TryResolveRoadGraph(out RoadGraph graph) &&
-                RoadGraphPathfinder.TryGetPathDiagnostics(graph, start, end, out var diag))
-            {
-                Debug.LogWarning(
-                    $"[NavigationService] {reason} Start={start}, End={end}, " +
-                    $"player={lastPlayerSource}, segments={diag.SegmentCount}, " +
-                    $"connections={diag.ConnectionCount}, " +
-                    $"startDist={diag.StartProjectionDistance:F2}, endDist={diag.EndProjectionDistance:F2}");
-                return;
-            }
-
             Debug.LogWarning($"[NavigationService] {reason} Start={start}, End={end}");
         }
 

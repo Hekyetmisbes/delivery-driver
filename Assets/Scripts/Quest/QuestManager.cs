@@ -3,7 +3,8 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Events;
-using TrafficSystem;
+using TrafficSystem.Spline;
+using UnityEngine.Serialization;
 
 namespace DeliveryDriver.Quest
 {
@@ -34,7 +35,8 @@ namespace DeliveryDriver.Quest
         [Header("References")]
         [SerializeField] private QuestDatabase questDatabase;
         [SerializeField] private CargoLibrary cargoLibrary;
-        [SerializeField] private RoadGraphBuilder roadGraphBuilder;
+        [FormerlySerializedAs("roadGraphBuilder")]
+        [SerializeField] private RoadNetworkManager roadNetworkManager;
         [SerializeField] private Transform playerTransform;
         [SerializeField] private CarController playerController;
 
@@ -217,7 +219,7 @@ namespace DeliveryDriver.Quest
         {
             usedLocations ??= new List<Vector3>();
             questLocationAssignmentService ??= new QuestLocationAssignmentService(
-                () => roadGraphBuilder,
+                () => roadNetworkManager,
                 () => pickupMarkerPrefab,
                 () => deliveryMarkerPrefab,
                 usedLocations,
@@ -288,9 +290,9 @@ namespace DeliveryDriver.Quest
                 QuestLogger.EnableLogs = questSystemSettings.EnableDebugLogging;
             }
 
-            if (roadGraphBuilder == null)
+            if (roadNetworkManager == null)
             {
-                roadGraphBuilder = FindAnyObjectByType<RoadGraphBuilder>();
+                roadNetworkManager = FindAnyObjectByType<RoadNetworkManager>();
             }
 
             if (playerTransform == null)
@@ -359,10 +361,10 @@ namespace DeliveryDriver.Quest
         {
             bool changed = false;
 
-            if (roadGraphBuilder == null)
+            if (roadNetworkManager == null)
             {
-                roadGraphBuilder = FindSceneComponent<RoadGraphBuilder>();
-                changed |= roadGraphBuilder != null;
+                roadNetworkManager = FindSceneComponent<RoadNetworkManager>();
+                changed |= roadNetworkManager != null;
             }
 
             if (playerController == null)
@@ -400,14 +402,14 @@ namespace DeliveryDriver.Quest
 
         private IEnumerator InitializeQuestStateWhenReady()
         {
-            if (roadGraphBuilder == null)
+            if (roadNetworkManager == null)
             {
-                roadGraphBuilder = FindAnyObjectByType<RoadGraphBuilder>();
+                roadNetworkManager = FindAnyObjectByType<RoadNetworkManager>();
             }
 
-            // Wait briefly for RoadGraphBuilder.Start() to run and build the graph.
+            // Wait briefly for RoadNetworkManager.Awake() to refresh the spline network.
             float timeoutAt = Time.time + 8f;
-            while (!IsRoadGraphReady() && Time.time < timeoutAt)
+            while (!IsRoadNetworkReady() && Time.time < timeoutAt)
             {
                 yield return null;
             }
@@ -417,7 +419,7 @@ namespace DeliveryDriver.Quest
             {
                 Debug.Log("[QuestManager] Skipping startup save/quest initialization because runtime quest state already exists.");
 
-                if (IsRoadGraphReady())
+                if (IsRoadNetworkReady())
                 {
                     CheckDailyChallenge();
                 }
@@ -434,29 +436,28 @@ namespace DeliveryDriver.Quest
                     LoadSaveData(saveData.QuestData);
                     Debug.Log("[QuestManager] Loaded quest data from save file.");
                 }
-                else if (IsRoadGraphReady())
+                else if (IsRoadNetworkReady())
                 {
                     Debug.Log("[QuestManager] No save found. Generating initial quests.");
                     GenerateAvailableQuests(5);
                 }
             }
-            else if (IsRoadGraphReady())
+            else if (IsRoadNetworkReady())
             {
                 GenerateAvailableQuests(5);
             }
 
-            if (IsRoadGraphReady())
+            if (IsRoadNetworkReady())
             {
                 CheckDailyChallenge();
             }
         }
 
-        private bool IsRoadGraphReady()
+        private bool IsRoadNetworkReady()
         {
-            return roadGraphBuilder != null &&
-                   roadGraphBuilder.RoadGraph != null &&
-                   roadGraphBuilder.RoadGraph.roadSegments != null &&
-                   roadGraphBuilder.RoadGraph.roadSegments.Count > 0;
+            return roadNetworkManager != null &&
+                   roadNetworkManager.roads != null &&
+                   roadNetworkManager.roads.Count > 0;
         }
 
         private void Update()
@@ -857,6 +858,7 @@ namespace DeliveryDriver.Quest
             }
 
             DriverProgressionSystem.Instance?.OnQuestCompleted(quest, finalReward, completionTimeSeconds);
+            CourierRatingManager.Instance?.RecordDeliveryOutcome(quest, true);
 
             Debug.Log($"[QuestManager] Quest completed with {quest.Rating} rank! Reward={finalReward}, Penalty={payout.TotalPenalty}, Streak={consecutiveSuccesses} ({streakMultiplier:F2}x)");
 

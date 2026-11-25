@@ -6,10 +6,10 @@ namespace DeliveryDriver.Optimization
     public class OptimizationProfile : ScriptableObject
     {
         [Header("Traffic Distances")]
-        public float nearDistance = 50f;
-        public float midDistance = 150f;
-        public float farDistance = 300f;
-        public float veryFarDistance = 500f;
+        public float nearDistance = 80f;
+        public float midDistance = 220f;
+        public float farDistance = 400f;
+        public float veryFarDistance = 600f;
         public float stateUpdateInterval = 0.12f;
         public bool disableVeryFarAI = true;
         public bool simplifyDistantPhysics = true;
@@ -21,18 +21,18 @@ namespace DeliveryDriver.Optimization
 
         [Header("World Streaming")]
         public float chunkSize = 64f;
-        public float nearRing = 90f;
-        public float midRing = 150f;
-        public float farRing = 170f;
-        public float chunkUpdateInterval = 0.35f;
-        public int maxChunkUpdatesPerFrame = 12;
+        public float nearRing = 180f;
+        public float midRing = 320f;
+        public float farRing = 450f;
+        public float chunkUpdateInterval = 0.25f;
+        public int maxChunkUpdatesPerFrame = 20;
         public float cacheRefreshInterval = 120f;
         public bool enableHardRadiusCulling = true;
         public bool cullStaticRenderersOnly = false;
-        public float rendererCullingPadding = 8f;
+        public float rendererCullingPadding = 25f;
 
         [Header("Rendering")]
-        public float shadowDistance = 40f;
+        public float shadowDistance = 80f;
         public int shadowCascades = 2;
         public bool streamingMipmaps = true;
         public int antiAliasing = 2;

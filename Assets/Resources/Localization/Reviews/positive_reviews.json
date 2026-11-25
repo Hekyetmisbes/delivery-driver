@@ -1,0 +1,100 @@
+{
+  "reviews": [
+    {
+      "id": "pos_01",
+      "rating": 5.0,
+      "customerName_tr": "Kızılay Medikal Deposu",
+      "customerName_en": "Kizilay Medical Depot",
+      "comment_tr": "Acil medikal kargomuz tam vaktinde ve eksiksiz ulaştı. Çok profesyonel kurye!",
+      "comment_en": "Our urgent medical cargo arrived right on time and intact. Very professional courier!"
+    },
+    {
+      "id": "pos_02",
+      "rating": 5.0,
+      "customerName_tr": "Tunalı Pastanesi",
+      "customerName_en": "Tunali Bakery",
+      "comment_tr": "Hassas pasta ve tatlı siparişimiz tek bir çizik bile olmadan geldi. Elinize sağlık!",
+      "comment_en": "Our delicate cake and pastry order arrived without a single scratch. Excellent work!"
+    },
+    {
+      "id": "pos_03",
+      "rating": 5.0,
+      "customerName_tr": "Batıkent Elektronik",
+      "customerName_en": "Batikent Electronics",
+      "comment_tr": "Hassas ekran panelleri çok özenli taşınmış, teslimat hızı muhteşemdi.",
+      "comment_en": "Delicate screen panels were handled with great care, delivery speed was amazing."
+    },
+    {
+      "id": "pos_04",
+      "rating": 4.8,
+      "customerName_tr": "Çankaya Hukuk Bürosu",
+      "customerName_en": "Cankaya Law Office",
+      "comment_tr": "Önemli dava evrakları adliyeye tam zamanında yetiştirildi. Teşekkür ederiz.",
+      "comment_en": "Important court documents were delivered to the courthouse right on time. Thank you."
+    },
+    {
+      "id": "pos_05",
+      "rating": 5.0,
+      "customerName_tr": "Gazi Gurme Şarküteri",
+      "customerName_en": "Gazi Gourmet Deli",
+      "comment_tr": "Sıcak ve taze teslimat! Şehir içi kuryeler arasında en hızlısı sizsiniz.",
+      "comment_en": "Hot and fresh delivery! You are the fastest courier in the city."
+    },
+    {
+      "id": "pos_06",
+      "rating": 4.9,
+      "customerName_tr": "Ulus Çiçekçilik",
+      "customerName_en": "Ulus Florist",
+      "comment_tr": "Özel tasarım çiçek aranjmanımız dökülmeden, sapasağlam ulaştı.",
+      "comment_en": "Our custom flower arrangement arrived safely and intact without any damage."
+    },
+    {
+      "id": "pos_07",
+      "rating": 5.0,
+      "customerName_tr": "Ostim Yedek Parça",
+      "customerName_en": "Ostim Auto Spare Parts",
+      "comment_tr": "Ağır metal parçaları hiç bekletmeden tam saatinde atölyemize indirdi. On numara sürüş.",
+      "comment_en": "Delivered heavy metal parts to our workshop right on time. Superb driving."
+    },
+    {
+      "id": "pos_08",
+      "rating": 4.8,
+      "customerName_tr": "Karanfil Kitabevi",
+      "customerName_en": "Karanfil Bookstore",
+      "comment_tr": "Koleksiyon kitaplarımız özenle teslim edildi, kutuda deformasyon yok.",
+      "comment_en": "Our collector books were delivered with care, no deformation on the box."
+    },
+    {
+      "id": "pos_09",
+      "rating": 5.0,
+      "customerName_tr": "Yıldız Butik Kafe",
+      "customerName_en": "Yildiz Boutique Cafe",
+      "comment_tr": "Öğle yoğunluğunda gelen siparişlerimizi kurtardı. Çok kibar ve süratli bir kurye.",
+      "comment_en": "Saved our orders during the lunch rush. Very polite and fast courier."
+    },
+    {
+      "id": "pos_10",
+      "rating": 5.0,
+      "customerName_tr": "Bilkent E-Ticaret Deposu",
+      "customerName_en": "Bilkent E-Commerce Hub",
+      "comment_tr": "Büyük koli sevkiyatı hatasız tamamlandı. Primli VIP teslimatları hak eden bir sürücü.",
+      "comment_en": "Large parcel shipment completed flawlessly. A driver who deserves premium VIP orders."
+    },
+    {
+      "id": "pos_11",
+      "rating": 4.9,
+      "customerName_tr": "Eryaman Evleri Sakini",
+      "customerName_en": "Eryaman Resident",
+      "comment_tr": "Kapıya kadar güler yüzle teslim edildi. Ankara trafiğinde bu hız takdire şayan.",
+      "comment_en": "Delivered right to the door with a smile. Commendable speed in city traffic."
+    },
+    {
+      "id": "pos_12",
+      "rating": 5.0,
+      "customerName_tr": "Lojistik Bölge Müdürü",
+      "customerName_en": "Regional Logistics Manager",
+      "comment_tr": "S-Rank teslimat performansı tespit edildi. Şirket genelinde örnek kurye seçildiniz!",
+      "comment_en": "S-Rank delivery performance detected. You have been selected as a model courier company-wide!"
+    }
+  ]
+}

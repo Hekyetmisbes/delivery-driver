@@ -8,5 +8,6 @@ namespace DeliveryDriver.Company
         public string PlayerDisplayName { get; set; }
         public int Balance { get; set; }
         public VehicleType SelectedVehicleType { get; set; }
+        public string OwnedVehicles { get; set; }
     }
 }

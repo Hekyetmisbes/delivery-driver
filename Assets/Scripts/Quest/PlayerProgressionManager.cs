@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.Events;
+using DeliveryDriver.Company;
 
 namespace DeliveryDriver.Quest
 {
@@ -44,6 +45,9 @@ namespace DeliveryDriver.Quest
 
         [Header("Achievements")]
         [SerializeField] private List<Achievement> achievements = new List<Achievement>();
+
+        [Header("Vehicles")]
+        [SerializeField] private string ownedVehicles = "Van";
 
         [Header("Events")]
         public UnityEvent<int> OnMoneyChanged = new UnityEvent<int>();
@@ -547,6 +551,47 @@ namespace DeliveryDriver.Quest
             Debug.Log("[PlayerProgressionManager] Progression reset to defaults.");
         }
 
+        public bool IsVehicleOwned(VehicleType type)
+        {
+            if (string.IsNullOrEmpty(ownedVehicles)) return type == VehicleType.Van;
+            string typeStr = VehicleTypeExtensions.ToDatabaseValue(type);
+            return ownedVehicles.Split(',').Any(v => v.Trim().Equals(typeStr, StringComparison.OrdinalIgnoreCase));
+        }
+
+        public bool AddOwnedVehicle(VehicleType type)
+        {
+            if (IsVehicleOwned(type)) return true;
+
+            string typeStr = VehicleTypeExtensions.ToDatabaseValue(type);
+            if (string.IsNullOrEmpty(ownedVehicles)) ownedVehicles = typeStr;
+            else ownedVehicles += "," + typeStr;
+
+            QuestDatabaseService.Instance?.SaveOwnedVehicles(QuestDatabaseService.DefaultPlayerId, ownedVehicles);
+            return true;
+        }
+
+        public bool BuyVehicle(VehicleType type, int price)
+        {
+            if (IsVehicleOwned(type)) return true;
+            if (currentMoney < price) return false;
+
+            currentMoney -= price;
+            AddOwnedVehicle(type);
+            QuestDatabaseService.Instance?.SetDefaultPlayerBalance(currentMoney);
+            OnMoneyChanged?.Invoke(currentMoney);
+            
+            // Log transaction
+            QuestDatabaseService.Instance?.InsertWalletTransaction(
+                QuestDatabaseService.DefaultPlayerId, 
+                null, 
+                "PURCHASE", 
+                -price, 
+                currentMoney, 
+                $"Purchased {type}");
+                
+            return true;
+        }
+
         public bool RefreshMoneyFromDatabase()
         {
             QuestDatabaseService database = QuestDatabaseService.Instance;
@@ -560,16 +605,19 @@ namespace DeliveryDriver.Quest
                 return false;
             }
 
-            int databaseBalance = database.GetDefaultPlayerBalance(currentMoney);
-            if (databaseBalance != currentMoney)
+            CompanyProfileData profile = database.GetCompanyProfile(QuestDatabaseService.DefaultPlayerId);
+            if (profile != null)
             {
-                currentMoney = Mathf.Max(0, databaseBalance);
+                currentMoney = profile.Balance;
+                ownedVehicles = profile.OwnedVehicles;
+                if (string.IsNullOrEmpty(ownedVehicles)) ownedVehicles = "Van";
                 PersistMoneyPrefsFallback();
                 OnMoneyChanged.Invoke(currentMoney);
+                Debug.Log($"[PlayerProgressionManager] Active balance and fleet refreshed from database. Vehicles: {ownedVehicles}");
+                return true;
             }
 
-            Debug.Log($"[PlayerProgressionManager] Active balance refreshed from database: ${currentMoney}");
-            return true;
+            return false;
         }
 
         #region Achievement System

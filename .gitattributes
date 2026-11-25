@@ -1,1 +1,4 @@
 Assets/Scenes/Game.unity filter=lfs diff=lfs merge=lfs -text
+Assets/Scenes/GameScene.unity filter=lfs diff=lfs merge=lfs -text
+Assets/Art/Terrains/TerrainData_*.asset filter=lfs diff=lfs merge=lfs -text
+"Assets/Art/Terrains/New Terrain*.asset" filter=lfs diff=lfs merge=lfs -text

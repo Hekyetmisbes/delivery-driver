@@ -72,19 +72,15 @@ When updating docs, keep these aligned with the real repository state.
 
 ## Important Directories
 
-- `Assets/Scripts/`
-- `Assets/Scripts/Quest/`
-- `Assets/Scripts/Quest/UI/`
-- `Assets/Scripts/Quest/SaveSystem/`
-- `Assets/Scripts/Navigation/`
-- `Assets/Scripts/UI/`
-- `Assets/Scripts/Company/`
-- `Assets/Scripts/Neighborhood/`
-- `Assets/Scripts/Performance/`
-- `Assets/Scenes/`
-- `Assets/Resources/`
+- `Assets/Art/` (`Materials/`, `Terrains/`, `Textures/`)
+- `Assets/Editor/` (`Build/`, `City/`, `Quest/`, `Setup/`, `Traffic/`)
 - `Assets/Prefabs/`
+- `Assets/Resources/`
+- `Assets/Scenes/`
+- `Assets/Scripts/` (`City/`, `Company/`, `Core/`, `Gameplay/`, `Navigation/`, `Optimization/`, `Performance/`, `Quest/`, `Traffic/`, `UI/`)
+- `Assets/Settings/` (`Input/`)
 - `Assets/StreamingAssets/Database/`
+- `Assets/ThirdParty/` (`EasyRoads3D/`, `KenneyUI/`, `LowPolyCity/`, `Vehicles/`, etc.)
 - `Assets/Plugins/x86_64/`
 
 ---
@@ -110,9 +106,10 @@ When updating docs, keep these aligned with the real repository state.
 - `ObjectiveMarker3D`: world objective marker
 - `EdgeIndicator`: edge-of-screen navigation indicator
 - `WorldRouteRenderer`: world-space route line
-- `RoadGraphBuilder`: road graph generation
-- `RoadGraphPathfinder`: graph path search
-- `NpcCarAgent`, `NpcSpawner`, `NpcRecovery`: traffic stack
+- **`RoadNetworkManager` (NEW):** Central authority for the Spline-based road network (replaces the old `RoadGraphBuilder`).
+- **`SplineRoad` & `RoadIntersection` (NEW):** The core data structures for the new traffic system. Spline curves provide smooth paths for realistic physics-based steering, while intersections handle right-of-way and yielding.
+- **`SplinePathfinder` (NEW):** Calculates A* routes over the simplified graph of intersections and roads (replaces the old `RoadGraphPathfinder`).
+- `NpcCarAgent`, `NpcSpawner`, `NpcRecovery`: traffic stack (updated to use Spline "Pure Pursuit" steering instead of discrete waypoints for much better performance and realistic vehicle turning).
 
 ### UI
 - `GlobalUiCoordinator`: persistent global canvas adoption layer
@@ -126,6 +123,13 @@ When updating docs, keep these aligned with the real repository state.
 - `CompanyPageUI`: company setup/overlay in game scene
 - `PlayerVehicleManager`: runtime player vehicle switching/setup
 - `GameSceneCompanyPageInstaller`: scene bootstrap for company page flow
+
+### Cinematic & Video Recording (NEW)
+- `CinematicCameraController`: multi-angle cinematic camera rig (Hood, Wheel, Drone, Flyby, Profile, Exhaust) supporting 16:9 Trailer and 9:16 Reels formats
+- `CinematicDirector`: automated intelligent camera cutting based on driving dynamics
+- `CinematicRecorderController`: Unity Recorder 5.1.7 deterministic 60 FPS MP4 video recorder
+- `CinematicCaptureHUD`: in-game status HUD with clean footage toggle and hotkeys
+- `CinematicCaptureWindow`: Editor studio window under `Delivery Driver > Cinematic Capture & Director`
 
 ---
 
@@ -144,6 +148,7 @@ The following systems are created automatically at runtime or ensured on scene l
 - `QuestDatabaseAutoSync`
 - `SceneTransitionManager`
 - `GameSceneCompanyPageInstaller`
+- `CinematicCaptureInstaller`
 
 ### Practical rule
 If something seems missing in a scene, do not assume the feature is absent. Check whether it is created at runtime.
@@ -244,21 +249,23 @@ Do not assume JSON save replaces SQLite history or vice versa. Both exist.
 ## File and Folder Guidance
 
 ### Often edited files
-- `Assets/Scripts/CarController.cs`
-- `Assets/Scripts/CameraFollow.cs`
-- `Assets/Scripts/DeliveryManager.cs`
-- `Assets/Scripts/RoadGraphBuilder.cs`
-- `Assets/Scripts/RoadGraphPathfinder.cs`
-- `Assets/Scripts/NpcCarAgent.cs`
+- `Assets/Scripts/Gameplay/Vehicle/CarController.cs`
+- `Assets/Scripts/Gameplay/Camera/CameraFollow.cs`
+- `Assets/Scripts/Gameplay/Delivery/DeliveryManager.cs`
+- `Assets/Scripts/Navigation/NavigationService.cs`
+- `Assets/Scripts/Traffic/Spline/SplineRoad.cs`
+- `Assets/Scripts/Traffic/Spline/RoadNetworkManager.cs`
+- `Assets/Scripts/Traffic/NpcCarAgent.cs`
+- `Assets/Scripts/Traffic/NpcSpawner.cs`
 - `Assets/Scripts/Quest/QuestManager.cs`
 - `Assets/Scripts/Quest/PlayerProgressionManager.cs`
-- `Assets/Scripts/Quest/GameSettings.cs`
-- `Assets/Scripts/Quest/SaveSystem/SaveManager.cs`
-- `Assets/Scripts/Quest/UI/MinimapUI.cs`
-- `Assets/Scripts/Quest/UI/QuestUIManager.cs`
-- `Assets/Scripts/Quest/UI/PauseMenuUI.cs`
-- `Assets/Scripts/UI/GlobalUiCoordinator.cs`
-- `Assets/Scripts/UI/MainMenuRuntimeUI.cs`
+- `Assets/Scripts/Core/Settings/GameSettings.cs`
+- `Assets/Scripts/Core/Save/SaveManager.cs`
+- `Assets/Scripts/UI/Minimap/MinimapUI.cs`
+- `Assets/Scripts/UI/Quest/QuestUIManager.cs`
+- `Assets/Scripts/UI/Menus/PauseMenuUI.cs`
+- `Assets/Scripts/UI/Core/GlobalUiCoordinator.cs`
+- `Assets/Scripts/UI/Menus/MainMenuRuntimeUI.cs`
 - `Assets/Scripts/Company/CompanyPageUI.cs`
 - `Assets/Scripts/Company/PlayerVehicleManager.cs`
 
@@ -394,8 +401,16 @@ Use the subset relevant to your change.
 
 ---
 
-## Git Workflow Expectations
+## Autonomous Execution and Git Policy
 
+### Autonomy and approvals
+- Perform all read-only inspection operations (reading files, searching codebase, directory listings, checking git status/diff) automatically without asking for confirmation.
+- Handle routine Git workflows autonomously (`git status`, `git diff`, `git add`, `git commit`). Do not stop or ask for confirmation before staging or committing changes for completed tasks.
+- Keep commits logically grouped and write descriptive, concise commit messages (e.g., `feat:`, `fix:`, `refactor:`, `perf:`, `docs:`).
+- Only pause and ask for confirmation on destructive or high-risk actions (`git reset --hard`, `git push --force`, deleting branches/scenes/data, schema migrations).
+- Carry tasks through from implementation to verification and git commit end-to-end without unnecessary pauses for trivial approvals.
+
+### Git Workflow Expectations
 - Keep commits logically grouped
 - Prefer user-visible or system-scope commit messages
 - Treat `main` as stable
@@ -409,6 +424,20 @@ Use the subset relevant to your change.
 
 ### If the user asks for commit/push all
 Prefer multiple logical commits instead of a single giant one.
+
+---
+
+## Developer Guidelines and Performance Rules
+
+### Language and communication
+- Explain thoughts, rationale, and summaries in Turkish.
+- Keep all code, Unity API names, engine terms, class names, component names, and technical terminology in English.
+
+### Unity C# and mobile optimization
+- Target stable 60 FPS and low memory/build footprint for mobile.
+- Zero/Low GC allocations in per-frame loops (`Update`, `FixedUpdate`, `LateUpdate`). Avoid LINQ, string concatenations, or `new` allocations in hot loops.
+- Cache component and object references in `Awake`/`Start`; avoid repeated `GetComponent` or `Find*` in update loops.
+- Treat `Assets/Scenes/Game.unity` as high-risk (Git LFS tracked). Avoid accidental or noise-only scene modifications.
 
 ---
 

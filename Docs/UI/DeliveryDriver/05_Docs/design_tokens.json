@@ -1,0 +1,75 @@
+{
+  "package": "Delivery Driver • UI Design Kit",
+  "version": "1.0-concept",
+  "language": "tr-TR",
+  "reference_resolution": [
+    1600,
+    900
+  ],
+  "aspect_ratio": "16:9",
+  "scaling": "CanvasScaler.ScaleWithScreenSize • MatchWidthOrHeight=0.5",
+  "color": {
+    "background": "#09121B",
+    "surface": "#142530",
+    "surfaceElevated": "#1C303B",
+    "border": "#37505B",
+    "primary": "#FF921E",
+    "primaryLight": "#FFC166",
+    "navigation": "#52D7DF",
+    "success": "#44E4AB",
+    "danger": "#FF6172",
+    "warning": "#FFCD65",
+    "textPrimary": "#F6F9FA",
+    "textSecondary": "#9DB0BA",
+    "textMuted": "#607988"
+  },
+  "type": {
+    "family": "Inter (sistemden; dosya pakete dahil değildir)",
+    "body": 18,
+    "caption": 13,
+    "label": 15,
+    "screenTitle": 37,
+    "display": 62,
+    "number": 38,
+    "weights": [
+      430,
+      750
+    ]
+  },
+  "radius": {
+    "small": 9,
+    "medium": 13,
+    "card": 17,
+    "panel": 23,
+    "phone": 35
+  },
+  "spacingBase": 8,
+  "layout": {
+    "safeArea": {
+      "left": 40,
+      "right": 40,
+      "top": 30,
+      "bottom": 45
+    },
+    "phoneOpenPosition": "Ekranın sağ alt kenarı",
+    "hudTopLeft": "görev + aktif rota",
+    "hudTopRight": "para / yakıt",
+    "hudBottomLeft": "minimap",
+    "hudBottomRight": "speedometer"
+  },
+  "animationSuggestions": {
+    "toastInMs": 250,
+    "toastVisibleMs": 4000,
+    "modalInMs": 230,
+    "buttonHoverScale": 1.035,
+    "sceneFadeMs": 500,
+    "fuelCriticalFlashMs": 700
+  },
+  "stateColors": {
+    "positive": "success",
+    "questAndCTA": "primary",
+    "navigation": "navigation",
+    "warnings": "warning",
+    "failure": "danger"
+  }
+}

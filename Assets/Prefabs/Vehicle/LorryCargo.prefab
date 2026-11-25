@@ -1702,21 +1702,25 @@ MonoBehaviour:
   frontRightMesh: {fileID: 3573458163969838975}
   rearLeftMesh: {fileID: 4596365080877124318}
   rearRightMesh: {fileID: 8239510454729596560}
-  motorTorque: 2200
-  brakeTorque: 3600
-  maxSteeringAngle: 33
+  driveTrain: 0
+  frontDriveBias: 0.5
+  motorTorque: 2600
+  brakeTorque: 4500
+  maxSteeringAngle: 35
   handbrakeFrictionMultiplier: 2
   maxForwardSpeedKmh: 210
   topSpeedMinTorqueFactor: 0.18
-  coastBrakeTorque: 45
+  coastBrakeTorque: 40
   centerOfMassOffset: {x: 0, y: -0.5, z: 0.3}
   cargoCenterOfMassYOffset: 0.2
   downforcePerSpeed: 35
   maxDownforceWeightFraction: 0.3
   autoNormalizeWheelColliderHeights: 1
   speedSensitiveSteering: 1
-  steeringReductionFullSpeedKmh: 170
-  steeringAtHighSpeedFactor: 0.58
+  steeringReductionStartSpeedKmh: 18
+  steeringReductionFullSpeedKmh: 90
+  steeringAtHighSpeedFactor: 0.50
+  ackermannSteerMultiplier: 1.05
   frontAntiRollStiffness: 6000
   rearAntiRollStiffness: 6500
   useContinuousCollisionDetection: 1
@@ -1724,10 +1728,20 @@ MonoBehaviour:
   useSimpleBodyCollider: 1
   simpleBodyColliderCenter: {x: 0, y: 0.75, z: 0.05}
   simpleBodyColliderSize: {x: 1.85, y: 1.35, z: 4.35}
-  throttleRiseRate: 6.5
-  throttleFallRate: 8
-  steeringInputRate: 7.5
-  handbrakeRearSidewaysGripFactor: 0.55
+  antiSlideGripFactor: 0.85
+  corneringSpeedRetention: 0.88
+  corneringPowerAssist: 0.35
+  agileTurnAssist: 0.2
+  antiSpinStability: 0.45
+  accelerationSquatTorque: 3400
+  brakeDiveTorque: 4500
+  pitchDamping: 7
+  throttleRiseRate: 10
+  throttleFallRate: 14
+  steeringInputRate: 3.5
+  steeringFallRate: 5.0
+  driftRecoveryDuration: 0.8
+  handbrakeRearSidewaysGripFactor: 0.5
   handbrakeDriftAssistTorque: 1100
   handbrakeDriftMinSpeedKmh: 15
   driftScoreMinLateralSpeed: 2.2

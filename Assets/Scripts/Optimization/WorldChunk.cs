@@ -212,6 +212,16 @@ namespace DeliveryDriver.Optimization
         }
 
         /// <summary>
+        /// Get bounding box of this chunk for frustum culling
+        /// </summary>
+        public Bounds GetBounds()
+        {
+            Vector3 center = GetWorldCenter();
+            center.y = 25f;
+            return new Bounds(center, new Vector3(chunkSize, 60f, chunkSize));
+        }
+
+        /// <summary>
         /// Check if a world position is within this chunk
         /// </summary>
         public bool ContainsPosition(Vector3 worldPosition)

@@ -243,21 +243,25 @@ MonoBehaviour:
   frontRightMesh: {fileID: 1784847963384337989}
   rearLeftMesh: {fileID: 141354912383573363}
   rearRightMesh: {fileID: 3523855246903289366}
-  motorTorque: 1500
-  brakeTorque: 3000
-  maxSteeringAngle: 20
+  driveTrain: 0
+  frontDriveBias: 0.55
+  motorTorque: 2000
+  brakeTorque: 3800
+  maxSteeringAngle: 38
   handbrakeFrictionMultiplier: 2
   maxForwardSpeedKmh: 210
   topSpeedMinTorqueFactor: 0.18
-  coastBrakeTorque: 45
+  coastBrakeTorque: 35
   centerOfMassOffset: {x: 0, y: -0.5, z: 0}
   cargoCenterOfMassYOffset: 0.2
   downforcePerSpeed: 35
   maxDownforceWeightFraction: 0.3
   autoNormalizeWheelColliderHeights: 1
   speedSensitiveSteering: 1
-  steeringReductionFullSpeedKmh: 120
-  steeringAtHighSpeedFactor: 0.45
+  steeringReductionStartSpeedKmh: 20
+  steeringReductionFullSpeedKmh: 95
+  steeringAtHighSpeedFactor: 0.52
+  ackermannSteerMultiplier: 1.06
   frontAntiRollStiffness: 6000
   rearAntiRollStiffness: 6500
   useContinuousCollisionDetection: 1
@@ -265,10 +269,20 @@ MonoBehaviour:
   useSimpleBodyCollider: 1
   simpleBodyColliderCenter: {x: 0, y: 0.75, z: 0.05}
   simpleBodyColliderSize: {x: 1.85, y: 1.35, z: 4.35}
-  throttleRiseRate: 4
-  throttleFallRate: 6
-  steeringInputRate: 5
-  handbrakeRearSidewaysGripFactor: 0.55
+  antiSlideGripFactor: 0.85
+  corneringSpeedRetention: 0.9
+  corneringPowerAssist: 0.3
+  agileTurnAssist: 0.22
+  antiSpinStability: 0.42
+  accelerationSquatTorque: 2800
+  brakeDiveTorque: 3600
+  pitchDamping: 8
+  throttleRiseRate: 12
+  throttleFallRate: 16
+  steeringInputRate: 3.8
+  steeringFallRate: 5.5
+  driftRecoveryDuration: 0.75
+  handbrakeRearSidewaysGripFactor: 0.5
   handbrakeDriftAssistTorque: 1100
   handbrakeDriftMinSpeedKmh: 15
   driftScoreMinLateralSpeed: 2.2
@@ -333,13 +347,13 @@ WheelCollider:
     m_ExtremumValue: 1
     m_AsymptoteSlip: 0.8
     m_AsymptoteValue: 0.5
-    m_Stiffness: 1
+    m_Stiffness: 1.2
   m_SidewaysFriction:
     m_ExtremumSlip: 0.2
     m_ExtremumValue: 1
     m_AsymptoteSlip: 0.5
     m_AsymptoteValue: 0.75
-    m_Stiffness: 1
+    m_Stiffness: 1.6
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -619,13 +633,13 @@ WheelCollider:
     m_ExtremumValue: 1
     m_AsymptoteSlip: 0.8
     m_AsymptoteValue: 0.5
-    m_Stiffness: 1
+    m_Stiffness: 1.2
   m_SidewaysFriction:
     m_ExtremumSlip: 0.2
     m_ExtremumValue: 1
     m_AsymptoteSlip: 0.5
     m_AsymptoteValue: 0.75
-    m_Stiffness: 1
+    m_Stiffness: 1.6
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -690,13 +704,13 @@ WheelCollider:
     m_ExtremumValue: 1
     m_AsymptoteSlip: 0.8
     m_AsymptoteValue: 0.5
-    m_Stiffness: 1
+    m_Stiffness: 1.2
   m_SidewaysFriction:
     m_ExtremumSlip: 0.2
     m_ExtremumValue: 1
     m_AsymptoteSlip: 0.5
     m_AsymptoteValue: 0.75
-    m_Stiffness: 1
+    m_Stiffness: 1.6
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -761,13 +775,13 @@ WheelCollider:
     m_ExtremumValue: 1
     m_AsymptoteSlip: 0.8
     m_AsymptoteValue: 0.5
-    m_Stiffness: 1
+    m_Stiffness: 1.2
   m_SidewaysFriction:
     m_ExtremumSlip: 0.2
     m_ExtremumValue: 1
     m_AsymptoteSlip: 0.5
     m_AsymptoteValue: 0.75
-    m_Stiffness: 1
+    m_Stiffness: 1.6
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0

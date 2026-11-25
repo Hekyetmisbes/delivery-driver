@@ -1,4 +1,5 @@
 using UnityEngine;
+using TrafficSystem.Spline;
 
 namespace TrafficSystem
 {
@@ -34,40 +35,27 @@ namespace TrafficSystem
         /// </summary>
         public static Vector3 PredictPositionWithPath(NpcCarAgent vehicle, float timeAhead)
         {
-            if (vehicle == null || vehicle.CurrentSegment == null)
+            if (vehicle == null || vehicle.CurrentRoad == null)
                 return PredictPosition(vehicle, timeAhead);
 
             // Get current speed in m/s
-            float speedMs = vehicle.CurrentSpeed / 3.6f;
+            float speedMs = vehicle.CurrentSpeedKmh / 3.6f;
 
             // Calculate distance to travel
             float distanceToTravel = speedMs * timeAhead;
-
-            // Follow waypoints to predict position
-            Vector3 currentPos = vehicle.transform.position;
-            int waypointIndex = vehicle.CurrentWaypointIndex;
-            RoadSegment segment = vehicle.CurrentSegment;
-
-            float remainingDistance = distanceToTravel;
-
-            while (remainingDistance > 0 && waypointIndex < segment.waypoints.Count)
+            
+            float currentT = vehicle.CurrentRoad.GetClosestT(vehicle.transform.position);
+            float distanceOnRoad = vehicle.CurrentRoad.TToDistance(currentT);
+            
+            // Assume forward for simplicity in prediction
+            float predictedDistance = distanceOnRoad + distanceToTravel;
+            
+            if (predictedDistance <= vehicle.CurrentRoad.GetTotalLength())
             {
-                Waypoint wp = segment.waypoints[waypointIndex];
-                float distToWaypoint = Vector3.Distance(currentPos, wp.position);
-
-                if (distToWaypoint >= remainingDistance)
-                {
-                    // Interpolate between current position and waypoint
-                    Vector3 direction = (wp.position - currentPos).normalized;
-                    return currentPos + direction * remainingDistance;
-                }
-
-                remainingDistance -= distToWaypoint;
-                currentPos = wp.position;
-                waypointIndex++;
+                return vehicle.CurrentRoad.GetLanePosition(vehicle.CurrentRoad.DistanceToT(predictedDistance), true);
             }
-
-            return currentPos;
+            
+            return PredictPosition(vehicle, timeAhead);
         }
 
         /// <summary>

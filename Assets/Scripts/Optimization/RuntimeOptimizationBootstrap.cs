@@ -1,6 +1,7 @@
 using System.Collections;
 using DeliveryDriver.Optimization;
 using TrafficSystem;
+using TrafficSystem.Spline;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -71,12 +72,26 @@ public class RuntimeOptimizationBootstrap : MonoBehaviour
         }
 
         WorldChunkManager chunkManager = FindAnyObjectByType<WorldChunkManager>();
+        if (chunkManager == null)
+        {
+            WorldChunk anyChunk = FindAnyObjectByType<WorldChunk>(FindObjectsInactive.Include);
+            if (anyChunk != null)
+            {
+                chunkManager = EnsureManager<WorldChunkManager>("[Optimization] WorldChunkManager");
+                chunkManager.autoDetectChunks = true;
+                chunkManager.autoFindPlayer = true;
+                chunkManager.nearRingDistance = 180f;
+                chunkManager.midRingDistance = 320f;
+                chunkManager.farRingDistance = 450f;
+            }
+        }
+
         if (chunkManager != null)
         {
             chunkManager.showDebugInfo = false;
             chunkManager.drawGizmos = false;
-            chunkManager.updateInterval = 0.35f;
-            chunkManager.maxChunkUpdatesPerFrame = 12;
+            chunkManager.updateInterval = 0.25f;
+            chunkManager.maxChunkUpdatesPerFrame = 24;
             chunkManager.enableHardRadiusCulling = true;
             chunkManager.cullStaticRenderersOnly = false;
         }
@@ -88,6 +103,8 @@ public class RuntimeOptimizationBootstrap : MonoBehaviour
             trafficOptimizer.autoFindPlayer = true;
         }
 
+        ApplyDefaultCameraLayerCulling();
+
         // Create unified optimization controller (persists across scenes)
         if (UnifiedOptimizationController.Instance == null)
         {
@@ -96,16 +113,48 @@ public class RuntimeOptimizationBootstrap : MonoBehaviour
         }
     }
 
+    private void ApplyDefaultCameraLayerCulling()
+    {
+        Camera mainCam = Camera.main;
+        if (mainCam == null) return;
+
+        if (mainCam.farClipPlane < 650f)
+        {
+            mainCam.farClipPlane = 650f;
+        }
+
+        if (mainCam.layerCullDistances == null || mainCam.layerCullDistances.Length != 32 || mainCam.layerCullDistances[0] == 0f)
+        {
+            float[] distances = new float[32];
+            float defaultCull = mainCam.farClipPlane > 0 ? mainCam.farClipPlane : 1000f;
+            for (int i = 0; i < 32; i++) distances[i] = defaultCull;
+
+            SetLayerDistance(distances, "Props", 120f);
+            SetLayerDistance(distances, "Nature", 250f);
+            SetLayerDistance(distances, "Trees", 250f);
+            SetLayerDistance(distances, "Buildings", 600f);
+            SetLayerDistance(distances, "MiniMapBuilding", 600f);
+            SetLayerDistance(distances, "Road", defaultCull);
+
+            mainCam.layerCullDistances = distances;
+        }
+    }
+
+    private static void SetLayerDistance(float[] distances, string layerName, float distance)
+    {
+        int layer = LayerMask.NameToLayer(layerName);
+        if (layer >= 0 && layer < 32)
+        {
+            distances[layer] = distance;
+        }
+    }
+
     private void StartPhaseTwoSystems()
     {
-        RoadGraphBuilder roadGraphBuilder = FindAnyObjectByType<RoadGraphBuilder>();
-        if (roadGraphBuilder != null)
+        RoadNetworkManager roadNetworkManager = FindAnyObjectByType<RoadNetworkManager>();
+        if (roadNetworkManager != null)
         {
-            // Avoid rebuilding if RoadGraphBuilder already built or has its own deferred build pending.
-            if (!roadGraphBuilder.HasBuiltRoadGraph && !roadGraphBuilder.HasPendingBuild)
-            {
-                roadGraphBuilder.BeginBuildWithDelay(phaseTwoDelaySeconds);
-            }
+            roadNetworkManager.RefreshNetwork();
         }
 
         NpcSpawner npcSpawner = FindAnyObjectByType<NpcSpawner>();

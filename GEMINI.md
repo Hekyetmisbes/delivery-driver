@@ -387,19 +387,15 @@ Important implementation caveat:
 
 ## High-value directories
 
-- `Assets/Scripts/`
-- `Assets/Scripts/Quest/`
-- `Assets/Scripts/Quest/UI/`
-- `Assets/Scripts/Quest/SaveSystem/`
-- `Assets/Scripts/Navigation/`
-- `Assets/Scripts/UI/`
-- `Assets/Scripts/Company/`
-- `Assets/Scripts/Neighborhood/`
-- `Assets/Scripts/Performance/`
-- `Assets/Scenes/`
-- `Assets/Resources/`
+- `Assets/Art/` (`Materials/`, `Terrains/`, `Textures/`)
+- `Assets/Editor/` (`Build/`, `City/`, `Quest/`, `Setup/`, `Traffic/`)
 - `Assets/Prefabs/`
+- `Assets/Resources/`
+- `Assets/Scenes/`
+- `Assets/Scripts/` (`City/`, `Company/`, `Core/`, `Gameplay/`, `Navigation/`, `Optimization/`, `Performance/`, `Quest/`, `Traffic/`, `UI/`)
+- `Assets/Settings/` (`Input/`)
 - `Assets/StreamingAssets/Database/`
+- `Assets/ThirdParty/` (`EasyRoads3D/`, `KenneyUI/`, `LowPolyCity/`, `Vehicles/`, etc.)
 - `Assets/Plugins/x86_64/`
 
 ## Verified notable asset/data directories
@@ -648,28 +644,28 @@ Both layers exist and should be considered together when modifying progression, 
 
 These are especially likely to matter during feature work or debugging:
 
-- `Assets/Scripts/CarController.cs`
-- `Assets/Scripts/CameraFollow.cs`
-- `Assets/Scripts/DeliveryManager.cs`
-- `Assets/Scripts/PhoneMissionUI.cs`
-- `Assets/Scripts/RoadGraphBuilder.cs`
-- `Assets/Scripts/RoadGraphPathfinder.cs`
-- `Assets/Scripts/NpcCarAgent.cs`
-- `Assets/Scripts/NpcSpawner.cs`
-- `Assets/Scripts/NpcRecovery.cs`
+- `Assets/Scripts/Gameplay/Vehicle/CarController.cs`
+- `Assets/Scripts/Gameplay/Camera/CameraFollow.cs`
+- `Assets/Scripts/Gameplay/Delivery/DeliveryManager.cs`
+- `Assets/Scripts/Gameplay/Delivery/PhoneMissionUI.cs`
+- `Assets/Scripts/Traffic/Spline/SplineRoad.cs`
+- `Assets/Scripts/Traffic/Spline/RoadNetworkManager.cs`
+- `Assets/Scripts/Traffic/NpcCarAgent.cs`
+- `Assets/Scripts/Traffic/NpcSpawner.cs`
+- `Assets/Scripts/Traffic/NpcRecovery.cs`
 - `Assets/Scripts/Quest/QuestManager.cs`
 - `Assets/Scripts/Quest/PlayerProgressionManager.cs`
 - `Assets/Scripts/Quest/DriverProgressionSystem.cs`
-- `Assets/Scripts/Quest/GameSettings.cs`
-- `Assets/Scripts/Quest/QuestDatabaseBootstrap.cs`
-- `Assets/Scripts/Quest/QuestDatabaseService.cs`
-- `Assets/Scripts/Quest/SaveSystem/SaveManager.cs`
-- `Assets/Scripts/Quest/UI/MinimapUI.cs`
-- `Assets/Scripts/Quest/UI/QuestUIManager.cs`
-- `Assets/Scripts/Quest/UI/PauseMenuUI.cs`
-- `Assets/Scripts/UI/GlobalUiCoordinator.cs`
-- `Assets/Scripts/UI/MainMenuRuntimeUI.cs`
-- `Assets/Scripts/UI/SceneTransitionManager.cs`
+- `Assets/Scripts/Core/Settings/GameSettings.cs`
+- `Assets/Scripts/Core/Database/QuestDatabaseBootstrap.cs`
+- `Assets/Scripts/Core/Database/QuestDatabaseService.cs`
+- `Assets/Scripts/Core/Save/SaveManager.cs`
+- `Assets/Scripts/UI/Minimap/MinimapUI.cs`
+- `Assets/Scripts/UI/Quest/QuestUIManager.cs`
+- `Assets/Scripts/UI/Menus/PauseMenuUI.cs`
+- `Assets/Scripts/UI/Core/GlobalUiCoordinator.cs`
+- `Assets/Scripts/UI/Menus/MainMenuRuntimeUI.cs`
+- `Assets/Scripts/UI/Core/SceneTransitionManager.cs`
 - `Assets/Scripts/Company/CompanyPageUI.cs`
 - `Assets/Scripts/Company/PlayerVehicleManager.cs`
 - `Assets/Scripts/Company/GameSceneCompanyPageInstaller.cs`
@@ -914,7 +910,16 @@ Use the subset relevant to the change.
 
 ---
 
-## Git and Asset Handling Guidance
+## Autonomous Execution and Git Policy
+
+### Autonomy and approvals
+- Perform all read-only inspection operations (reading files, searching codebase, directory listings, checking git status/diff) automatically without asking for confirmation.
+- Handle routine Git workflows autonomously (`git status`, `git diff`, `git add`, `git commit`). Do not stop or ask for confirmation before staging or committing changes for completed tasks.
+- Keep commits logically grouped and write descriptive, concise commit messages (e.g., `feat:`, `fix:`, `refactor:`, `perf:`, `docs:`).
+- Only pause and ask for confirmation on destructive or high-risk actions (`git reset --hard`, `git push --force`, deleting branches/scenes/data, schema migrations).
+- Carry tasks through from implementation to verification and git commit end-to-end without unnecessary pauses for trivial approvals.
+
+### Git and Asset Handling Guidance
 
 ### Branching expectations
 - treat `main` as stable
@@ -928,6 +933,20 @@ Use the subset relevant to the change.
 
 ### LFS note
 Because `Game.unity` is LFS-tracked, avoid casual scene edits that do not materially support the intended change.
+
+---
+
+## Developer Guidelines and Performance Rules
+
+### Language and communication
+- Explain thoughts, rationale, and summaries in Turkish.
+- Keep all code, Unity API names, engine terms, class names, component names, and technical terminology in English.
+
+### Unity C# and mobile optimization
+- Target stable 60 FPS and low memory/build footprint for mobile.
+- Zero/Low GC allocations in per-frame loops (`Update`, `FixedUpdate`, `LateUpdate`). Avoid LINQ, string concatenations, or `new` allocations in hot loops.
+- Cache component and object references in `Awake`/`Start`; avoid repeated `GetComponent` or `Find*` in update loops.
+- Treat `Assets/Scenes/Game.unity` as high-risk (Git LFS tracked). Avoid accidental or noise-only scene modifications.
 
 ---
 

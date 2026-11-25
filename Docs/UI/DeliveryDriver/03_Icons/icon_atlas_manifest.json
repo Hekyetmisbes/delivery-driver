@@ -1,0 +1,296 @@
+{
+  "box": {
+    "x": 4,
+    "y": 4,
+    "width": 128,
+    "height": 128
+  },
+  "truck": {
+    "x": 140,
+    "y": 4,
+    "width": 128,
+    "height": 128
+  },
+  "map": {
+    "x": 276,
+    "y": 4,
+    "width": 128,
+    "height": 128
+  },
+  "pin": {
+    "x": 412,
+    "y": 4,
+    "width": 128,
+    "height": 128
+  },
+  "route": {
+    "x": 548,
+    "y": 4,
+    "width": 128,
+    "height": 128
+  },
+  "speed": {
+    "x": 684,
+    "y": 4,
+    "width": 128,
+    "height": 128
+  },
+  "fuel": {
+    "x": 820,
+    "y": 4,
+    "width": 128,
+    "height": 128
+  },
+  "warning": {
+    "x": 4,
+    "y": 140,
+    "width": 128,
+    "height": 128
+  },
+  "wrench": {
+    "x": 140,
+    "y": 140,
+    "width": 128,
+    "height": 128
+  },
+  "bank": {
+    "x": 276,
+    "y": 140,
+    "width": 128,
+    "height": 128
+  },
+  "garage": {
+    "x": 412,
+    "y": 140,
+    "width": 128,
+    "height": 128
+  },
+  "phone": {
+    "x": 548,
+    "y": 140,
+    "width": 128,
+    "height": 128
+  },
+  "message": {
+    "x": 684,
+    "y": 140,
+    "width": 128,
+    "height": 128
+  },
+  "settings": {
+    "x": 820,
+    "y": 140,
+    "width": 128,
+    "height": 128
+  },
+  "play": {
+    "x": 4,
+    "y": 276,
+    "width": 128,
+    "height": 128
+  },
+  "pause": {
+    "x": 140,
+    "y": 276,
+    "width": 128,
+    "height": 128
+  },
+  "check": {
+    "x": 276,
+    "y": 276,
+    "width": 128,
+    "height": 128
+  },
+  "close": {
+    "x": 412,
+    "y": 276,
+    "width": 128,
+    "height": 128
+  },
+  "star": {
+    "x": 548,
+    "y": 276,
+    "width": 128,
+    "height": 128
+  },
+  "chart": {
+    "x": 684,
+    "y": 276,
+    "width": 128,
+    "height": 128
+  },
+  "trophy": {
+    "x": 820,
+    "y": 276,
+    "width": 128,
+    "height": 128
+  },
+  "save": {
+    "x": 4,
+    "y": 412,
+    "width": 128,
+    "height": 128
+  },
+  "exit": {
+    "x": 140,
+    "y": 412,
+    "width": 128,
+    "height": 128
+  },
+  "globe": {
+    "x": 276,
+    "y": 412,
+    "width": 128,
+    "height": 128
+  },
+  "eye": {
+    "x": 412,
+    "y": 412,
+    "width": 128,
+    "height": 128
+  },
+  "clock": {
+    "x": 548,
+    "y": 412,
+    "width": 128,
+    "height": 128
+  },
+  "plus": {
+    "x": 684,
+    "y": 412,
+    "width": 128,
+    "height": 128
+  },
+  "minus": {
+    "x": 820,
+    "y": 412,
+    "width": 128,
+    "height": 128
+  },
+  "coin": {
+    "x": 4,
+    "y": 548,
+    "width": 128,
+    "height": 128
+  },
+  "cart": {
+    "x": 140,
+    "y": 548,
+    "width": 128,
+    "height": 128
+  },
+  "users": {
+    "x": 276,
+    "y": 548,
+    "width": 128,
+    "height": 128
+  },
+  "shield": {
+    "x": 412,
+    "y": 548,
+    "width": 128,
+    "height": 128
+  },
+  "lock": {
+    "x": 548,
+    "y": 548,
+    "width": 128,
+    "height": 128
+  },
+  "volume": {
+    "x": 684,
+    "y": 548,
+    "width": 128,
+    "height": 128
+  },
+  "keyboard": {
+    "x": 820,
+    "y": 548,
+    "width": 128,
+    "height": 128
+  },
+  "gamepad": {
+    "x": 4,
+    "y": 684,
+    "width": 128,
+    "height": 128
+  },
+  "camera": {
+    "x": 140,
+    "y": 684,
+    "width": 128,
+    "height": 128
+  },
+  "home": {
+    "x": 276,
+    "y": 684,
+    "width": 128,
+    "height": 128
+  },
+  "palette": {
+    "x": 412,
+    "y": 684,
+    "width": 128,
+    "height": 128
+  },
+  "building": {
+    "x": 548,
+    "y": 684,
+    "width": 128,
+    "height": 128
+  },
+  "info": {
+    "x": 684,
+    "y": 684,
+    "width": 128,
+    "height": 128
+  },
+  "download": {
+    "x": 820,
+    "y": 684,
+    "width": 128,
+    "height": 128
+  },
+  "upload": {
+    "x": 4,
+    "y": 820,
+    "width": 128,
+    "height": 128
+  },
+  "arrowleft": {
+    "x": 140,
+    "y": 820,
+    "width": 128,
+    "height": 128
+  },
+  "arrowright": {
+    "x": 276,
+    "y": 820,
+    "width": 128,
+    "height": 128
+  },
+  "sliders": {
+    "x": 412,
+    "y": 820,
+    "width": 128,
+    "height": 128
+  },
+  "spark": {
+    "x": 548,
+    "y": 820,
+    "width": 128,
+    "height": 128
+  },
+  "flag": {
+    "x": 684,
+    "y": 820,
+    "width": 128,
+    "height": 128
+  },
+  "target": {
+    "x": 820,
+    "y": 820,
+    "width": 128,
+    "height": 128
+  }
+}

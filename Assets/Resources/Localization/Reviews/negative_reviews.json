@@ -1,0 +1,100 @@
+{
+  "reviews": [
+    {
+      "id": "neg_01",
+      "rating": 1.0,
+      "customerName_tr": "Kızılay Medikal Deposu",
+      "customerName_en": "Kizilay Medical Depot",
+      "comment_tr": "Kargo kutusu ezilmiş ve medikal cam tüpler kırılmış! Böyle sorumsuzluk kabul edilemez.",
+      "comment_en": "The cargo box was crushed and medical glass tubes were broken! Such negligence is unacceptable."
+    },
+    {
+      "id": "neg_02",
+      "rating": 1.5,
+      "customerName_tr": "Tunalı Pastanesi",
+      "customerName_en": "Tunali Bakery",
+      "comment_tr": "Pasta arabanın arkasında savrulup devrilmiş. Müşterimize mahcup olduk, çok dikkatsiz sürüş.",
+      "comment_en": "The cake slid around in the trunk and toppled. We were embarrassed in front of our client, reckless driving."
+    },
+    {
+      "id": "neg_03",
+      "rating": 1.0,
+      "customerName_tr": "Batıkent Elektronik",
+      "customerName_en": "Batikent Electronics",
+      "comment_tr": "Teslimat 40 dakika gecikti ve kutu sarsıntıdan hasar görmüş. Kesinlikle memnun kalmadık.",
+      "comment_en": "Delivery was 40 minutes late and the parcel was shock-damaged. We are thoroughly dissatisfied."
+    },
+    {
+      "id": "neg_04",
+      "rating": 2.0,
+      "customerName_tr": "Çankaya Hukuk Bürosu",
+      "customerName_en": "Cankaya Law Office",
+      "comment_tr": "Evraklar duruşma bittikten sonra ulaştı. Kuryenin hız ve rota planlaması çok yetersiz.",
+      "comment_en": "Documents arrived after the court hearing ended. The courier's route planning was very poor."
+    },
+    {
+      "id": "neg_05",
+      "rating": 1.0,
+      "customerName_tr": "Gazi Gurme Şarküteri",
+      "customerName_en": "Gazi Gourmet Deli",
+      "comment_tr": "Sıcak teslim edilmesi gereken ürünler buz gibi geldi. Müşteri iade etti, zararımız büyük.",
+      "comment_en": "Items meant to be delivered hot arrived ice cold. The customer returned it, big financial loss."
+    },
+    {
+      "id": "neg_06",
+      "rating": 1.5,
+      "customerName_tr": "Ulus Çiçekçilik",
+      "customerName_en": "Ulus Florist",
+      "comment_tr": "Sert fren yapıldığı çok belli, çiçek vazosu devrilmiş ve su kutuya sızmış.",
+      "comment_en": "Hard braking was obvious, flower vase was knocked over and water leaked onto the package."
+    },
+    {
+      "id": "neg_07",
+      "rating": 2.0,
+      "customerName_tr": "Ostim Yedek Parça",
+      "customerName_en": "Ostim Auto Spare Parts",
+      "comment_tr": "Kurye adresi bulmakta çok zorlandı, işlerimiz aksadı. Şehir navigasyonunu öğrenmeli.",
+      "comment_en": "Courier struggled heavily to locate the address, our work was stalled. Must learn city navigation."
+    },
+    {
+      "id": "neg_08",
+      "rating": 1.0,
+      "customerName_tr": "Karanfil Kitabevi",
+      "customerName_en": "Karanfil Bookstore",
+      "comment_tr": "Paket adeta fırlatılmış gibiydi, kapaklar bükülmüş. Bir daha bu kuryeyi tercih etmeyeceğiz.",
+      "comment_en": "The parcel looked as if it had been thrown, covers were bent. We will not use this courier again."
+    },
+    {
+      "id": "neg_09",
+      "rating": 2.0,
+      "customerName_tr": "Yıldız Butik Kafe",
+      "customerName_en": "Yildiz Boutique Cafe",
+      "comment_tr": "Kurye teslimat sırasında oldukça kaba davrandı ve aceleyle paketi bırakıp gitti.",
+      "comment_en": "Courier was quite rude during drop-off and hastily dumped the box before leaving."
+    },
+    {
+      "id": "neg_10",
+      "rating": 1.0,
+      "customerName_tr": "Bilkent E-Ticaret Deposu",
+      "customerName_en": "Bilkent E-Commerce Hub",
+      "comment_tr": "Kargo güvenlik bandı yırtılmış ve ürün ezilmiş. Sistemde kurye puanınız düşürüldü.",
+      "comment_en": "Security tape was torn and the merchandise crushed. Your courier rating has been penalized."
+    },
+    {
+      "id": "neg_11",
+      "rating": 1.5,
+      "customerName_tr": "Eryaman Evleri Sakini",
+      "customerName_en": "Eryaman Resident",
+      "comment_tr": "Zamanında gelmedi, üstelik araçtan kutu indirilirken yere düşürüldü. Hayal kırıklığı.",
+      "comment_en": "Did not arrive on time, and the box was dropped on the ground while unloading. Disappointing."
+    },
+    {
+      "id": "neg_12",
+      "rating": 1.0,
+      "customerName_tr": "Lojistik Merkez Denetimi",
+      "customerName_en": "Logistics Quality Audit",
+      "comment_tr": "Başarısız teslimat kaydı oluşturuldu. Ceza puanı uygulandı, kargo haklarınız kısıtlanabilir.",
+      "comment_en": "Failed delivery recorded. Penalty points applied, your premium order access may be restricted."
+    }
+  ]
+}
