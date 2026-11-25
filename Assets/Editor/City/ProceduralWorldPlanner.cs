@@ -275,6 +275,13 @@ namespace DeliveryDriver.EditorTools
 
         // Preview-only sample raster; the original heightmap is still authoritative for
         // the final road grade and cross-section constraints.
+        internal static Plan AnalyzeOnly(Settings settings, Layout layout, Scene scene)
+        {
+            var planner = new ProceduralWorldPlanner(settings, layout, scene);
+            planner.AnalyzeTerrain();
+            return planner.plan;
+        }
+
         private void AnalyzeTerrain()
         {
             foreach (Tile tile in plan.layout.tiles)
@@ -439,9 +446,11 @@ namespace DeliveryDriver.EditorTools
                 adaptive.BridgeCount<baseline.BridgeCount ||
                 (GatesConnected(baseline)&&!GatesConnected(adaptive)) ||
                 new[]{"Ankara","İstanbul"}.Any(s=>Coverage(adaptive,s)<Coverage(baseline,s)) ||
-                adaptive.detachedEdges.Count>baseline.detachedEdges.Count+Mathf.Max(10,baseline.edges.Count/20)))
+                adaptive.detachedEdges.Count>baseline.detachedEdges.Count+Mathf.Max(10,baseline.edges.Count/20) ||
+                new[]{"Ankara","İstanbul"}.Any(s=>adaptive.edges.Count(e=>e.sector==s)<baseline.edges.Count(e=>e.sector==s)*.75f)))
             {
                 if(adaptive!=null)baseline.terrainCells.AddRange(adaptive.terrainCells);
+                else baseline.terrainCells.AddRange(AnalyzeOnly(settings,layout,scene).terrainCells);
                 baseline.warnings.Insert(0,"V5 coverage guard selected the V4 layout: adaptive candidate lost coverage or connectivity. Disable guard to inspect the V5 candidate."+(adaptiveError!=null?" "+adaptiveError.Message:""));
                 return baseline;
             }
@@ -1222,6 +1231,8 @@ namespace DeliveryDriver.EditorTools
                 if(group.Count>0)targets.Add(group);
             }
             foreach(Node gate in gates.Where(g=>g!=root))targets.Add(new List<Node>{gate});
+            if(settings.terrainDesign)
+                targets.InsertRange(0,plan.authoredLinks.Where(e=>e.sector==root.sector && e.b!=root).Select(e=>new List<Node>{e.b}));
             int reached=0,links=0,routed=0;
             foreach(var goalNodes in targets)
             {
