@@ -348,7 +348,7 @@ namespace DeliveryDriver.EditorTools
             BuildAnalysisLines();
             BuildEarthworkLines();
             BuildParcels();
-            if(settings.qualityDesign) { EvaluateOpenSpaceAccess(); BuildGradingZones(); }
+            if(settings.qualityDesign) { EvaluateOpenSpaceAccess(); BuildGradingZones(); ValidateQualityGeometry(); }
             ValidateUrbanPlan();
             foreach(var anchor in settings.accessAnchors)
             {
@@ -473,7 +473,8 @@ namespace DeliveryDriver.EditorTools
                     yield return new Vector2Int(x,z);
             }
             var counts=new Dictionary<string,int>();
-            var catalog=settings.qualityDesign?RoadsideBuildingPlacementTool.ReadPreviewFootprints():null;
+            var catalog=settings.qualityDesign?RoadsideBuildingPlacementTool.ReadPreviewFootprints()
+                .OrderByDescending(m=>m.size.x*m.size.y).ThenBy(m=>m.name,StringComparer.Ordinal).ToList():null;
             if(settings.qualityDesign)plan.notes.Add("Prefab footprint catalog: "+catalog.Count+" usable measured models (unmatched lots are not counted as verified prefab fits).");
             int perCity=settings.buildAnkara&&settings.buildIstanbul?1500:3000;
             int processed=0;
@@ -500,8 +501,7 @@ namespace DeliveryDriver.EditorTools
                             if(sectorCount>=perCity)break;
                             float halfWidth=10f,depth=22f;
                             if(StreetStyle(p).density<.65f){halfWidth=14f;depth=30f;}
-                            (string name,Vector2 size) model=catalog==null?default:catalog.Where(m=>m.size.x+2f<=halfWidth*2f && m.size.y+2f<=depth)
-                                .OrderByDescending(m=>m.size.x*m.size.y).FirstOrDefault();
+                            (string name,Vector2 size) model=catalog==null?default:catalog.FirstOrDefault(m=>m.size.x+2f<=halfWidth*2f && m.size.y+2f<=depth);
                             if(catalog!=null && catalog.Count>0 && string.IsNullOrEmpty(model.name))continue;
                             if(!string.IsNullOrEmpty(model.name)){halfWidth=Mathf.Max(3f,model.size.x*.5f+1f);depth=Mathf.Max(6f,model.size.y+2f);}
                             Vector2 front=p+right*sign*(RoadClearance+4f);
@@ -532,9 +532,7 @@ namespace DeliveryDriver.EditorTools
                             if(settings.qualityDesign)
                             {
                                 float roadY=Mathf.Lerp(a.y,b.y,Mathf.Clamp01(Vector2.Distance(XZ(a),p)/len));
-                                if(!plan.layout.TryHeight(front,out float frontY))continue;
-                                access=Mathf.Abs(frontY-roadY)/Mathf.Max(1f,Vector2.Distance(front,p));
-                                if(access>settings.parcelAccessGrade)continue;
+                                if(!ScreenAccess(XYZ(p,roadY),front,e,roadIndex,out access))continue;
                             }
                             // Conservative bounding-box clearance test: any road sample
                             // inside the inflated lot rejects it, even between lot probes.

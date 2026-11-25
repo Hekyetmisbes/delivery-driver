@@ -11,7 +11,7 @@ namespace DeliveryDriver.EditorTools
 {
     public sealed partial class ProceduralWorldGeneratorWindow
     {
-        private string previewFingerprint,previewSettings,analysisCacheKey;
+        private string previewFingerprint,previewSettings,analysisCacheKey,previewScenePath;
         private ProceduralWorldPlanner.Plan analysisCache;
         private readonly Dictionary<string,ProceduralWorldPlanner.Plan> planCache=new Dictionary<string,ProceduralWorldPlanner.Plan>();
         private readonly List<string> cacheOrder=new List<string>();
@@ -19,6 +19,12 @@ namespace DeliveryDriver.EditorTools
         private NeighborhoodZone refineZone;
         private int refineTile;
 
+        private void OnPreviewSceneChanged(Scene oldScene,Scene newScene)
+        {
+            preview=null;layout=null;previewFingerprint=null;analysisCache=null;analysisCacheKey=null;
+            planCache.Clear();cacheOrder.Clear();settings.accessAnchors.Clear();anchorSamples=null;pickAnchor=false;
+            refineZone=null;Repaint();SceneView.RepaintAll();
+        }
         private bool TryCachedPlan(string key,out ProceduralWorldPlanner.Plan p)
         {
             p=null;
@@ -108,7 +114,7 @@ namespace DeliveryDriver.EditorTools
             string path=EditorUtility.SaveFilePanel("Save procedural preview",Path.Combine(Directory.GetCurrentDirectory(),"Library"),"CityPreview-V7","json");
             if(string.IsNullOrEmpty(path))return;
             var scene=SceneManager.GetActiveScene();
-            var saved=ProceduralWorldPlanner.Capture(preview,previewFingerprint,scene.path,previewSettings);
+            var saved=ProceduralWorldPlanner.Capture(preview,previewFingerprint,previewScenePath??scene.path,previewSettings);
             File.WriteAllText(path,JsonUtility.ToJson(saved,false));
             SetStatus("Preview snapshot saved: "+path);
         }
@@ -124,7 +130,7 @@ namespace DeliveryDriver.EditorTools
             string key=ProceduralWorldPlanner.PreviewFingerprint(settings,detected,scene);
             var loaded=ProceduralWorldPlanner.Restore(saved,detected,settings);
             layout=detected;preview=loaded;analysisOnly=false;
-            previewFingerprint=key==saved.fingerprint?key:null;previewSettings=saved.settingsDescription;
+            previewFingerprint=key==saved.fingerprint?key:null;previewSettings=saved.settingsDescription;previewScenePath=saved.scenePath;
             if(previewFingerprint==null)
                 SetStatus("Loaded view-only snapshot; current terrain, scene inputs or settings differ. Refinement disabled. Saved metrics describe the original plan.",MessageType.Warning);
             else SetStatus("Loaded verified preview snapshot. Current scene and settings match.");

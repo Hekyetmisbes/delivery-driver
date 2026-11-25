@@ -96,7 +96,7 @@ namespace DeliveryDriver.EditorTools
                 }
                 var roots=scene.GetRootGameObjects();
                 var roads=roots.SelectMany(r=>r.GetComponentsInChildren<SplineRoad>(true))
-                    .Where(r=>r.IsUsable).OrderBy(ObjectId).ThenBy(r=>r.name).ToList();
+                    .Where(r=>r.IsUsable).ToList();
                 writer.Write(roads.Count);
                 foreach(var r in roads)
                 {
@@ -108,7 +108,7 @@ namespace DeliveryDriver.EditorTools
                     for(int i=1;i<=count;i++)Vec(r.GetPoint(r.DistanceToT(len*i/count)));
                 }
                 var zones=roots.SelectMany(r=>r.GetComponentsInChildren<NeighborhoodZone>(true))
-                    .OrderBy(ObjectId).ThenBy(z=>z.name).ToList();
+                    .ToList();
                 writer.Write(zones.Count);
                 foreach(var zone in zones)
                 {
@@ -233,7 +233,12 @@ namespace DeliveryDriver.EditorTools
             clone.notes.Clear();clone.warnings.Clear();
             planner.BuildEarthworkLines();planner.BuildGradingZones();planner.BuildParcels();planner.EvaluateOpenSpaceAccess();
             planner.ReportGrading("Ankara");planner.ValidateUrbanPlan();
-            clone.quality=Measure(clone,s);AddQualityNotes(clone);
+            clone.quality=Measure(clone,s);
+            var previousQuality=source.quality??Measure(source,s);
+            if(clone.quality.peak>previousQuality.peak+.25f||clone.quality.extraFraction>previousQuality.extraFraction+.005f||
+                clone.quality.meanCut+clone.quality.meanFill>previousQuality.meanCut+previousQuality.meanFill+.05f)
+                throw new InvalidOperationException("Regional candidate increased sampled grading cost. Previous preview retained.");
+            AddQualityNotes(clone);
             if(clone.detachedEdges.Count>0)clone.warnings.Add(clone.detachedEdges.Count+" detached diagnostics remain from source plan.");
             if(!clone.quality.bridgeGraphConnected)clone.warnings.Add("Requested bridge graph is incomplete.");
             if(clone.accessResults.Any(a=>!a.connected))clone.warnings.Add("Some manual anchors remain unresolved.");

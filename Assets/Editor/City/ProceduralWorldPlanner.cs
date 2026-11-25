@@ -2066,6 +2066,8 @@ namespace DeliveryDriver.EditorTools
             foreach(float cap in new[]{settings.maxCutFill,Mathf.Max(settings.maxCutFill,10f),
                 Mathf.Max(settings.maxCutFill,settings.preferredGrading),float.PositiveInfinity}.Distinct().OrderBy(v=>v))
             {
+                if(!float.IsInfinity(cap) && new[]{path[0],path[path.Count-1]}.Any(v=>
+                    plan.layout.TryHeight(XZ(v),out float ground)&&Mathf.Abs(v.y-.12f-ground)>cap+.001f))continue;
                 var trial=new List<Vector3>(path);
                 profileCap=cap;
                 try { if(SolveElevationCore(trial)){path.Clear();path.AddRange(trial);return true;} }

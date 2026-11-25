@@ -20,6 +20,7 @@ namespace DeliveryDriver.EditorTools
 
         private float profileCap=float.PositiveInfinity;
         private List<List<Node>> priorityTargets;
+        private readonly HashSet<Node> reachedPriorityNodes=new HashSet<Node>();
 
         // V6 remains a real comparator, not a label on a V7 graph. To avoid running
         // three nested guards per candidate, compare with the same-seed V6 raw planner.
@@ -58,7 +59,7 @@ namespace DeliveryDriver.EditorTools
                 var a=candidate.quality;var b=baseline.quality;
                 if(a.ankaraTiles<b.ankaraTiles||a.istanbulTiles<b.istanbulTiles)regressions.Add("tile coverage");
                 if(candidate.BridgeCount<baseline.BridgeCount||(b.bridgeGraphConnected&&!a.bridgeGraphConnected))regressions.Add("bridge connectivity");
-                if(candidate.authoredLinks.Count<baseline.authoredLinks.Count ||
+                if(new[]{"Ankara","İstanbul"}.Any(city=>candidate.authoredLinks.Count(e=>e.sector==city)<baseline.authoredLinks.Count(e=>e.sector==city)) ||
                     candidate.accessResults.Count(x=>x.connected)<baseline.accessResults.Count(x=>x.connected))regressions.Add("existing-road access");
                 if(candidate.detachedEdges.Count>baseline.detachedEdges.Count)regressions.Add("detached streets");
                 if(a.roadKm<b.roadKm*.75f)regressions.Add("network length");
@@ -183,6 +184,11 @@ namespace DeliveryDriver.EditorTools
             if(priorityTargets!=null)
             {
                 int reached=priorityTargets.Count(g=>g.Any(n=>find(n)==find(root)&&n.degree>0));
+                foreach(var group in priorityTargets)
+                {
+                    Node chosen=group.FirstOrDefault(n=>find(n)==find(root)&&n.degree>0);
+                    if(chosen!=null)reachedPriorityNodes.Add(chosen);
+                }
                 plan.notes.Add("Ankara final backbone targets: "+reached+"/"+priorityTargets.Count+".");
                 if(reached<priorityTargets.Count)plan.warnings.Add("Ankara: "+(priorityTargets.Count-reached)+" priority targets remain unresolved after final repair.");
             }
@@ -191,15 +197,18 @@ namespace DeliveryDriver.EditorTools
         private void CleanAndBalanceRoads()
         {
             int pruned=0;
+            var tileMap=plan.edges.Where(e=>!e.Bridge).ToDictionary(e=>e,e=>plan.layout.tiles.Where(t=>t.row!=3&&
+                e.points.Any(v=>t.area.Contains(XZ(v)))).ToList());
+            var tileUse=tileMap.Values.SelectMany(a=>a).GroupBy(t=>t).ToDictionary(g=>g.Key,g=>g.Count());
             foreach(var e in plan.edges.Where(e=>!e.Bridge&&e.kind==RoadKind.Local&&!e.spine).ToList())
             {
                 if(Length(e.points)>=settings.minLocalStub)continue;
                 Node leaf=e.a.degree==1?e.a:e.b.degree==1?e.b:null;
-                if(leaf==null||leaf.gate||plan.authoredLinks.Any(l=>l.b==leaf))continue;
+                if(leaf==null||leaf.gate||reachedPriorityNodes.Contains(leaf)||plan.authoredLinks.Any(l=>l.b==leaf))continue;
                 // Do not lose any covered tile or a park frontage just to improve a score.
                 if(plan.openSpaces.Any(s=>s.sector==e.sector&&Contains(s.bounds,XZ(leaf.position),60f)))continue;
-                if(plan.layout.tiles.Any(t=>e.points.Any(v=>t.area.Contains(XZ(v)))&&
-                    !plan.edges.Any(other=>other!=e&&other.sector==e.sector&&other.points.Any(v=>t.area.Contains(XZ(v))))))continue;
+                if(tileMap[e].Any(t=>tileUse[t]<=1))continue;
+                foreach(var tile in tileMap[e])tileUse[tile]--;
                 plan.edges.Remove(e);e.a.degree--;e.b.degree--;pruned++;
             }
             foreach(string sector in new[]{"Ankara","İstanbul"})
@@ -252,15 +261,60 @@ namespace DeliveryDriver.EditorTools
             plan.notes.Add("V7 geometry cleanup: "+pruned+" short non-essential local stubs removed; road class targets are by length, backbone protected.");
         }
 
+        private void ValidateQualityGeometry()
+        {
+            foreach(var edge in plan.edges.Concat(plan.authoredLinks))
+            {
+                for(int i=1;i<edge.points.Count;i++)
+                    if(!GradeOk(edge.points[i-1],edge.points[i]))
+                        throw new InvalidOperationException("V7 path failed final grade validation.");
+                if(!edge.Bridge&&!RadiusOk(edge.points,edge.kind))
+                    throw new InvalidOperationException("V7 path failed final turn radius validation.");
+            }
+        }
+
         private void BuildGradingZones()
         {
             plan.gradingZones.Clear();
-            foreach(var line in plan.earthworks)
+            foreach(var edge in plan.edges.Where(e=>!e.Bridge))
+            for(int i=1;i<edge.points.Count;i++)
             {
-                float magnitude=Mathf.Abs(line.value);
+                Vector3 a=edge.points[i-1],b=edge.points[i],mid=(a+b)*.5f;
+                Vector2 direction=XZ(b-a).normalized,side=new Vector2(-direction.y,direction.x)*(settings.width*.5f+settings.sidewalk);
+                float magnitude=0;
+                for(int j=-1;j<=1;j++)
+                    if(plan.layout.TryHeight(XZ(mid)+side*j,out float h))magnitude=Mathf.Max(magnitude,Mathf.Abs(mid.y-.12f-h));
                 int band=magnitude<=3f?0:magnitude<=settings.maxCutFill?1:magnitude<=10f?2:magnitude<=settings.preferredGrading?3:4;
-                plan.gradingZones.Add(new AnalysisLine{a=line.a,b=line.b,value=band});
+                plan.gradingZones.Add(new AnalysisLine{a=a+Vector3.up,b=b+Vector3.up,value=band});
             }
+        }
+
+        // Access starts at the planned road/sidewalk edge; the rest is sampled
+        // on original land. A candidate is not a built driveway or sidewalk.
+        private bool ScreenAccess(Vector3 roadPoint,Vector2 target,Edge owner,StreetIndex index,out float peak)
+        {
+            peak=0f;
+            Vector2 start=XZ(roadPoint),delta=target-start;
+            float distance=delta.magnitude,paved=settings.width*.5f+settings.sidewalk;
+            if(distance<=paved+.5f)return false;
+            Vector2 direction=delta.normalized;
+            float run=distance-paved;
+            int steps=Mathf.Max(1,Mathf.CeilToInt(run/2.5f));
+            float previous=roadPoint.y;
+            for(int i=1;i<=steps;i++)
+            {
+                Vector2 pos=start+direction*(paved+run*i/steps);
+                if(IsProtected(pos,1f)||obstacles.Near(pos,2f)||!plan.layout.TryHeight(pos,out float h))return false;
+                peak=Mathf.Max(peak,Mathf.Abs(h-previous)/(run/steps));previous=h;
+                if(peak>settings.parcelAccessGrade+.001f)return false;
+                foreach(var e in index.Query(new Rect(pos.x-RoadClearance,pos.y-RoadClearance,RoadClearance*2f,RoadClearance*2f)))
+                {
+                    if(e==owner)continue;
+                    for(int j=1;j<e.points.Count;j++)
+                        if(DistanceSquared(pos,XZ(e.points[j-1]),XZ(e.points[j]))<RoadClearance*RoadClearance)return false;
+                }
+            }
+            return true;
         }
 
         private void EvaluateOpenSpaceAccess()
@@ -278,15 +332,10 @@ namespace DeliveryDriver.EditorTools
                     {
                         Vector2 p=XZ(point),q=new Vector2(Mathf.Clamp(p.x,r.xMin,r.xMax),Mathf.Clamp(p.y,r.yMin,r.yMax));
                         float d=Vector2.Distance(p,q);
-                        if(d<RoadClearance||d>reach||!plan.layout.TryHeight(q,out float h))continue;
-                        if(Mathf.Abs(h-point.y)/d>settings.parcelAccessGrade)continue;
-                        bool clear=true;
-                        for(int i=1;i<=4;i++)
-                        {
-                            Vector2 mid=Vector2.Lerp(p,q,i/4f);
-                            if(IsProtected(mid,2f)||obstacles.Near(mid,2f)){clear=false;break;}
-                        }
-                        if(clear){space.accessible=true;space.accessGrade=Mathf.Abs(h-point.y)/d;break;}
+                        if(d<RoadClearance||d>reach)continue;
+                        if(!ScreenAccess(point,q,e,index,out float access))continue;
+                        if(plan.parcels.Any(l=>l.sector==space.sector&&SegmentHitsRect(p,q,l.bounds,1f)))continue;
+                        space.accessible=true;space.accessGrade=access;break;
                     }
                     if(space.accessible)break;
                 }

@@ -54,6 +54,7 @@ namespace DeliveryDriver.EditorTools
             SceneView.duringSceneGui += DrawPreview;
             SceneView.duringSceneGui += PickAnchorInScene;
             Undo.undoRedoPerformed += OnUndoRedo;
+            EditorSceneManager.activeSceneChangedInEditMode += OnPreviewSceneChanged;
         }
 
         private void OnDisable()
@@ -62,11 +63,13 @@ namespace DeliveryDriver.EditorTools
             SceneView.duringSceneGui -= PickAnchorInScene;
             anchorSamples=null;pickAnchor=false;
             Undo.undoRedoPerformed -= OnUndoRedo;
+            EditorSceneManager.activeSceneChangedInEditMode -= OnPreviewSceneChanged;
         }
 
         private void OnUndoRedo()
         {
             preview = null;
+            previewFingerprint=null;
             layout = null;
             RefreshNetwork(SceneManager.GetActiveScene(), false);
             Repaint();
@@ -325,9 +328,9 @@ namespace DeliveryDriver.EditorTools
             Scene scene = SceneManager.GetActiveScene();
             layout = ProceduralWorldPlanner.DetectLayout(scene);
             string key=ProceduralWorldPlanner.PreviewFingerprint(settings,layout,scene);
-            if(analysisCache==null||analysisCacheKey!=key)
+            if(!cacheEnabled||analysisCache==null||analysisCacheKey!=key)
             {analysisCache=ProceduralWorldPlanner.AnalyzeOnly(settings,layout,scene);analysisCacheKey=key;}
-            preview=analysisCache;previewFingerprint=key;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);
+            preview=analysisCache;previewFingerprint=key;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);previewScenePath=scene.path;
             analysisOnly = true;
             showTerrainAnalysis = true;
             terrainLayer = TerrainLayer.Slope;
@@ -338,7 +341,7 @@ namespace DeliveryDriver.EditorTools
 
         private void PlanOnly(bool allowBridgeFallback)
         {
-            analysisOnly = false;
+            bool wasAnalysis=analysisOnly;
             Scene scene = SceneManager.GetActiveScene();
             if (FindStates(scene).Count > 0) throw new InvalidOperationException("Clear the previous build before previewing a new one.");
             if (layout == null) Detect();
@@ -352,7 +355,7 @@ namespace DeliveryDriver.EditorTools
             string key=ProceduralWorldPlanner.PreviewFingerprint(settings,layout,scene);
             if(TryCachedPlan(key,out var cached))
             {
-                preview=cached;previewFingerprint=key;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);
+                preview=cached;analysisOnly=false;previewFingerprint=key;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);previewScenePath=scene.path;
                 SetStatus("Preview cache hit: "+stopwatch.Elapsed.TotalSeconds.ToString("F2")+" s including input verification.");return;
             }
             // Preserve the last successful preview if planning is canceled or fails.
@@ -361,7 +364,7 @@ namespace DeliveryDriver.EditorTools
             {
                 preview = ProceduralWorldPlanner.Build(settings, layout, scene);
                 preview.notes.Insert(0,"Planning elapsed: "+stopwatch.Elapsed.TotalSeconds.ToString("F1")+" s (including input verification and selected guard comparisons).");
-                previewFingerprint=key;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);
+                previewFingerprint=key;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);previewScenePath=scene.path;analysisOnly=false;
                 CachePlan(key,preview);
                 SetStatus("Preview ready: " + preview.edges.Count + " retained segments, " + preview.detachedEdges.Count + " detached, " + preview.BridgeCount + " planned bridges. No scene assets changed.", preview.detachedEdges.Count > 0 ? MessageType.Warning : MessageType.Info);
             }
@@ -375,14 +378,14 @@ namespace DeliveryDriver.EditorTools
                     settings.bridges = false;
                     preview = ProceduralWorldPlanner.Build(settings, layout, scene);
                     preview.warnings.Insert(0, "BRIDGES NOT PLANNED: " + ex.Message);
-                    previewFingerprint=null;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);
+                    previewFingerprint=null;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);previewScenePath=scene.path;analysisOnly=false;
                     SetStatus("City-only preview shown. Adjust bridge settings or try another seed to preview both bridge links. Scene generation is locked during preview iteration.", MessageType.Warning);
                     Debug.LogWarning("[ProceduralWorld] " + ex.Message);
                 }
-                catch {preview=previous;throw;}
+                catch {preview=previous;analysisOnly=wasAnalysis;throw;}
                 finally { settings.bridges = requested; }
             }
-            catch {preview=previous;throw;}
+            catch {preview=previous;analysisOnly=wasAnalysis;throw;}
         }
 
         private void ValidateRoots(Scene scene)

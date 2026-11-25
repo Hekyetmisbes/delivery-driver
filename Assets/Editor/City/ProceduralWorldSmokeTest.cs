@@ -38,7 +38,7 @@ namespace DeliveryDriver.EditorTools
                 var settings = new ProceduralWorldPlanner.Settings
                 {
                     seed = 4281, spacing = 90f, nodesPerTile = 80, arterialSpacing = 400f, collectorSpacing = 200f,
-                    urbanDesign = false,
+                    urbanDesign = false, qualityDesign = false,
                     grade = .12f, bridgeClearance = 4f, seaY = 0f,
                     buildAnkara = true, buildIstanbul = false, protectKizilay = false, bridges = false
                 };
@@ -153,6 +153,38 @@ namespace DeliveryDriver.EditorTools
                 for(int i=0;i<land.Count;i++)
                     Require(before[i].SequenceEqual(land[i].terrain.terrainData.GetHeights(0,0,33,33).Cast<float>()),
                         "V6 modified original terrain.");
+                // V7 quality and snapshot regression; keep fallback disabled so
+                // a V6 plan cannot satisfy the V7-only assertions.
+                Require(float.IsPositiveInfinity(ProceduralWorldPlanner.TurnRadius(Vector2.zero,Vector2.right,new Vector2(2,0))),
+                    "Straight path radius must be infinite.");
+                Require(Mathf.Abs(ProceduralWorldPlanner.TurnRadius(new Vector2(10,0),new Vector2(0,10),new Vector2(-10,0))-10f)<.01f,
+                    "Circular radius calculation is wrong.");
+                settings.qualityDesign=true;settings.qualityGuard=false;
+                var quality=ProceduralWorldPlanner.Build(settings,emptySea,scene);
+                Verify(quality,settings,0);
+                Require(quality.version=="V7"&&quality.quality!=null,"V7 quality plan or report missing.");
+                Require(quality.quality.sharpRoads==0,"V7 retained a road below the configured radius.");
+                Require(quality.gradingZones.Count>0,"V7 grading zones missing on flat terrain.");
+                Require(quality.quality.istanbulTiles>0,"V7 coverage missing.");
+                string key=ProceduralWorldPlanner.PreviewFingerprint(settings,emptySea,scene);
+                var saved=ProceduralWorldPlanner.Capture(quality,key,scene.path,ProceduralWorldPlanner.DescribeSettings(settings));
+                var restored=ProceduralWorldPlanner.Restore(JsonUtility.FromJson<ProceduralWorldPlanner.PreviewSnapshot>(JsonUtility.ToJson(saved)),emptySea,settings);
+                Verify(restored,settings,0);
+                Require(quality.edges.Count==restored.edges.Count&&quality.parcels.Count==restored.parcels.Count&&
+                    quality.openSpaces.Count==restored.openSpaces.Count&&quality.gradingZones.Count==restored.gradingZones.Count,
+                    "Preview snapshot lost geometry or overlays.");
+                for(int i=0;i<quality.edges.Count;i++)
+                    Require(quality.edges[i].points.SequenceEqual(restored.edges[i].points),"Preview snapshot changed path "+i);
+                Require(quality.quality.score==restored.quality.score,"Preview snapshot changed quality report.");
+                var changed=emptySea.tiles.First(t=>t.row>3).terrain.terrainData;
+                float[,] oldSample=changed.GetHeights(0,0,1,1);
+                changed.SetHeights(0,0,new float[,]{{oldSample[0,0]+.01f}});
+                Require(key!=ProceduralWorldPlanner.PreviewFingerprint(settings,emptySea,scene),"Cache key missed an edited terrain sample.");
+                changed.SetHeights(0,0,oldSample);
+                Require(key==ProceduralWorldPlanner.PreviewFingerprint(settings,emptySea,scene),"Cache key did not reproduce after restoring terrain.");
+                for(int i=0;i<land.Count;i++)
+                    Require(before[i].SequenceEqual(land[i].terrain.terrainData.GetHeights(0,0,33,33).Cast<float>()),
+                        "V7 modified original terrain.");
                 // Rotate the placement convention (not the Terrain objects): the same layout must work on Z.
                 foreach (var tile in emptySea.tiles)
                 {
@@ -167,7 +199,7 @@ namespace DeliveryDriver.EditorTools
                     tile.terrain.transform.position += Vector3.forward * 100f;
                 var wider = ProceduralWorldPlanner.DetectLayout(scene);
                 Require(Mathf.Abs(wider.sea.height - 300f) < .01f, "Actual sea gap width was not inferred.");
-                Debug.Log("[ProceduralWorldSmoke] PASS: 28/24 terrain detection, empty sea bridges, X/Z orientation, real sea width, deterministic road plan, stepped Ankara coverage, V6 reservations/parcels and read-only grading checks. No assets written.");
+                Debug.Log("[ProceduralWorldSmoke] PASS: 28/24 terrain detection, empty sea bridges, X/Z orientation, real sea width, deterministic road plan, stepped Ankara coverage, V6 reservations/parcels, V7 radius/quality, snapshot round-trip, cache invalidation and read-only grading checks. No assets written.");
             }
             catch (Exception ex)
             {
