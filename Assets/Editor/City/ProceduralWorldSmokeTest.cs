@@ -37,7 +37,7 @@ namespace DeliveryDriver.EditorTools
 
                 var settings = new ProceduralWorldPlanner.Settings
                 {
-                    seed = 4281, spacing = 90f, maxNodesPerCity = 80,
+                    seed = 4281, spacing = 90f, nodesPerTile = 80, arterialSpacing = 400f, collectorSpacing = 200f,
                     grade = .12f, bridgeClearance = 4f, seaY = 0f,
                     buildAnkara = true, buildIstanbul = false, protectKizilay = false, bridges = false
                 };
@@ -46,9 +46,12 @@ namespace DeliveryDriver.EditorTools
                 Require(first.edges.Count == repeat.edges.Count, "Seed changed edge count.");
                 for (int i = 0; i < first.edges.Count; i++)
                 {
-                    Require(first.edges[i].points.SequenceEqual(repeat.edges[i].points), "Seed did not reproduce path " + i);
+                    Require(first.edges[i].points.SequenceEqual(repeat.edges[i].points) && first.edges[i].kind == repeat.edges[i].kind, "Seed did not reproduce path/class " + i);
                 }
                 Verify(first, settings, 0);
+                Require(first.edges.Any(e => e.kind == ProceduralWorldPlanner.RoadKind.Arterial) &&
+                    first.edges.Any(e => e.kind == ProceduralWorldPlanner.RoadKind.Collector) &&
+                    first.edges.Any(e => e.kind == ProceduralWorldPlanner.RoadKind.Local), "Missing a street hierarchy class.");
                 settings.buildIstanbul = true;
                 settings.bridges = true;
                 ProceduralWorldPlanner.Plan both = null;
@@ -113,6 +116,8 @@ namespace DeliveryDriver.EditorTools
         private static void Verify(ProceduralWorldPlanner.Plan plan, ProceduralWorldPlanner.Settings settings, int bridges)
         {
             Require(plan.edges.Count > 0 && plan.BridgeCount == bridges, "Unexpected bridge or road count.");
+            Require(plan.edges.All(e => e.kind != ProceduralWorldPlanner.RoadKind.AuthoredLink), "Preview-only proposals leaked into the bake graph.");
+            Require(plan.edges.All(e => (e.kind == ProceduralWorldPlanner.RoadKind.Bridge) == e.Bridge), "Bridge class mismatch.");
             foreach (var e in plan.edges)
             {
                 Require(e.points.Count >= 2 && e.points[0] == e.a.position && e.points[e.points.Count - 1] == e.b.position,
