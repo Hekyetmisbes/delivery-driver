@@ -836,6 +836,7 @@ namespace DeliveryDriver.EditorTools
                 ", geometry " + diagnostics.geometryRejected + "; skipped nodes: protected " +
                 diagnostics.protectedNodes + ", obstacles/bounds " + diagnostics.blockedNodes + ", missing terrain " + diagnostics.missingNodes + ".");
             AddCoverageReport(sector, bounds);
+            if (backbone) ReportTerrainSeams(bounds);
             if (gradingSurface != null) ReportGrading(sector);
             index=new StreetIndex();
             foreach(Edge e in plan.edges)index.Add(e);
@@ -936,6 +937,35 @@ namespace DeliveryDriver.EditorTools
             return original+Mathf.Clamp(gradingSurface.Sample(pos)-original,-reserve,reserve);
         }
 
+        private void ReportTerrainSeams(Rect bounds)
+        {
+            var tiles = plan.layout.tiles.Where(t => Contains(bounds, t.area.center)).ToList();
+            float worst = 0f; int large = 0, total = 0; string pair = "none";
+            foreach (Tile a in tiles)
+            foreach (Tile b in tiles)
+            {
+                bool row = b.row == a.row + 1 && b.column == a.column;
+                bool column = b.column == a.column + 1 && b.row == a.row;
+                if (!row && !column) continue;
+                bool alongX = row ? plan.layout.rowsOnX : !plan.layout.rowsOnX;
+                float diff = 0f;
+                for (int i=0;i<=24;i++)
+                {
+                    float t = i / 24f;
+                    Vector2 first = alongX ? new Vector2(a.area.xMax, Mathf.Lerp(a.area.yMin,a.area.yMax,t)) :
+                        new Vector2(Mathf.Lerp(a.area.xMin,a.area.xMax,t),a.area.yMax);
+                    Vector2 second = alongX ? new Vector2(b.area.xMin,Mathf.Lerp(b.area.yMin,b.area.yMax,t)) :
+                        new Vector2(Mathf.Lerp(b.area.xMin,b.area.xMax,t),b.area.yMin);
+                    diff = Mathf.Max(diff,Mathf.Abs(a.Height(first)-b.Height(second)));
+                }
+                total++;
+                if (diff > 1f) large++;
+                if (diff > worst) {worst=diff;pair=a.terrain.name+" / "+b.terrain.name;}
+            }
+            string note = "Ankara terrain seams: "+large+"/"+total+" boundaries have >1m sampled height discontinuity; worst "+worst.ToString("F1")+" m ("+pair+").";
+            if (large>0) plan.warnings.Add(note); else plan.notes.Add(note);
+        }
+
         private void ReportGrading(string sector)
         {
             int segments=0;float max=0f;
@@ -1026,7 +1056,7 @@ namespace DeliveryDriver.EditorTools
                             if(!same&&(n.degree>=DegreeLimit(n)||next.degree>=DegreeLimit(next)))continue;
                             float rise=Mathf.Abs(n.position.y-next.position.y);
                             if(!same&&rise>c.length*settings.grade+.01f)continue;
-                            float price=item.cost+(same?.001f:c.length*(c.kind==RoadKind.Arterial?.8f:c.kind==RoadKind.Collector?1f:1.18f)+rise*2f);
+                            float price = item.cost + (same ? .001f : c.length * (c.kind == RoadKind.Arterial ? .8f : c.kind == RoadKind.Collector ? 1f : 1.18f) + rise * 2f);
                             if(cost.TryGetValue(next,out float old)&&old<=price)continue;
                             cost[next]=price;previous[next]=(n,c);queue.Add((price,next.id,next));
                         }
