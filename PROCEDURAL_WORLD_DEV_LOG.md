@@ -58,3 +58,48 @@ Sampled height differences are not earthwork volumes. V6 quality score used a di
 
 ### Next decision
 Await actual Unity compiler result, final preview report and JSON/screenshots. Compare each accepted candidate with its input; inspect rollback reasons and sample warnings. Preserve the V7.1 baseline. Fix only demonstrated issues; if V7.2 is adequate, proceed to V7.3 production readiness (continuous virtual terrain, junction/spline/corridor validation) before V8 controlled physical generation and driving tests.
+
+
+## 2026-11-25 — V7.2 first real GameScene preview (seed 4281)
+
+User supplied full Copy preview report and Unity screenshot (Unity 6000.3.12f1). Selected layout V7.2 optimized; elapsed 113.9 s, score 90.1/100. Actual local Git SHA not supplied; expected source baseline a838bbbb (docs-only commit 3271fa9). Compilation sufficient to run preview; Console and smoke-test outcomes not provided. Final JSON and rejected-stage snapshots not yet provided.
+
+| Metric | V7.2 final observed |
+|---|---:|
+| Coverage Ankara / Istanbul | 12/12 + 12/12 |
+| Retained / detached | 2871 / 10 |
+| Ankara mean cut / fill | 0.60 / 0.48 m |
+| Peak / extra grading | 19.1 m / 6.1% |
+| Sharp streets / short stubs | 19 / 22 |
+| Authored proposals / bridges | 4 / 2 |
+| Bridge gap | 1242 m |
+| Prefab fits / lots | 1987/1987 (36 models) |
+| Park access | 72/73 (four additional entrances) |
+| Vertical flags / near straight-through junction pairs | 1748 / 268 |
+| Terrain seams >1m | 0/17 |
+
+Stage 0 V6 baseline: 51.3 s, cut/fill 2.84/1.49 m, peak 21.9 m, extra 31.8%, radius 20, vertical 2380, junction 805. Stage 1 accepted (12.2 s; cut/fill 1.44/0.87, vertical 1974, junction 346). Stage 2 accepted (11.1 s; reference earthworks restored, vertical 2067, junction 282). Stage 3 rollback (2.6 s; 40 direct + 8 routed attempts, none promoted). Stage 4 accepted (2.9 s; radius 20->19, vertical 2064). Stage 5 rollback (1.9 s; 14 fixed-gate approaches, 187 coastal spline ends audit only).
+
+| V7.2 stage | Decision | Observed candidate / finding |
+|---|---|---|
+| 5a hotspot | Rollback, no measurable improvement, 2.2 s | 0/5 eligible roads improved; fixed endpoints |
+| 5b T-junction | Rollback, network/access regression, 1.4 s | 2 groups, 2 splits, all 10 promoted, 2885 retained / 0 detached candidate only; 5 attempts, 3 routed, 3 connector rejects; candidate cut/fill 0.59/0.61 m, extra 7.0%, radius 22, vertical 2079, junction 286; peak 19.1 m |
+| 5c bend | Rollback, no measurable improvement, 1.6 s | 2/19 roads improved locally but count remained 19 |
+| 5d vertical | Accepted, 2.9 s | 122/180 roads improved; flags 2064->1748, junction 282->268, earthwork metrics unchanged at report precision |
+| 5e bridge | Rollback, network/access regression, 1.8 s | 126 tests, 126 protected rejects, 0 feasible, 0 replaced |
+| 6 urban | Accepted, 3.4 s | 1987 prefab fits, 72/73 parks |
+
+Virtual terrain: 11866 valid sections, nominal spacing adjusted to 24.2 m, 209 missing sections, 0 missing shoulder samples, 234 incompatible 4m cells, 313 steep sections (wall candidates), 0 protected/existing-road samples, 3 parcel shoulder samples. 50 hotspot intervals; peak 19.11 m at (13.0,41.1,895.4), another cluster near (2697.4,64.3,1134.0) at 17.70 m. These are sampled diagnostics, not certified mesh collisions or wall counts. Mandatory checks NOT MET; Generate remains locked.
+
+Settings verified: seed 4281, local budget 180, vertical radius 80, spacing 20, shoulder slope 0.67, profile sweeps 16, preferred cap 15, radius 18, grade .1, maxCutFill 6, district limit 30, blend 10, seaY -2E-05, bridge clearance 8, separation .65, protection on, both cities/two bridges on. Additional settings: arterial/collector/local spacing 600/250/95, width 8.5, sidewalk 2.2, nodesPerTile 180, maxNodesPerCity 170, arterial/collector length target .15/.25, contour .85, curve .35, districtVariation .65, earthworkPreference .8, gradingOptimization .9, loops .75, minLocalStub 45, openSpaceFraction .12, parcelAccessGrade .15, straightPreference .7, terrainInfluence .65, ankaraLow false, all prior V6/V7/terrain/staged/local/bridge gates toggles true. Report archived metrics without machine-specific paths or scene object IDs.
+
+Checkpoint folder identifier: 20261125-193817-821-BD0657ED (under local Library/ProceduralWorldCheckpoints). Source stage order implies 07-rejected.json = 5b, 10-rejected.json = 5e; verify labels in JSON. Archive entire directory outside Library. Request 06-rejected.json (5a) only if needed, 07-rejected.json (5b), 10-rejected.json (5e), and final.json; prioritize 07 and final.
+
+### Source inspection and next V7.2.1 proposal (not implemented)
+- Staged.cs checks StageGraphSafe first, then NoTerrainRegression, then local quality thresholds. 5b would also fail terrain and geometry goals even if graph guard were fixed; do not loosen them or promote current candidate.
+- StageGraphSafe returns only a generic boolean; PreservedNetwork checks all plan node IDs for uniqueness, then exact retained edge geometry and split chains. Preview Capture/Restore includes authored endpoint nodes (Urban.cs can create manual endpoint id=-1); multiple authored anchors or duplicated IDs are a plausible guard failure, not established by report. Inspect snapshot node IDs and exact old-edge lineage; bridge branch can also reject old bridge endpoints without a land edge even if unchanged. Distinguish actual failure from no-op. Add explicit per-invariant guard reasons and tests with authored endpoints, unchanged bridge candidates, exact splits, and duplicate identities; maintain real graph and authored-link safety.
+- 5b accepts first locally viable option per detached group before aggregate guard; improve by independent group transactions, candidate ranking across several safe connectors, local profile/bend/junction repair, guard at group level. Preserve exact original retained road shape for split; if subsequent refinement is needed, separately validate topology and corridor. No global guard relaxation. 5c partial radius severity gains currently discarded if flag count unchanged; introduce measured severity without accepting regressions. 5a fixed-endpoint limitations require local connected junction neighborhood candidates (not blanket node shifts).
+- 5d successful; keep and later improve with severity/distribution and junction-surface checks, not simply larger attempt budget.
+- 5e 100% protected rejection means explicit authored-corridor audit/verified approach design required; no protection bypass.
+- Virtual terrain missing sections need road/sample coordinates and reason categories (road footprint vs outer blend crossing tile/shore bounds); classify same-junction overlaps vs independent road conflicts; preserve unresolved warnings; continuous surface later. No physical generation or scene/terrain writes.
+- Next obtain snapshots and focused screenshots (Hotspots, VerticalProfile, VirtualTerrain). Prioritize 5b diagnostic/repair V7.2.1, then hotspots/geometry and virtual terrain checks before V7.3. No C# edits performed for this test entry.
