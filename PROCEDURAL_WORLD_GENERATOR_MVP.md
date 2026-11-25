@@ -1,3 +1,9 @@
+# Procedural World Generator V7 — quality preview
+
+The current branch contains the V7 quality update. See [V7 implementation, limitations and test report](PROCEDURAL_WORLD_V7_REPORT.md). The V6 instructions below describe the preserved baseline mode (disable Enable V7 quality design). Generate remains locked.
+
+---
+
 # Procedural World Generator V6 — urban design preview
 
 Branch: feature/procedural-world-generator-mvp. **Generate is locked.** This is an editor-only planning update. It does not modify terrain heights, scenes, existing spline roads, buildings or mesh assets. The existing Simple Road Placement Tool remains the eventual geometry backend. No EasyRoads dependency added.

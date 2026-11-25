@@ -233,6 +233,7 @@ namespace DeliveryDriver.EditorTools
             clone.notes.Clear();clone.warnings.Clear();
             planner.BuildEarthworkLines();planner.BuildGradingZones();planner.BuildParcels();planner.EvaluateOpenSpaceAccess();
             planner.ReportGrading("Ankara");planner.ValidateUrbanPlan();
+            if(source.version.StartsWith("V7",StringComparison.Ordinal))planner.ValidateQualityGeometry();
             clone.quality=Measure(clone,s);
             var previousQuality=source.quality??Measure(source,s);
             if(clone.quality.peak>previousQuality.peak+.25f||clone.quality.extraFraction>previousQuality.extraFraction+.005f||

@@ -92,7 +92,7 @@ namespace DeliveryDriver.EditorTools
             using(new EditorGUI.DisabledScope(preview==null||analysisOnly))
             {
                 if(GUILayout.Button("Save preview JSON"))Run(SavePreview);
-                if(GUILayout.Button("Copy preview report"))EditorGUIUtility.systemCopyBuffer=string.Join("\n",preview.notes.Concat(preview.warnings));
+                if(GUILayout.Button("Copy preview report"))EditorGUIUtility.systemCopyBuffer=PreviewReportText();
             }
             if(GUILayout.Button("Load preview JSON (read only)"))Run(LoadPreview);
             using(new EditorGUI.DisabledScope(preview==null||analysisOnly||string.IsNullOrEmpty(previewFingerprint)||!settings.qualityDesign))
@@ -108,12 +108,22 @@ namespace DeliveryDriver.EditorTools
             }
             EditorGUILayout.HelpBox("Snapshots include road paths and overlays, never a scene bake. Exact scene/settings fingerprint is required to refine. Local refinement keeps topology and exterior roads fixed; parcel/access overlays are refreshed. Save the preferred layout before experimenting.",MessageType.Info);
         }
+        private string PreviewReportText()
+        {
+            var lines=new List<string>{"Selected layout: "+preview.version,"Retained/detached roads: "+preview.edges.Count+" / "+preview.detachedEdges.Count,
+                "Bridges: "+preview.BridgeCount,"Authored proposals: "+preview.authoredLinks.Count,
+                "Open spaces / lots: "+preview.openSpaces.Count+" / "+preview.parcels.Count};
+            lines.AddRange(preview.notes);lines.AddRange(preview.warnings.Select(x=>"WARNING: "+x));
+            lines.Add("--- Settings at calculation ---");lines.Add(previewSettings??"Unknown");
+            return string.Join("\n",lines);
+        }
         private void SavePreview()
         {
             if(preview==null||analysisOnly)return;
             string path=EditorUtility.SaveFilePanel("Save procedural preview",Path.Combine(Directory.GetCurrentDirectory(),"Library"),"CityPreview-V7","json");
             if(string.IsNullOrEmpty(path))return;
             var scene=SceneManager.GetActiveScene();
+            if(string.IsNullOrEmpty(scene.path))throw new InvalidOperationException("Save the Unity scene before saving a persistent preview snapshot.");
             var saved=ProceduralWorldPlanner.Capture(preview,previewFingerprint,previewScenePath??scene.path,previewSettings);
             File.WriteAllText(path,JsonUtility.ToJson(saved,false));
             SetStatus("Preview snapshot saved: "+path);

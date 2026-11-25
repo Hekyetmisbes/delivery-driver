@@ -75,6 +75,7 @@ namespace DeliveryDriver.EditorTools
             if(selected==baseline)
             {
                 selected.version=selected.version.StartsWith("V6")?"V6 fallback":selected.version+" (V7 fallback)";
+                BuildGradingZones(selected,settings);
                 selected.warnings.Add("Fallback uses baseline road geometry and unscreened V6 parcel/park data; V7 score is diagnostic only.");
                 selected.warnings.Insert(0,"V7 guard rejected candidate: "+string.Join(", ",regressions)+". Disable Preserve V6 quality to inspect V7.");
             }
@@ -273,7 +274,8 @@ namespace DeliveryDriver.EditorTools
             }
         }
 
-        private void BuildGradingZones()
+        private void BuildGradingZones()=>BuildGradingZones(plan,settings);
+        private static void BuildGradingZones(Plan plan,Settings settings)
         {
             plan.gradingZones.Clear();
             foreach(var edge in plan.edges.Where(e=>!e.Bridge))

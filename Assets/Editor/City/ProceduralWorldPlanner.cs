@@ -907,8 +907,8 @@ namespace DeliveryDriver.EditorTools
                 Rect r=BoundsOf(e.points,0f);
                 for(int x=I(r.xMin);x<=I(r.xMax);x++)
                 for(int y=I(r.yMin);y<=I(r.yMax);y++)
-                    if(cells.TryGetValue(new Vector2Int(x,y),out List<Edge> list))list.Remove(e);
-                foreach(Node n in new[]{e.a,e.b})if(incident.TryGetValue(n,out List<Edge> list))list.Remove(e);
+                    if(cells.TryGetValue(new Vector2Int(x,y),out List<Edge> spatialList))spatialList.Remove(e);
+                foreach(Node n in new[]{e.a,e.b})if(incident.TryGetValue(n,out List<Edge> nodeList))nodeList.Remove(e);
             }
             public IEnumerable<Edge> At(Node n) =>
                 incident.TryGetValue(n, out List<Edge> list) ? (IEnumerable<Edge>)list : Enumerable.Empty<Edge>();
@@ -1023,7 +1023,7 @@ namespace DeliveryDriver.EditorTools
                 List<Vector3> path;
                 if (route)
                 {
-                    if (!TryTerrainConnector(c.a, c.b, bounds, index, out path)) return false;
+                    if (!TryTerrainConnector(c.a, c.b, bounds, index, out path,c.kind)) return false;
                 }
                 else if (!TryStreet(c.a,c.b,bounds,c.kind,index,false,out path)) return false;
                 var edge = new Edge { a=c.a,b=c.b,sector=sector,kind=c.kind,points=path,spine=c.spine };
@@ -1555,7 +1555,7 @@ namespace DeliveryDriver.EditorTools
 
         // Bounded terrain-aware A* on a temporary raster. Final geometry is still a
         // sampled polyline and is checked by the same elevation/clearance validators.
-        private bool TryTerrainConnector(Node a, Node b, Rect bounds, StreetIndex index, out List<Vector3> points)
+        private bool TryTerrainConnector(Node a, Node b, Rect bounds, StreetIndex index, out List<Vector3> points,RoadKind kind)
         {
             points = null;
             Vector2 start=XZ(a.position), end=XZ(b.position);
@@ -1686,7 +1686,7 @@ namespace DeliveryDriver.EditorTools
                 }
                 if(path.Count<2)continue;
                 path[0]=a.position;path[path.Count-1]=b.position;
-                if(settings.qualityDesign && settings.urbanDesign && (!RouteClear(path,bounds)||!RadiusOk(path,RoadKind.Collector)))continue;
+                if(settings.qualityDesign && settings.urbanDesign && (!RouteClear(path,bounds)||!RadiusOk(path,kind)))continue;
                 if(!SolveElevation(path)||!StreetAngles(a,b,path,index)||StreetCrosses(a,b,path,index))continue;
                 points=path;return true;
             }
