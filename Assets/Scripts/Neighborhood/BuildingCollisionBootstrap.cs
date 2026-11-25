@@ -273,12 +273,26 @@ namespace DeliveryDriver.City
             BoxCollider collider = candidate.GetComponent<BoxCollider>();
             if (collider == null)
             {
+                GameObject colliderObject = candidate;
+                if (Application.isPlaying &&
+                    candidate.TryGetComponent(out MeshRenderer renderer) &&
+                    renderer.isPartOfStaticBatch)
+                {
+                    // Unity tries to fit the collider to the combined mesh during AddComponent.
+                    colliderObject = new GameObject("BuildingCollider")
+                    {
+                        layer = candidate.layer,
+                        tag = candidate.tag
+                    };
+                    colliderObject.transform.SetParent(candidate.transform, false);
+                }
+
 #if UNITY_EDITOR
                 collider = !Application.isPlaying && useEditorUndo
                     ? Undo.AddComponent<BoxCollider>(candidate)
-                    : candidate.AddComponent<BoxCollider>();
+                    : colliderObject.AddComponent<BoxCollider>();
 #else
-                collider = candidate.AddComponent<BoxCollider>();
+                collider = colliderObject.AddComponent<BoxCollider>();
 #endif
             }
 
