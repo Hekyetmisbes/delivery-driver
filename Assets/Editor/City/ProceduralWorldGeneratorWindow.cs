@@ -11,7 +11,7 @@ using Object = UnityEngine.Object;
 
 namespace DeliveryDriver.EditorTools
 {
-    public sealed class ProceduralWorldGeneratorWindow : EditorWindow
+    public sealed partial class ProceduralWorldGeneratorWindow : EditorWindow
     {
         private const string AssetParent = "Assets/Art/Terrains";
         private const string AssetRootName = "ProceduralGenerated";
@@ -28,7 +28,7 @@ namespace DeliveryDriver.EditorTools
         private bool showDetached = true;
         private bool showGrading = true, xrayPreview = true;
         private bool showTerrainAnalysis = false, analysisOnly = false;
-        private enum TerrainLayer { Slope, Elevation, Buildability, Contours, Seams, Earthworks }
+        private enum TerrainLayer { Slope, Elevation, Buildability, Contours, Seams, Earthworks, GradingZones }
         private TerrainLayer terrainLayer = TerrainLayer.Slope;
         private bool showParcels = false, showOpenSpaces = true, pickAnchor, fastPreview = true;
         private SplineRoad anchorRoad;
@@ -76,7 +76,7 @@ namespace DeliveryDriver.EditorTools
         private void OnGUI()
         {
             scroll = EditorGUILayout.BeginScrollView(scroll);
-            EditorGUILayout.LabelField("Procedural World Generator V6 - Urban Design Preview", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Procedural World Generator V7 - Quality Preview", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("Preview iteration only. No scene, mesh or terrain asset changes. Generation is intentionally locked until the road layout is approved.", MessageType.Info);
             using (new EditorGUI.DisabledScope(busy || EditorApplication.isPlayingOrWillChangePlaymode))
             {
@@ -126,6 +126,7 @@ namespace DeliveryDriver.EditorTools
                     settings.urbanGuard = EditorGUILayout.Toggle("Preserve V5 coverage", settings.urbanGuard);
                 }
                 EditorGUILayout.HelpBox("V6 separates neighborhood streets inside the major-road framework. Open-space area and access count are targets, not guarantees. Guard can select V5 if connectivity or coverage regresses.", MessageType.Info);
+                DrawQualityControls();
                 EditorGUILayout.LabelField("Terrain intelligence", EditorStyles.boldLabel);
                 settings.terrainDesign = EditorGUILayout.Toggle("Terrain-adaptive city design", settings.terrainDesign);
                 using (new EditorGUI.DisabledScope(!settings.terrainDesign))
@@ -175,6 +176,7 @@ namespace DeliveryDriver.EditorTools
                 if (EditorGUI.EndChangeCheck()) SceneView.RepaintAll();
 
                 EditorGUILayout.Space();
+                DrawPreviewStorage();
                 if (GUILayout.Button("Analyze Terrain (read only)", GUILayout.Height(28f))) Run(AnalyzeOnly);
                 if (GUILayout.Button("Preview Layout (no scene changes)", GUILayout.Height(32f))) Run(PlanOnly);
                 if (showTerrainAnalysis)
@@ -184,7 +186,8 @@ namespace DeliveryDriver.EditorTools
                         terrainLayer == TerrainLayer.Buildability ? "Buildability screening: green gentle/smooth, amber moderate, red steep/rough, gray protected. Not a foundation certification." :
                         terrainLayer == TerrainLayer.Contours ? "Contours: 10 m interval, sampled independently per terrain tile." :
                         terrainLayer == TerrainLayer.Seams ? "Seams: green <=1 m, orange <=6 m, red >6 m sampled height discontinuity." :
-                        "Earthworks: red cut, blue fill; brighter = beyond ordinary road grading budget. Available after V6 road preview.";
+                        terrainLayer == TerrainLayer.GradingZones ? "Grading zones: green <=3 m, yellow ordinary budget, orange <=10 m, red preferred cap, purple above preferred cap. Sampled road segments only." :
+                        "Earthworks: red cut, blue fill; brighter = beyond ordinary road grading budget. Available after road preview.";
                     EditorGUILayout.HelpBox(legend, MessageType.Info);
                 }
                 if (preview != null && analysisOnly)
@@ -195,6 +198,7 @@ namespace DeliveryDriver.EditorTools
                 if (preview != null && !analysisOnly)
                 {
                     EditorGUILayout.LabelField("Selected layout", preview.version);
+                    DrawQualityReport();
                     EditorGUILayout.LabelField("Park/plaza reservations", preview.openSpaces.Count.ToString());
                     EditorGUILayout.LabelField("Building lot proposals", preview.parcels.Count.ToString());
                     EditorGUILayout.LabelField("Manual anchor proposals", preview.accessResults.Count(a=>a.connected) + "/" + preview.accessResults.Count);
@@ -320,7 +324,10 @@ namespace DeliveryDriver.EditorTools
         {
             Scene scene = SceneManager.GetActiveScene();
             layout = ProceduralWorldPlanner.DetectLayout(scene);
-            preview = ProceduralWorldPlanner.AnalyzeOnly(settings, layout, scene);
+            string key=ProceduralWorldPlanner.PreviewFingerprint(settings,layout,scene);
+            if(analysisCache==null||analysisCacheKey!=key)
+            {analysisCache=ProceduralWorldPlanner.AnalyzeOnly(settings,layout,scene);analysisCacheKey=key;}
+            preview=analysisCache;previewFingerprint=key;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);
             analysisOnly = true;
             showTerrainAnalysis = true;
             terrainLayer = TerrainLayer.Slope;
@@ -341,12 +348,21 @@ namespace DeliveryDriver.EditorTools
             if (!settings.buildAnkara && !settings.buildIstanbul) throw new InvalidOperationException("Select a city.");
             if (EditorUtility.DisplayCancelableProgressBar("Procedural World", "Planning safe roads and bridge approaches", .05f))
                 throw new OperationCanceledException();
-            preview = null;
             var stopwatch=System.Diagnostics.Stopwatch.StartNew();
+            string key=ProceduralWorldPlanner.PreviewFingerprint(settings,layout,scene);
+            if(TryCachedPlan(key,out var cached))
+            {
+                preview=cached;previewFingerprint=key;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);
+                SetStatus("Preview cache hit: "+stopwatch.Elapsed.TotalSeconds.ToString("F2")+" s including input verification.");return;
+            }
+            // Preserve the last successful preview if planning is canceled or fails.
+            var previous=preview;
             try
             {
                 preview = ProceduralWorldPlanner.Build(settings, layout, scene);
-                preview.notes.Insert(0,"Planning elapsed: "+stopwatch.Elapsed.TotalSeconds.ToString("F1")+" s (including selected guard comparisons).");
+                preview.notes.Insert(0,"Planning elapsed: "+stopwatch.Elapsed.TotalSeconds.ToString("F1")+" s (including input verification and selected guard comparisons).");
+                previewFingerprint=key;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);
+                CachePlan(key,preview);
                 SetStatus("Preview ready: " + preview.edges.Count + " retained segments, " + preview.detachedEdges.Count + " detached, " + preview.BridgeCount + " planned bridges. No scene assets changed.", preview.detachedEdges.Count > 0 ? MessageType.Warning : MessageType.Info);
             }
             catch (ProceduralWorldPlanner.BridgePlanningException ex) when (allowBridgeFallback)
@@ -359,11 +375,14 @@ namespace DeliveryDriver.EditorTools
                     settings.bridges = false;
                     preview = ProceduralWorldPlanner.Build(settings, layout, scene);
                     preview.warnings.Insert(0, "BRIDGES NOT PLANNED: " + ex.Message);
+                    previewFingerprint=null;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);
                     SetStatus("City-only preview shown. Adjust bridge settings or try another seed to preview both bridge links. Scene generation is locked during preview iteration.", MessageType.Warning);
                     Debug.LogWarning("[ProceduralWorld] " + ex.Message);
                 }
+                catch {preview=previous;throw;}
                 finally { settings.bridges = requested; }
             }
+            catch {preview=previous;throw;}
         }
 
         private void ValidateRoots(Scene scene)
@@ -681,6 +700,7 @@ namespace DeliveryDriver.EditorTools
                     if (showOpenSpaces)
                         foreach(var space in preview.openSpaces)
                             Handles.DrawSolidRectangleWithOutline(space.corners,
+                                preview.version.StartsWith("V7")&&!space.accessible?new Color(.95f,.55f,.12f,.32f):
                                 space.kind==ProceduralWorldPlanner.AreaKind.Plaza?new Color(.85f,.71f,.32f,.30f):new Color(.12f,.8f,.25f,.28f),
                                 new Color(.30f,.92f,.38f,.7f));
                     if (showParcels)
@@ -755,7 +775,7 @@ namespace DeliveryDriver.EditorTools
 
         private void InvalidateAnchorPreview()
         {
-            preview=null;Repaint();SceneView.RepaintAll();
+            preview=null;previewFingerprint=null;Repaint();SceneView.RepaintAll();
         }
 
         private void DrawAnchorControls()
@@ -867,6 +887,17 @@ namespace DeliveryDriver.EditorTools
 
         private void DrawAnalysisLayer()
         {
+            if(terrainLayer==TerrainLayer.GradingZones)
+            {
+                var colors=new[]{new Color(.24f,.85f,.4f),Color.yellow,new Color(1f,.5f,.1f),Color.red,new Color(.85f,.2f,1f)};
+                for(int i=0;i<colors.Length;i++)
+                {
+                    int band=i;Handles.color=colors[i];
+                    Handles.DrawLines(Batch(50+i,()=>preview.gradingZones.Where(l=>(int)l.value==band)
+                        .SelectMany(l=>new[]{l.a+Vector3.up*2f,l.b+Vector3.up*2f})));
+                }
+                return;
+            }
             if(terrainLayer==TerrainLayer.Contours||terrainLayer==TerrainLayer.Seams||terrainLayer==TerrainLayer.Earthworks)
             {
                 if(terrainLayer==TerrainLayer.Contours)

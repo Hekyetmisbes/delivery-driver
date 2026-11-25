@@ -902,6 +902,14 @@ namespace DeliveryDriver.EditorTools
                     list.Add(e);
                 }
             }
+            public void Remove(Edge e)
+            {
+                Rect r=BoundsOf(e.points,0f);
+                for(int x=I(r.xMin);x<=I(r.xMax);x++)
+                for(int y=I(r.yMin);y<=I(r.yMax);y++)
+                    if(cells.TryGetValue(new Vector2Int(x,y),out List<Edge> list))list.Remove(e);
+                foreach(Node n in new[]{e.a,e.b})if(incident.TryGetValue(n,out List<Edge> list))list.Remove(e);
+            }
             public IEnumerable<Edge> At(Node n) =>
                 incident.TryGetValue(n, out List<Edge> list) ? (IEnumerable<Edge>)list : Enumerable.Empty<Edge>();
             public HashSet<Edge> Query(Rect r)
