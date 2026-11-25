@@ -22,10 +22,29 @@ namespace DeliveryDriver.EditorTools
         // A split is valid only when the concatenated geometry is byte-for-byte
         // (Vector3 equality via SequenceEqual) the old sampled path. No old land
         // connection may disappear. Bridges can move only in their own stage.
+        // Authored spline endpoints use -1 as a sentinel, not as a generated
+        // graph identity. Only actual link-only sentinel nodes may share it.
+        private static string NetworkIdentityIssue(Plan p)
+        {
+            var generated=new HashSet<Node>(p.edges.Concat(p.detachedEdges).SelectMany(e=>new[]{e.a,e.b}));
+            var authored=new HashSet<Node>(p.authoredLinks.SelectMany(e=>new[]{e.a,e.b}));
+            var ids=new HashSet<int>();
+            foreach(var n in p.nodes.Concat(generated).Distinct())
+            {
+                if(n.id<0)
+                {
+                    if(n.id!=-1||generated.Contains(n)||!authored.Contains(n))
+                        return "invalid negative node identity "+n.id;
+                }
+                else if(!ids.Add(n.id))return "duplicate generated node identity "+n.id;
+            }
+            return null;
+        }
+
         internal static bool PreservedNetwork(Plan before,Plan after,bool allowSplit,bool allowBridgeMove)
         {
-            var oldNodes=new HashSet<int>(before.nodes.Select(n=>n.id));
-            if(oldNodes.Count!=before.nodes.Count||after.nodes.Select(n=>n.id).Distinct().Count()!=after.nodes.Count)return false;
+            if(NetworkIdentityIssue(before)!=null||NetworkIdentityIssue(after)!=null)return false;
+            var oldNodes=new HashSet<int>(before.nodes.Where(n=>n.id>=0).Select(n=>n.id));
             var incident=after.edges.SelectMany(e=>new[]{(id:e.a.id,e),(id:e.b.id,e)})
                 .GroupBy(x=>x.id).ToDictionary(g=>g.Key,g=>g.Select(x=>x.e).ToList());
             foreach(var old in before.edges)

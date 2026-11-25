@@ -39,27 +39,36 @@ namespace DeliveryDriver.EditorTools
             return BalancedCost(b,s)<=BalancedCost(a,s)+.005f&&b.meanCut+b.meanFill<=a.meanCut+a.meanFill+.005f&&
                 b.peak<=a.peak+.02f&&b.extraFraction<=a.extraFraction+.0005f;
         }
-        private static bool StageGraphSafe(Plan before,Plan after,Settings s,bool allowSplit=false,bool allowBridgeMove=false)
+        private static string StageGraphIssue(Plan before,Plan after,Settings s,bool allowSplit=false,bool allowBridgeMove=false)
         {
-            if(after.edges.Count<before.edges.Count||after.detachedEdges.Count>before.detachedEdges.Count||
-                after.BridgeCount!=before.BridgeCount||
-                (before.quality.bridgeGraphConnected&&!after.quality.bridgeGraphConnected)||
-                after.quality.ankaraTiles<before.quality.ankaraTiles||after.quality.istanbulTiles<before.quality.istanbulTiles||
-                after.quality.bridgeGap+.01f<before.quality.bridgeGap||
-                after.accessResults.Count(a=>a.connected)<before.accessResults.Count(a=>a.connected))return false;
-            if(new[]{"Ankara","İstanbul"}.Any(city=>after.authoredLinks.Count(e=>e.sector==city)!=before.authoredLinks.Count(e=>e.sector==city)))return false;
+            if(after.edges.Count<before.edges.Count)return "retained edge count decreased";
+            if(after.detachedEdges.Count>before.detachedEdges.Count)return "detached edge count increased";
+            if(after.BridgeCount!=before.BridgeCount)return "bridge count changed";
+            if(before.quality.bridgeGraphConnected&&!after.quality.bridgeGraphConnected)return "bridge graph disconnected";
+            if(after.quality.ankaraTiles<before.quality.ankaraTiles||after.quality.istanbulTiles<before.quality.istanbulTiles)return "city coverage decreased";
+            if(after.quality.bridgeGap+.01f<before.quality.bridgeGap)return "bridge separation decreased";
+            if(after.accessResults.Count(a=>a.connected)<before.accessResults.Count(a=>a.connected))return "connected manual access count decreased";
+            if(after.authoredLinks.Count!=before.authoredLinks.Count||
+                new[]{"Ankara","İstanbul"}.Any(city=>after.authoredLinks.Count(e=>e.sector==city)!=before.authoredLinks.Count(e=>e.sector==city)))return "authored proposal count changed";
             for(int i=0;i<before.authoredLinks.Count;i++)
-                if(!before.authoredLinks[i].points.SequenceEqual(after.authoredLinks[i].points))return false;
-            if(allowSplit||allowBridgeMove)return PreservedNetwork(before,after,allowSplit,allowBridgeMove);
+                if(!before.authoredLinks[i].points.SequenceEqual(after.authoredLinks[i].points))return "authored proposal geometry changed at index "+i;
+            if(allowSplit||allowBridgeMove)
+            {
+                string issue=NetworkIdentityIssue(before);
+                if(issue!=null)return "baseline "+issue;
+                issue=NetworkIdentityIssue(after);
+                if(issue!=null)return "candidate "+issue;
+                return PreservedNetwork(before,after,allowSplit,allowBridgeMove)?null:"original edge/split chain or bridge endpoint connection not preserved";
+            }
             // Existing network edges are never removed or rewired. Compare the stable
             // original prefix; new repair edges can only be appended.
             for(int i=0;i<before.edges.Count;i++)
             {
                 var a=before.edges[i];var b=after.edges[i];
                 if(a.a.id!=b.a.id||a.b.id!=b.b.id||a.sector!=b.sector||
-                    XZ(a.a.position)!=XZ(b.a.position)||XZ(a.b.position)!=XZ(b.b.position))return false;
+                    XZ(a.a.position)!=XZ(b.a.position)||XZ(a.b.position)!=XZ(b.b.position))return "original edge topology changed at index "+i;
             }
-            return true;
+            return null;
         }
         private static Plan BuildStaged(Settings s,Layout layout,Scene scene)
         {
@@ -114,7 +123,8 @@ namespace DeliveryDriver.EditorTools
                     planner.ValidateUrbanPlan();
                     planner.ValidateStageGrades();
                     candidate.quality=Measure(candidate,s);
-                    if(!StageGraphSafe(current,candidate,s,allowSplit,allowBridgeMove))reason="network/access regression";
+                    string graphIssue=StageGraphIssue(current,candidate,s,allowSplit,allowBridgeMove);
+                    if(graphIssue!=null)reason="network/access regression: "+graphIssue;
                     else if(!NoTerrainRegression(current.quality,candidate.quality,s))reason="earthworks regression";
                     else if(s.localOptimization&&name.StartsWith("5",StringComparison.Ordinal)&&name.Length>1&&char.IsLetter(name[1])&&
                         (candidate.quality.meanCut>current.quality.meanCut+.005f||candidate.quality.meanFill>current.quality.meanFill+.005f||

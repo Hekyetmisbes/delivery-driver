@@ -287,7 +287,23 @@ namespace DeliveryDriver.EditorTools
             var after=new ProceduralWorldPlanner.Plan();after.nodes.AddRange(new[]{a,b,mid});
             after.edges.Add(new ProceduralWorldPlanner.Edge{a=a,b=mid,sector="Ankara",points=new List<Vector3>{a.position,mid.position}});
             after.edges.Add(new ProceduralWorldPlanner.Edge{a=mid,b=b,sector="Ankara",points=new List<Vector3>{mid.position,b.position}});
-            Require(ProceduralWorldPlanner.PreservedNetwork(before,after,true,false),"Exact T-junction split rejected.");
+            // Real V7.2 snapshots contain multiple distinct authored-only
+            // endpoints with the sentinel ID -1. They are not generated nodes.
+            var manualA=new ProceduralWorldPlanner.Node{id=-1,position=new Vector3(0,0,10)};
+            var manualB=new ProceduralWorldPlanner.Node{id=-1,position=new Vector3(20,0,10)};
+            foreach(var p in new[]{before,after})
+            {
+                p.nodes.AddRange(new[]{manualA,manualB});
+                p.authoredLinks.Add(new ProceduralWorldPlanner.Edge{a=manualA,b=a,sector="Ankara",kind=ProceduralWorldPlanner.RoadKind.AuthoredLink,points=new List<Vector3>{manualA.position,a.position}});
+                p.authoredLinks.Add(new ProceduralWorldPlanner.Edge{a=manualB,b=b,sector="Ankara",kind=ProceduralWorldPlanner.RoadKind.AuthoredLink,points=new List<Vector3>{manualB.position,b.position}});
+            }
+            Require(ProceduralWorldPlanner.PreservedNetwork(before,before,false,true),"Unchanged graph with authored sentinels rejected.");
+            Require(ProceduralWorldPlanner.PreservedNetwork(before,after,true,false),"Exact T-junction split with authored sentinels rejected.");
+            mid.id=1;
+            Require(!ProceduralWorldPlanner.PreservedNetwork(before,after,true,false),"Duplicate generated node ID accepted.");
+            mid.id=-1;
+            Require(!ProceduralWorldPlanner.PreservedNetwork(before,after,true,false),"Generated node using authored sentinel accepted.");
+            mid.id=2;
             after.edges[1].points[0]+=Vector3.up;
             Require(!ProceduralWorldPlanner.PreservedNetwork(before,after,true,false),"Changed split geometry accepted.");
         }
