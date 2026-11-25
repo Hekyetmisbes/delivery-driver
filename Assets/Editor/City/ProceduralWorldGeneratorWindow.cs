@@ -254,6 +254,7 @@ namespace DeliveryDriver.EditorTools
                 folder = CreateBuildFolder();
                 var stateObject = NewRoot(scene, "Procedural World Build State", null);
                 var state = Undo.AddComponent<ProceduralWorldBuildState>(stateObject);
+                Undo.RegisterCompleteObjectUndo(state, "Record procedural build manifest");
                 state.seed = settings.seed;
                 state.assetFolder = folder;
                 var roots = new Dictionary<string, Transform>();
@@ -296,6 +297,7 @@ namespace DeliveryDriver.EditorTools
                         GameObject obj = NewRoot(scene, "PW_Node_" + node.id.ToString("D4"), junctionRoot);
                         obj.transform.position = node.position;
                         intersection = Undo.AddComponent<RoadIntersection>(obj);
+                        Undo.RecordObject(intersection, "Configure generated intersection");
                         intersection.sectorTag = node.sector;
                         intersection.isStopSignControlled = node.degree >= 3;
                         junctionParents.Add(intersection, roots[node.sector]);
@@ -312,6 +314,7 @@ namespace DeliveryDriver.EditorTools
                     string name = edge.Bridge ? "PW_Bridge_" : "PW_Road_";
                     GameObject obj = NewRoot(scene, name + i.ToString("D4"), roots[edge.sector]);
                     SplineRoad road = Undo.AddComponent<SplineRoad>(obj);
+                    Undo.RecordObject(road, "Configure generated spline");
                     road.sectorTag = edge.sector;
                     road.laneWidth = Mathf.Min(settings.width * .25f, 2.1f);
                     // The same sampled polyline is the source of both the spline and its visual surface.
@@ -329,6 +332,7 @@ namespace DeliveryDriver.EditorTools
                 SimpleRoadPlacementTool.BakePlannedRoads(paths, junctionParents, preview.layout.sea,
                     settings.width, settings.sidewalk, settings.seaY);
                 ValidateGeometry(paths);
+                ValidateJunctionGeometry(junctionParents, preview.layout);
                 PersistMeshes(state.generatedRoots, folder);
                 Undo.RecordObject(manager, "Refresh generated road network");
                 manager.RefreshNetwork();
@@ -416,6 +420,25 @@ namespace DeliveryDriver.EditorTools
             }
         }
 
+        private static void ValidateJunctionGeometry(Dictionary<RoadIntersection, Transform> junctionParents, ProceduralWorldPlanner.Layout layout)
+        {
+            foreach (var pair in junctionParents)
+            {
+                if (pair.Key.connectedRoads.Count < 3) continue;
+                Transform visual = pair.Value.Find("Intersection_" + pair.Key.name);
+                Transform asphalt = visual != null ? visual.Find("Asphalt") : null;
+                MeshCollider collider = asphalt != null ? asphalt.GetComponent<MeshCollider>() : null;
+                if (collider == null || collider.sharedMesh == null || collider.sharedMesh.vertexCount < 3)
+                    throw new InvalidOperationException("Missing generated junction mesh: " + pair.Key.name);
+                foreach (Vector3 local in collider.sharedMesh.vertices)
+                {
+                    Vector3 point = asphalt.TransformPoint(local);
+                    if (layout.TryHeight(ProceduralWorldPlanner.XZ(point), out float ground) && ground - point.y > .10f)
+                        throw new InvalidOperationException("Junction terrain clearance failed near " + point + ". Try another seed or a larger grading budget.");
+                }
+            }
+        }
+
         private static string CreateBuildFolder()
         {
             string root = AssetParent + "/" + AssetRootName;
@@ -455,7 +478,7 @@ namespace DeliveryDriver.EditorTools
             var obj = new GameObject(name);
             SceneManager.MoveGameObjectToScene(obj, scene);
             Undo.RegisterCreatedObjectUndo(obj, "Create " + name);
-            if (parent != null) obj.transform.SetParent(parent, true);
+            if (parent != null) Undo.SetTransformParent(obj.transform, parent, "Parent " + name);
             return obj;
         }
 

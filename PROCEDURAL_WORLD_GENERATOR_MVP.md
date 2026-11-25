@@ -37,6 +37,7 @@ Branch: feature/procedural-world-generator-mvp
 ## Test checklist
 
 - [ ] No compile errors after Unity imports the new files.
+- [ ] Run Tools > Delivery Driver > City > Run Procedural Planner Smoke Test and confirm PASS in Console (temporary synthetic flat 28-tile scene, no scene assets written).
 - [ ] Detect confirms 28 tiles and the correct city sides.
 - [ ] Preview does not change the scene or terrain assets.
 - [ ] Ankara-only preview/generation preserves Kizilay.

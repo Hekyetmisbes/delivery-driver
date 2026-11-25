@@ -39,8 +39,12 @@ namespace DeliveryDriver.EditorTools
                 }
 
                 int layer = LayerMask.NameToLayer("Road");
+                int baked = 0;
                 foreach (var pair in paths)
                 {
+                    if (baked % 10 == 0 && EditorUtility.DisplayCancelableProgressBar("Procedural World", "Baking road meshes " + baked + "/" + paths.Count, .76f + .13f * baked / paths.Count))
+                        throw new System.OperationCanceledException();
+                    baked++;
                     SplineRoad road = pair.Key;
                     bool bridge = road.sectorTag == "Highways";
                     tool.targetCategory = bridge ? RoadTargetCategory.HighwaysAndBridges : RoadTargetCategory.Ankara;
@@ -72,7 +76,7 @@ namespace DeliveryDriver.EditorTools
                     }
                     GameObject visual = new GameObject("Intersection_" + junction.name);
                     Undo.RegisterCreatedObjectUndo(visual, "Bake planned intersection");
-                    visual.transform.SetParent(pair.Value, true); // Mesh vertices are world-space.
+                    Undo.SetTransformParent(visual.transform, pair.Value, "Parent planned intersection"); // Mesh vertices are world-space.
                     tool.BuildProceduralIntersection(visual, junction.transform.position, branches);
                     SetAsphaltLayer(visual.transform, layer);
                 }
