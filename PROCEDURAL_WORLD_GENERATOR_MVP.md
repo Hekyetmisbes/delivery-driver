@@ -1,4 +1,4 @@
-# Procedural World Generator V3 — hillside preview iteration
+# Procedural World Generator V4 — Ankara backbone preview
 
 **Branch:** feature/procedural-world-generator-mvp
 
@@ -69,3 +69,11 @@ The previous version discarded all street components except the one containing t
 Purple lines represent individually feasible but detached street components, not a connected road network. These are kept separately from the retained graph. Preview displays connected/detached counts, covered terrain tiles, empty districts, elevation/geometry rejection counts, and protected/blocked/missing node counts. Bridge gate connectivity warnings remain visible instead of silently removing the inland layout. Generation remains locked.
 
 Start with Ankara only, Terrain-aware network repair enabled, grade 10%, cut/fill 6 m, then compare both-city preview. If necessary, explicitly try grade 12% and cut/fill 10 m as a separate preview experiment; do not treat higher values as a verified vehicle-safe setting.
+
+## V4 Ankara-first backbone
+
+Ankara now builds a connected primary route toward each terrain tile center (candidate target group) and the other bridge gate before expanding the regular street scaffold. Failed backbone links are retried with alternate candidates and, when enabled, bounded terrain routing. The Istanbul planner remains the V3 hierarchy. Purple detached segments remain visible for diagnosis.
+
+New controls: Ankara backbone first (on), Ankara virtual district grading (on), District grading limit (30 m), X-ray road preview (on), Extra grading markers (red). The virtual model uses a coarse smoothed, approximately grade-limited height raster to choose shared junction heights. Road profiles are checked against the original sampled center and both shoulders using the explicit total grading allowance (at least the normal road budget); no automatic increase to the chosen grade limit. Protected areas and authored roads do not receive the expanded allowance. The original terrain assets are not edited. Red marks indicate sampled road positions requiring more than ordinary road cut/fill, NOT terrain modifications already performed. This is not a complete terrace or earthworks simulation. Actual grading, drainage, retaining structures, full collision and vehicle tests are deferred until layout approval.
+
+The panel reports backbone targets reached, reserved arterials, direct growth count, connected terrain coverage and sampled tile seam discontinuity (maximum and tile pair). Test Ankara only with Seed 4281, local spacing 95 m, max grade 10%, normal cut/fill 6 m, district grading limit 30 m. Compare with virtual district grading off; if necessary test 45 m as an explicit preview experiment. Generation remains locked. Synthetic smoke test includes three stepped terrain height bands and verifies retained network depth-band coverage and unchanged height data. It has not been executed in Unity remotely.
