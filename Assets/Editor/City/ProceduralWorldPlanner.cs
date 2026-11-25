@@ -585,7 +585,7 @@ namespace DeliveryDriver.EditorTools
 
         private sealed class StreetDiagnostics
         {
-            public int blockedNodes, protectedNodes, missingNodes, elevationRejected, geometryRejected, routed, directRepair;
+            public int blockedNodes, protectedNodes, missingNodes, elevationRejected, geometryRejected, routed, directRepair, hillsideInfill;
         }
         private StreetDiagnostics diagnostics;
 
@@ -717,7 +717,33 @@ namespace DeliveryDriver.EditorTools
                 }
             }
             if (settings.terrainRepair)
+            {
+                // The regular street scaffold may leave every uphill edge infeasible.
+                // In steep regions, attempt contour-oriented links even for isolated nodes.
+                // Unlike component repair, this pass can create streets in completely empty bands.
+                var available = nodes.Where(n => !n.gate).ToList();
+                float maxReach = local * 3.5f;
+                int infillAttempts = 0;
+                foreach (Node a in available.Where(n => n.degree == 0).OrderBy(n => n.id).ToList())
+                {
+                    if (a.degree > 0) continue;
+                    var alternatives = available.Where(b => b != a && b.degree < DegreeLimit(b))
+                        .Select(b => new { node=b, distance=Vector2.Distance(XZ(a.position),XZ(b.position)),
+                            rise=Mathf.Abs(a.position.y-b.position.y) })
+                        .Where(c => c.distance >= RoadClearance*2.5f && c.distance <= maxReach &&
+                            c.rise <= c.distance*settings.grade+.001f)
+                        .OrderBy(c => c.distance + c.rise*5f + (c.node.degree==0 ? local*.25f : 0f))
+                        .ThenBy(c=>c.node.id).Take(8);
+                    foreach (var c in alternatives)
+                    {
+                        if (++infillAttempts > 2400) break;
+                        if (TryBuild(new StreetCandidate {a=a,b=c.node,kind=RoadKind.Local,length=c.distance}))
+                        { diagnostics.hillsideInfill++; break; }
+                    }
+                    if (infillAttempts > 2400) break;
+                }
                 RepairComponents(sector, bounds, local, nodes, Find, TryBuild, diagnostics);
+            }
             var active=nodes.Where(n=>n.degree>0).ToList();
             Node keep=gates.Count>0?Find(gates[0]):active.GroupBy(Find).OrderByDescending(g=>g.Count()).ThenBy(g=>g.Key.id).Select(g=>g.Key).FirstOrDefault();
             if (keep == null) throw new InvalidOperationException(sector + ": no connected street component.");
@@ -733,7 +759,7 @@ namespace DeliveryDriver.EditorTools
             if(dropped>0)plan.warnings.Add(sector+": "+dropped+" detached street segments shown in purple; NOT connected to the retained network.");
             int retained = plan.edges.Count(e=>e.sector==sector);
             plan.notes.Add(sector+": "+retained+" connected / "+dropped+" detached street segments; local scaffold "+local.ToString("F0")+" m, "+nodes.Count+"/"+budget+" candidate nodes.");
-            plan.notes.Add(sector + ": repair links " + diagnostics.directRepair + " direct, " + diagnostics.routed +
+            plan.notes.Add(sector + ": hillside infill " + diagnostics.hillsideInfill + "; repair links " + diagnostics.directRepair + " direct, " + diagnostics.routed +
                 " terrain-routed; rejected path variants: elevation " + diagnostics.elevationRejected +
                 ", geometry " + diagnostics.geometryRejected + "; skipped nodes: protected " +
                 diagnostics.protectedNodes + ", obstacles/bounds " + diagnostics.blockedNodes + ", missing terrain " + diagnostics.missingNodes + ".");
@@ -775,6 +801,7 @@ namespace DeliveryDriver.EditorTools
                 if (build(c,false)) stats.directRepair++;
             }
             int routedAttempts = 0;
+            var pairAttempts = new Dictionary<(int,int),int>();
             // Favor connecting the largest remaining fragments and bridge gates.
             var sizes = nodes.Where(n=>n.degree>0).GroupBy(find).ToDictionary(g=>g.Key,g=>g.Count());
             foreach (var c in ordered.OrderByDescending(c =>
@@ -784,6 +811,11 @@ namespace DeliveryDriver.EditorTools
                 .ThenBy(c=>c.length))
             {
                 if (find(c.a)==find(c.b) || c.a.degree>=DegreeLimit(c.a) || c.b.degree>=DegreeLimit(c.b)) continue;
+                Node groupA=find(c.a),groupB=find(c.b);
+                var pair=(Mathf.Min(groupA.id,groupB.id),Mathf.Max(groupA.id,groupB.id));
+                pairAttempts.TryGetValue(pair,out int tried);
+                if(tried>=4)continue;
+                pairAttempts[pair]=tried+1;
                 if (++routedAttempts > 48) break;
                 if (EditorUtility.DisplayCancelableProgressBar("Procedural World",
                     sector + ": terrain connector " + routedAttempts + "/48", .45f))
@@ -837,7 +869,15 @@ namespace DeliveryDriver.EditorTools
                 Mathf.Min(bounds.yMax-RoadClearance,Mathf.Max(start.y,end.y)+padding));
             float gap=RoadClearance*2f;
             // Local point queries are substantially cheaper than scanning all edges in the search rectangle.
+            var clearCache = new Dictionary<Vector2,bool>();
             bool PointClear(Vector2 pos)
+            {
+                if (clearCache.TryGetValue(pos,out bool cached)) return cached;
+                bool result=PointClearUncached(pos);
+                clearCache[pos]=result;
+                return result;
+            }
+            bool PointClearUncached(Vector2 pos)
             {
                 if(!Contains(search,pos)||IsProtected(pos,RoadClearance)||obstacles.Near(pos,gap))return false;
                 foreach(Edge edge in index.Query(new Rect(pos.x-gap,pos.y-gap,gap*2f,gap*2f)))
@@ -887,6 +927,8 @@ namespace DeliveryDriver.EditorTools
                 Vector2Int cell=item.cell;
                 if(!closed.Add(cell))continue;
                 expanded++;
+                if (expanded % 400 == 0 && EditorUtility.DisplayCancelableProgressBar("Procedural World", "Searching terrain connector: " + expanded + " cells", .45f))
+                    throw new OperationCanceledException();
                 Vector2 pos=Position(cell);
                 if(Vector2.Distance(pos,end)<=step*1.5f&&SegmentOk(pos,end,out _))
                 {goal=cell;found=true;break;}
@@ -921,22 +963,27 @@ namespace DeliveryDriver.EditorTools
                     simplified.Add(route[next]);
                 at=next;
             }
-            var path=new List<Vector3>();
-            for(int i=1;i<simplified.Count;i++)
+            foreach (var polyline in new[] { simplified, route })
             {
-                Vector2 from=simplified[i-1],to=simplified[i];
-                int n=Mathf.Max(1,Mathf.CeilToInt(Vector2.Distance(from,to)/3f));
-                for(int j=i==1?0:1;j<=n;j++)
+                var path=new List<Vector3>();
+                for(int i=1;i<polyline.Count;i++)
                 {
-                    Vector2 pos=Vector2.Lerp(from,to,j/(float)n);
-                    if(!plan.layout.TryHeight(pos,out float ground))return false;
-                    path.Add(XYZ(pos,ground+.12f));
+                    Vector2 from=polyline[i-1],to=polyline[i];
+                    if(Vector2.Distance(from,to)<.01f)continue;
+                    int n=Mathf.Max(1,Mathf.CeilToInt(Vector2.Distance(from,to)/3f));
+                    for(int j=path.Count==0?0:1;j<=n;j++)
+                    {
+                        Vector2 pos=Vector2.Lerp(from,to,j/(float)n);
+                        if(!plan.layout.TryHeight(pos,out float ground))return false;
+                        path.Add(XYZ(pos,ground+.12f));
+                    }
                 }
+                if(path.Count<2)continue;
+                path[0]=a.position;path[path.Count-1]=b.position;
+                if(!SolveElevation(path)||!StreetAngles(a,b,path,index)||StreetCrosses(a,b,path,index))continue;
+                points=path;return true;
             }
-            if(path.Count<2)return false;
-            path[0]=a.position;path[path.Count-1]=b.position;
-            if(!SolveElevation(path)||!StreetAngles(a,b,path,index)||StreetCrosses(a,b,path,index))return false;
-            points=path;return true;
+            return false;
         }
 
         private bool TryStreet(Node a,Node b,Rect bounds,RoadKind kind,StreetIndex index,bool authored,out List<Vector3> points)
