@@ -394,9 +394,18 @@ Use the subset relevant to your change.
 
 ---
 
+## Future navigation research (deferred)
+
+- The intended candidate is **RTAA* (Real-Time Adaptive A*)**, not classic RTA*. See `RTA_STAR_EVALUATION.md` for the feasibility review and future Adaptive GPS & Navigation Overhaul plan.
+- Do not implement or switch algorithms during current code simplification. Keep the existing incremental A* as the production planner; no GPS timing or minimap behavior changes under this work package.
+- Before future implementation, benchmark high-speed route freshness, local road matching, route cursor continuity and display correctness independently of search latency. Obtain explicit approval before enabling a new algorithm.
+
+---
+
 ## Git Workflow Expectations
 
-- Keep commits logically grouped
+- Continue 2.0 work on `refactor/delivery-driver-2.0-core-performance`; keep commits logically grouped
+- Defer new pull requests and PR updates until the user requests final review; do not merge into `main`
 - Prefer user-visible or system-scope commit messages
 - Treat `main` as stable
 - Use care with scene and prefab churn

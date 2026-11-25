@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
+using Mono.Data.Sqlite;
 using DeliveryDriver.Company;
 using UnityEngine;
 
@@ -17,6 +17,8 @@ namespace DeliveryDriver.Quest
         private static bool databaseInitializationCompleted;
         private static bool databaseInitializationSucceeded;
         private readonly object gate = new object();
+        private SqliteConnection questWriteConnection;
+        private SqliteTransaction questWriteTransaction;
 
         [SerializeField] private string databaseFileName = "quest.db";
         private Type connType;
@@ -111,18 +113,25 @@ namespace DeliveryDriver.Quest
             return CvI(result, 0) > 0;
         }
 
-        public int GetPlayerBalance(string playerId, int fallback = 0)
+        public bool TryGetPlayerBalance(string playerId, out int balance)
         {
+            balance = 0;
             if (!IsReady || string.IsNullOrWhiteSpace(playerId))
-            {
-                return fallback;
-            }
+                return false;
 
             object result = ExecuteScalar(
                 "SELECT money_balance FROM players WHERE player_id=@id LIMIT 1;",
                 new Dictionary<string, object> { ["@id"] = playerId });
-            return CvI(result, fallback);
+            // Zero is a valid balance; a missing row or failed query is not.
+            if (result == null || result == DBNull.Value)
+                return false;
+
+            balance = CvI(result, -1);
+            return balance >= 0;
         }
+
+        public int GetPlayerBalance(string playerId, int fallback = 0) =>
+            TryGetPlayerBalance(playerId, out int balance) ? balance : fallback;
 
         public int GetDefaultPlayerBalance(int fallback = 0)
         {
@@ -136,15 +145,12 @@ namespace DeliveryDriver.Quest
                 return false;
             }
 
-            if (!EnsurePlayer(playerId))
-            {
-                return false;
-            }
-
-            const string sql = @"UPDATE players
-            SET money_balance=@balance,
-                last_login_at=datetime('now')
-            WHERE player_id=@id;";
+            // One atomic SQL statement, including initial creation of a missing player row.
+            const string sql = @"INSERT INTO players
+            (player_id,display_name,created_at,last_login_at,level,xp,xp_to_next_level,money_balance,reputation_score)
+            VALUES (@id,'Player',datetime('now'),datetime('now'),1,0,100,@balance,0)
+            ON CONFLICT(player_id) DO UPDATE SET money_balance=excluded.money_balance,
+                last_login_at=excluded.last_login_at;";
             return ExecuteNonQuery(sql, new Dictionary<string, object>
             {
                 ["@id"] = playerId,
@@ -199,6 +205,8 @@ namespace DeliveryDriver.Quest
                 Debug.LogError("[QuestDatabaseService] Failed to reset default player balance for startup profile.");
                 return false;
             }
+
+            PlayerProgressionManager.ResetPersistedBalanceAfterProfileReset();
 
             if (!EnsureDefaultCompanyProfile(DefaultPlayerId, resolvedCompanyName))
             {
@@ -384,7 +392,41 @@ namespace DeliveryDriver.Quest
 
         public bool SaveQuestInstance(string playerId, QuestData quest)
         {
-            if (quest == null || string.IsNullOrWhiteSpace(quest.QuestID) || !EnsurePlayer(playerId)) return false;
+            if (!IsReady || quest == null || string.IsNullOrWhiteSpace(quest.QuestID))
+                return false;
+
+            lock (gate)
+            {
+                try
+                {
+                    using (var connection = Open())
+                    using (var transaction = connection.BeginTransaction())
+                    {
+                        questWriteConnection = connection;
+                        questWriteTransaction = transaction;
+                        if (!SaveQuestInstanceCore(playerId, quest))
+                            return false; // Disposing an uncommitted transaction rolls it back.
+
+                        transaction.Commit();
+                        return true;
+                    }
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[QuestDatabaseService] Quest snapshot failed: {e.Message}");
+                    return false;
+                }
+                finally
+                {
+                    questWriteTransaction = null;
+                    questWriteConnection = null;
+                }
+            }
+        }
+
+        private bool SaveQuestInstanceCore(string playerId, QuestData quest)
+        {
+            if (!EnsurePlayer(playerId)) return false;
             int cargoId = EnsureCargo(quest.Cargo);
             string templateId = EnsureTemplate(quest, cargoId);
             int? pickupLoc = EnsureLocation(quest.PickupLocation, "pickup");
@@ -415,12 +457,16 @@ namespace DeliveryDriver.Quest
             )
             ON CONFLICT(quest_instance_id) DO UPDATE SET
               quest_status=excluded.quest_status,
-              completed_at=excluded.completed_at,
-              failed_at=excluded.failed_at,
+              completed_at=CASE WHEN excluded.quest_status='Completed'
+                  THEN COALESCE(quest_instances.completed_at,excluded.completed_at) ELSE NULL END,
+              failed_at=CASE WHEN excluded.quest_status='Failed'
+                  THEN COALESCE(quest_instances.failed_at,excluded.failed_at) ELSE NULL END,
               time_limit_sec=excluded.time_limit_sec,
               time_remaining_sec=excluded.time_remaining_sec,
               current_delivery_index=excluded.current_delivery_index,
               has_picked_up_cargo=excluded.has_picked_up_cargo,
+              pickup_location_id=excluded.pickup_location_id,
+              pickup_neighborhood_id=excluded.pickup_neighborhood_id,
               selected_cargo_type_id=excluded.selected_cargo_type_id,
               cargo_health=excluded.cargo_health,
               collision_count=excluded.collision_count,
@@ -463,7 +509,7 @@ namespace DeliveryDriver.Quest
                 ["@reason"] = Db(failureReason)
             });
             if (!ok) return false;
-            return SaveStops(quest.QuestID, quest.DeliveryLocations);
+            return SaveStops(quest);
         }
 
         public bool InsertQuestEvent(string questId, string playerId, string type, string valueText = null, Vector3? pos = null, string metadataJson = null)
@@ -487,7 +533,12 @@ namespace DeliveryDriver.Quest
         {
             const string sql = @"INSERT INTO wallet_transactions
             (player_id,quest_instance_id,tx_type,amount,balance_after,created_at,description)
-            VALUES (@pid,@qid,@type,@amount,@bal,datetime('now'),@desc);";
+            SELECT @pid,@qid,@type,@amount,@bal,datetime('now'),@desc
+            WHERE @qid IS NULL OR @type NOT IN ('QUEST_REWARD','PENALTY')
+               OR NOT EXISTS (
+                   SELECT 1 FROM wallet_transactions
+                   WHERE player_id=@pid AND quest_instance_id=@qid AND tx_type=@type
+               );";
             return ExecuteNonQuery(sql, new Dictionary<string, object>
             {
                 ["@pid"] = playerId, ["@qid"] = Db(questId), ["@type"] = txType,
@@ -539,75 +590,105 @@ namespace DeliveryDriver.Quest
 
         public bool ExecuteNonQuery(string sql, Dictionary<string, object> parameters = null)
         {
-            if (!IsReady || string.IsNullOrWhiteSpace(sql)) return false;
-            lock (gate)
+            return ExecuteCommand(sql, parameters, command =>
             {
-                object conn = null; object cmd = null;
-                try
-                {
-                    conn = Open(); cmd = Build(conn, sql, parameters); Invoke(cmd, "ExecuteNonQuery"); return true;
-                }
-                catch (Exception e) { Debug.LogError($"[QuestDatabaseService] NonQuery failed: {e.Message}"); return false; }
-                finally { Dispose(cmd); Close(conn); }
-            }
+                command.ExecuteNonQuery();
+                return true;
+            }, false);
         }
 
         public object ExecuteScalar(string sql, Dictionary<string, object> parameters = null)
         {
-            if (!IsReady || string.IsNullOrWhiteSpace(sql)) return null;
-            lock (gate)
-            {
-                object conn = null; object cmd = null;
-                try { conn = Open(); cmd = Build(conn, sql, parameters); return Invoke(cmd, "ExecuteScalar"); }
-                catch (Exception e) { Debug.LogError($"[QuestDatabaseService] Scalar failed: {e.Message}"); return null; }
-                finally { Dispose(cmd); Close(conn); }
-            }
+            return ExecuteCommand<object>(sql, parameters, command => command.ExecuteScalar(), null);
         }
 
         public List<Dictionary<string, object>> ExecuteQuery(string sql, Dictionary<string, object> parameters = null)
         {
-            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
-            if (!IsReady || string.IsNullOrWhiteSpace(sql)) return rows;
-            lock (gate)
+            return ExecuteCommand(sql, parameters, command =>
             {
-                object conn = null; object cmd = null; object reader = null;
-                try
+                var rows = new List<Dictionary<string, object>>();
+                using (var reader = command.ExecuteReader())
                 {
-                    conn = Open(); cmd = Build(conn, sql, parameters); reader = Invoke(cmd, "ExecuteReader");
-                    int n = CvI(GetProp(reader, "FieldCount"), 0);
-                    while (Convert.ToBoolean(Invoke(reader, "Read")))
+                    while (reader.Read())
                     {
-                        Dictionary<string, object> row = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-                        for (int i = 0; i < n; i++)
-                        {
-                            string key = Convert.ToString(Invoke(reader, "GetName", i));
-                            object value = Invoke(reader, "GetValue", i);
-                            row[key] = value == DBNull.Value ? null : value;
-                        }
+                        var row = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                        for (int i = 0; i < reader.FieldCount; i++)
+                            row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+
                         rows.Add(row);
                     }
                 }
-                catch (Exception e) { Debug.LogError($"[QuestDatabaseService] Query failed: {e.Message}"); }
-                finally { Dispose(reader); Dispose(cmd); Close(conn); }
-            }
-            return rows;
+                return rows;
+            }, new List<Dictionary<string, object>>());
         }
 
-        private bool SaveStops(string questId, List<QuestLocation> stops)
+        private T ExecuteCommand<T>(string sql, Dictionary<string, object> parameters,
+            Func<SqliteCommand, T> execute, T fallback)
         {
-            if (!ExecuteNonQuery("DELETE FROM quest_instance_stops WHERE quest_instance_id=@qid;", new Dictionary<string, object> { ["@qid"] = questId })) return false;
-            if (stops == null) return true;
+            if (!IsReady || string.IsNullOrWhiteSpace(sql))
+                return fallback;
+
+            lock (gate)
+            {
+                // All quest snapshot commands share one connection and transaction.
+                // Exceptions must propagate so a partially written snapshot is rolled back.
+                if (questWriteConnection != null)
+                {
+                    using (var command = Build(questWriteConnection, sql, parameters, questWriteTransaction))
+                        return execute(command);
+                }
+
+                try
+                {
+                    using (var connection = Open())
+                    using (var command = Build(connection, sql, parameters, null))
+                        return execute(command);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[QuestDatabaseService] Command failed: {e.Message}");
+                    return fallback;
+                }
+            }
+        }
+
+        private bool SaveStops(QuestData quest)
+        {
+            var stops = quest.DeliveryLocations;
+            int count = stops?.Count ?? 0;
             const string sql = @"INSERT INTO quest_instance_stops
             (quest_instance_id,stop_order,location_id,neighborhood_id,status,eta_sec,reached_at,completed_at)
-            VALUES (@qid,@ord,@loc,@nid,'Pending',NULL,NULL,NULL);";
-            for (int i = 0; i < stops.Count; i++)
+            VALUES (@qid,@ord,@loc,@nid,@status,NULL,NULL,
+                    CASE WHEN @status='Completed' THEN datetime('now') ELSE NULL END)
+            ON CONFLICT(quest_instance_id,stop_order) DO UPDATE SET
+                location_id=excluded.location_id,
+                neighborhood_id=excluded.neighborhood_id,
+                status=excluded.status,
+                completed_at=CASE WHEN excluded.status='Completed'
+                    THEN COALESCE(quest_instance_stops.completed_at,excluded.completed_at)
+                    ELSE NULL END;";
+
+            for (int i = 0; i < count; i++)
             {
-                int? loc = EnsureLocation(stops[i], "delivery");
-                if (!loc.HasValue) continue;
-                int? nid = GetNeighborhoodForLocation(loc);
-                if (!ExecuteNonQuery(sql, new Dictionary<string, object> { ["@qid"] = questId, ["@ord"] = i + 1, ["@loc"] = loc.Value, ["@nid"] = Db(nid) })) return false;
+                int? location = EnsureLocation(stops[i], "delivery");
+                if (!location.HasValue || location.Value <= 0)
+                    return false;
+
+                bool completed = quest.Status == QuestStatus.Completed ||
+                                 (quest.HasPickedUpCargo && i < quest.CurrentDeliveryIndex);
+                if (!ExecuteNonQuery(sql, new Dictionary<string, object>
+                {
+                    ["@qid"] = quest.QuestID, ["@ord"] = i + 1, ["@loc"] = location.Value,
+                    ["@nid"] = Db(GetNeighborhoodForLocation(location)),
+                    ["@status"] = completed ? "Completed" : "Pending"
+                }))
+                    return false;
             }
-            return true;
+
+            // Remove only obsolete trailing stops, rather than recreating the entire route.
+            return ExecuteNonQuery(
+                "DELETE FROM quest_instance_stops WHERE quest_instance_id=@qid AND stop_order>@count;",
+                new Dictionary<string, object> { ["@qid"] = quest.QuestID, ["@count"] = count });
         }
 
         private int EnsureCargo(CargoData c)
@@ -705,110 +786,43 @@ namespace DeliveryDriver.Quest
             return list;
         }
 
-        private object Open() { object c = Activator.CreateInstance(connType, $"Data Source={dbPath}"); Invoke(c, "Open"); return c; }
-        private object Build(object conn, string sql, Dictionary<string, object> p)
+        private SqliteConnection Open()
         {
-            object cmd = Invoke(conn, "CreateCommand"); SetProp(cmd, "CommandText", sql);
-            if (p == null) return cmd;
-            object col = GetProp(cmd, "Parameters");
-            foreach (KeyValuePair<string, object> kv in p)
+            var connection = new SqliteConnection($"Data Source={dbPath}");
+            try
             {
-                object prm = Invoke(cmd, "CreateParameter");
-                SetProp(prm, "ParameterName", kv.Key);
-                SetProp(prm, "Value", kv.Value ?? DBNull.Value);
-
-                if (col is System.Collections.IList list)
-                {
-                    list.Add(prm);
-                }
-                else
-                {
-                    Invoke(col, "Add", prm);
-                }
+                connection.Open();
+                return connection;
             }
-            return cmd;
-        }
-        private static void Close(object c) { if (c != null) try { Invoke(c, "Close"); } catch { } }
-        private static void Dispose(object o) { if (o != null) try { Invoke(o, "Dispose"); } catch { } }
-        private static object Invoke(object o, string m, params object[] a)
-        {
-            Type t = o.GetType();
-            object[] args = a ?? Array.Empty<object>();
-            MethodInfo best = null;
-            int bestScore = -1;
-
-            foreach (MethodInfo candidate in t.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+            catch
             {
-                if (!string.Equals(candidate.Name, m, StringComparison.Ordinal)) continue;
-                ParameterInfo[] ps = candidate.GetParameters();
-                if (ps.Length != args.Length) continue;
-
-                int score = 0;
-                bool compatible = true;
-                for (int i = 0; i < ps.Length; i++)
-                {
-                    Type pt = ps[i].ParameterType;
-                    if (pt.IsByRef) pt = pt.GetElementType();
-
-                    object arg = args[i];
-                    if (arg == null)
-                    {
-                        if (pt.IsValueType && Nullable.GetUnderlyingType(pt) == null)
-                        {
-                            compatible = false;
-                            break;
-                        }
-                        score += 1;
-                        continue;
-                    }
-
-                    Type at = arg.GetType();
-                    if (pt == at) score += 4;
-                    else if (pt.IsAssignableFrom(at)) score += 3;
-                    else if (pt == typeof(object)) score += 2;
-                    else
-                    {
-                        compatible = false;
-                        break;
-                    }
-                }
-
-                if (!compatible) continue;
-                if (score > bestScore)
-                {
-                    best = candidate;
-                    bestScore = score;
-                }
+                connection.Dispose();
+                throw;
             }
-
-            if (best == null)
-            {
-                throw new MissingMethodException(t.FullName, m);
-            }
-
-            return best.Invoke(o, args);
-        }
-        private static object GetProp(object o, string p)
-        {
-            PropertyInfo prop = FindProperty(o.GetType(), p);
-            if (prop == null)
-            {
-                throw new MissingMemberException(o.GetType().FullName, p);
-            }
-
-            return prop.GetValue(o);
         }
 
-        private static void SetProp(object o, string p, object v)
+        private static SqliteCommand Build(SqliteConnection connection, string sql,
+            Dictionary<string, object> parameters, SqliteTransaction transaction)
         {
-            PropertyInfo prop = FindProperty(o.GetType(), p);
-            if (prop == null || !prop.CanWrite)
+            var command = connection.CreateCommand();
+            try
             {
-                throw new MissingMemberException(o.GetType().FullName, p);
+                command.CommandText = sql;
+                command.Transaction = transaction;
+                if (parameters != null)
+                {
+                    foreach (var parameter in parameters)
+                        command.Parameters.AddWithValue(parameter.Key, parameter.Value ?? DBNull.Value);
+                }
+                return command;
             }
-
-            prop.SetValue(o, v);
+            catch
+            {
+                command.Dispose();
+                throw;
+            }
         }
+
         private static string GetCompanyIdForPlayer(string playerId)
         {
             return string.Equals(playerId, DefaultPlayerId, StringComparison.Ordinal)
@@ -826,21 +840,16 @@ namespace DeliveryDriver.Quest
 
         private bool ValidateProvider()
         {
-            object conn = null;
             try
             {
-                conn = Activator.CreateInstance(connType, "Data Source=:memory:");
-                Invoke(conn, "Open");
+                using (var connection = new SqliteConnection("Data Source=:memory:"))
+                    connection.Open();
                 return true;
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[QuestDatabaseService] Provider validation failed: {FormatExceptionChain(ex)} | {SqliteProviderResolver.GetNativeDependencyDiagnostics()}");
                 return false;
-            }
-            finally
-            {
-                Close(conn);
             }
         }
 
@@ -860,23 +869,5 @@ namespace DeliveryDriver.Quest
             return sb.ToString();
         }
 
-        private static PropertyInfo FindProperty(Type type, string name)
-        {
-            Type t = type;
-            while (t != null)
-            {
-                PropertyInfo prop = t.GetProperty(
-                    name,
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-                if (prop != null)
-                {
-                    return prop;
-                }
-
-                t = t.BaseType;
-            }
-
-            return null;
-        }
     }
 }

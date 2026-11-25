@@ -94,7 +94,7 @@ namespace TrafficSystem
 
         // Runtime data
         private List<GameObject> activeNpcs = new List<GameObject>();
-        private List<GameObject> pooledNpcs = new List<GameObject>();
+        private readonly Queue<GameObject> pooledNpcs = new Queue<GameObject>();
         private HashSet<GameObject> pooledNpcSet = new HashSet<GameObject>();
         private Transform npcContainer;
         private Coroutine spawnCoroutine;
@@ -452,15 +452,14 @@ namespace TrafficSystem
             // Try to get from pool
             if (enablePooling && pooledNpcs.Count > 0)
             {
-                npc = pooledNpcs[0];
-                pooledNpcs.RemoveAt(0);
+                npc = pooledNpcs.Dequeue();
                 pooledNpcSet.Remove(npc);
-                if (npc.activeSelf)
+                if (npc != null && npc.activeSelf)
                 {
                     npc.SetActive(false);
                 }
             }
-            else
+            if (npc == null)
             {
                 // Create new instance
                 GameObject prefab = npcVehiclePrefabs[Random.Range(0, npcVehiclePrefabs.Length)];
@@ -482,7 +481,7 @@ namespace TrafficSystem
                 npc.SetActive(false);
                 if (!pooledNpcSet.Contains(npc))
                 {
-                    pooledNpcs.Add(npc);
+                    pooledNpcs.Enqueue(npc);
                     pooledNpcSet.Add(npc);
                 }
             }
@@ -503,7 +502,7 @@ namespace TrafficSystem
                 GameObject npc = Instantiate(prefab, npcContainer);
                 npc.name = $"NPC_{prefab.name}_Pooled_{i}";
                 npc.SetActive(false);
-                pooledNpcs.Add(npc);
+                pooledNpcs.Enqueue(npc);
                 pooledNpcSet.Add(npc);
             }
 
@@ -565,7 +564,7 @@ namespace TrafficSystem
                         npc.SetActive(false);
                         if (!pooledNpcSet.Contains(npc))
                         {
-                            pooledNpcs.Add(npc);
+                            pooledNpcs.Enqueue(npc);
                             pooledNpcSet.Add(npc);
                         }
                     }

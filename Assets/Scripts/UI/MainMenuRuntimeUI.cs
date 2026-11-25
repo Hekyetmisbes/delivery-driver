@@ -318,28 +318,31 @@ public class MainMenuRuntimeUI : MonoBehaviour
         backButton.onClick.AddListener(ShowMainPanel);
     }
 
+    private static void ApplyAndSaveSettings()
+    {
+        GameSettings.Instance.ApplySettings();
+        GameSettings.Instance.SaveSettings();
+    }
+
     private void OnMasterVolumeChanged(float value)
     {
         if (suppressCallbacks || GameSettings.Instance == null) return;
         GameSettings.Instance.SetMasterVolume(value);
-        GameSettings.Instance.ApplySettings();
-        GameSettings.Instance.SaveSettings();
+        ApplyAndSaveSettings();
     }
 
     private void OnMusicVolumeChanged(float value)
     {
         if (suppressCallbacks || GameSettings.Instance == null) return;
         GameSettings.Instance.SetMusicVolume(value);
-        GameSettings.Instance.ApplySettings();
-        GameSettings.Instance.SaveSettings();
+        ApplyAndSaveSettings();
     }
 
     private void OnSfxVolumeChanged(float value)
     {
         if (suppressCallbacks || GameSettings.Instance == null) return;
         GameSettings.Instance.SetSfxVolume(value);
-        GameSettings.Instance.ApplySettings();
-        GameSettings.Instance.SaveSettings();
+        ApplyAndSaveSettings();
     }
 
     private void OnQualityChanged(int tier)
@@ -347,16 +350,14 @@ public class MainMenuRuntimeUI : MonoBehaviour
         if (suppressCallbacks || GameSettings.Instance == null) return;
         int index = Mathf.Clamp(tier, 0, qualityTierToProjectQuality.Length - 1);
         GameSettings.Instance.SetQualityLevel(qualityTierToProjectQuality[index]);
-        GameSettings.Instance.ApplySettings();
-        GameSettings.Instance.SaveSettings();
+        ApplyAndSaveSettings();
     }
 
     private void OnFullscreenChanged(bool value)
     {
         if (suppressCallbacks || GameSettings.Instance == null) return;
         GameSettings.Instance.SetFullScreen(value);
-        GameSettings.Instance.ApplySettings();
-        GameSettings.Instance.SaveSettings();
+        ApplyAndSaveSettings();
     }
 
     private void OnFpsChanged(int index)
@@ -364,8 +365,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
         if (suppressCallbacks || GameSettings.Instance == null) return;
         int[] fpsValues = { 30, 60, 120, -1 };
         GameSettings.Instance.SetTargetFps(fpsValues[Mathf.Clamp(index, 0, fpsValues.Length - 1)]);
-        GameSettings.Instance.ApplySettings();
-        GameSettings.Instance.SaveSettings();
+        ApplyAndSaveSettings();
     }
 
     private void OnResolutionChanged(int index)
@@ -388,8 +388,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
         GameSettings.Instance.SetSpeedUnitPreference(index == 1
             ? SpeedUnitPreference.Mph
             : SpeedUnitPreference.Kmh);
-        GameSettings.Instance.ApplySettings();
-        GameSettings.Instance.SaveSettings();
+        ApplyAndSaveSettings();
     }
 
     private void OnColorBlindModeChanged(int mode)
@@ -849,29 +848,30 @@ public class MainMenuRuntimeUI : MonoBehaviour
         return button;
     }
 
-    private Slider CreateLabeledSlider(Transform parent, string label)
+    private GameObject CreateSettingsRow(Transform parent, string label, bool isToggle)
     {
         GameObject row = new GameObject($"{label}Row", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
         row.transform.SetParent(parent, false);
 
         LayoutElement rowLayout = row.GetComponent<LayoutElement>();
-        rowLayout.preferredHeight = SettingsRowHeight;
-        rowLayout.minHeight = SettingsRowHeight;
+        rowLayout.preferredHeight = isToggle ? 44f : SettingsRowHeight;
+        rowLayout.minHeight = rowLayout.preferredHeight;
 
         HorizontalLayoutGroup h = row.GetComponent<HorizontalLayoutGroup>();
-        h.spacing = 14f;
+        h.spacing = isToggle ? 10f : 14f;
         h.childControlHeight = true;
         h.childControlWidth = true;
         h.childForceExpandHeight = false;
-        h.childForceExpandWidth = true;
-        h.childAlignment = TextAnchor.MiddleLeft;
+        h.childForceExpandWidth = !isToggle;
+        if (!isToggle)
+            h.childAlignment = TextAnchor.MiddleLeft;
 
         GameObject labelObj = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
         labelObj.transform.SetParent(row.transform, false);
         LayoutElement labelLayout = labelObj.GetComponent<LayoutElement>();
         labelLayout.preferredWidth = SettingsLabelColumnWidth;
         labelLayout.minWidth = SettingsLabelColumnWidth;
-        labelLayout.flexibleWidth = 0f;
+        labelLayout.flexibleWidth = isToggle ? 1f : 0f;
         TextMeshProUGUI labelText = labelObj.GetComponent<TextMeshProUGUI>();
         labelText.text = label;
         labelText.fontSize = 20f;
@@ -881,6 +881,12 @@ public class MainMenuRuntimeUI : MonoBehaviour
         {
             labelText.font = TMP_Settings.defaultFontAsset;
         }
+        return row;
+    }
+
+    private Slider CreateLabeledSlider(Transform parent, string label)
+    {
+        GameObject row = CreateSettingsRow(parent, label, false);
 
         GameObject sliderObj = new GameObject("Slider", typeof(RectTransform), typeof(Slider), typeof(Image));
         sliderObj.transform.SetParent(row.transform, false);
@@ -947,36 +953,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
     private RuntimeOptionSelector CreateLabeledDropdown(Transform parent, string label, string[] options)
     {
-        GameObject row = new GameObject($"{label}Row", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
-        row.transform.SetParent(parent, false);
-
-        LayoutElement rowLayout = row.GetComponent<LayoutElement>();
-        rowLayout.preferredHeight = SettingsRowHeight;
-        rowLayout.minHeight = SettingsRowHeight;
-
-        HorizontalLayoutGroup h = row.GetComponent<HorizontalLayoutGroup>();
-        h.spacing = 14f;
-        h.childControlHeight = true;
-        h.childControlWidth = true;
-        h.childForceExpandHeight = false;
-        h.childForceExpandWidth = true;
-        h.childAlignment = TextAnchor.MiddleLeft;
-
-        GameObject labelObj = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
-        labelObj.transform.SetParent(row.transform, false);
-        LayoutElement labelLayout = labelObj.GetComponent<LayoutElement>();
-        labelLayout.preferredWidth = SettingsLabelColumnWidth;
-        labelLayout.minWidth = SettingsLabelColumnWidth;
-        labelLayout.flexibleWidth = 0f;
-        TextMeshProUGUI labelText = labelObj.GetComponent<TextMeshProUGUI>();
-        labelText.text = label;
-        labelText.fontSize = 20f;
-        labelText.color = Color.white;
-        labelText.alignment = TextAlignmentOptions.MidlineLeft;
-        if (TMP_Settings.defaultFontAsset != null)
-        {
-            labelText.font = TMP_Settings.defaultFontAsset;
-        }
+        GameObject row = CreateSettingsRow(parent, label, false);
 
         GameObject ddObj = new GameObject("Dropdown", typeof(RectTransform), typeof(Image), typeof(LayoutElement));
         ddObj.transform.SetParent(row.transform, false);
@@ -992,35 +969,7 @@ public class MainMenuRuntimeUI : MonoBehaviour
 
     private Toggle CreateLabeledToggle(Transform parent, string label)
     {
-        GameObject row = new GameObject($"{label}Row", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
-        row.transform.SetParent(parent, false);
-
-        LayoutElement rowLayout = row.GetComponent<LayoutElement>();
-        rowLayout.preferredHeight = 44f;
-        rowLayout.minHeight = 44f;
-
-        HorizontalLayoutGroup h = row.GetComponent<HorizontalLayoutGroup>();
-        h.spacing = 10f;
-        h.childControlHeight = true;
-        h.childControlWidth = true;
-        h.childForceExpandHeight = false;
-        h.childForceExpandWidth = false;
-
-        GameObject labelObj = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
-        labelObj.transform.SetParent(row.transform, false);
-        LayoutElement labelLayout = labelObj.GetComponent<LayoutElement>();
-        labelLayout.preferredWidth = SettingsLabelColumnWidth;
-        labelLayout.minWidth = SettingsLabelColumnWidth;
-        labelLayout.flexibleWidth = 1f;
-        TextMeshProUGUI labelText = labelObj.GetComponent<TextMeshProUGUI>();
-        labelText.text = label;
-        labelText.fontSize = 20f;
-        labelText.color = Color.white;
-        labelText.alignment = TextAlignmentOptions.MidlineLeft;
-        if (TMP_Settings.defaultFontAsset != null)
-        {
-            labelText.font = TMP_Settings.defaultFontAsset;
-        }
+        GameObject row = CreateSettingsRow(parent, label, true);
 
         GameObject toggleObj = new GameObject("Toggle", typeof(RectTransform), typeof(Toggle), typeof(Image), typeof(LayoutElement));
         toggleObj.transform.SetParent(row.transform, false);

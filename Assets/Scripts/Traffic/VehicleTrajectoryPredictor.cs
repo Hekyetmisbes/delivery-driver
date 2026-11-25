@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections.Generic;
 
 namespace TrafficSystem
 {
@@ -9,6 +10,7 @@ namespace TrafficSystem
     /// </summary>
     public static class VehicleTrajectoryPredictor
     {
+        private static readonly List<Collider> collisionBoundsBuffer = new List<Collider>(16);
         /// <summary>
         /// Predict future position of a vehicle after a given time
         /// </summary>
@@ -21,7 +23,7 @@ namespace TrafficSystem
 
             // Simple linear prediction based on current velocity
             Vector3 currentPos = vehicle.transform.position;
-            Vector3 velocity = rb.linearVelocity;
+            Vector3 velocity = vehicle.SimulationVelocity;
 
             // Account for steering angle if turning
             Vector3 predictedPos = currentPos + velocity * timeAhead;
@@ -114,8 +116,8 @@ namespace TrafficSystem
 
             Vector3 posA = vehicleA.transform.position;
             Vector3 posB = vehicleB.transform.position;
-            Vector3 velA = rbA.linearVelocity;
-            Vector3 velB = rbB.linearVelocity;
+            Vector3 velA = vehicleA.SimulationVelocity;
+            Vector3 velB = vehicleB.SimulationVelocity;
 
             // Relative position and velocity
             Vector3 relativePos = posB - posA;
@@ -206,17 +208,25 @@ namespace TrafficSystem
         {
             if (vehicle == null) return 2f;
 
-            Collider[] colliders = vehicle.GetComponentsInChildren<Collider>();
-            if (colliders == null || colliders.Length == 0)
+            collisionBoundsBuffer.Clear();
+            vehicle.GetComponentsInChildren(false, collisionBoundsBuffer);
+            Bounds bounds = default;
+            bool hasBounds = false;
+            for (int i = 0; i < collisionBoundsBuffer.Count; i++)
             {
-                return 2f;
+                Collider collider = collisionBoundsBuffer[i];
+                if (collider == null || !collider.enabled)
+                    continue;
+                if (!hasBounds)
+                {
+                    bounds = collider.bounds;
+                    hasBounds = true;
+                }
+                else
+                    bounds.Encapsulate(collider.bounds);
             }
-
-            Bounds bounds = colliders[0].bounds;
-            for (int i = 1; i < colliders.Length; i++)
-            {
-                bounds.Encapsulate(colliders[i].bounds);
-            }
+            collisionBoundsBuffer.Clear();
+            if (!hasBounds) return 2f;
 
             float xExtent = Mathf.Max(0.5f, bounds.extents.x);
             float zExtent = Mathf.Max(0.5f, bounds.extents.z);

@@ -58,6 +58,8 @@ namespace DeliveryDriver.Navigation
         [SerializeField] private float hardOffRouteDistanceThreshold = 26f;
         [SerializeField] private float initialAsyncRouteDelay = 0.02f;
         [SerializeField] private int pathSearchIterationsPerFrame = 220;
+        [Tooltip("Cooperative A* search budget per frame in milliseconds. Zero disables time limiting.")]
+        [SerializeField, Min(0f)] private float pathSearchMillisecondsPerFrame = 1.5f;
         [SerializeField] private int maxTransferStepsPerRequest = 1;
         [SerializeField] private float continuedRouteAttemptDelay = 0.08f;
 
@@ -78,7 +80,7 @@ namespace DeliveryDriver.Navigation
         // Transfer distance steps for pathfinding
         // ────────────────────────────────────────────────────────────────────
 
-        private static readonly float[] TransferDistances = { 6f, 10f, 16f, 24f, 32f };
+        private static readonly float[] TransferDistances = { RoadGraphPathfinder.InitialNavigationTransferDistance, 10f, 16f, 24f, 32f };
 
         // ────────────────────────────────────────────────────────────────────
         // Internal state
@@ -124,6 +126,13 @@ namespace DeliveryDriver.Navigation
         private Vector3 lastRequestedRouteStart;
         private Vector3 lastRequestedRouteObjective;
         private float nextAsyncRouteAllowedTime;
+
+        // Development diagnostics for comparing route planners on the same map.
+        public int LastSearchExpandedNodes { get; private set; }
+        public int LastSearchQueuePops { get; private set; }
+        public double LastSearchPeakSliceMilliseconds { get; private set; }
+        public double LastSearchComputeMilliseconds { get; private set; }
+        public double LastSearchWallMilliseconds { get; private set; }
         private bool hasRequestedRoute;
 
         // Diagnostics
@@ -269,82 +278,6 @@ namespace DeliveryDriver.Navigation
             if (!CurrentObjective.IsValid) return;
             if (!ResolvePlayer(out Transform player)) return;
             RequestAsyncRoute(player.position, CurrentObjective.WorldPosition, force: true);
-        }
-
-        private void BuildRoute(Vector3 start, Vector3 end)
-        {
-            needsRouteBuild = false;
-            lastObjectivePosition = end;
-
-            // Try road graph path
-            if (TryResolveRoadGraph(out RoadGraph graph))
-            {
-                if (TryFindGraphRoute(graph, start, end))
-                {
-                    consecutiveFailures = 0;
-                    return;
-                }
-            }
-
-            // Graph route failed - try stale route
-            if (TryUseStaleRoute(start))
-            {
-                consecutiveFailures = 0;
-                return;
-            }
-
-            // All failed - use fallback straight line
-            consecutiveFailures++;
-            PublishFallback(start, end);
-            ScheduleRetry();
-            LogRouteIssue("Rota hesaplanamadi.", start, end);
-            ShowRerouteNotification();
-        }
-
-        private bool TryFindGraphRoute(RoadGraph graph, Vector3 start, Vector3 end)
-        {
-            int startStep = Mathf.Clamp(Mathf.Max(currentTransferStep, baselineTransferStep), 0, TransferDistances.Length - 1);
-            List<Vector3> path = null;
-            int resolvedStep = -1;
-            long budgetTicks = System.Diagnostics.Stopwatch.Frequency / 20; // ~50ms total budget
-            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
-
-            for (int step = startStep; step < TransferDistances.Length; step++)
-            {
-                path = RoadGraphPathfinder.FindPath(graph, start, end, TransferDistances[step]);
-                if (path != null && path.Count >= 2)
-                {
-                    resolvedStep = step;
-                    break;
-                }
-
-                // Don't burn more than ~50ms trying progressively wider transfers
-                if (System.Diagnostics.Stopwatch.GetTimestamp() - t0 > budgetTicks)
-                {
-                    break;
-                }
-            }
-
-            if (resolvedStep < 0 || path == null || path.Count < 2)
-            {
-                currentTransferStep = TransferDistances.Length - 1;
-                nextRerouteTime = Time.time + rerouteCooldown;
-                return false;
-            }
-
-            // Success
-            routePoints.Clear();
-            routePoints.AddRange(path);
-            lastGoodRoute.Clear();
-            lastGoodRoute.AddRange(path);
-            baselineTransferStep = Mathf.Max(0, resolvedStep - 1);
-            currentTransferStep = baselineTransferStep;
-            nextRouteRetryTime = 0f;
-            nextRerouteTime = Time.time + rerouteCooldown;
-
-            ProjectOnRoute(routePoints, start, out int segIdx, out Vector3 projected, out _);
-            PublishProjected(start, segIdx, projected, RouteKind.Graph, true);
-            return true;
         }
 
         private bool TryUseStaleRoute(Vector3 playerPos)
@@ -595,12 +528,18 @@ namespace DeliveryDriver.Navigation
             return playerMovedEnough || objectiveMovedEnough;
         }
 
+        private static double ElapsedMilliseconds(long started) =>
+            (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000d / System.Diagnostics.Stopwatch.Frequency;
+
         private IEnumerator BuildRouteAsync(Vector3 start, Vector3 end)
         {
             needsRouteBuild = false;
             lastObjectivePosition = end;
 
             bool found = false;
+            LastSearchExpandedNodes = LastSearchQueuePops = 0;
+            LastSearchPeakSliceMilliseconds = LastSearchComputeMilliseconds = LastSearchWallMilliseconds = 0;
+            long searchStarted = System.Diagnostics.Stopwatch.GetTimestamp();
 
             if (initialAsyncRouteDelay > 0f)
             {
@@ -624,12 +563,18 @@ namespace DeliveryDriver.Navigation
                         end = CurrentObjective.WorldPosition;
                     }
 
+                    long setupStarted = System.Diagnostics.Stopwatch.GetTimestamp();
                     RoadGraphPathfinder.IncrementalPathSearchSession session =
                         RoadGraphPathfinder.StartIncrementalSearch(graph, start, end, TransferDistances[step]);
+                    double setupMilliseconds = ElapsedMilliseconds(setupStarted);
+                    LastSearchComputeMilliseconds += setupMilliseconds;
+                    LastSearchPeakSliceMilliseconds = System.Math.Max(LastSearchPeakSliceMilliseconds, setupMilliseconds);
 
                     while (session != null && session.Status == RoadGraphPathfinder.IncrementalSearchStatus.Running)
                     {
-                        session.Step(Mathf.Max(16, pathSearchIterationsPerFrame));
+                        session.Step(Mathf.Max(16, pathSearchIterationsPerFrame), pathSearchMillisecondsPerFrame);
+                        LastSearchComputeMilliseconds += session.LastStepMilliseconds;
+                        LastSearchPeakSliceMilliseconds = System.Math.Max(LastSearchPeakSliceMilliseconds, session.LastStepMilliseconds);
                         if (session.Status == RoadGraphPathfinder.IncrementalSearchStatus.Running)
                         {
                             yield return null;
@@ -639,6 +584,11 @@ namespace DeliveryDriver.Navigation
                     List<Vector3> path = session != null && session.Status == RoadGraphPathfinder.IncrementalSearchStatus.Succeeded
                         ? session.Path
                         : null;
+                    if (session != null)
+                    {
+                        LastSearchExpandedNodes += session.ExpandedNodes;
+                        LastSearchQueuePops += session.QueuePops;
+                    }
                     transferStepsTried++;
                     if (path != null && path.Count >= 2)
                     {
@@ -669,6 +619,8 @@ namespace DeliveryDriver.Navigation
                     }
                 }
             }
+
+            LastSearchWallMilliseconds = ElapsedMilliseconds(searchStarted);
 
             if (!found)
             {

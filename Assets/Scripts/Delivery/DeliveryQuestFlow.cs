@@ -154,7 +154,6 @@ internal static class DeliveryQuestFlow
 
         if (quest.Status == QuestStatus.Active)
         {
-            quest.Status = QuestStatus.Completed;
             QuestManager.Instance.CompleteQuest(quest);
         }
     }

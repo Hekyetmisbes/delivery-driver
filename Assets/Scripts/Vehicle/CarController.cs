@@ -114,6 +114,7 @@ public class CarController : MonoBehaviour
 
     // Private Runtime Variables
     private Rigidbody rb;
+    private FuelSystem fuelSystem;
     private float currentSteerAngle;
     private float currentBrakeTorque;
     private bool isBraking;
@@ -151,6 +152,7 @@ public class CarController : MonoBehaviour
         }
 
         rb = GetComponent<Rigidbody>();
+        fuelSystem = GetComponent<FuelSystem>();
         SetupRigidbody();
         ConfigureBodyCollidersForStability();
         CacheWheelVisualOffsets();
@@ -247,12 +249,16 @@ public class CarController : MonoBehaviour
         isHandbraking = handbrakeAction != null && handbrakeAction.IsPressed();
     }
 
+    internal void BindFuelSystem(FuelSystem system)
+    {
+        fuelSystem = system;
+    }
+
     private void HandleMotor()
     {
         float accelInput = smoothedThrottleInput;
 
         // Fuel check: engine blocked if out of fuel
-        FuelSystem fuelSystem = GetComponent<FuelSystem>();
         if (fuelSystem != null && fuelSystem.ShouldBlockEngine())
         {
             rearLeftCollider.motorTorque = 0f;

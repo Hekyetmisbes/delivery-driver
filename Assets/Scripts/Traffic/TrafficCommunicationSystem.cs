@@ -29,7 +29,6 @@ namespace TrafficSystem
 
         // Vehicle state cache
         private Dictionary<NpcCarAgent, VehicleState> vehicleStates;
-        private Dictionary<NpcCarAgent, Rigidbody> vehicleRigidbodies;
 
         // Incremental grid tracking: vehicle -> last cell key
         private Dictionary<NpcCarAgent, Vector2Int> vehicleCellKeys;
@@ -49,7 +48,6 @@ namespace TrafficSystem
             spatialGrid = new Dictionary<Vector2Int, List<NpcCarAgent>>();
             allVehicles = new List<NpcCarAgent>();
             vehicleStates = new Dictionary<NpcCarAgent, VehicleState>();
-            vehicleRigidbodies = new Dictionary<NpcCarAgent, Rigidbody>();
             vehicleCellKeys = new Dictionary<NpcCarAgent, Vector2Int>();
         }
 
@@ -73,7 +71,6 @@ namespace TrafficSystem
             {
                 allVehicles.Add(vehicle);
                 vehicleStates[vehicle] = new VehicleState();
-                vehicleRigidbodies[vehicle] = vehicle.GetComponent<Rigidbody>();
             }
         }
 
@@ -96,7 +93,6 @@ namespace TrafficSystem
 
             allVehicles.Remove(vehicle);
             vehicleStates.Remove(vehicle);
-            vehicleRigidbodies.Remove(vehicle);
         }
 
         /// <summary>
@@ -175,14 +171,9 @@ namespace TrafficSystem
 
             VehicleState state = vehicleStates[vehicle];
             state.position = vehicle.transform.position;
-            if (!vehicleRigidbodies.TryGetValue(vehicle, out Rigidbody rb) || rb == null)
-            {
-                rb = vehicle.GetComponent<Rigidbody>();
-                vehicleRigidbodies[vehicle] = rb;
-            }
-
-            state.velocity = rb != null ? rb.linearVelocity : Vector3.zero;
+            state.velocity = vehicle.SimulationVelocity;
             state.speed = vehicle.CurrentSpeed;
+            state.isChangingLanes = vehicle.IsChangingLanes;
             state.forward = vehicle.transform.forward;
         }
 

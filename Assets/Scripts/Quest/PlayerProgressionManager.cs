@@ -15,6 +15,8 @@ namespace DeliveryDriver.Quest
         private const float DatabaseReadyWaitTimeoutSeconds = 5f;
         private const string MoneyPrefsKey = "DeliveryDriver.Player.CurrentMoney";
         private const string MoneyPrefsVersionKey = "DeliveryDriver.Player.MoneyPersisted";
+        private const string MoneyPendingKey = "DeliveryDriver.Player.MoneyWritePending";
+        private float nextBalanceRetryTime;
         public static PlayerProgressionManager Instance { get; private set; }
 
         [Header("Currency")]
@@ -111,6 +113,8 @@ namespace DeliveryDriver.Quest
             InitializeAchievements();
         }
 
+        public bool IsSaveReady { get; private set; }
+
         private void Start()
         {
             // Try to load saved game
@@ -149,6 +153,12 @@ namespace DeliveryDriver.Quest
         {
             // Track total time played
             totalTimePlayed += Time.deltaTime;
+            if (Time.unscaledTime >= nextBalanceRetryTime)
+            {
+                nextBalanceRetryTime = Time.unscaledTime + 5f;
+                if (IsSaveReady && HasPendingBalance())
+                    RefreshMoneyFromDatabase();
+            }
         }
 
         /// <summary>
@@ -560,13 +570,24 @@ namespace DeliveryDriver.Quest
                 return false;
             }
 
-            int databaseBalance = database.GetDefaultPlayerBalance(currentMoney);
-            if (databaseBalance != currentMoney)
+            if (HasPendingBalance())
             {
-                currentMoney = Mathf.Max(0, databaseBalance);
-                PersistMoneyPrefsFallback();
-                OnMoneyChanged.Invoke(currentMoney);
+                // A durable local write intent must be replayed before reading an older DB value.
+                bool changedByPending = LoadMoneyFromPrefsFallback();
+                bool committed = TryCommitPendingBalance(database);
+                if (changedByPending)
+                    OnMoneyChanged.Invoke(currentMoney);
+                return committed;
             }
+
+            if (!database.TryGetPlayerBalance(QuestDatabaseService.DefaultPlayerId, out int databaseBalance))
+                return false;
+
+            bool changed = databaseBalance != currentMoney;
+            currentMoney = databaseBalance;
+            PersistMoneyPrefsFallback();
+            if (changed)
+                OnMoneyChanged.Invoke(currentMoney);
 
             Debug.Log($"[PlayerProgressionManager] Active balance refreshed from database: ${currentMoney}");
             return true;
@@ -802,14 +823,17 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
-            currentMoney = data.Money;
-            LoadMoneyFromPrefsFallback(preferHigherBalance: true);
             QuestDatabaseService database = QuestDatabaseService.Instance;
-            if (database != null && database.IsReady)
-            {
-                currentMoney = database.GetDefaultPlayerBalance(currentMoney);
+            int? databaseBalance = database != null &&
+                database.TryGetPlayerBalance(QuestDatabaseService.DefaultPlayerId, out int persistedBalance)
+                ? persistedBalance : (int?)null;
+            int? preferencesBalance = PlayerPrefs.HasKey(MoneyPrefsVersionKey)
+                ? PlayerPrefs.GetInt(MoneyPrefsKey, data.Money) : (int?)null;
+
+            bool pending = HasPendingBalance();
+            currentMoney = PlayerBalanceReadPolicy.Resolve(databaseBalance, preferencesBalance, data.Money, pending);
+            if (databaseBalance.HasValue && !pending)
                 PersistMoneyPrefsFallback();
-            }
 
             currentLevel = data.Level;
             currentXP = data.XP;
@@ -831,7 +855,7 @@ namespace DeliveryDriver.Quest
             levelSnapshots = data.LevelSnapshots ?? new List<LevelSnapshot>();
 
             // Load unlocked achievements
-            foreach (string achievementID in data.UnlockedAchievements)
+            foreach (string achievementID in data.UnlockedAchievements ?? new List<string>())
             {
                 Achievement achievement = achievements.FirstOrDefault(a => a.AchievementID == achievementID);
                 if (achievement != null && !achievement.IsUnlocked)
@@ -849,81 +873,101 @@ namespace DeliveryDriver.Quest
 
         private IEnumerator InitializeMoneyFromDatabaseRoutine()
         {
-            float timeoutAt = Time.realtimeSinceStartup + DatabaseReadyWaitTimeoutSeconds;
-
-            while ((QuestDatabaseService.Instance == null || !QuestDatabaseService.Instance.IsReady) &&
-                   Time.realtimeSinceStartup < timeoutAt)
+            try
             {
-                yield return null;
+                float timeoutAt = Time.realtimeSinceStartup + DatabaseReadyWaitTimeoutSeconds;
+                while ((QuestDatabaseService.Instance == null || !QuestDatabaseService.Instance.IsReady) &&
+                       Time.realtimeSinceStartup < timeoutAt)
+                    yield return null;
+
+                QuestDatabaseService database = QuestDatabaseService.Instance;
+                if (database == null || !database.IsReady)
+                    yield break;
+
+                if (HasPendingBalance())
+                {
+                    RefreshMoneyFromDatabase();
+                    yield break;
+                }
+
+                bool playerExisted = database.PlayerExists(QuestDatabaseService.DefaultPlayerId);
+                if (!database.EnsureDefaultPlayer())
+                    yield break;
+
+                if (!playerExisted && currentMoney > 0)
+                {
+                    SyncMoneyToDatabase();
+                }
+                else
+                {
+                    RefreshMoneyFromDatabase();
+                }
             }
-
-            QuestDatabaseService database = QuestDatabaseService.Instance;
-            if (database == null || !database.IsReady)
+            finally
             {
-                yield break;
-            }
-
-            bool playerExisted = database.PlayerExists(QuestDatabaseService.DefaultPlayerId);
-            if (!database.EnsureDefaultPlayer())
-            {
-                yield break;
-            }
-
-            int databaseBalance = database.GetDefaultPlayerBalance(currentMoney);
-            bool shouldSeedDatabaseBalance = !playerExisted && currentMoney > 0;
-
-            if (shouldSeedDatabaseBalance)
-            {
-                database.SetDefaultPlayerBalance(currentMoney);
-            }
-            else
-            {
-                RefreshMoneyFromDatabase();
+                // JSON autosave must not capture a provisional startup balance.
+                IsSaveReady = true;
             }
         }
 
         private void SyncMoneyToDatabase()
         {
-            PersistMoneyPrefsFallback();
-
-            QuestDatabaseService database = QuestDatabaseService.Instance;
-            if (database == null || !database.IsReady)
-            {
-                return;
-            }
-
-            database.EnsureDefaultPlayer();
-            database.SetDefaultPlayerBalance(currentMoney);
+            // Persist the absolute balance and its pending marker before attempting SQLite.
+            // Replaying the same absolute balance after interruption does not award money twice.
+            PersistMoneyPrefsFallback(pending: true);
+            TryCommitPendingBalance(QuestDatabaseService.Instance);
         }
 
-        private bool LoadMoneyFromPrefsFallback(bool preferHigherBalance = false)
+        private bool TryCommitPendingBalance(QuestDatabaseService database)
         {
-            if (!PlayerPrefs.HasKey(MoneyPrefsVersionKey))
+            if (database == null || !database.IsReady)
+                return false;
+
+            if (!database.SetDefaultPlayerBalance(currentMoney))
             {
+                Debug.LogWarning("[PlayerProgressionManager] SQLite balance write pending; will retry.");
                 return false;
             }
 
-            int persistedMoney = Mathf.Max(0, PlayerPrefs.GetInt(MoneyPrefsKey, currentMoney));
-            if (preferHigherBalance)
-            {
-                if (persistedMoney <= currentMoney)
-                {
-                    return false;
-                }
-            }
-            else if (persistedMoney == currentMoney)
-            {
+            PlayerPrefs.DeleteKey(MoneyPendingKey);
+            PlayerPrefs.Save();
+            return true;
+        }
+
+        private bool LoadMoneyFromPrefsFallback()
+        {
+            if (!PlayerPrefs.HasKey(MoneyPrefsVersionKey))
                 return false;
-            }
+
+            int persistedMoney = PlayerBalanceReadPolicy.Resolve(null,
+                PlayerPrefs.GetInt(MoneyPrefsKey, currentMoney), currentMoney);
+            if (persistedMoney == currentMoney)
+                return false;
 
             currentMoney = persistedMoney;
             return true;
         }
 
-        private void PersistMoneyPrefsFallback()
+        private static bool HasPendingBalance() =>
+            PlayerPrefs.HasKey(MoneyPrefsVersionKey) &&
+            PlayerPrefs.HasKey(MoneyPrefsKey) &&
+            PlayerPrefs.GetInt(MoneyPendingKey, 0) == 1;
+
+        private void PersistMoneyPrefsFallback(bool pending = false) =>
+            PersistBalancePreference(currentMoney, pending);
+
+        // Explicit profile creation/reset overrides pending writes from the old profile.
+        internal static void ResetPersistedBalanceAfterProfileReset() =>
+            PersistBalancePreference(0, false);
+
+        private static void PersistBalancePreference(int balance, bool pending)
         {
             PlayerPrefs.SetInt(MoneyPrefsVersionKey, 1);
-            PlayerPrefs.SetInt(MoneyPrefsKey, Mathf.Max(0, currentMoney));
+            PlayerPrefs.SetInt(MoneyPrefsKey, Mathf.Max(0, balance));
+            if (pending)
+                PlayerPrefs.SetInt(MoneyPendingKey, 1);
+            else
+                PlayerPrefs.DeleteKey(MoneyPendingKey);
             PlayerPrefs.Save();
         }
 

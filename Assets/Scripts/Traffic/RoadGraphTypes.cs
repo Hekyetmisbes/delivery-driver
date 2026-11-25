@@ -148,12 +148,23 @@ namespace TrafficSystem
 
         [System.NonSerialized]
         private RoadGraphSpatialIndex cachedIndex;
+        [System.NonSerialized]
+        private RoadGraphSpatialIndex previousIndex;
 
         public RoadGraphSpatialIndex GetOrBuildSpatialIndex(float cellSize)
         {
             if (cachedIndex != null && Mathf.Approximately(cachedIndex.cellSize, cellSize))
             {
                 return cachedIndex;
+            }
+
+            // Navigation retries alternate between nearby transfer tiers; retain one prior index.
+            if (previousIndex != null && Mathf.Approximately(previousIndex.cellSize, cellSize))
+            {
+                var hit = previousIndex;
+                previousIndex = cachedIndex;
+                cachedIndex = hit;
+                return hit;
             }
 
             var index = new RoadGraphSpatialIndex();
@@ -182,6 +193,7 @@ namespace TrafficSystem
                 }
             }
 
+            previousIndex = cachedIndex;
             cachedIndex = index;
             return index;
         }
@@ -189,6 +201,7 @@ namespace TrafficSystem
         public void InvalidateSpatialIndex()
         {
             cachedIndex = null;
+            previousIndex = null;
         }
 
         private static Vector3 GetWaypointForward(RoadSegment segment, int waypointIndex)

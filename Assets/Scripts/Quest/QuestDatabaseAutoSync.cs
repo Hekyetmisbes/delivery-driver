@@ -13,6 +13,8 @@ namespace DeliveryDriver.Quest
 
         private QuestManager manager;
         private bool subscribed;
+        private readonly QuestSnapshotPolicy snapshotPolicy = new QuestSnapshotPolicy();
+        private const float SnapshotIntervalSeconds = 15f;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
@@ -42,35 +44,38 @@ namespace DeliveryDriver.Quest
 
         private IEnumerator BindRoutine()
         {
-            while (QuestDatabaseService.Instance == null || !QuestDatabaseService.Instance.IsReady)
+            var delay = new WaitForSecondsRealtime(0.5f);
+            while (true)
             {
-                yield return null;
-            }
-
-            QuestDatabaseService.Instance.EnsurePlayer(playerId, playerDisplayName);
-
-            while (manager == null)
-            {
-                manager = FindAnyObjectByType<QuestManager>();
-                yield return null;
-            }
-
-            if (!subscribed)
-            {
-                manager.OnQuestStarted.AddListener(OnQuestStarted);
-                manager.OnQuestCompleted.AddListener(OnQuestCompleted);
-                manager.OnQuestFailed.AddListener(OnQuestFailed);
-                manager.OnQuestUpdated.AddListener(OnQuestUpdated);
-                subscribed = true;
-            }
-
-            if (verboseLogs)
-            {
-                Debug.Log("[QuestDatabaseAutoSync] Bound to QuestManager and DB service.");
+                var database = QuestDatabaseService.Instance;
+                var nextManager = QuestManager.Instance;
+                if (database != null && database.IsReady &&
+                    nextManager != null && (!subscribed || manager != nextManager))
+                {
+                    Unbind();
+                    if (database.EnsurePlayer(playerId, playerDisplayName))
+                    {
+                        manager = nextManager;
+                        manager.OnQuestStarted.AddListener(OnQuestStarted);
+                        manager.OnQuestCompleted.AddListener(OnQuestCompleted);
+                        manager.OnQuestFailed.AddListener(OnQuestFailed);
+                        manager.OnQuestUpdated.AddListener(OnQuestUpdated);
+                        subscribed = true;
+                        if (manager.CurrentQuest != null)
+                            OnQuestUpdated(manager.CurrentQuest);
+                        if (verboseLogs)
+                            Debug.Log("[QuestDatabaseAutoSync] Bound to QuestManager and DB service.");
+                    }
+                }
+                else if (nextManager == null || database == null || !database.IsReady)
+                {
+                    Unbind();
+                }
+                yield return delay;
             }
         }
 
-        private void OnDestroy()
+        private void Unbind()
         {
             if (manager != null && subscribed)
             {
@@ -78,8 +83,28 @@ namespace DeliveryDriver.Quest
                 manager.OnQuestCompleted.RemoveListener(OnQuestCompleted);
                 manager.OnQuestFailed.RemoveListener(OnQuestFailed);
                 manager.OnQuestUpdated.RemoveListener(OnQuestUpdated);
-                subscribed = false;
             }
+            manager = null;
+            subscribed = false;
+            snapshotPolicy.Reset();
+        }
+
+        private void OnDestroy()
+        {
+            Unbind();
+            if (instance == this)
+                instance = null;
+        }
+
+        private bool PersistSnapshot(QuestData quest)
+        {
+            var database = QuestDatabaseService.Instance;
+            if (database == null || !database.SaveQuestInstance(playerId, quest))
+                return false;
+
+            snapshotPolicy.Record(quest.QuestID, quest.HasPickedUpCargo, quest.CurrentDeliveryIndex,
+                quest.DeliveryLocations?.Count ?? 0, Time.unscaledTime);
+            return true;
         }
 
         private void OnQuestStarted(QuestData quest)
@@ -89,7 +114,7 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
-            QuestDatabaseService.Instance.SaveQuestInstance(playerId, quest);
+            if (!PersistSnapshot(quest)) return;
             QuestDatabaseService.Instance.InsertQuestEvent(
                 quest.QuestID,
                 playerId,
@@ -106,7 +131,9 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
-            QuestDatabaseService.Instance.SaveQuestInstance(playerId, quest);
+            if (snapshotPolicy.ShouldWrite(quest.QuestID, quest.HasPickedUpCargo, quest.CurrentDeliveryIndex,
+                    quest.DeliveryLocations?.Count ?? 0, Time.unscaledTime, SnapshotIntervalSeconds))
+                PersistSnapshot(quest);
         }
 
         private void OnQuestCompleted(QuestData quest)
@@ -116,7 +143,7 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
-            QuestDatabaseService.Instance.SaveQuestInstance(playerId, quest);
+            if (!PersistSnapshot(quest)) return;
             int fuelRebate = DriverProgressionSystem.Instance != null
                 ? DriverProgressionSystem.Instance.CalculateFuelEfficiencyRebate(quest)
                 : 0;
@@ -149,7 +176,7 @@ namespace DeliveryDriver.Quest
                 return;
             }
 
-            QuestDatabaseService.Instance.SaveQuestInstance(playerId, quest);
+            if (!PersistSnapshot(quest)) return;
             int penaltyAmount = QuestManager.Instance != null ? QuestManager.Instance.LastFailurePenalty : 0;
             int balanceAfter = PlayerProgressionManager.Instance != null
                 ? PlayerProgressionManager.Instance.CurrentMoney

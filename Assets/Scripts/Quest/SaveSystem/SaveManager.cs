@@ -22,7 +22,7 @@ namespace DeliveryDriver.Quest
 
         public string SaveFilePath => saveFilePath;
         public GameSaveData CurrentSaveData => currentSaveData;
-        public bool HasSaveFile => File.Exists(saveFilePath);
+        public bool HasSaveFile => SaveFileExists();
 
         private void Awake()
         {
@@ -58,8 +58,14 @@ namespace DeliveryDriver.Quest
 
         private void OnApplicationQuit()
         {
-            // Save on quit
-            SaveGame();
+            if (Instance == this)
+                SaveGame();
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+                Instance = null;
         }
 
         /// <summary>
@@ -67,51 +73,39 @@ namespace DeliveryDriver.Quest
         /// </summary>
         public void SaveGame()
         {
+            TrySaveGame();
+        }
+
+        public bool TrySaveGame()
+        {
+            var progression = PlayerProgressionManager.Instance;
+            var quests = QuestManager.Instance;
+            if (Instance != this || progression == null || quests == null ||
+                !progression.IsSaveReady || !quests.IsSaveReady)
+            {
+                Debug.LogWarning("[SaveManager] Save skipped: gameplay state is not ready.");
+                return false;
+            }
+
             try
             {
-                // Create save data
-                GameSaveData saveData = new GameSaveData();
-
-                // Gather player progression data
-                if (PlayerProgressionManager.Instance != null)
+                var saveData = new GameSaveData
                 {
-                    saveData.PlayerData = PlayerProgressionData.FromManager(PlayerProgressionManager.Instance);
-                }
-                else
-                {
-                    Debug.Log("[SaveManager] PlayerProgressionManager not found. Saving with default player data.");
-                    saveData.PlayerData = new PlayerProgressionData();
-                }
+                    PlayerData = PlayerProgressionData.FromManager(progression),
+                    QuestData = quests.GetSaveData(),
+                    SaveDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                    SaveVersion = GameSaveData.CurrentVersion
+                };
 
-                // Gather quest data
-                if (QuestManager.Instance != null)
-                {
-                    saveData.QuestData = QuestManager.Instance.GetSaveData();
-                }
-                else
-                {
-                    Debug.Log("[SaveManager] QuestManager not found. Saving with default quest data.");
-                    saveData.QuestData = new QuestSaveData();
-                }
-
-                // Update timestamp
-                saveData.SaveDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-                saveData.SaveVersion = 3;
-
-                // Serialize to JSON
-                string json = JsonUtility.ToJson(saveData, true);
-
-                // Write to file
-                File.WriteAllText(saveFilePath, json);
-
-                // Store current save data
+                GameSaveFileStore.Write(saveFilePath, saveData);
                 currentSaveData = saveData;
-
                 Debug.Log($"[SaveManager] Game saved successfully to {saveFilePath}");
+                return true;
             }
             catch (Exception e)
             {
                 Debug.LogError($"[SaveManager] Failed to save game: {e.Message}");
+                return false;
             }
         }
 
@@ -121,40 +115,23 @@ namespace DeliveryDriver.Quest
         /// <returns>Loaded save data, or null if no save exists</returns>
         public GameSaveData LoadGame()
         {
-            try
+            currentSaveData = null;
+            if (GameSaveFileStore.TryRead(saveFilePath, out var data))
             {
-                // Check if save file exists
-                if (!File.Exists(saveFilePath))
-                {
-                    Debug.Log("[SaveManager] No save file found. Starting new game.");
-                    return null;
-                }
-
-                // Read file
-                string json = File.ReadAllText(saveFilePath);
-
-                // Deserialize JSON
-                GameSaveData saveData = JsonUtility.FromJson<GameSaveData>(json);
-
-                if (saveData == null)
-                {
-                    Debug.LogError("[SaveManager] Failed to deserialize save data.");
-                    return null;
-                }
-
-                // Store current save data
-                currentSaveData = saveData;
-
-                Debug.Log($"[SaveManager] Game loaded successfully from {saveFilePath}");
-                Debug.Log($"[SaveManager] Save date: {saveData.SaveDate}, Version: {saveData.SaveVersion}");
-
-                return saveData;
+                currentSaveData = data;
+                return data;
             }
-            catch (Exception e)
+
+            if (GameSaveFileStore.TryRead(saveFilePath + ".bak", out data))
             {
-                Debug.LogError($"[SaveManager] Failed to load game: {e.Message}");
-                return null;
+                currentSaveData = data;
+                Debug.LogWarning("[SaveManager] Recovered game state from backup.");
+                return data;
             }
+
+            if (SaveFileExists())
+                Debug.LogError("[SaveManager] No valid save or backup could be loaded.");
+            return null;
         }
 
         /// <summary>
@@ -164,16 +141,12 @@ namespace DeliveryDriver.Quest
         {
             try
             {
-                if (File.Exists(saveFilePath))
-                {
-                    File.Delete(saveFilePath);
-                    currentSaveData = null;
-                    Debug.Log("[SaveManager] Save file deleted.");
-                }
-                else
-                {
-                    Debug.Log("[SaveManager] No save file to delete.");
-                }
+                // Remove recovery files first so an intentional reset cannot restore them.
+                File.Delete(saveFilePath + ".tmp");
+                File.Delete(saveFilePath + ".bak");
+                File.Delete(saveFilePath);
+                currentSaveData = null;
+                Debug.Log("[SaveManager] Save files deleted.");
             }
             catch (Exception e)
             {
@@ -188,25 +161,13 @@ namespace DeliveryDriver.Quest
         public string GetLastSaveDate()
         {
             if (currentSaveData != null)
-            {
                 return currentSaveData.SaveDate;
-            }
 
-            if (File.Exists(saveFilePath))
-            {
-                try
-                {
-                    string json = File.ReadAllText(saveFilePath);
-                    GameSaveData saveData = JsonUtility.FromJson<GameSaveData>(json);
-                    return saveData?.SaveDate ?? "Unknown";
-                }
-                catch
-                {
-                    return "Error reading save";
-                }
-            }
+            if (GameSaveFileStore.TryRead(saveFilePath, out var data) ||
+                GameSaveFileStore.TryRead(saveFilePath + ".bak", out data))
+                return data.SaveDate;
 
-            return "No save";
+            return SaveFileExists() ? "Error reading save" : "No save";
         }
 
         /// <summary>
@@ -215,7 +176,8 @@ namespace DeliveryDriver.Quest
         /// <returns>True if save file exists</returns>
         public bool SaveFileExists()
         {
-            return File.Exists(saveFilePath);
+            return !string.IsNullOrEmpty(saveFilePath) &&
+                   (File.Exists(saveFilePath) || File.Exists(saveFilePath + ".bak"));
         }
 
         /// <summary>
