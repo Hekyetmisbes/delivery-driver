@@ -974,9 +974,6 @@ namespace TrafficSystem
                 rb.isKinematic = false;
                 rb.collisionDetectionMode = savedLodCollisionMode;
                 rb.interpolation = savedLodInterpolation;
-                rb.linearVelocity = resumeMotion ? lodVelocity : Vector3.zero;
-                rb.angularVelocity = Vector3.zero;
-                rb.WakeUp();
             }
             foreach (WheelCollider wheel in lodDisabledWheels)
             {
@@ -984,6 +981,14 @@ namespace TrafficSystem
                     wheel.enabled = true;
             }
             lodDisabledWheels.Clear();
+
+            if (rb != null)
+            {
+                // Re-enabling WheelColliders can reset the dynamic Rigidbody's velocity.
+                rb.linearVelocity = resumeMotion ? lodVelocity : Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+                rb.WakeUp();
+            }
 
             lodSpeedMs = 0f;
             lodVelocity = Vector3.zero;

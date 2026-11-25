@@ -62,7 +62,6 @@ namespace DeliveryDriver.Tests
                 var body = vehicle.GetComponent<Rigidbody>();
                 body.interpolation = RigidbodyInterpolation.Extrapolate;
                 body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-                body.linearVelocity = Vector3.forward * 8f;
                 var wheels = new WheelCollider[6];
                 for (int i = 0; i < wheels.Length; i++)
                 {
@@ -82,9 +81,12 @@ namespace DeliveryDriver.Tests
                 type.GetField("currentSegment", flags).SetValue(agent, road);
                 type.GetField("currentWaypointIndex", flags).SetValue(agent, 1);
                 Physics.SyncTransforms();
+                body.linearVelocity = Vector3.forward * 8f;
+                Assert.That(body.linearVelocity.z, Is.EqualTo(8f), "Initial dynamic speed");
 
                 Assert.That(type.GetMethod("TryEnterWaypointLod", flags).Invoke(agent, null), Is.True);
                 Assert.That(body.isKinematic, Is.True);
+                Assert.That(agent.SimulationVelocity.z, Is.EqualTo(8f), "Speed captured on LOD entry");
                 Assert.That(wheels[5].enabled, Is.False);
 
                 if (resumeMotion)
