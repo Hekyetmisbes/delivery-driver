@@ -19,7 +19,7 @@ namespace DeliveryDriver.EditorTools
         private ProceduralWorldPlanner.Layout layout;
         private ProceduralWorldPlanner.Plan preview;
         private Vector2 scroll;
-        private string status = "Detect the 28-tile layout in GameScene.";
+        private string status = "Detect the 24 land tiles and optional 4 sea tiles in GameScene.";
         private MessageType statusType = MessageType.Info;
         private bool showPreview = true;
         private bool busy;
@@ -57,13 +57,14 @@ namespace DeliveryDriver.EditorTools
         {
             scroll = EditorGUILayout.BeginScrollView(scroll);
             EditorGUILayout.LabelField("Procedural World Generator", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("Roads-only MVP: 4 x 3 Ankara + 4 x 1 sea + 4 x 3 Istanbul. Existing Simple Road Placement geometry; no EasyRoads.", MessageType.Info);
+            EditorGUILayout.HelpBox("Roads-only MVP: 4 x 3 Ankara + sea corridor + 4 x 3 Istanbul. Sea can be empty or contain four terrain tiles. Existing Simple Road Placement geometry; no EasyRoads.", MessageType.Info);
             using (new EditorGUI.DisabledScope(busy || EditorApplication.isPlayingOrWillChangePlaymode))
             {
-                if (GUILayout.Button("Detect 28 Terrain Tiles & City Roots", GUILayout.Height(28f))) Run(Detect);
+                if (GUILayout.Button("Detect Terrain Layout & City Roots", GUILayout.Height(28f))) Run(Detect);
                 if (layout != null)
                 {
-                    EditorGUILayout.LabelField("Layout", "12 land + 4 sea + 12 land");
+                    EditorGUILayout.LabelField("Layout", "12 land + " + layout.SeaTerrainCount + " sea terrains + 12 land");
+                    EditorGUILayout.LabelField("Sea corridor width", (layout.AlongMax(layout.sea) - layout.AlongMin(layout.sea)).ToString("F1") + " m");
                     EditorGUILayout.LabelField("Row direction", layout.rowsOnX ? "World X" : "World Z");
                     EditorGUILayout.LabelField("Tile size", layout.tiles[0].area.size.ToString());
                 }
@@ -167,16 +168,21 @@ namespace DeliveryDriver.EditorTools
         private void Detect()
         {
             Scene scene = SceneManager.GetActiveScene();
+            preview = null;
+            layout = null;
             layout = ProceduralWorldPlanner.DetectLayout(scene);
             settings.ankara = FindNamed(scene, "Ankara");
             settings.istanbul = FindNamed(scene, "İstanbul", "Istanbul");
             Transform sea = FindNamed(scene, "Sea Reference");
             if (sea != null) settings.seaY = sea.position.y;
+            bool sideKnown = true;
             if (TryInferSide(settings.ankara, out bool isLow)) settings.ankaraLow = isLow;
             else if (TryInferSide(settings.istanbul, out isLow)) settings.ankaraLow = !isLow;
-            else SetStatus("28 tiles detected; verify which side is Ankara using the checkbox.", MessageType.Warning);
-            preview = null;
-            SetStatus("Detected 28 tiles. Verify city roots, Ankara side and Sea surface Y; then preview.");
+            else sideKnown = false;
+            SetStatus("Detected " + layout.tiles.Count + " terrains (24 land, " + layout.SeaTerrainCount +
+                " sea). " + (sideKnown ? "Verify city roots, Ankara side and Sea surface Y; then preview." :
+                    "City side could not be inferred; set the Ankara side checkbox and city roots manually."),
+                sideKnown ? MessageType.Info : MessageType.Warning);
         }
 
         private bool TryInferSide(Transform root, out bool low)
@@ -517,7 +523,7 @@ namespace DeliveryDriver.EditorTools
             Handles.color = new Color(.95f, .65f, .25f, .9f);
             DrawArea(layout.Istanbul(settings.ankaraLow), "Istanbul (12 tiles)");
             Handles.color = new Color(.25f, .45f, 1f, .8f);
-            DrawArea(layout.sea, "Sea (4 tiles)");
+            DrawArea(layout.sea, layout.SeaTerrainCount == 0 ? "Sea (empty corridor)" : "Sea (4 tiles)");
             if (preview == null) return;
             foreach (var edge in preview.edges)
             {

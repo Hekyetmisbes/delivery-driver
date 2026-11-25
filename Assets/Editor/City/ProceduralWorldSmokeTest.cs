@@ -61,7 +61,31 @@ namespace DeliveryDriver.EditorTools
                 }
                 Require(both != null, "No flat synthetic two-city seed could be planned.");
                 Verify(both, settings, 2);
-                Debug.Log("[ProceduralWorldSmoke] PASS: 28-tile detection, deterministic Ankara plan, two-city graph, two bridge paths and grade checks. No assets written.");
+                // Remove only the sea row and repeat with 24 real Terrain components.
+                foreach (var tile in layout.tiles.Where(t => t.row == 3).ToList())
+                    Object.DestroyImmediate(tile.terrain.gameObject);
+                var emptySea = ProceduralWorldPlanner.DetectLayout(scene);
+                Require(emptySea.tiles.Count == 24 && emptySea.SeaTerrainCount == 0 && emptySea.rowsOnX,
+                    "24-tile empty-sea layout detection failed.");
+                Require(emptySea.sea == layout.sea, "Inferred sea bounds changed after removing sea tiles.");
+                Require(!emptySea.TryHeight(emptySea.sea.center, out _), "Empty sea unexpectedly reports terrain.");
+                var emptyPlan = ProceduralWorldPlanner.Build(settings, emptySea, scene);
+                Verify(emptyPlan, settings, 2);
+                // Rotate the placement convention (not the Terrain objects): the same layout must work on Z.
+                foreach (var tile in emptySea.tiles)
+                {
+                    Vector3 pos = tile.terrain.transform.position;
+                    tile.terrain.transform.position = new Vector3(pos.z, pos.y, pos.x);
+                }
+                var transposed = ProceduralWorldPlanner.DetectLayout(scene);
+                Require(!transposed.rowsOnX && transposed.tiles.Count == 24 &&
+                    Mathf.Abs(transposed.sea.height - 200f) < .01f, "Z-axis empty-sea detection failed.");
+                // A wider empty sea is also valid; bridge length follows the actual shores.
+                foreach (var tile in transposed.tiles.Where(t => t.row > 3))
+                    tile.terrain.transform.position += Vector3.forward * 100f;
+                var wider = ProceduralWorldPlanner.DetectLayout(scene);
+                Require(Mathf.Abs(wider.sea.height - 300f) < .01f, "Actual sea gap width was not inferred.");
+                Debug.Log("[ProceduralWorldSmoke] PASS: 28/24 terrain detection, empty sea bridges, X/Z orientation, real sea width, deterministic road plan and grade checks. No assets written.");
             }
             catch (Exception ex)
             {

@@ -38,6 +38,7 @@ namespace DeliveryDriver.EditorTools
             public readonly List<Tile> tiles = new List<Tile>();
             public Rect low, high, sea;
             public bool rowsOnX;
+            public int SeaTerrainCount => tiles.Count(t => t.row == 3);
             public Rect Ankara(bool lowSide) => lowSide ? low : high;
             public Rect Istanbul(bool lowSide) => lowSide ? high : low;
             public bool TryHeight(Vector2 p, out float height)
@@ -178,8 +179,8 @@ namespace DeliveryDriver.EditorTools
             var terrains = new List<Terrain>();
             foreach (GameObject root in scene.GetRootGameObjects())
                 terrains.AddRange(root.GetComponentsInChildren<Terrain>(true).Where(t => t.terrainData != null));
-            if (terrains.Count != 28)
-                throw new InvalidOperationException("Expected 28 Terrain objects (12 Ankara + 4 sea + 12 Istanbul); found " + terrains.Count + ".");
+            if (terrains.Count != 24 && terrains.Count != 28)
+                throw new InvalidOperationException("Expected 24 land Terrain objects, with either an empty sea corridor or 4 additional sea Terrain objects (28 total); found " + terrains.Count + ".");
             var layout = new Layout();
             Vector3 size = terrains[0].terrainData.size;
             float epsilon = Mathf.Max(0.1f, Mathf.Min(size.x, size.z) * 0.002f);
@@ -194,27 +195,53 @@ namespace DeliveryDriver.EditorTools
             }
             List<float> xs = Cluster(layout.tiles.Select(t => t.area.xMin), epsilon);
             List<float> zs = Cluster(layout.tiles.Select(t => t.area.yMin), epsilon);
-            if (!((xs.Count == 7 && zs.Count == 4) || (xs.Count == 4 && zs.Count == 7)))
-                throw new InvalidOperationException("Terrain layout must be 4 x 7 contiguous tiles; detected " + xs.Count + " x " + zs.Count + ".");
-            for (int i = 1; i < xs.Count; i++)
-                if (Mathf.Abs(xs[i] - xs[i - 1] - size.x) > epsilon) throw new InvalidOperationException("Terrain X seam has a gap or overlap.");
-            for (int i = 1; i < zs.Count; i++)
-                if (Mathf.Abs(zs[i] - zs[i - 1] - size.z) > epsilon) throw new InvalidOperationException("Terrain Z seam has a gap or overlap.");
-            layout.rowsOnX = xs.Count == 7;
+            // The sea may be empty space rather than four Unity Terrain components.
+            // Keep logical row 3 reserved for water in both cases.
+            bool hasSeaTiles = terrains.Count == 28;
+            int physicalRows = hasSeaTiles ? 7 : 6;
+            if (!((xs.Count == physicalRows && zs.Count == 4) ||
+                  (xs.Count == 4 && zs.Count == physicalRows)))
+                throw new InvalidOperationException("Expected two 4 x 3 land blocks " +
+                    (hasSeaTiles ? "with a four-tile sea row" : "separated by an empty sea gap") +
+                    "; detected " + xs.Count + " x " + zs.Count + " distinct terrain coordinates.");
+            layout.rowsOnX = xs.Count == physicalRows;
+            List<float> along = layout.rowsOnX ? xs : zs;
+            List<float> across = layout.rowsOnX ? zs : xs;
+            float alongSize = layout.rowsOnX ? size.x : size.z;
+            float acrossSize = layout.rowsOnX ? size.z : size.x;
+            for (int i = 1; i < across.Count; i++)
+                if (Mathf.Abs(across[i] - across[i - 1] - acrossSize) > epsilon)
+                    throw new InvalidOperationException("Terrain columns have a gap or overlap.");
+            for (int i = 1; i < along.Count; i++)
+            {
+                float gap = along[i] - along[i - 1] - alongSize;
+                if (!hasSeaTiles && i == 3)
+                {
+                    if (gap <= epsilon)
+                        throw new InvalidOperationException("24 land tiles detected, but no positive sea gap separates the two 4 x 3 city blocks.");
+                }
+                else if (Mathf.Abs(gap) > epsilon)
+                    throw new InvalidOperationException("Unexpected terrain seam gap or overlap at city row " + i + ".");
+            }
             var occupied = new HashSet<Vector2Int>();
             foreach (Tile tile in layout.tiles)
             {
                 int x = xs.FindIndex(v => Mathf.Abs(v - tile.area.xMin) <= epsilon);
                 int z = zs.FindIndex(v => Mathf.Abs(v - tile.area.yMin) <= epsilon);
-                tile.row = layout.rowsOnX ? x : z;
+                int physicalRow = layout.rowsOnX ? x : z;
+                tile.row = !hasSeaTiles && physicalRow >= 3 ? physicalRow + 1 : physicalRow;
                 tile.column = layout.rowsOnX ? z : x;
                 if (!occupied.Add(new Vector2Int(tile.row, tile.column)))
                     throw new InvalidOperationException("Overlapping terrain tile coordinates.");
             }
             layout.tiles.Sort((a, b) => a.row == b.row ? a.column.CompareTo(b.column) : a.row.CompareTo(b.row));
             layout.low = Union(layout.tiles.Where(t => t.row < 3).Select(t => t.area));
-            layout.sea = Union(layout.tiles.Where(t => t.row == 3).Select(t => t.area));
             layout.high = Union(layout.tiles.Where(t => t.row > 3).Select(t => t.area));
+            // Infer the real corridor width from the facing city shores.
+            // Never fabricate a TerrainData asset for an empty sea row.
+            layout.sea = layout.rowsOnX
+                ? Rect.MinMaxRect(layout.low.xMax, layout.low.yMin, layout.high.xMin, layout.low.yMax)
+                : Rect.MinMaxRect(layout.low.xMin, layout.low.yMax, layout.low.xMax, layout.high.yMin);
             return layout;
         }
 
@@ -289,7 +316,16 @@ namespace DeliveryDriver.EditorTools
                 if (obstacles.Near(p, RoadClearance) || IsProtected(p, RoadClearance)) return false;
                 float y = along < shoreA ? Mathf.SmoothStep(yA, deck, (along - alongA) / (shoreA - alongA)) :
                     along > shoreB ? Mathf.SmoothStep(deck, yB, (along - shoreB) / (alongB - shoreB)) : deck;
-                if (!l.TryHeight(p, out float ground) || ground > y + settings.maxCutFill - .12f) return false;
+                // No terrain under a bridge in the reserved water corridor is valid.
+                // Missing terrain anywhere on a land approach remains an error.
+                if (l.TryHeight(p, out float ground))
+                {
+                    if (ground > y + settings.maxCutFill - .12f) return false;
+                }
+                else if (!l.sea.Contains(p))
+                {
+                    return false;
+                }
                 Vector3 point = XYZ(p, y);
                 if (points.Count > 0 && !GradeOk(points[points.Count - 1], point)) return false;
                 points.Add(point);

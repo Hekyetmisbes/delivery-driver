@@ -152,7 +152,11 @@ namespace DeliveryDriver.EditorTools
                     for (int side = -1; side <= 1; side++)
                     {
                         Vector2 p = ProceduralWorldPlanner.XZ(center) + right * side * settings.width * .5f;
-                        if (!plan.layout.TryHeight(p, out float ground)) continue;
+                        if (!plan.layout.TryHeight(p, out float ground))
+                        {
+                            if (edge.Bridge && plan.layout.sea.Contains(p)) continue;
+                            throw new InvalidOperationException("Missing land terrain under planned road at " + center + ".");
+                        }
                         float penetration = ground - (center.y + .03f);
                         if (penetration > .08f)
                         {

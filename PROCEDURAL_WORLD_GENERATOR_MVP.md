@@ -6,8 +6,8 @@ Branch: feature/procedural-world-generator-mvp
 
 1. Pull the branch and open **a copy of GameScene.unity**. Ensure Git LFS assets are present.
 2. Open **Tools > Delivery Driver > City > Procedural World Generator**.
-3. Click **Detect 28 Terrain Tiles & City Roots**. The scene must contain exactly 28 contiguous, axis-aligned, equally sized Terrain objects in a 4x7 (or 7x4) layout.
-4. Check the Ankara and Istanbul root fields, side toggle, and **Sea surface Y**. The four middle terrain tiles are the sea corridor; no normal city roads or terrain deformation are allowed there.
+3. Click **Detect Terrain Layout & City Roots**. The scene must contain 24 land Terrain objects in two axis-aligned, equally sized 4x3 blocks with a positive sea gap, or 28 Terrain objects including the four middle sea tiles. Both X and Z layouts are supported.
+4. Check the Ankara and Istanbul root fields, side toggle, and **Sea surface Y**. The actual gap between city shores (empty space or four sea tiles) is the sea corridor; no normal city roads or terrain deformation are allowed there.
 5. To test just Ankara, uncheck Generate Istanbul. Keep Protect existing Kizilay district enabled. Click **Preview Layout**. Cyan/orange lines are roads; yellow lines are the two bridge routes when both cities are selected.
 6. Review warnings. If a city cannot connect its two gates, try a different seed or spacing. If the terrain is too steep, change the cut/fill budget cautiously or test one city first.
 7. Click **Generate Roads & Bridges**. The tool clones affected land TerrainData and uses the existing SimpleRoadPlacementTool mesh, collider, sidewalk, lane marking, intersection, and bridge code.
@@ -15,7 +15,7 @@ Branch: feature/procedural-world-generator-mvp
 
 ## What this MVP does
 
-- Exact 12+4+12 terrain layout detection, seeded scattered road nodes, district-sensitive node spacing, connected road component and optional cycles, varied curved paths rather than a square road grid.
+- 12+12 land tile detection with optional four sea tiles, real corridor width, seeded scattered road nodes, district-sensitive node spacing, connected road component and optional cycles, varied curved paths rather than a square road grid.
 - Bounded elevation profiles and corridor-local cut/fill on cloned land tiles; no writes to sea tiles, protected Kizilay or the immediate area of existing authored roads.
 - Shared explicit intersection references and the same sampled road polyline for the spline and baked asphalt geometry; one network refresh after baking.
 - Two actual bridge paths spanning the middle row (if both cities selected and a feasible plan exists). Bridge supports use the existing road generator.
@@ -37,8 +37,8 @@ Branch: feature/procedural-world-generator-mvp
 ## Test checklist
 
 - [ ] No compile errors after Unity imports the new files.
-- [ ] Run Tools > Delivery Driver > City > Run Procedural Planner Smoke Test and confirm PASS in Console (temporary synthetic flat 28-tile scene, no scene assets written).
-- [ ] Detect confirms 28 tiles and the correct city sides.
+- [ ] Run Tools > Delivery Driver > City > Run Procedural Planner Smoke Test and confirm PASS in Console (temporary synthetic flat 28/24-tile scene, no scene assets written).
+- [ ] Detect confirms 24 or 28 terrain objects, correct city sides and real sea gap.
 - [ ] Preview does not change the scene or terrain assets.
 - [ ] Ankara-only preview/generation preserves Kizilay.
 - [ ] Roads have usable spline, asphalt and MeshCollider on Road layer.
