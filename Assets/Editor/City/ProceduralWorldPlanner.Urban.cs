@@ -46,7 +46,8 @@ namespace DeliveryDriver.EditorTools
             InvalidOperationException failure = null;
             try { candidate = BuildOnce(settings, layout, scene); }
             catch (InvalidOperationException ex) { failure = ex; }
-            if (settings.urbanGuard || candidate == null)
+            if(candidate==null && !settings.urbanGuard) throw failure ?? new InvalidOperationException("V6 candidate failed.");
+            if (settings.urbanGuard)
             {
                 try
                 {
@@ -110,7 +111,7 @@ namespace DeliveryDriver.EditorTools
                 if(cell==null)continue;
                 penalty+=Mathf.Abs(Vector2.Dot(direction,cell.uphill))*cell.slope*6f;
             }
-            return penalty/3f*settings.contourPreference*(settings.urbanMode==UrbanMode.ContourFirst?2f:1f);
+            return penalty/3f*settings.contourPreference*(settings.urbanMode==UrbanMode.ContourFirst?2f:settings.urbanMode==UrbanMode.DistrictBased?.40f:1f);
         }
 
         private float UrbanProfileCost(List<Vector3> path)
@@ -135,6 +136,31 @@ namespace DeliveryDriver.EditorTools
         }
 
         private bool Reserved(Vector2 p,float margin) => plan.openSpaces.Any(a=>Contains(a.bounds,p,margin));
+
+        internal static bool SegmentHitsRect(Vector2 a,Vector2 b,Rect rect,float margin)
+        {
+            Vector2 delta=b-a;float lo=0f,hi=1f;
+            bool Clip(float p,float q)
+            {
+                if(Mathf.Abs(p)<.000001f)return q>=0f;
+                float t=q/p;
+                if(p<0f)lo=Mathf.Max(lo,t);else hi=Mathf.Min(hi,t);
+                return lo<=hi;
+            }
+            return Clip(-delta.x,a.x-rect.xMin+margin)&&Clip(delta.x,rect.xMax+margin-a.x)&&
+                Clip(-delta.y,a.y-rect.yMin+margin)&&Clip(delta.y,rect.yMax+margin-a.y);
+        }
+        private bool PathHitsReservation(List<Vector3> path)
+        {
+            Rect box=BoundsOf(path,RoadClearance);
+            foreach(var space in plan.openSpaces)
+            {
+                if(!space.bounds.Overlaps(box))continue;
+                for(int i=1;i<path.Count;i++)
+                    if(SegmentHitsRect(XZ(path[i-1]),XZ(path[i]),space.bounds,RoadClearance))return true;
+            }
+            return false;
+        }
 
         private UrbanArea MakeArea(Rect area,string sector,string district,AreaKind kind)
         {
@@ -174,7 +200,8 @@ namespace DeliveryDriver.EditorTools
                 if(block.width<=inset*2f+30f||block.height<=inset*2f+30f)continue;
                 Rect r=Rect.MinMaxRect(block.xMin+inset,block.yMin+inset,block.xMax-inset,block.yMax-inset);
                 if(protectedAreas.Any(p=>p.Overlaps(r)))continue;
-                if(plan.edges.Any(e=>e.Bridge&&e.points.Any(p=>Contains(r,XZ(p),RoadClearance*2f))))continue;
+                if(plan.edges.Any(e=>e.Bridge&&Enumerable.Range(1,e.points.Count-1).Any(i=>
+                    SegmentHitsRect(XZ(e.points[i-1]),XZ(e.points[i]),r,RoadClearance*2f))))continue;
                 var samples=new[]{r.center,new Vector2(r.xMin,r.yMin),new Vector2(r.xMax,r.yMin),
                     new Vector2(r.xMax,r.yMax),new Vector2(r.xMin,r.yMax)};
                 if(samples.Any(p=>obstacles.Near(p,RoadClearance*2f)))continue;
@@ -212,8 +239,11 @@ namespace DeliveryDriver.EditorTools
         {
             var boundary=nodes.Where(n=>!n.gate).ToList();
             int total=0,blocks=0;
+            int scanned=0;
             foreach(Rect block in UrbanBlocks(xs,zs))
             {
+                if(++scanned%24==0&&EditorUtility.DisplayCancelableProgressBar("Procedural World",sector+": independent neighborhood blocks "+scanned,.24f))
+                    throw new OperationCanceledException();
                 if(nodes.Count>=budget)break;
                 var regions=districts.Where(d=>d.area.Overlaps(block)).Select(d=>
                     Rect.MinMaxRect(Mathf.Max(block.xMin,d.area.xMin),Mathf.Max(block.yMin,d.area.yMin),
@@ -306,6 +336,7 @@ namespace DeliveryDriver.EditorTools
             BuildAnalysisLines();
             BuildEarthworkLines();
             BuildParcels();
+            ValidateUrbanPlan();
             foreach(var anchor in settings.accessAnchors)
             {
                 Vector3 pos=anchor.road!=null?anchor.road.GetPoint(Mathf.Clamp01(anchor.t)):Vector3.zero;
@@ -316,9 +347,25 @@ namespace DeliveryDriver.EditorTools
             if(plan.accessResults.Any(a=>!a.connected))
                 plan.warnings.Add("Manual anchors: "+plan.accessResults.Count(a=>a.connected)+"/"+plan.accessResults.Count+
                     " feasible. Unresolved anchors remain visible in red; no authored roads were modified.");
-            plan.notes.Add("Parcel preview: "+plan.parcels.Count+" sampled building lots; "+plan.openSpaces.Count+" park/plaza reservations. No buildings placed.");
+            plan.notes.Add("Parcel preview: "+plan.parcels.Count+" sampled building lots (cap 3000 total); "+plan.openSpaces.Count+" park/plaza reservations. No buildings placed.");
             foreach(string sector in new[]{"Ankara","İstanbul"})
                 if(plan.edges.Any(e=>e.sector==sector))plan.notes.Add(sector+" earthworks: "+EarthworkSummary(plan,sector,settings)+".");
+        }
+
+        private void ValidateUrbanPlan()
+        {
+            foreach(var edge in plan.edges.Concat(plan.authoredLinks))
+                if(PathHitsReservation(edge.points))
+                    throw new InvalidOperationException("Road corridor crosses a reserved open space; V6 candidate rejected.");
+            foreach(var lot in plan.parcels)
+            {
+                if(plan.openSpaces.Any(a=>a.bounds.Overlaps(lot.bounds)))
+                    throw new InvalidOperationException("Building lot overlaps a reserved open space.");
+                if(protectedAreas.Any(a=>a.Overlaps(lot.bounds)))
+                    throw new InvalidOperationException("Building lot overlaps protected district.");
+            }
+            if(plan.edges.Any(e=>e.points.Count<2 || e.points[0]!=e.a.position || e.points[e.points.Count-1]!=e.b.position))
+                throw new InvalidOperationException("V6 graph has an invalid path endpoint.");
         }
 
         private void BuildAnalysisLines()
@@ -414,8 +461,11 @@ namespace DeliveryDriver.EditorTools
             }
             var counts=new Dictionary<string,int>();
             int perCity=settings.buildAnkara&&settings.buildIstanbul?1500:3000;
+            int processed=0;
             foreach(var e in plan.edges.Where(e=>!e.Bridge).OrderBy(e=>e.kind==RoadKind.Local?0:1).ThenBy(e=>e.a.id))
             {
+                if(++processed%120==0&&EditorUtility.DisplayCancelableProgressBar("Procedural World","Screening roadside lots ("+processed+" roads)",.82f))
+                    throw new OperationCanceledException();
                 if(plan.parcels.Count>=3000)break;
                 counts.TryGetValue(e.sector,out int sectorCount);
                 if(sectorCount>=perCity)continue;

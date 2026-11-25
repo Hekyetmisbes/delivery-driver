@@ -375,8 +375,10 @@ namespace DeliveryDriver.EditorTools
             return pos+shift;
         }
 
+        private readonly Dictionary<StreetCandidate,float> terrainCostCache = new Dictionary<StreetCandidate,float>();
         private float TerrainCandidateCost(StreetCandidate c)
         {
+            if(settings.urbanDesign && terrainCostCache.TryGetValue(c,out float cached))return cached;
             Vector2 a=XZ(c.a.position),b=XZ(c.b.position);
             Vector2 direction=(b-a).normalized;
             float penalty=0f;
@@ -388,7 +390,9 @@ namespace DeliveryDriver.EditorTools
                 penalty+=Mathf.Max(0f,along-settings.grade*.5f)*6f+cell.roughness*.07f;
             }
             float contour = settings.urbanDesign ? ContourPenalty(a,b) : 0f;
-            return c.length*(1f+settings.terrainInfluence*penalty/3f+contour);
+            float cost=c.length*(1f+settings.terrainInfluence*penalty/3f+contour);
+            if(settings.urbanDesign)terrainCostCache[c]=cost;
+            return cost;
         }
 
         // A sampled cost proxy, not a cubic-meter earthworks estimate.
@@ -849,9 +853,10 @@ namespace DeliveryDriver.EditorTools
         private void PlanHierarchy(string sector, Rect bounds)
         {
             diagnostics = new StreetDiagnostics();
+            terrainCostCache.Clear();
             bool backbone = sector == "Ankara" && settings.ankaraBackbone;
             gradingSurface = backbone && settings.districtGrading ? new GradingSurface(plan.layout, bounds, settings.grade) : null;
-            bool adaptive = settings.terrainDesign;
+            bool adaptive = settings.terrainDesign || settings.urbanDesign;
             bool urban = settings.urbanDesign;
             var gates = plan.nodes.Where(n => n.sector == sector && n.gate).ToList();
             var nodes = new List<Node>(gates);
@@ -1299,7 +1304,7 @@ namespace DeliveryDriver.EditorTools
                 if(group.Count>0)targets.Add(group);
             }
             foreach(Node gate in gates.Where(g=>g!=root))targets.Add(new List<Node>{gate});
-            if(settings.terrainDesign)
+            if(settings.terrainDesign || settings.urbanDesign)
                 targets.InsertRange(0,plan.authoredLinks.Where(e=>e.sector==root.sector && e.b!=root).Select(e=>new List<Node>{e.b}));
             int reached=0,links=0,routed=0;
             foreach(var goalNodes in targets)
@@ -1335,7 +1340,7 @@ namespace DeliveryDriver.EditorTools
                             if(!same&&(n.degree>=DegreeLimit(n)||next.degree>=DegreeLimit(next)))continue;
                             float rise=Mathf.Abs(n.position.y-next.position.y);
                             if(!same&&rise>c.length*settings.grade+.01f)continue;
-                            float price = item.cost + (same ? .001f : (settings.terrainDesign ? TerrainCandidateCost(c) : c.length) * (c.kind == RoadKind.Arterial ? .8f : c.kind == RoadKind.Collector ? 1f : 1.18f) + rise * 2f);
+                            float price = item.cost + (same ? .001f : ((settings.terrainDesign || settings.urbanDesign) ? TerrainCandidateCost(c) : c.length) * (c.kind == RoadKind.Arterial ? .8f : c.kind == RoadKind.Collector ? 1f : 1.18f) + rise * 2f);
                             if(cost.TryGetValue(next,out float old)&&old<=price)continue;
                             cost[next]=price;previous[next]=(n,c);queue.Add((price,next.id,next));
                         }
@@ -1636,7 +1641,7 @@ namespace DeliveryDriver.EditorTools
                 if(!StreetAngles(a,b,path,index)||StreetCrosses(a,b,path,index))
                 { if (diagnostics != null) diagnostics.geometryRejected++; continue; }
                 if(authored&&!ProtectedSurfaceOk(path))continue;
-                if (!settings.terrainDesign) { points=path;return true; }
+                if (!settings.terrainDesign && !settings.urbanDesign) { points=path;return true; }
                 float cost = ProfileCost(path) + Mathf.Abs(offset) * .02f;
                 if(settings.urbanDesign)cost += UrbanProfileCost(path);
                 if (cost < bestCost) { bestCost=cost; points=path; }
@@ -1662,6 +1667,7 @@ namespace DeliveryDriver.EditorTools
 
         private bool StreetCrosses(Node a,Node b,List<Vector3> path,StreetIndex index)
         {
+            if(settings.urbanDesign && PathHitsReservation(path))return true;
             float gap=RoadClearance*2f;
             Rect box=BoundsOf(path,gap);
             foreach(Edge e in index.Query(box))

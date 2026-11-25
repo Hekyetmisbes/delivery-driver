@@ -36,6 +36,8 @@ namespace DeliveryDriver.EditorTools
         private readonly Dictionary<int,Vector3[]> lineBatches = new Dictionary<int,Vector3[]>();
         private readonly Dictionary<ProceduralWorldPlanner.TerrainAnalysisCell,Vector3[]> cellQuads = new Dictionary<ProceduralWorldPlanner.TerrainAnalysisCell,Vector3[]>();
         private float elevationMin,elevationMax;
+        private ProceduralWorldPlanner.Plan statsPlan;
+        private string roadClassCounts, roadLengthText;
         private List<(SplineRoad road,float t,Vector3 point)> anchorSamples;
         private bool busy;
 
@@ -188,6 +190,7 @@ namespace DeliveryDriver.EditorTools
                 if (preview != null && analysisOnly)
                 {
                     foreach (string note in preview.notes) EditorGUILayout.HelpBox(note, MessageType.Info);
+                    foreach (string warning in preview.warnings) EditorGUILayout.HelpBox(warning, MessageType.Warning);
                 }
                 if (preview != null && !analysisOnly)
                 {
@@ -202,16 +205,21 @@ namespace DeliveryDriver.EditorTools
                     EditorGUILayout.LabelField("Detached preview segments", preview.detachedEdges.Count.ToString());
                     if (preview.detachedEdges.Count > 0)
                         EditorGUILayout.HelpBox("Purple streets passed their individual path checks but do NOT connect to the retained network. They are diagnostic only.", MessageType.Warning);
-                    EditorGUILayout.LabelField("Arterial / collector / local",
-                        preview.edges.Count(e => e.kind == ProceduralWorldPlanner.RoadKind.Arterial) + " / " +
-                        preview.edges.Count(e => e.kind == ProceduralWorldPlanner.RoadKind.Collector) + " / " +
-                        preview.edges.Count(e => e.kind == ProceduralWorldPlanner.RoadKind.Local));
+                    if(statsPlan!=preview)
+                    {
+                        statsPlan=preview;
+                        roadClassCounts=preview.edges.Count(e=>e.kind==ProceduralWorldPlanner.RoadKind.Arterial)+" / "+
+                            preview.edges.Count(e=>e.kind==ProceduralWorldPlanner.RoadKind.Collector)+" / "+
+                            preview.edges.Count(e=>e.kind==ProceduralWorldPlanner.RoadKind.Local);
+                        roadLengthText=(preview.edges.Sum(e=>PathLength(e.points))/1000f).ToString("F2")+" km";
+                    }
+                    EditorGUILayout.LabelField("Arterial / collector / local",roadClassCounts);
                     EditorGUILayout.LabelField("Existing-road proposals", preview.authoredLinks.Count.ToString());
                     foreach (string note in preview.notes) EditorGUILayout.HelpBox(note, MessageType.Info);
                     EditorGUILayout.LabelField("Planned bridge links", preview.BridgeCount.ToString());
                     if (settings.bridges && settings.buildAnkara && settings.buildIstanbul && preview.BridgeCount != 2)
                         EditorGUILayout.HelpBox("Requested bridge links are missing from this preview. Check the bridge diagnostic below.", MessageType.Warning);
-                    EditorGUILayout.LabelField("Road length", (preview.edges.Sum(e => PathLength(e.points)) / 1000f).ToString("F2") + " km");
+                    EditorGUILayout.LabelField("Road length",roadLengthText);
                     foreach (string warning in preview.warnings) EditorGUILayout.HelpBox(warning, MessageType.Warning);
                 }
                 bool hasBuild = FindStates(SceneManager.GetActiveScene()).Count > 0;
@@ -334,9 +342,11 @@ namespace DeliveryDriver.EditorTools
             if (EditorUtility.DisplayCancelableProgressBar("Procedural World", "Planning safe roads and bridge approaches", .05f))
                 throw new OperationCanceledException();
             preview = null;
+            var stopwatch=System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 preview = ProceduralWorldPlanner.Build(settings, layout, scene);
+                preview.notes.Insert(0,"Planning elapsed: "+stopwatch.Elapsed.TotalSeconds.ToString("F1")+" s (including selected guard comparisons).");
                 SetStatus("Preview ready: " + preview.edges.Count + " retained segments, " + preview.detachedEdges.Count + " detached, " + preview.BridgeCount + " planned bridges. No scene assets changed.", preview.detachedEdges.Count > 0 ? MessageType.Warning : MessageType.Info);
             }
             catch (ProceduralWorldPlanner.BridgePlanningException ex) when (allowBridgeFallback)
@@ -730,7 +740,6 @@ namespace DeliveryDriver.EditorTools
                         Vector3 at=anchor.road.GetPoint(anchor.t)+Vector3.up*1.5f;
                         Handles.SphereHandleCap(0,at,Quaternion.identity,HandleUtility.GetHandleSize(at)*.14f,EventType.Repaint);
                     }
-                    Handles.color = new Color(.24f, 1f, .35f, 1f);
                     Handles.color = new Color(.24f, 1f, .35f, 1f);
                     foreach (var link in preview.authoredLinks)
                     {
