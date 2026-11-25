@@ -9,7 +9,7 @@ using UnityEngine.SceneManagement;
 
 namespace DeliveryDriver.EditorTools
 {
-    internal sealed class ProceduralWorldPlanner
+    internal sealed partial class ProceduralWorldPlanner
     {
         internal sealed class Settings
         {
@@ -20,6 +20,10 @@ namespace DeliveryDriver.EditorTools
             public float arterialSpacing = 600f, collectorSpacing = 250f, straightPreference = .70f, bridgeSeparation = .65f;
             public int nodesPerTile = 180, authoredLinkTarget = 4;
             public bool terrainRepair = true;
+            public bool urbanDesign = true, urbanGuard = true;
+            public UrbanMode urbanMode = UrbanMode.TerrainAdaptive;
+            public float contourPreference = .85f, openSpaceFraction = .12f, gradingOptimization = .9f;
+            public readonly List<AccessAnchor> accessAnchors = new List<AccessAnchor>();
             public bool terrainDesign = true, preserveV4Coverage = true;
             public float terrainInfluence = .65f, districtVariation = .65f, earthworkPreference = .8f;
             public bool ankaraBackbone = true, districtGrading = true;
@@ -98,6 +102,13 @@ namespace DeliveryDriver.EditorTools
             public readonly List<Edge> authoredLinks = new List<Edge>();
             public readonly List<Vector3> gradingMarkers = new List<Vector3>();
             public readonly List<TerrainAnalysisCell> terrainCells = new List<TerrainAnalysisCell>();
+            public readonly List<UrbanArea> openSpaces = new List<UrbanArea>();
+            public readonly List<UrbanArea> parcels = new List<UrbanArea>();
+            public readonly List<AnalysisLine> contours = new List<AnalysisLine>();
+            public readonly List<AnalysisLine> seams = new List<AnalysisLine>();
+            public readonly List<AnalysisLine> earthworks = new List<AnalysisLine>();
+            public readonly List<AnchorResult> accessResults = new List<AnchorResult>();
+            public string version = "V5";
             public readonly List<Edge> detachedEdges = new List<Edge>(); // Feasible individual roads, not connected to the retained network.
             public readonly List<Rect> protectedAreas = new List<Rect>();
             public Func<Vector2, float, bool> manualRoadNear;
@@ -279,6 +290,7 @@ namespace DeliveryDriver.EditorTools
         {
             var planner = new ProceduralWorldPlanner(settings, layout, scene);
             planner.AnalyzeTerrain();
+            planner.BuildAnalysisLines();
             return planner.plan;
         }
 
@@ -451,7 +463,7 @@ namespace DeliveryDriver.EditorTools
             return p.edges.All(e=>visited.Contains(e.a)&&visited.Contains(e.b));
         }
 
-        internal static Plan Build(Settings settings, Layout layout, Scene scene)
+        private static Plan BuildV5(Settings settings, Layout layout, Scene scene)
         {
             if(!settings.terrainDesign || !settings.preserveV4Coverage)return BuildOnce(settings,layout,scene);
             // Compare against the same-seed V4 algorithm, without modifying the scene.
@@ -502,6 +514,7 @@ namespace DeliveryDriver.EditorTools
             planner.gradingSurface = null;
             if (settings.buildIstanbul) planner.PlanHierarchy("İstanbul", layout.Istanbul(settings.ankaraLow));
             if (planner.plan.edges.Count == 0) throw new InvalidOperationException("No valid roads. Increase spacing or cut/fill tolerance, or check the terrain.");
+            if (settings.urbanDesign) planner.FinishUrbanPlan();
             return planner.plan;
         }
 
@@ -518,7 +531,7 @@ namespace DeliveryDriver.EditorTools
         private sealed class BridgeCandidate
         {
             public List<Vector3> path;
-            public float acrossMin, acrossMax;
+            public float acrossMin, acrossMax, score;
         }
 
         private void PlanBridges()
@@ -533,6 +546,7 @@ namespace DeliveryDriver.EditorTools
             var accepted = new List<BridgeCandidate>();
             BridgeCandidate bestA = null, bestB = null;
             float bestGap = -1f, desiredGap = span * settings.bridgeSeparation;
+            float bestPairScore = float.NegativeInfinity;
             int attempts = 0;
             // Prefer well-separated crossings, but permit both in the same free coastal district.
             // Search both sides independently; the gap's actual measured width is used.
@@ -571,21 +585,26 @@ namespace DeliveryDriver.EditorTools
                             failures[(int)rejection]++;
                             continue;
                         }
-                        var candidate = new BridgeCandidate { path = path, acrossMin = candidateMin, acrossMax = candidateMax };
+                        var candidate = new BridgeCandidate { path = path, acrossMin = candidateMin, acrossMax = candidateMax,
+                            score = settings.urbanDesign ? BridgeApproachCost(path) : 0f };
                         // Disjoint lateral envelopes guarantee that the two straight crossings
                         // and their approach ramps cannot cross each other.
                         foreach (BridgeCandidate partner in accepted)
                         {
                             float gap = Mathf.Max(candidate.acrossMin - partner.acrossMax,
                                 partner.acrossMin - candidate.acrossMax);
-                            if (gap < separation || gap <= bestGap) continue;
-                            bestGap = gap; bestA = partner; bestB = candidate;
+                            if (gap < separation) continue;
+                            float score = gap - (candidate.score + partner.score) * .18f;
+                            // Meeting the requested separation takes precedence over approach cost.
+                            if (settings.urbanDesign && gap >= desiredGap) score += span;
+                            if (settings.urbanDesign ? score <= bestPairScore : gap <= bestGap) continue;
+                            bestPairScore = score; bestGap = gap; bestA = partner; bestB = candidate;
                         }
                         accepted.Add(candidate);
                         break;
                     }
                 }
-                if (bestGap >= desiredGap) break;
+                if (bestGap >= desiredGap && (!settings.urbanDesign || Mathf.Abs(diagonal) >= .07f)) break;
             }
             if (bestA != null)
             {
@@ -832,6 +851,7 @@ namespace DeliveryDriver.EditorTools
             bool backbone = sector == "Ankara" && settings.ankaraBackbone;
             gradingSurface = backbone && settings.districtGrading ? new GradingSurface(plan.layout, bounds, settings.grade) : null;
             bool adaptive = settings.terrainDesign;
+            bool urban = settings.urbanDesign;
             var gates = plan.nodes.Where(n => n.sector == sector && n.gate).ToList();
             var nodes = new List<Node>(gates);
             var index = new StreetIndex();
@@ -853,6 +873,7 @@ namespace DeliveryDriver.EditorTools
             if (local > settings.spacing + 1f)
                 plan.warnings.Add(sector + ": local spacing adjusted to " + local.ToString("F0") + " m to fit " + budget + " candidate nodes.");
             var grid = new Node[xs.Count, zs.Count];
+            if (urban) ReserveOpenSpaces(sector, bounds, xs, zs, local);
             float phase = Next() * Mathf.PI * 2f, phase2 = Next() * Mathf.PI * 2f;
             for (int x = 0; x < xs.Count; x++)
             for (int z = 0; z < zs.Count; z++)
@@ -865,6 +886,8 @@ namespace DeliveryDriver.EditorTools
                 if (xs[x].kind == RoadKind.Local && zs[z].kind == RoadKind.Local)
                     pos += new Vector2(Next() - .5f, Next() - .5f) * local * .24f * style.jitter;
                 if (adaptive) pos = ShapeStreetNode(pos, bounds, local);
+                if (urban && xs[x].kind == RoadKind.Local && zs[z].kind == RoadKind.Local) continue;
+                if (urban && Reserved(pos, RoadClearance)) continue;
                 if (IsProtected(pos, RoadClearance)) { diagnostics.protectedNodes++; continue; }
                 if (!Contains(bounds, pos, -RoadClearance) || obstacles.Near(pos, RoadClearance * 2f) ||
                     gates.Any(g => Vector2.Distance(pos, XZ(g.position)) < RoadClearance * 3f))
@@ -890,6 +913,7 @@ namespace DeliveryDriver.EditorTools
                 if (x+1 < xs.Count) AddCandidate(n,grid[x+1,z],zs[z].kind);
                 if (z+1 < zs.Count) AddCandidate(n,grid[x,z+1],xs[x].kind);
             }
+            if (urban) AddDistrictStreets(sector, bounds, xs, zs, grid, local, budget, nodes, AddCandidate);
             var groups = nodes.ToDictionary(n => n, n => n);
             Node Find(Node n)
             {
@@ -898,6 +922,7 @@ namespace DeliveryDriver.EditorTools
                 while (groups[n] != n) { Node next = groups[n]; groups[n] = root; n = next; }
                 return root;
             }
+            if (urban) ProposeManualAnchors(sector, bounds, nodes.Where(n => !n.gate).ToList(), index);
             if (adaptive && sector == "Ankara")
                 ProposeLinks(sector, bounds, nodes.Where(n => !n.gate).ToList(), index);
             var built = new HashSet<(int,int)>();
@@ -1081,6 +1106,7 @@ namespace DeliveryDriver.EditorTools
             index=new StreetIndex();
             foreach(Edge e in plan.edges)index.Add(e);
             if (adaptive) foreach(Edge e in plan.authoredLinks) index.Add(e);
+            if (urban) ProposeManualAnchors(sector,bounds,nodes.Where(n=>n.degree>0&&!n.gate&&n.degree<4).ToList(),index);
             ProposeLinks(sector,bounds,nodes.Where(n=>n.degree>0&&!n.gate&&n.degree<4).ToList(),index);
             gradingSurface = null;
         }
@@ -1175,7 +1201,16 @@ namespace DeliveryDriver.EditorTools
         {
             if(!CanGradeDistrict(pos))return original;
             float reserve=Mathf.Max(0f,settings.districtGradingLimit-settings.maxCutFill-1f);
-            return original+Mathf.Clamp(gradingSurface.Sample(pos)-original,-reserve,reserve);
+            float shift=Mathf.Clamp(gradingSurface.Sample(pos)-original,-reserve,reserve);
+            if(settings.urbanDesign)
+            {
+                // Keep junction elevations closer to the actual ground where possible.
+                // A smooth transition avoids abrupt virtual height jumps at Kizilay's boundary.
+                float influence=1f-settings.gradingOptimization*.28f;
+                if(IsProtected(pos,RoadClearance+settings.blend+45f)||obstacles.Near(pos,RoadClearance*2f+settings.blend+45f))influence*=.45f;
+                shift*=influence;
+            }
+            return original+shift;
         }
 
         private void ReportTerrainSeams(Rect bounds)
@@ -1446,7 +1481,8 @@ namespace DeliveryDriver.EditorTools
             }
             bool PointClearUncached(Vector2 pos)
             {
-                if(!Contains(search,pos)||IsProtected(pos,RoadClearance)||obstacles.Near(pos,gap))return false;
+                if(!Contains(search,pos)||IsProtected(pos,RoadClearance)||obstacles.Near(pos,gap)||
+                    (settings.urbanDesign && Reserved(pos,RoadClearance)))return false;
                 foreach(Edge edge in index.Query(new Rect(pos.x-gap,pos.y-gap,gap*2f,gap*2f)))
                 {
                     if ((edge.a==a||edge.b==a)&&Vector2.Distance(pos,start)<gap*1.5f)continue;
@@ -1477,6 +1513,7 @@ namespace DeliveryDriver.EditorTools
                     totalRise+=dy;previous=h;
                 }
                 cost=len+totalRise*5f;
+                if(settings.urbanDesign)cost+=len*ContourPenalty(from,to);
                 return true;
             }
             Vector2 Position(Vector2Int cell)=>start+new Vector2(cell.x*step,cell.y*step);
@@ -1569,7 +1606,13 @@ namespace DeliveryDriver.EditorTools
             if(Next()<.5f)bend=-bend;
             bool straight=kind==RoadKind.Arterial||Next()<settings.straightPreference;
             float bestCost = float.PositiveInfinity;
-            foreach(float offset in straight?new[]{0f,bend,-bend,bend*2f,-bend*2f}:new[]{bend,-bend,0f,bend*2f,-bend*2f})
+            var offsets = straight?new List<float>{0f,bend,-bend,bend*2f,-bend*2f}:new List<float>{bend,-bend,0f,bend*2f,-bend*2f};
+            if(settings.urbanDesign && (AnalysisAt((start+end)*.5f)?.slope ?? 0f) > .025f)
+            {
+                float wide = Mathf.Min(len*.34f,settings.spacing*.48f)*settings.contourPreference;
+                offsets.Add(wide);offsets.Add(-wide);
+            }
+            foreach(float offset in offsets.Distinct())
             {
                 int steps=Mathf.Max(2,Mathf.CeilToInt(len/3f));
                 var path=new List<Vector3>(steps+1);bool valid=true;
@@ -1579,7 +1622,8 @@ namespace DeliveryDriver.EditorTools
                     Vector2 pos=Vector2.Lerp(start,end,t)+side*(4f*t*(1f-t)*offset);
                     float fromAnchor=Vector2.Distance(pos,start);
                     if(!Contains(bounds,pos,-RoadClearance)||
-                        (!(authored&&fromAnchor<=55f)&&IsProtected(pos,RoadClearance))||
+                        (settings.urbanDesign && Reserved(pos,RoadClearance))||
+                        (!(authored&&fromAnchor<=(settings.urbanDesign?95f:55f))&&IsProtected(pos,RoadClearance))||
                         (!(authored&&fromAnchor<=RoadClearance*2.2f)&&obstacles.Near(pos,authored?RoadClearance*1.4f:RoadClearance*2f))||
                         !plan.layout.TryHeight(pos,out float ground))
                     {valid=false;break;}
@@ -1593,6 +1637,7 @@ namespace DeliveryDriver.EditorTools
                 if(authored&&!ProtectedSurfaceOk(path))continue;
                 if (!settings.terrainDesign) { points=path;return true; }
                 float cost = ProfileCost(path) + Mathf.Abs(offset) * .02f;
+                if(settings.urbanDesign)cost += UrbanProfileCost(path);
                 if (cost < bestCost) { bestCost=cost; points=path; }
                 // If the straight candidate needs negligible earthworks, avoid unnecessary bends.
                 if (cost < .08f && straight) break;
@@ -1655,7 +1700,7 @@ namespace DeliveryDriver.EditorTools
                 {
                     float t=road.DistanceToT(length*i/count);
                     Vector3 point=road.GetPoint(t);Vector2 pos=XZ(point);
-                    if(!Contains(bounds,pos,-RoadClearance)||protectedAreas.Any(r=>Contains(r,pos,-45f)))continue;
+                    if(!Contains(bounds,pos,-RoadClearance)||protectedAreas.Any(r=>Contains(r,pos,settings.urbanDesign?-75f:-45f)))continue;
                     Vector2 tangent=XZ(road.GetTangent(t)).normalized;
                     foreach(Node target in targets.OrderBy(n=>(XZ(n.position)-pos).sqrMagnitude).Take(settings.terrainDesign?12:5))
                     {
@@ -1664,7 +1709,7 @@ namespace DeliveryDriver.EditorTools
                         if(dist<RoadClearance*2.5f||dist>Mathf.Max(settings.terrainDesign?380f:260f,settings.spacing*3f))continue;
                         float angle=Vector2.Angle(tangent,delta);
                         bool endpoint=i==0||i==count;
-                        if(!endpoint&&(angle<55f||angle>125f))continue;
+                        if(!endpoint&&(angle<(settings.urbanDesign?45f:55f)||angle>(settings.urbanDesign?135f:125f)))continue;
                         links.Add(new LinkCandidate{position=point,target=target,score=dist+(endpoint?0f:10f)+Mathf.Abs(point.y-target.position.y)*3f});
                     }
                 }
@@ -1673,7 +1718,7 @@ namespace DeliveryDriver.EditorTools
             int made=plan.authoredLinks.Count(e=>e.sector==sector),attempts=0;
             foreach(LinkCandidate link in links.OrderBy(c=>c.score))
             {
-                if(made>=settings.authoredLinkTarget||attempts>=250)break;
+                if(made>=settings.authoredLinkTarget||attempts>=(settings.urbanDesign?450:250))break;
                 if(plan.authoredLinks.Any(e=>e.sector==sector&&(Vector2.Distance(XZ(e.a.position),XZ(link.position))<85f||e.b==link.target)))continue;
                 attempts++;
                 Node anchor=new Node{id=-1,sector=sector,position=link.position};
@@ -1933,7 +1978,7 @@ namespace DeliveryDriver.EditorTools
                     lo[i] = Mathf.Max(lo[i], cross + .12f - sideBudget);
                     hi[i] = Mathf.Min(hi[i], cross + .12f + sideBudget);
                 }
-                target[i] = PreferredGround(p, h) + .12f;
+                target[i] = (settings.urbanDesign ? Mathf.Lerp(PreferredGround(p,h), h, settings.gradingOptimization*.70f) : PreferredGround(p,h)) + .12f;
                 if (i > 0) step[i] = Vector2.Distance(XZ(path[i - 1]), p) * settings.grade;
                 if (lo[i] > hi[i]) return false;
             }
