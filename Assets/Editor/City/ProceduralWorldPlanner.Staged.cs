@@ -27,7 +27,7 @@ namespace DeliveryDriver.EditorTools
                 ", links "+p.authoredLinks.Count+", bridges "+p.BridgeCount+", bridge gap "+q.bridgeGap.ToString("F0")+" m, "+
                 "cut/fill "+q.meanCut.ToString("F2")+"/"+q.meanFill.ToString("F2")+" m, peak "+q.peak.ToString("F1")+
                 " m, extra "+(q.extraFraction*100f).ToString("F1")+"%, radius flags "+q.sharpRoads+", lots "+q.matchedLots+
-                ", park access "+q.accessibleParks+"/"+q.totalParks;
+                ", park access "+q.accessibleParks+"/"+q.totalParks+", vertical flags "+q.verticalDefects+", junction transitions "+q.junctionGradeFlags;
         }
         private static float BalancedCost(QualityReport q,Settings s)
         {
@@ -39,7 +39,7 @@ namespace DeliveryDriver.EditorTools
             return BalancedCost(b,s)<=BalancedCost(a,s)+.005f&&b.meanCut+b.meanFill<=a.meanCut+a.meanFill+.005f&&
                 b.peak<=a.peak+.02f&&b.extraFraction<=a.extraFraction+.0005f;
         }
-        private static bool StageGraphSafe(Plan before,Plan after,Settings s)
+        private static bool StageGraphSafe(Plan before,Plan after,Settings s,bool allowSplit=false,bool allowBridgeMove=false)
         {
             if(after.edges.Count<before.edges.Count||after.detachedEdges.Count>before.detachedEdges.Count||
                 after.BridgeCount!=before.BridgeCount||
@@ -50,6 +50,7 @@ namespace DeliveryDriver.EditorTools
             if(new[]{"Ankara","İstanbul"}.Any(city=>after.authoredLinks.Count(e=>e.sector==city)!=before.authoredLinks.Count(e=>e.sector==city)))return false;
             for(int i=0;i<before.authoredLinks.Count;i++)
                 if(!before.authoredLinks[i].points.SequenceEqual(after.authoredLinks[i].points))return false;
+            if(allowSplit||allowBridgeMove)return PreservedNetwork(before,after,allowSplit,allowBridgeMove);
             // Existing network edges are never removed or rewired. Compare the stable
             // original prefix; new repair edges can only be appended.
             for(int i=0;i<before.edges.Count;i++)
@@ -97,7 +98,7 @@ namespace DeliveryDriver.EditorTools
             reports.Add("Stage 0 base "+baseline.version+" ("+timer.Elapsed.TotalSeconds.ToString("F1")+" s): "+StageMetrics(baseline));
             SaveView(baseline,"0 "+baseline.version+" base",true);
             Plan current=baseline;
-            void Stage(string name,Action<ProceduralWorldPlanner> change,Func<Plan,Plan,bool> benefit)
+            void Stage(string name,Action<ProceduralWorldPlanner> change,Func<Plan,Plan,bool> benefit,bool allowSplit=false,bool allowBridgeMove=false)
             {
                 var clock=System.Diagnostics.Stopwatch.StartNew();
                 if(EditorUtility.DisplayCancelableProgressBar("V7.1 staged optimization",name,.5f))throw new OperationCanceledException();
@@ -113,7 +114,7 @@ namespace DeliveryDriver.EditorTools
                     planner.ValidateUrbanPlan();
                     planner.ValidateStageGrades();
                     candidate.quality=Measure(candidate,s);
-                    if(!StageGraphSafe(current,candidate,s))reason="network/access regression";
+                    if(!StageGraphSafe(current,candidate,s,allowSplit,allowBridgeMove))reason="network/access regression";
                     else if(!NoTerrainRegression(current.quality,candidate.quality,s))reason="earthworks regression";
                     else if(!benefit(current,candidate))reason="no measurable improvement";
                 }
@@ -131,7 +132,7 @@ namespace DeliveryDriver.EditorTools
                 // reflect current paths; parcel/park accessibility is only final-stage data.
                 candidate.earthworks.Clear();candidate.gradingZones.Clear();candidate.gradingMarkers.Clear();
                 planner.BuildEarthworkLines();planner.BuildGradingZones();
-                candidate.version="V7.1 "+name+(accepted?"":" rejected (diagnostic)");
+                candidate.version=(s.localOptimization?"V7.2 ":"V7.1 ")+name+(accepted?"":" rejected (diagnostic)");
                 SaveView(candidate,name+(accepted?" accepted":" rejected"),accepted);
                 if(accepted)current=candidate;
             }
@@ -141,12 +142,21 @@ namespace DeliveryDriver.EditorTools
             Stage("3 Detached component repair",x=>x.ReconnectDetached(),(a,b)=>b.detachedEdges.Count<a.detachedEdges.Count);
             Stage("4 Geometry refinement",x=>x.RefineExistingGeometry(),(a,b)=>b.quality.sharpRoads<a.quality.sharpRoads);
             Stage("5 Bridge approach refinement",x=>x.RefineFixedGateBridges(),(a,b)=>b.quality.bridgeGap>a.quality.bridgeGap+.01f);
+            if(s.localOptimization)
+            {
+                Stage("5a Hotspot optimization",x=>x.RefineLocalRoads(0),(a,b)=>b.quality.peak<a.quality.peak-.001f||BalancedCost(b.quality,s)<BalancedCost(a.quality,s)-.001f);
+                Stage("5b Interior T-junction repair",x=>x.RepairWithInteriorJunctions(),(a,b)=>b.detachedEdges.Count<a.detachedEdges.Count,true);
+                Stage("5c Local bend smoothing",x=>x.RefineLocalRoads(1),(a,b)=>b.quality.sharpRoads<a.quality.sharpRoads);
+                Stage("5d Vertical curve smoothing",x=>x.RefineLocalRoads(2),(a,b)=>b.quality.verticalDefects<a.quality.verticalDefects||b.quality.verticalSeverity<a.quality.verticalSeverity-.0001f);
+                if(s.relocateBridgeGates)Stage("5e Alternative bridge gates",x=>x.RelocateBridgeGate(),(a,b)=>b.quality.bridgeGap>a.quality.bridgeGap+.01f,false,true);
+            }
             Stage("6 Prefab and park screening",x=>
             {
                 x.plan.parcels.Clear();x.BuildParcels();x.EvaluateOpenSpaceAccess();
+                if(s.localOptimization)x.FindAlternateParkAccess();
             },(a,b)=>true);
             bool urbanScreened=views.Last().accepted;
-            current.version="V7.1 optimized";
+            current.version=s.localOptimization?"V7.2 optimized":"V7.1 optimized";
             current.stageReports.Clear();current.stageReports.AddRange(reports);
             current.stageViews.AddRange(views);
             current.quality=Measure(current,s);
@@ -160,17 +170,27 @@ namespace DeliveryDriver.EditorTools
             // Historical warnings and reports are kept in checkpoints, not presented
             // as current final results.
             current.notes.Clear();current.warnings.Clear();
-            current.notes.Add("V7.1 base vs final: "+StageMetrics(baseline)+" / "+StageMetrics(current));
+            current.notes.Add((s.localOptimization?"V7.2":"V7.1")+" base vs final: "+StageMetrics(baseline)+" / "+StageMetrics(current));
             current.notes.Add("Mandatory preview checks: "+(current.previewCriteriaMet?"PASS":"NOT MET")+"; Generate remains locked.");
-            current.notes.Add("Profile/geometry stages preserve original graph and authored link paths. Bridge endpoints fixed; no protected-zone exception. Short stubs are diagnostics, not pruned by this preservation-first mode.");
+            current.notes.Add("Original land graph and authored link paths preserved; V7.2 may split an unchanged road or replace a bridge at existing generated nodes. No protected-zone exception. Short stubs remain diagnostics.");
             current.notes.Add(urbanScreened?"Park and lot overlays: "+current.parcels.Count+" sampled lots, "+current.quality.matchedLots+" measured prefab fits, "+current.quality.accessibleParks+"/"+current.openSpaces.Count+" screened park access.":"Urban screening rolled back; parcel/park data is historical and not verified for the final plan.");
             if(!validGrades)current.warnings.Add("Final mandatory sampled grade validation failed.");
             if(current.detachedEdges.Count>0)current.warnings.Add(current.detachedEdges.Count+" detached segments still unresolved; purple diagnostic only.");
             if(!current.previewCriteriaMet)current.warnings.Add("Mandatory preview criteria incomplete; inspect stage reports. No generation.");
             if(current.quality.bridgeGap< (layout.AcrossMax(layout.sea)-layout.AcrossMin(layout.sea))*s.bridgeSeparation && s.bridges&&s.buildAnkara&&s.buildIstanbul)
-                current.warnings.Add("Requested bridge separation unavailable with fixed gates; protected existing-road access audit is diagnostic only.");
+                current.warnings.Add("Requested bridge separation unavailable; no protected-area crossing exception. Authored coastal spline audit is diagnostic only.");
             var finalPlanner=new ProceduralWorldPlanner(s,layout,scene,current);
             current.gradingMarkers.Clear();finalPlanner.ReportGrading("Ankara");finalPlanner.ReportTerrainSeams(layout.Ankara(s.ankaraLow));
+            if(s.localOptimization)
+            {
+                finalPlanner.BuildLocalDiagnostics();
+                finalPlanner.BuildVirtualTerrain();
+                if(current.quality.verticalDefects>0||current.quality.junctionGradeFlags>0||current.virtualReport.conflictingCells>0||current.virtualReport.protectedSamples>0||current.virtualReport.missingSections>0||current.virtualReport.parcelSamples>0||current.virtualReport.steepSections>0||current.quality.peak>s.preferredGrading+.01f)
+                    current.previewCriteriaMet=false;
+                current.notes.RemoveAll(n=>n.StartsWith("Mandatory preview checks:"));
+                current.notes.Add("Mandatory preview checks: "+(current.previewCriteriaMet?"PASS":"NOT MET")+"; Generate remains locked.");
+                if(!current.previewCriteriaMet&&!current.warnings.Any(n=>n.StartsWith("Mandatory preview criteria")))current.warnings.Add("Mandatory preview criteria incomplete; no generation.");
+            }
             AddQualityNotes(current);
             return current;
         }

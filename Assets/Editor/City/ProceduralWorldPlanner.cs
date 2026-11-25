@@ -24,6 +24,10 @@ namespace DeliveryDriver.EditorTools
             public bool qualityDesign = true, qualityGuard = true;
             public bool stagedOptimization = true;
             public int profileSweeps = 16;
+            public bool localOptimization = true;
+            public float verticalRadius = 80f, shoulderSlopeLimit = .67f, virtualSectionSpacing = 20f;
+            public int localRepairBudget = 180;
+            public bool relocateBridgeGates = true;
             public float preferredGrading = 15f, minTurnRadius = 18f, minLocalStub = 45f;
             public float arterialLengthTarget = .15f, collectorLengthTarget = .25f;
             public float parcelAccessGrade = .15f;
@@ -122,6 +126,10 @@ namespace DeliveryDriver.EditorTools
             public readonly List<StageView> stageViews = new List<StageView>();
             public readonly List<string> stageReports = new List<string>();
             public bool previewCriteriaMet;
+            public readonly List<AnalysisLine> hotspots = new List<AnalysisLine>();
+            public readonly List<AnalysisLine> verticalFlags = new List<AnalysisLine>();
+            public readonly List<VirtualSection> virtualSections = new List<VirtualSection>();
+            public VirtualTerrainReport virtualReport;
             public readonly List<AnalysisLine> gradingZones = new List<AnalysisLine>();
             public readonly List<Edge> detachedEdges = new List<Edge>(); // Feasible individual roads, not connected to the retained network.
             public readonly List<Rect> protectedAreas = new List<Rect>();
@@ -695,7 +703,7 @@ namespace DeliveryDriver.EditorTools
             AddEdge(first, last, path, "Highways");
         }
 
-        private bool TryBridge(Vector2 a, Vector2 b, out List<Vector3> points, out BridgeRejection rejection, float lowBow=0f, float highBow=0f)
+        private bool TryBridge(Vector2 a, Vector2 b, out List<Vector3> points, out BridgeRejection rejection, float lowBow=0f, float highBow=0f, float? fixedStart=null, float? fixedEnd=null)
         {
             points = null;
             rejection = BridgeRejection.MissingLand;
@@ -785,8 +793,8 @@ namespace DeliveryDriver.EditorTools
             // Solve a grade-bounded profile over the entire crossing. A deck can slope
             // across the sea, while both land endpoints stay at their own terrain heights.
             rejection = BridgeRejection.GradeOrHeight;
-            yA += .12f;
-            yB += .12f;
+            yA = fixedStart ?? (yA + .12f);
+            yB = fixedEnd ?? (yB + .12f);
             if (yA + .001f < lower[0] || yB + .001f < lower[steps]) return false;
             lower[0] = upper[0] = yA;
             lower[steps] = upper[steps] = yB;

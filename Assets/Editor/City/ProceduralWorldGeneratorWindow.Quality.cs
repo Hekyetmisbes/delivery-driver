@@ -42,7 +42,7 @@ namespace DeliveryDriver.EditorTools
         }
         private void DrawQualityControls()
         {
-            qualitySettingsOpen=EditorGUILayout.Foldout(qualitySettingsOpen,"V7.1 Urban Quality",true);
+            qualitySettingsOpen=EditorGUILayout.Foldout(qualitySettingsOpen,"V7.2 Urban Quality",true);
             if(!qualitySettingsOpen)return;
             settings.qualityDesign=EditorGUILayout.Toggle("Enable V7 quality design",settings.qualityDesign);
             using(new EditorGUI.DisabledScope(!settings.qualityDesign))
@@ -53,6 +53,15 @@ namespace DeliveryDriver.EditorTools
                 if(settings.stagedOptimization)
                 {
                     settings.profileSweeps=EditorGUILayout.IntSlider("Profile optimization sweeps",settings.profileSweeps,4,40);
+                    settings.localOptimization=EditorGUILayout.Toggle("V7.2 local optimization",settings.localOptimization);
+                    if(settings.localOptimization)
+                    {
+                        settings.localRepairBudget=EditorGUILayout.IntSlider("Local repair attempt budget",settings.localRepairBudget,40,360);
+                        settings.verticalRadius=EditorGUILayout.Slider("Vertical curve radius (m)",settings.verticalRadius,30f,200f);
+                        settings.relocateBridgeGates=EditorGUILayout.Toggle("Try alternative bridge gates",settings.relocateBridgeGates);
+                        settings.virtualSectionSpacing=EditorGUILayout.Slider("Virtual section spacing (m)",settings.virtualSectionSpacing,10f,50f);
+                        settings.shoulderSlopeLimit=EditorGUILayout.Slider("Shoulder slope limit",settings.shoulderSlopeLimit,.25f,1f);
+                    }
                     EditorGUILayout.HelpBox("V6 is the starting graph. Each candidate is checked independently; coverage, existing access, grade and bridge connectivity cannot regress. Existing radius defects remain diagnostic until repaired.",MessageType.Info);
                 }
                 settings.preferredGrading=EditorGUILayout.Slider("Preferred grading cap (m)",settings.preferredGrading,Mathf.Max(10f,settings.maxCutFill),30f);
@@ -79,7 +88,7 @@ namespace DeliveryDriver.EditorTools
             if(preview.quality==null)return;
             var q=preview.quality;
             EditorGUILayout.LabelField("Urban quality score",q.score.ToString("F1")+"/100");
-            if(preview.version.StartsWith("V7.1"))EditorGUILayout.HelpBox(preview.previewCriteriaMet?"Mandatory preview checks passed; bake remains locked.":"Mandatory preview checks NOT met. Score does not override them.",preview.previewCriteriaMet?MessageType.Info:MessageType.Warning);
+            if(preview.version.StartsWith("V7.1")||preview.version.StartsWith("V7.2"))EditorGUILayout.HelpBox(preview.previewCriteriaMet?"Mandatory preview checks passed; bake remains locked.":"Mandatory preview checks NOT met. Score does not override them.",preview.previewCriteriaMet?MessageType.Info:MessageType.Warning);
             EditorGUILayout.LabelField("Connectivity / terrain / geometry",q.connectivity.ToString("F0")+" / "+q.terrainFit.ToString("F0")+" / "+q.geometry.ToString("F0"));
             EditorGUILayout.LabelField("Prefab fit / bridge / park",q.parcels.ToString("F0")+" / "+q.bridges.ToString("F0")+" / "+q.parks.ToString("F0"));
             EditorGUILayout.LabelField("Ankara / Istanbul coverage",q.ankaraTiles+"/12 / "+q.istanbulTiles+"/12");
@@ -87,17 +96,45 @@ namespace DeliveryDriver.EditorTools
             EditorGUILayout.LabelField("Peak / extra grading",q.peak.ToString("F1")+" m / "+(q.extraFraction*100f).ToString("F1")+"%");
             EditorGUILayout.LabelField("Arterial / collector / local km",q.arterialKm.ToString("F1")+" / "+q.collectorKm.ToString("F1")+" / "+q.localKm.ToString("F1"));
             EditorGUILayout.LabelField("Sharp streets / short stubs",q.sharpRoads+" / "+q.shortStubs);
+            if(preview.version.StartsWith("V7.2"))
+            {
+                EditorGUILayout.LabelField("Vertical flags / junction pairs",q.verticalDefects+" / "+q.junctionGradeFlags);
+                EditorGUILayout.LabelField("Hotspot segments",preview.hotspots.Count.ToString());
+                if(preview.virtualReport!=null)
+                {
+                    var r=preview.virtualReport;
+                    EditorGUILayout.LabelField("Virtual sections / missing",r.sections+" / "+r.missingSections);
+                    EditorGUILayout.LabelField("Overlap cells / steep sections",r.conflictingCells+" / "+r.steepSections);
+                    EditorGUILayout.LabelField("Protected / parcel samples",r.protectedSamples+" / "+r.parcelSamples);
+                    DrawSectionInspector();
+                }
+            }
             EditorGUILayout.LabelField("Prefab-fit accessible lots",q.matchedLots+"/"+preview.parcels.Count);
             EditorGUILayout.LabelField("Screened park access",q.accessibleParks+"/"+q.totalParks);
             EditorGUILayout.LabelField("Bridge separation",q.bridgeGap.ToString("F0")+" m");
             EditorGUILayout.LabelField("Requested bridge graph",q.bridgeGraphConnected?"Connected / not required":"Incomplete");
+        }
+        private int virtualSectionIndex;
+        private void DrawSectionInspector()
+        {
+            if(preview.virtualSections.Count==0)return;
+            virtualSectionIndex=EditorGUILayout.IntSlider("Inspect virtual section",Mathf.Clamp(virtualSectionIndex,0,preview.virtualSections.Count-1),0,preview.virtualSections.Count-1);
+            var section=preview.virtualSections[virtualSectionIndex];
+            EditorGUILayout.LabelField("Section position",section.proposed[3].ToString("F1"));
+            EditorGUILayout.LabelField("Section status",section.flagged?"Check clearance / blend":"Sampled OK");
+            for(int i=0;i<section.original.Length;i++)EditorGUILayout.LabelField("Sample "+i+" original / planned Y",section.original[i].y.ToString("F2")+" / "+section.proposed[i].y.ToString("F2"));
+            if(GUILayout.Button("Focus selected section"))
+            {
+                var view=SceneView.lastActiveSceneView;
+                if(view!=null){view.pivot=section.proposed[3];view.size=35f;view.Repaint();}
+            }
         }
         private void DrawPreviewStorage()
         {
             storageOpen=EditorGUILayout.Foldout(storageOpen,"Preview cache, snapshots & district refinement",true);
             if(!storageOpen)return;
             cacheEnabled=EditorGUILayout.Toggle("Reuse verified previews",cacheEnabled);
-            autoCheckpoints=EditorGUILayout.Toggle("Auto-save V7.1 checkpoints",autoCheckpoints);
+            autoCheckpoints=EditorGUILayout.Toggle("Auto-save staged checkpoints",autoCheckpoints);
             DrawStageComparison();
             EditorGUILayout.LabelField("Session cache",planCache.Count+"/3 road plans");
             if(GUILayout.Button("Clear preview caches"))

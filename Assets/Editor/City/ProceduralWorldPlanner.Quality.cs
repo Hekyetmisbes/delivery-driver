@@ -16,6 +16,8 @@ namespace DeliveryDriver.EditorTools
             public float meanCut, meanFill, peak, extraFraction, roadKm, arterialKm, collectorKm, localKm, bridgeGap;
             public int ankaraTiles, istanbulTiles, sharpRoads, shortStubs, matchedLots, accessibleParks, totalParks;
             public bool bridgeGraphConnected;
+            public int verticalDefects,junctionGradeFlags;
+            public float verticalSeverity;
         }
 
         private float profileCap=float.PositiveInfinity;
@@ -402,6 +404,7 @@ namespace DeliveryDriver.EditorTools
             float weights=s.connectivityWeight+s.terrainWeight+s.geometryWeight+s.parcelWeight+s.bridgeWeight+s.parkWeight;
             q.score=(q.connectivity*s.connectivityWeight+q.terrainFit*s.terrainWeight+q.geometry*s.geometryWeight+
                 q.parcels*s.parcelWeight+q.bridges*s.bridgeWeight+q.parks*s.parkWeight)/Mathf.Max(1,weights);
+            MeasureVertical(p,s,q);
             return q;
         }
         private static void AddQualityNotes(Plan p)

@@ -52,6 +52,9 @@ namespace DeliveryDriver.EditorTools
             public QualityReport quality;
             public List<string> stageReports;
             public bool previewCriteriaMet;
+            public List<AnalysisLine> hotspots,verticalFlags;
+            public List<VirtualSection> virtualSections;
+            public VirtualTerrainReport virtualReport;
         }
         private static string ObjectId(UnityEngine.Object obj) =>
             obj==null?"":GlobalObjectId.GetGlobalObjectIdSlow(obj).ToString();
@@ -80,7 +83,7 @@ namespace DeliveryDriver.EditorTools
             using(var stream=new CryptoStream(Stream.Null,hash,CryptoStreamMode.Write))
             using(var writer=new BinaryWriter(stream))
             {
-                writer.Write("delivery-driver-procedural-preview-v7.2-staged");
+                writer.Write("delivery-driver-procedural-preview-v7.2-local-v1");
                 writer.Write(scene.path??"");writer.Write(DescribeSettings(s));
                 void Vec(Vector3 v){writer.Write(v.x);writer.Write(v.y);writer.Write(v.z);}
                 void Matrix(Matrix4x4 m){for(int i=0;i<16;i++)writer.Write(m[i]);}
@@ -140,6 +143,7 @@ namespace DeliveryDriver.EditorTools
                 seams=p.seams.ToList(),earthworks=p.earthworks.ToList(),zones=p.gradingZones.ToList(),protectedAreas=p.protectedAreas.ToList(),
                 markers=p.gradingMarkers.ToList(),notes=p.notes.ToList(),warnings=p.warnings.ToList(),quality=p.quality,
                 stageReports=p.stageReports.ToList(),previewCriteriaMet=p.previewCriteriaMet,
+                hotspots=p.hotspots.ToList(),verticalFlags=p.verticalFlags.ToList(),virtualSections=p.virtualSections.ToList(),virtualReport=p.virtualReport,
                 access=p.accessResults.Select(a=>new SavedAccess{roadId=ObjectId(a.anchor?.road),t=a.anchor?.t??0f,
                     position=a.position,connected=a.connected,message=a.message}).ToList()};
         }
@@ -175,6 +179,8 @@ namespace DeliveryDriver.EditorTools
             result.protectedAreas.AddRange(saved.protectedAreas??new List<Rect>());result.gradingMarkers.AddRange(saved.markers??new List<Vector3>());
             result.notes.AddRange(saved.notes??new List<string>());result.warnings.AddRange(saved.warnings??new List<string>());
             result.stageReports.AddRange(saved.stageReports??new List<string>());result.previewCriteriaMet=saved.previewCriteriaMet;
+            result.hotspots.AddRange(saved.hotspots??new List<AnalysisLine>());result.verticalFlags.AddRange(saved.verticalFlags??new List<AnalysisLine>());
+            result.virtualSections.AddRange(saved.virtualSections??new List<VirtualSection>());result.virtualReport=saved.virtualReport;
             foreach(var a in saved.access??new List<SavedAccess>())
             {
                 var anchor=s.accessAnchors.FirstOrDefault(x=>ObjectId(x.road)==a.roadId&&Mathf.Abs(x.t-a.t)<.0001f);

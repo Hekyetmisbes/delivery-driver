@@ -186,7 +186,7 @@ namespace DeliveryDriver.EditorTools
                     Require(before[i].SequenceEqual(land[i].terrain.terrainData.GetHeights(0,0,33,33).Cast<float>()),
                         "V7 modified original terrain.");
                 // V7.1 must not trade away the baseline network to improve geometry.
-                settings.stagedOptimization=true;
+                settings.stagedOptimization=true;settings.localOptimization=false;
                 var staged=ProceduralWorldPlanner.Build(settings,emptySea,scene);
                 Verify(staged,settings,0);
                 Require(staged.version.StartsWith("V7.1")&&staged.stageReports.Count>=6,"Staged preview/report missing.");
@@ -198,6 +198,18 @@ namespace DeliveryDriver.EditorTools
                 for(int i=0;i<land.Count;i++)
                     Require(before[i].SequenceEqual(land[i].terrain.terrainData.GetHeights(0,0,33,33).Cast<float>()),
                         "V7.1 modified original terrain.");
+                settings.localOptimization=true;
+                var local=ProceduralWorldPlanner.Build(settings,emptySea,scene);
+                Verify(local,settings,0);
+                Require(local.version.StartsWith("V7.2")&&local.virtualReport!=null&&local.virtualSections.Count>0,"V7.2 virtual terrain missing.");
+                Require(local.quality.istanbulTiles>=staged.quality.istanbulTiles,"V7.2 lost baseline coverage.");
+                Require(local.edges.Count>=staged.edges.Count,"V7.2 removed baseline edges.");
+                var localSnap=ProceduralWorldPlanner.Capture(local,null,scene.path,ProceduralWorldPlanner.DescribeSettings(settings));
+                var localRestored=ProceduralWorldPlanner.Restore(JsonUtility.FromJson<ProceduralWorldPlanner.PreviewSnapshot>(JsonUtility.ToJson(localSnap)),emptySea,settings);
+                Require(localRestored.virtualSections.Count==local.virtualSections.Count,"Virtual section snapshot lost data.");
+                Require(Mathf.Abs(ProceduralWorldPlanner.VerticalCurvature(new Vector3(0,0,0),new Vector3(10,1,0),new Vector3(20,0,0))-.02f)<.0001f,"Vertical curvature calculation failed.");
+                for(int i=0;i<land.Count;i++)
+                    Require(before[i].SequenceEqual(land[i].terrain.terrainData.GetHeights(0,0,33,33).Cast<float>()),"V7.2 modified terrain.");
                 settings.stagedOptimization=false;
                 // Rotate the placement convention (not the Terrain objects): the same layout must work on Z.
                 foreach (var tile in emptySea.tiles)

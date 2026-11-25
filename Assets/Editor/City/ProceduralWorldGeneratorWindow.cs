@@ -28,7 +28,7 @@ namespace DeliveryDriver.EditorTools
         private bool showDetached = true;
         private bool showGrading = true, xrayPreview = true;
         private bool showTerrainAnalysis = false, analysisOnly = false;
-        private enum TerrainLayer { Slope, Elevation, Buildability, Contours, Seams, Earthworks, GradingZones }
+        private enum TerrainLayer { Slope, Elevation, Buildability, Contours, Seams, Earthworks, GradingZones, Hotspots, VerticalProfile, VirtualTerrain }
         private TerrainLayer terrainLayer = TerrainLayer.Slope;
         private bool showParcels = false, showOpenSpaces = true, pickAnchor, fastPreview = true;
         private SplineRoad anchorRoad;
@@ -79,7 +79,7 @@ namespace DeliveryDriver.EditorTools
         private void OnGUI()
         {
             scroll = EditorGUILayout.BeginScrollView(scroll);
-            EditorGUILayout.LabelField("Procedural World Generator V7.1 - Staged Optimization Preview", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Procedural World Generator V7.2 - Local Optimization Preview", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("Preview iteration only. No scene, mesh or terrain asset changes. Generation is intentionally locked until the road layout is approved.", MessageType.Info);
             using (new EditorGUI.DisabledScope(busy || EditorApplication.isPlayingOrWillChangePlaymode))
             {
@@ -190,6 +190,9 @@ namespace DeliveryDriver.EditorTools
                         terrainLayer == TerrainLayer.Buildability ? "Buildability screening: green gentle/smooth, amber moderate, red steep/rough, gray protected. Not a foundation certification." :
                         terrainLayer == TerrainLayer.Contours ? "Contours: 10 m interval, sampled independently per terrain tile." :
                         terrainLayer == TerrainLayer.Seams ? "Seams: green <=1 m, orange <=6 m, red >6 m sampled height discontinuity." :
+                        terrainLayer == TerrainLayer.Hotspots ? "Hotspots: red sampled road cross-sections above preferred grading cap." :
+                        terrainLayer == TerrainLayer.VerticalProfile ? "Vertical profile: flagged interior grade transitions; junction transitions reported separately." :
+                        terrainLayer == TerrainLayer.VirtualTerrain ? "Virtual terrain: gray original cross-sections; green proposed road/shoulder, orange flagged. Sampled only, no TerrainData writes." :
                         terrainLayer == TerrainLayer.GradingZones ? "Grading zones: green <=3 m, yellow ordinary budget, orange <=10 m, red preferred cap, purple above preferred cap. Sampled road segments only." :
                         "Earthworks: red cut, blue fill; brighter = beyond ordinary road grading budget. Available after road preview.";
                     EditorGUILayout.HelpBox(legend, MessageType.Info);
@@ -895,6 +898,24 @@ namespace DeliveryDriver.EditorTools
 
         private void DrawAnalysisLayer()
         {
+            if(terrainLayer==TerrainLayer.Hotspots||terrainLayer==TerrainLayer.VerticalProfile)
+            {
+                bool hot=terrainLayer==TerrainLayer.Hotspots;
+                Handles.color=hot?Color.red:new Color(1f,.35f,.8f,1f);
+                Handles.DrawLines(Batch(hot?210:211,()=>(hot?preview.hotspots:preview.verticalFlags).SelectMany(l=>new[]{l.a+Vector3.up*2f,l.b+Vector3.up*2f})));
+                return;
+            }
+            if(terrainLayer==TerrainLayer.VirtualTerrain)
+            {
+                IEnumerable<Vector3> Lines(Vector3[] a){for(int i=1;i<a.Length;i++){yield return a[i-1];yield return a[i];}}
+                Handles.color=new Color(.7f,.72f,.72f,.65f);
+                Handles.DrawLines(Batch(212,()=>preview.virtualSections.SelectMany(x=>Lines(x.original))));
+                Handles.color=new Color(.28f,.9f,.48f,.85f);
+                Handles.DrawLines(Batch(213,()=>preview.virtualSections.Where(x=>!x.flagged).SelectMany(x=>Lines(x.proposed))));
+                Handles.color=new Color(1f,.47f,.1f,1f);
+                Handles.DrawLines(Batch(214,()=>preview.virtualSections.Where(x=>x.flagged).SelectMany(x=>Lines(x.proposed))));
+                return;
+            }
             if(terrainLayer==TerrainLayer.GradingZones)
             {
                 var colors=new[]{new Color(.24f,.85f,.4f),Color.yellow,new Color(1f,.5f,.1f),Color.red,new Color(.85f,.2f,1f)};
