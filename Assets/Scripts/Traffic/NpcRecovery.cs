@@ -358,41 +358,14 @@ namespace TrafficSystem
         /// </summary>
         private void SnapToRoad(RoadSegment segment, int waypointIndex, Vector3 position, Quaternion rotation)
         {
-            // CRITICAL FIX: Make rigidbody kinematic during snap to prevent physics explosions
-            bool wasKinematic = rb.isKinematic;
-            if (!wasKinematic)
-            {
-                // Unity does not allow velocity writes on kinematic bodies.
-                rb.linearVelocity = Vector3.zero;
-                rb.angularVelocity = Vector3.zero;
-            }
-            rb.isKinematic = true;
-
-            // Set position and rotation using rigidbody (not transform)
-            rb.position = position;
-            rb.rotation = rotation;
-
-            // Sync physics transforms immediately
-            Physics.SyncTransforms();
-
-            // Now use ForceReposition from NpcCarAgent
-            carAgent.ForceReposition(segment, waypointIndex, position, rotation);
-
-            // Re-enable physics and apply gentle velocity
-            rb.isKinematic = wasKinematic;
-
-            // Apply recovery velocity only for dynamic rigidbodies.
             Vector3 recoveryVelocity = rotation * Vector3.forward * (recoverySpeed / 3.6f);
-            if (!rb.isKinematic)
-            {
-                rb.linearVelocity = recoveryVelocity;
-                rb.angularVelocity = Vector3.zero;
-            }
+            carAgent.ForceReposition(segment, waypointIndex, position, rotation, recoveryVelocity);
+            Physics.SyncTransforms();
 
             // Reset timers
             stuckTimer = 0f;
             offRoadTimer = 0f;
-            lastPosition = position;
+            lastPosition = rb.position;
 
             if (logRecoveryEvents)
             {

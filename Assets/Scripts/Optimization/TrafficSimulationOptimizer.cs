@@ -120,6 +120,12 @@ namespace DeliveryDriver.Optimization
             AutoRegisterNPCs();
         }
 
+        private void OnDestroy()
+        {
+            if (instance == this)
+                instance = null;
+        }
+
         private void AutoRegisterNPCs()
         {
             NpcCarAgent[] npcs = FindObjectsByType<NpcCarAgent>(FindObjectsSortMode.None);
@@ -322,7 +328,7 @@ namespace DeliveryDriver.Optimization
 
         public bool ShouldUseWaypointLod(NpcCarAgent npc, bool alreadyLightweight, out float distance)
         {
-            if (!TryGetPlayerDistance(npc, out distance) || !simplifyDistantPhysics)
+            if (!TryGetPlayerDistance(npc, out distance) || !isActiveAndEnabled || !simplifyDistantPhysics)
                 return false;
 
             float exit = Mathf.Max(nearDistance, waypointLodExitDistance);

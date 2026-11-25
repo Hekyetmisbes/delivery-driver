@@ -355,7 +355,8 @@ namespace TrafficSystem
         private Vector3 lodVelocity;
         private float lodHeightOffset;
         private float nextLodEntryTime;
-        private int lodWheelMask;
+        private WheelCollider[] bodyWheels;
+        private readonly List<WheelCollider> lodDisabledWheels = new List<WheelCollider>(4);
         private RigidbodyInterpolation savedLodInterpolation;
         private CollisionDetectionMode savedLodCollisionMode;
         private uint lastSafetyTick, lastPathTick, lastTurnScanTick, lastNearbyTick, lastOffRoadTick, lastWeatherTick;
@@ -466,6 +467,7 @@ namespace TrafficSystem
             npcId = nextNpcId++;
 
             rb = GetComponent<Rigidbody>();
+            bodyWheels = GetComponentsInChildren<WheelCollider>(true);
             wheelVisualService = new NpcCarWheelVisualService(autoSetupWheelVisuals, autoCreateWheelVisualsIfMissing);
             SetupRigidbody();
             cachedWeight = rb.mass * Mathf.Abs(Physics.gravity.y);
@@ -642,8 +644,6 @@ namespace TrafficSystem
             var optimizer = TrafficSimulationOptimizer.Instance;
             float distance = 0f;
             bool useLod = optimizer != null && optimizer.ShouldUseWaypointLod(this, waypointLod, out distance);
-            if (optimizer != null && !useLod)
-                optimizer.TryGetPlayerDistance(this, out distance);
 
             if (waypointLod && (!useLod || NeedsHighFrequencySimulation()))
                 ExitWaypointLod(true);
@@ -811,7 +811,7 @@ namespace TrafficSystem
             savedLodCollisionMode = rb.collisionDetectionMode;
             SetMotorTorque(0f);
             SetBrakeTorque(0f);
-            lodWheelMask = CaptureAndDisableLodWheels();
+            DisableLodWheels();
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
             rb.collisionDetectionMode = CollisionDetectionMode.Discrete;
@@ -951,29 +951,16 @@ namespace TrafficSystem
             return false;
         }
 
-        private int CaptureAndDisableLodWheels()
+        private void DisableLodWheels()
         {
-            int mask = 0;
-            DisableLodWheel(frontLeftCollider, 1, ref mask);
-            DisableLodWheel(frontRightCollider, 2, ref mask);
-            DisableLodWheel(rearLeftCollider, 4, ref mask);
-            DisableLodWheel(rearRightCollider, 8, ref mask);
-            return mask;
-        }
-
-        private static void DisableLodWheel(WheelCollider wheel, int bit, ref int mask)
-        {
-            if (wheel != null && wheel.enabled)
+            foreach (WheelCollider wheel in bodyWheels)
             {
-                mask |= bit;
+                if (wheel == null || !wheel.enabled || wheel.attachedRigidbody != rb)
+                    continue;
+
+                lodDisabledWheels.Add(wheel);
                 wheel.enabled = false;
             }
-        }
-
-        private static void RestoreLodWheel(WheelCollider wheel, int bit, int mask)
-        {
-            if (wheel != null)
-                wheel.enabled = (mask & bit) != 0;
         }
 
         private void ExitWaypointLod(bool resumeMotion)
@@ -987,14 +974,17 @@ namespace TrafficSystem
                 rb.isKinematic = false;
                 rb.collisionDetectionMode = savedLodCollisionMode;
                 rb.interpolation = savedLodInterpolation;
-                RestoreLodWheel(frontLeftCollider, 1, lodWheelMask);
-                RestoreLodWheel(frontRightCollider, 2, lodWheelMask);
-                RestoreLodWheel(rearLeftCollider, 4, lodWheelMask);
-                RestoreLodWheel(rearRightCollider, 8, lodWheelMask);
                 rb.linearVelocity = resumeMotion ? lodVelocity : Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
                 rb.WakeUp();
             }
+            foreach (WheelCollider wheel in lodDisabledWheels)
+            {
+                if (wheel != null)
+                    wheel.enabled = true;
+            }
+            lodDisabledWheels.Clear();
+
             lodSpeedMs = 0f;
             lodVelocity = Vector3.zero;
             InvalidateDrivePlan();
@@ -3629,6 +3619,10 @@ namespace TrafficSystem
         /// Force reposition to specific segment and waypoint
         /// </summary>
         public void ForceReposition(RoadSegment segment, int waypointIndex, Vector3 position, Quaternion rotation)
+            => ForceReposition(segment, waypointIndex, position, rotation, null);
+
+        internal void ForceReposition(RoadSegment segment, int waypointIndex, Vector3 position, Quaternion rotation,
+            Vector3? recoveryVelocity)
         {
             ExitWaypointLod(false);
             currentSegment = segment;
@@ -3637,16 +3631,17 @@ namespace TrafficSystem
             ClearPlannedContinuation();
             hasSmoothedTargetSteerAngle = false;
             ApplyLaneCenteringPolicyForCurrentSegment();
-            transform.position = GetGroundedPosition(position);
+            rb.position = GetGroundedPosition(position);
 
             // Align to road forward using model axes
             Vector3 forward = rotation * Vector3.forward;
             forward = GetFlattenedForward(forward);
-            ApplyAlignedRotation(forward);
+            if (forward.sqrMagnitude > 0.001f)
+                rb.rotation = Quaternion.LookRotation(forward, Vector3.up);
 
             if (!rb.isKinematic)
             {
-                rb.linearVelocity = GetWorldForward() * (targetSpeed / 3.6f);
+                rb.linearVelocity = recoveryVelocity ?? forward * (targetSpeed / 3.6f);
                 rb.angularVelocity = Vector3.zero;
             }
 

@@ -1,3 +1,4 @@
+using System.Reflection;
 using NUnit.Framework;
 using TrafficSystem;
 using UnityEngine;
@@ -47,6 +48,62 @@ namespace DeliveryDriver.Tests
             Assert.That(NpcTrafficLodPolicy.StepTowards(Vector3.zero, destination, 10f, 0.02f).z, Is.EqualTo(0.2f).Within(0.0001f));
             Assert.That(NpcTrafficLodPolicy.StepTowards(Vector3.zero, destination, 1000f, 0.02f), Is.EqualTo(destination));
             Assert.That(NpcTrafficLodPolicy.StepTowards(Vector3.zero, destination, -10f, 0.02f), Is.EqualTo(Vector3.zero));
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void WaypointExit_RestoresAdditionalWheelsAndRigidbodySettings(bool resumeMotion)
+        {
+            var vehicle = new GameObject("LOD test vehicle");
+            try
+            {
+                vehicle.transform.position = new Vector3(4000f, 40f, 0f);
+                var agent = vehicle.AddComponent<NpcCarAgent>();
+                var body = vehicle.GetComponent<Rigidbody>();
+                body.interpolation = RigidbodyInterpolation.Extrapolate;
+                body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+                body.linearVelocity = Vector3.forward * 8f;
+                var wheels = new WheelCollider[6];
+                for (int i = 0; i < wheels.Length; i++)
+                {
+                    var wheelObject = new GameObject("Wheel " + i);
+                    wheelObject.transform.SetParent(vehicle.transform, false);
+                    wheels[i] = wheelObject.AddComponent<WheelCollider>();
+                }
+                wheels[2].enabled = false;
+
+                var road = new RoadSegment(1, "Straight");
+                road.waypoints.Add(new Waypoint(body.position - Vector3.up, Vector3.forward, road.id));
+                road.waypoints.Add(new Waypoint(body.position - Vector3.up + Vector3.forward * 50f, Vector3.forward, road.id));
+                const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+                var type = typeof(NpcCarAgent);
+                type.GetField("rb", flags).SetValue(agent, body);
+                type.GetField("bodyWheels", flags).SetValue(agent, wheels);
+                type.GetField("currentSegment", flags).SetValue(agent, road);
+                type.GetField("currentWaypointIndex", flags).SetValue(agent, 1);
+                Physics.SyncTransforms();
+
+                Assert.That(type.GetMethod("TryEnterWaypointLod", flags).Invoke(agent, null), Is.True);
+                Assert.That(body.isKinematic, Is.True);
+                Assert.That(wheels[5].enabled, Is.False);
+
+                if (resumeMotion)
+                    type.GetMethod("ExitWaypointLod", flags).Invoke(agent, new object[] { true });
+                else
+                    type.GetMethod("OnDisable", flags).Invoke(agent, null);
+
+                Assert.That(agent.IsWaypointLod, Is.False);
+                Assert.That(body.isKinematic, Is.False);
+                Assert.That(body.interpolation, Is.EqualTo(RigidbodyInterpolation.Extrapolate));
+                Assert.That(body.collisionDetectionMode, Is.EqualTo(CollisionDetectionMode.ContinuousDynamic));
+                Assert.That(body.linearVelocity.z, Is.EqualTo(resumeMotion ? 8f : 0f));
+                for (int i = 0; i < wheels.Length; i++)
+                    Assert.That(wheels[i].enabled, Is.EqualTo(i != 2), "Wheel " + i);
+            }
+            finally
+            {
+                Object.DestroyImmediate(vehicle);
+            }
         }
     }
 }

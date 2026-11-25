@@ -114,8 +114,7 @@ namespace TrafficSystem
             npcContainer = new GameObject("NPC Vehicles").transform;
             npcContainer.SetParent(transform);
 
-            // Priority 2: Ensure traffic communication system exists
-            EnsureTrafficCommunicationSystem();
+            EnsureTrafficSystems();
 
             if (enablePooling && warmPoolOnStart)
             {
@@ -167,11 +166,13 @@ namespace TrafficSystem
             }
         }
 
-        /// <summary>
-        /// Ensure traffic communication system exists in scene
-        /// </summary>
-        private void EnsureTrafficCommunicationSystem()
+        private void EnsureTrafficSystems()
         {
+            if (TrafficSimulationOptimizer.Instance == null)
+            {
+                gameObject.AddComponent<TrafficSimulationOptimizer>();
+            }
+
             if (TrafficCommunicationSystem.Instance == null)
             {
                 GameObject commsObj = new GameObject("TrafficCommunicationSystem");
@@ -1248,6 +1249,12 @@ namespace TrafficSystem
 
         private bool TryResolvePlayerTransform(out Transform resolvedPlayer)
         {
+            var activeController = PlayerVehicleManager.Instance?.ActiveVehicleController;
+            if (autoFindPlayer && activeController != null && activeController.gameObject.activeInHierarchy)
+            {
+                playerTransform = activeController.transform;
+            }
+
             resolvedPlayer = playerTransform;
             if (resolvedPlayer != null && resolvedPlayer.gameObject.activeInHierarchy)
             {
@@ -1267,11 +1274,9 @@ namespace TrafficSystem
 
             nextPlayerResolveTime = Time.time + 1f;
 
-            if (PlayerVehicleManager.Instance != null && PlayerVehicleManager.Instance.ActiveVehicleController != null)
-            {
-                playerTransform = PlayerVehicleManager.Instance.ActiveVehicleController.transform;
-            }
-            else if (TrafficSimulationOptimizer.Instance != null && TrafficSimulationOptimizer.Instance.playerTransform != null)
+            if (TrafficSimulationOptimizer.Instance != null &&
+                TrafficSimulationOptimizer.Instance.playerTransform != null &&
+                TrafficSimulationOptimizer.Instance.playerTransform.gameObject.activeInHierarchy)
             {
                 playerTransform = TrafficSimulationOptimizer.Instance.playerTransform;
             }
