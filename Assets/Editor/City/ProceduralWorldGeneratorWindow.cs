@@ -22,6 +22,7 @@ namespace DeliveryDriver.EditorTools
         private string status = "Detect the 24 land tiles and optional 4 sea tiles in GameScene.";
         private MessageType statusType = MessageType.Info;
         private bool showPreview = true;
+        private bool showArterials = true, showCollectors = true, showLocals = true, showLinks = true, showBridgeLines = true;
         private bool busy;
 
         [MenuItem("Tools/Delivery Driver/City/Procedural World Generator", false, 1)]
@@ -56,8 +57,8 @@ namespace DeliveryDriver.EditorTools
         private void OnGUI()
         {
             scroll = EditorGUILayout.BeginScrollView(scroll);
-            EditorGUILayout.LabelField("Procedural World Generator", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("Roads-only MVP: 4 x 3 Ankara + sea corridor + 4 x 3 Istanbul. Sea can be empty or contain four terrain tiles. Existing Simple Road Placement geometry; no EasyRoads.", MessageType.Info);
+            EditorGUILayout.LabelField("Procedural World Generator V2 - Preview", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("Preview iteration only. No scene, mesh or terrain asset changes. Generation is intentionally locked until the road layout is approved.", MessageType.Info);
             using (new EditorGUI.DisabledScope(busy || EditorApplication.isPlayingOrWillChangePlaymode))
             {
                 if (GUILayout.Button("Detect Terrain Layout & City Roots", GUILayout.Height(28f))) Run(Detect);
@@ -82,11 +83,16 @@ namespace DeliveryDriver.EditorTools
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Road layout", EditorStyles.boldLabel);
                 settings.seed = EditorGUILayout.IntField("Seed", settings.seed);
-                settings.spacing = Mathf.Clamp(EditorGUILayout.FloatField("Target spacing (m)", settings.spacing), 45f, 500f);
-                settings.maxNodesPerCity = EditorGUILayout.IntSlider("Node budget per city", settings.maxNodesPerCity, 40, 350);
-                settings.curve = EditorGUILayout.Slider("Curvature", settings.curve, 0f, 1f);
-                settings.loops = EditorGUILayout.Slider("Extra route probability", settings.loops, 0f, 1f);
-                settings.width = Mathf.Clamp(EditorGUILayout.FloatField("Uniform asphalt width (m)", settings.width), 5f, 12f);
+                settings.arterialSpacing = Mathf.Clamp(EditorGUILayout.FloatField("Arterial spacing (m)", settings.arterialSpacing), 300f, 1200f);
+                settings.collectorSpacing = Mathf.Clamp(EditorGUILayout.FloatField("Collector spacing (m)", settings.collectorSpacing), 120f, 450f);
+                settings.spacing = Mathf.Clamp(EditorGUILayout.FloatField("Local street spacing (m)", settings.spacing), 55f, 200f);
+                settings.nodesPerTile = EditorGUILayout.IntSlider("Candidate budget per land tile", settings.nodesPerTile, 60, 500);
+                settings.straightPreference = EditorGUILayout.Slider("Straight road preference", settings.straightPreference, 0f, 1f);
+                settings.curve = EditorGUILayout.Slider("Organic curvature", settings.curve, 0f, 1f);
+                settings.loops = EditorGUILayout.Slider("Local alternate routes", settings.loops, 0f, 1f);
+                settings.authoredLinkTarget = EditorGUILayout.IntSlider("Existing road connection target", settings.authoredLinkTarget, 0, 8);
+                settings.bridgeSeparation = EditorGUILayout.Slider("Bridge separation target (%)", settings.bridgeSeparation * 100f, 10f, 90f) / 100f;
+                settings.width = Mathf.Clamp(EditorGUILayout.FloatField("Planning asphalt width (m)", settings.width), 5f, 12f);
                 settings.sidewalk = Mathf.Clamp(EditorGUILayout.FloatField("Sidewalk width (m)", settings.sidewalk), .5f, 3f);
 
                 EditorGUILayout.Space();
@@ -102,28 +108,35 @@ namespace DeliveryDriver.EditorTools
                     SceneView.RepaintAll();
                 }
                 showPreview = EditorGUILayout.Toggle("Show Scene View preview", showPreview);
+                EditorGUI.BeginChangeCheck();
+                showArterials = EditorGUILayout.Toggle("Arterials (blue)", showArterials);
+                showCollectors = EditorGUILayout.Toggle("Collectors (orange)", showCollectors);
+                showLocals = EditorGUILayout.Toggle("Local streets (gray)", showLocals);
+                showBridgeLines = EditorGUILayout.Toggle("Bridges (yellow)", showBridgeLines);
+                showLinks = EditorGUILayout.Toggle("Existing-road proposals (green)", showLinks);
+                if (EditorGUI.EndChangeCheck()) SceneView.RepaintAll();
 
                 EditorGUILayout.Space();
                 if (GUILayout.Button("Preview Layout (no scene changes)", GUILayout.Height(32f))) Run(PlanOnly);
                 if (preview != null)
                 {
-                    EditorGUILayout.LabelField("Planned roads", preview.edges.Count.ToString());
+                    EditorGUILayout.LabelField("Planned road segments", preview.edges.Count.ToString());
+                    EditorGUILayout.LabelField("Arterial / collector / local",
+                        preview.edges.Count(e => e.kind == ProceduralWorldPlanner.RoadKind.Arterial) + " / " +
+                        preview.edges.Count(e => e.kind == ProceduralWorldPlanner.RoadKind.Collector) + " / " +
+                        preview.edges.Count(e => e.kind == ProceduralWorldPlanner.RoadKind.Local));
+                    EditorGUILayout.LabelField("Existing-road proposals", preview.authoredLinks.Count.ToString());
+                    foreach (string note in preview.notes) EditorGUILayout.HelpBox(note, MessageType.Info);
                     EditorGUILayout.LabelField("Planned bridge links", preview.BridgeCount.ToString());
                     if (settings.bridges && settings.buildAnkara && settings.buildIstanbul && preview.BridgeCount != 2)
-                        EditorGUILayout.HelpBox("Preview only: requested bridge links are missing. Generate requires two valid bridges, or explicitly disable bridges.", MessageType.Warning);
+                        EditorGUILayout.HelpBox("Requested bridge links are missing from this preview. Check the bridge diagnostic below.", MessageType.Warning);
                     EditorGUILayout.LabelField("Road length", (preview.edges.Sum(e => PathLength(e.points)) / 1000f).ToString("F2") + " km");
                     foreach (string warning in preview.warnings) EditorGUILayout.HelpBox(warning, MessageType.Warning);
                 }
                 bool hasBuild = FindStates(SceneManager.GetActiveScene()).Count > 0;
-                using (new EditorGUI.DisabledScope(hasBuild || (!settings.buildAnkara && !settings.buildIstanbul)))
-                {
-                    if (GUILayout.Button("Generate Roads & Bridges", GUILayout.Height(36f)))
-                    {
-                        if (EditorUtility.DisplayDialog("Generate procedural roads",
-                            "Only new generated roots will be created. TerrainData will be copied before grading. Existing manual roads and buildings are not deleted. Continue?",
-                            "Generate", "Cancel")) Run(Generate);
-                    }
-                }
+                using (new EditorGUI.DisabledScope(true))
+                    GUILayout.Button("Generate Roads & Bridges (locked for V2 preview)", GUILayout.Height(36f));
+                EditorGUILayout.HelpBox("Road classes currently affect the plan and preview, not mesh widths. Green connections are proposals; existing roads are unchanged.", MessageType.Info);
                 using (new EditorGUI.DisabledScope(!hasBuild))
                 {
                     if (GUILayout.Button("Clear Generated Roads / Restore Terrain", GUILayout.Height(28f)) &&
@@ -243,8 +256,7 @@ namespace DeliveryDriver.EditorTools
                     settings.bridges = false;
                     preview = ProceduralWorldPlanner.Build(settings, layout, scene);
                     preview.warnings.Insert(0, "BRIDGES NOT PLANNED: " + ex.Message);
-                    SetStatus("City-only preview shown. Two-bridge generation is blocked until a valid bridge plan exists. " +
-                        "Adjust the bridge settings or explicitly uncheck Connect with two bridges to generate just city roads.", MessageType.Warning);
+                    SetStatus("City-only preview shown. Adjust bridge settings or try another seed to preview both bridge links. Scene generation is locked during V2.", MessageType.Warning);
                     Debug.LogWarning("[ProceduralWorld] " + ex.Message);
                 }
                 finally { settings.bridges = requested; }
@@ -549,10 +561,41 @@ namespace DeliveryDriver.EditorTools
             Handles.color = new Color(.25f, .45f, 1f, .8f);
             DrawArea(layout.sea, layout.SeaTerrainCount == 0 ? "Sea (empty corridor)" : "Sea (4 tiles)");
             if (preview == null) return;
-            foreach (var edge in preview.edges)
+            foreach (var kind in new[] { ProceduralWorldPlanner.RoadKind.Local, ProceduralWorldPlanner.RoadKind.Collector,
+                ProceduralWorldPlanner.RoadKind.Arterial, ProceduralWorldPlanner.RoadKind.Bridge })
             {
-                Handles.color = edge.Bridge ? Color.yellow : edge.sector == "Ankara" ? Color.cyan : new Color(1f, .65f, .2f);
-                Handles.DrawAAPolyLine(edge.Bridge ? 5f : 2.5f, edge.points.Select(p => p + Vector3.up * .5f).ToArray());
+                if (kind == ProceduralWorldPlanner.RoadKind.Local && !showLocals ||
+                    kind == ProceduralWorldPlanner.RoadKind.Collector && !showCollectors ||
+                    kind == ProceduralWorldPlanner.RoadKind.Arterial && !showArterials ||
+                    kind == ProceduralWorldPlanner.RoadKind.Bridge && !showBridgeLines) continue;
+                float thickness;
+                switch (kind)
+                {
+                    case ProceduralWorldPlanner.RoadKind.Arterial:
+                        Handles.color = new Color(.10f, .68f, 1f, 1f); thickness = 4.5f; break;
+                    case ProceduralWorldPlanner.RoadKind.Collector:
+                        Handles.color = new Color(1f, .55f, .12f, .95f); thickness = 2.8f; break;
+                    case ProceduralWorldPlanner.RoadKind.Bridge:
+                        Handles.color = Color.yellow; thickness = 5f; break;
+                    default:
+                        Handles.color = new Color(.88f, .91f, .93f, .82f); thickness = 1.4f; break;
+                }
+                foreach (var edge in preview.edges)
+                {
+                    if (edge.kind != kind) continue;
+                    Handles.DrawAAPolyLine(thickness, edge.points.Select(p => p + Vector3.up * .5f).ToArray());
+                }
+            }
+            if (showLinks)
+            {
+                Handles.color = new Color(.24f, 1f, .35f, 1f);
+                foreach (var link in preview.authoredLinks)
+                {
+                    Handles.DrawAAPolyLine(4f, link.points.Select(p => p + Vector3.up * .8f).ToArray());
+                    Vector3 anchor = link.points[0] + Vector3.up;
+                    Handles.SphereHandleCap(0, anchor, Quaternion.identity,
+                        HandleUtility.GetHandleSize(anchor) * .12f, EventType.Repaint);
+                }
             }
         }
 
