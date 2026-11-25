@@ -27,6 +27,7 @@ namespace DeliveryDriver.EditorTools
         private bool showArterials = true, showCollectors = true, showLocals = true, showLinks = true, showBridgeLines = true;
         private bool showDetached = true;
         private bool showGrading = true, xrayPreview = true;
+        private bool showTerrainAnalysis = false, analysisOnly = false;
         private bool busy;
 
         [MenuItem("Tools/Delivery Driver/City/Procedural World Generator", false, 1)]
@@ -61,7 +62,7 @@ namespace DeliveryDriver.EditorTools
         private void OnGUI()
         {
             scroll = EditorGUILayout.BeginScrollView(scroll);
-            EditorGUILayout.LabelField("Procedural World Generator V4 - Ankara Backbone Preview", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Procedural World Generator V5 - Terrain Design Preview", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("Preview iteration only. No scene, mesh or terrain asset changes. Generation is intentionally locked until the road layout is approved.", MessageType.Info);
             using (new EditorGUI.DisabledScope(busy || EditorApplication.isPlayingOrWillChangePlaymode))
             {
@@ -100,6 +101,16 @@ namespace DeliveryDriver.EditorTools
                 settings.sidewalk = Mathf.Clamp(EditorGUILayout.FloatField("Sidewalk width (m)", settings.sidewalk), .5f, 3f);
 
                 EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Terrain intelligence", EditorStyles.boldLabel);
+                settings.terrainDesign = EditorGUILayout.Toggle("Terrain-adaptive city design", settings.terrainDesign);
+                using (new EditorGUI.DisabledScope(!settings.terrainDesign))
+                {
+                    settings.terrainInfluence = EditorGUILayout.Slider("Terrain direction influence", settings.terrainInfluence, 0f, 1f);
+                    settings.districtVariation = EditorGUILayout.Slider("District orientation variation", settings.districtVariation, 0f, 1f);
+                    settings.earthworkPreference = EditorGUILayout.Slider("Prefer lower earthworks", settings.earthworkPreference, 0f, 1f);
+                    settings.preserveV4Coverage = EditorGUILayout.Toggle("Preserve V4 coverage", settings.preserveV4Coverage);
+                }
+                EditorGUILayout.HelpBox("Coverage guard compares two plans (slower). Terrain analysis guides street direction and candidate priority; original terrain still determines feasibility.", MessageType.Info);
                 EditorGUILayout.LabelField("Terrain and bridges", EditorStyles.boldLabel);
                 settings.terrainRepair = EditorGUILayout.Toggle("Terrain-aware network repair", settings.terrainRepair);
                 settings.ankaraBackbone = EditorGUILayout.Toggle("Ankara backbone first", settings.ankaraBackbone);
@@ -130,11 +141,19 @@ namespace DeliveryDriver.EditorTools
                 showLinks = EditorGUILayout.Toggle("Existing-road proposals (green)", showLinks);
                 showDetached = EditorGUILayout.Toggle("Detached roads (purple)", showDetached);
                 showGrading = EditorGUILayout.Toggle("Extra grading markers (red)", showGrading);
+                showTerrainAnalysis = EditorGUILayout.Toggle("Terrain slope map", showTerrainAnalysis);
                 if (EditorGUI.EndChangeCheck()) SceneView.RepaintAll();
 
                 EditorGUILayout.Space();
+                if (GUILayout.Button("Analyze Terrain (read only)", GUILayout.Height(28f))) Run(AnalyzeOnly);
                 if (GUILayout.Button("Preview Layout (no scene changes)", GUILayout.Height(32f))) Run(PlanOnly);
-                if (preview != null)
+                if (showTerrainAnalysis)
+                    EditorGUILayout.HelpBox("Slope map: green = ground slope under half the selected grade, amber = between half and the grade, red = above it. Gray = protected or near authored road. Raw terrain, not road feasibility.", MessageType.Info);
+                if (preview != null && analysisOnly)
+                {
+                    foreach (string note in preview.notes) EditorGUILayout.HelpBox(note, MessageType.Info);
+                }
+                if (preview != null && !analysisOnly)
                 {
                     EditorGUILayout.LabelField("Retained road segments", preview.edges.Count.ToString());
                     EditorGUILayout.LabelField("Detached preview segments", preview.detachedEdges.Count.ToString());
@@ -246,10 +265,21 @@ namespace DeliveryDriver.EditorTools
             return true;
         }
 
+        private void AnalyzeOnly()
+        {
+            Scene scene = SceneManager.GetActiveScene();
+            layout = ProceduralWorldPlanner.DetectLayout(scene);
+            preview = ProceduralWorldPlanner.AnalyzeOnly(settings, layout, scene);
+            analysisOnly = true;
+            showTerrainAnalysis = true;
+            SetStatus("Read-only terrain analysis ready: " + preview.terrainCells.Count + " samples. No scene assets changed.");
+        }
+
         private void PlanOnly() => PlanOnly(true);
 
         private void PlanOnly(bool allowBridgeFallback)
         {
+            analysisOnly = false;
             Scene scene = SceneManager.GetActiveScene();
             if (FindStates(scene).Count > 0) throw new InvalidOperationException("Clear the previous build before previewing a new one.");
             if (layout == null) Detect();
@@ -589,6 +619,23 @@ namespace DeliveryDriver.EditorTools
                     cachedPreview = preview;
                 }
                 if (preview == null) return;
+                if (showTerrainAnalysis)
+                {
+                    foreach (var cell in preview.terrainCells)
+                    {
+                        Rect r = cell.area;
+                        float y = cell.center.y + 1.2f;
+                        Color fill = cell.protectedLand ? new Color(.5f,.5f,.5f,.24f) :
+                            cell.slope > settings.grade ? new Color(.93f,.21f,.16f,.32f) :
+                            cell.slope > settings.grade*.5f ? new Color(1f,.65f,.12f,.26f) :
+                            new Color(.2f,.8f,.35f,.22f);
+                        Handles.DrawSolidRectangleWithOutline(new[] {
+                            new Vector3(r.xMin,y,r.yMin),new Vector3(r.xMax,y,r.yMin),
+                            new Vector3(r.xMax,y,r.yMax),new Vector3(r.xMin,y,r.yMax)
+                        },fill,Color.clear);
+                    }
+                }
+                if (analysisOnly) return;
                 foreach (var kind in new[] { ProceduralWorldPlanner.RoadKind.Local, ProceduralWorldPlanner.RoadKind.Collector,
                     ProceduralWorldPlanner.RoadKind.Arterial, ProceduralWorldPlanner.RoadKind.Bridge })
                 {
