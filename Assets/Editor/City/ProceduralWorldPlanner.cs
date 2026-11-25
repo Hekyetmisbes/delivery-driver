@@ -577,6 +577,7 @@ namespace DeliveryDriver.EditorTools
                     float candidateMin = Mathf.Min(across, otherAcross), candidateMax = Mathf.Max(across, otherAcross);
                     if (accepted.Any(c => Mathf.Abs(c.acrossMin - candidateMin) < 2f &&
                                           Mathf.Abs(c.acrossMax - candidateMax) < 2f)) continue;
+                    int feasibleAtLane = 0;
                     foreach (var pair in depthPairs)
                     {
                         if (++attempts % 128 == 0 &&
@@ -606,7 +607,7 @@ namespace DeliveryDriver.EditorTools
                             bestPairScore = score; bestGap = gap; bestA = partner; bestB = candidate;
                         }
                         accepted.Add(candidate);
-                        break;
+                        if (!settings.urbanDesign || ++feasibleAtLane >= 3) break;
                     }
                 }
                 if (bestGap >= desiredGap && (!settings.urbanDesign || Mathf.Abs(diagonal) >= .07f)) break;

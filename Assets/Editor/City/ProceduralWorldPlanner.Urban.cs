@@ -98,7 +98,13 @@ namespace DeliveryDriver.EditorTools
                 if(plan.layout.TryHeight(XZ(p),out float h))
                     cost+=Mathf.Abs(p.y-h)*Vector3.Distance(path[i-1],p);
             }
-            return cost/Mathf.Max(1,path.Count*.25f);
+            float endpointPenalty=0f;
+            foreach(var pos in new[]{XZ(path[0]),XZ(path[path.Count-1])})
+            {
+                var cell=AnalysisAt(pos);
+                if(cell!=null)endpointPenalty+=cell.slope*35f+cell.roughness*2f;
+            }
+            return cost/Mathf.Max(1,path.Count*.25f)+endpointPenalty;
         }
 
         private float ContourPenalty(Vector2 a,Vector2 b)

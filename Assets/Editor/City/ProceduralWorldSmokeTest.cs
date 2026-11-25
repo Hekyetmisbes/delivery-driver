@@ -38,6 +38,7 @@ namespace DeliveryDriver.EditorTools
                 var settings = new ProceduralWorldPlanner.Settings
                 {
                     seed = 4281, spacing = 90f, nodesPerTile = 80, arterialSpacing = 400f, collectorSpacing = 200f,
+                    urbanDesign = false,
                     grade = .12f, bridgeClearance = 4f, seaY = 0f,
                     buildAnkara = true, buildIstanbul = false, protectKizilay = false, bridges = false
                 };
@@ -123,6 +124,35 @@ namespace DeliveryDriver.EditorTools
                 for(int i=0;i<land.Count;i++)
                     Require(before[i].SequenceEqual(land[i].terrain.terrainData.GetHeights(0,0,33,33).Cast<float>()),
                         "Preview modified synthetic terrain height data.");
+                // Exercise V6 itself, without allowing the coverage guard to hide a failure.
+                // Flat Istanbul permits an independent urban-layout regression.
+                settings.urbanDesign = true;
+                settings.urbanGuard = false;
+                settings.buildAnkara = false;
+                settings.buildIstanbul = true;
+                settings.bridges = false;
+                settings.openSpaceFraction = .12f;
+                settings.seed = 4281;
+                var urban = ProceduralWorldPlanner.Build(settings,emptySea,scene);
+                Verify(urban,settings,0);
+                Require(urban.version=="V6","V6 test unexpectedly selected a fallback.");
+                Require(urban.openSpaces.Count>0,"No open-space reservations in the synthetic flat city.");
+                Require(urban.seams.Count>0,"No seam analysis lines.");
+                Require(urban.parcels.Count>0,"No building-lot proposals in flat city.");
+                float margin=settings.width*.5f+settings.sidewalk+2f;
+                foreach(var space in urban.openSpaces)
+                foreach(var edge in urban.edges.Concat(urban.authoredLinks))
+                for(int i=1;i<edge.points.Count;i++)
+                    Require(!ProceduralWorldPlanner.SegmentHitsRect(ProceduralWorldPlanner.XZ(edge.points[i-1]),
+                        ProceduralWorldPlanner.XZ(edge.points[i]),space.bounds,margin),"Road crosses reserved park/plaza.");
+                Require(urban.parcels.All(l=>!urban.openSpaces.Any(r=>r.bounds.Overlaps(l.bounds))),"Lot overlaps open space.");
+                Require(ProceduralWorldPlanner.SegmentHitsRect(new Vector2(-2,0),new Vector2(2,0),new Rect(-1,-1,2,2),0f),
+                    "Reservation clipping missed a crossing.");
+                Require(!ProceduralWorldPlanner.SegmentHitsRect(new Vector2(-2,3),new Vector2(2,3),new Rect(-1,-1,2,2),0f),
+                    "Reservation clipping rejected a separated segment.");
+                for(int i=0;i<land.Count;i++)
+                    Require(before[i].SequenceEqual(land[i].terrain.terrainData.GetHeights(0,0,33,33).Cast<float>()),
+                        "V6 modified original terrain.");
                 // Rotate the placement convention (not the Terrain objects): the same layout must work on Z.
                 foreach (var tile in emptySea.tiles)
                 {
@@ -137,7 +167,7 @@ namespace DeliveryDriver.EditorTools
                     tile.terrain.transform.position += Vector3.forward * 100f;
                 var wider = ProceduralWorldPlanner.DetectLayout(scene);
                 Require(Mathf.Abs(wider.sea.height - 300f) < .01f, "Actual sea gap width was not inferred.");
-                Debug.Log("[ProceduralWorldSmoke] PASS: 28/24 terrain detection, empty sea bridges, X/Z orientation, real sea width, deterministic road plan, stepped Ankara coverage and read-only grading checks. No assets written.");
+                Debug.Log("[ProceduralWorldSmoke] PASS: 28/24 terrain detection, empty sea bridges, X/Z orientation, real sea width, deterministic road plan, stepped Ankara coverage, V6 reservations/parcels and read-only grading checks. No assets written.");
             }
             catch (Exception ex)
             {
