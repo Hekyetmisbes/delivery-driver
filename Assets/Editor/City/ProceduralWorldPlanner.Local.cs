@@ -292,6 +292,10 @@ namespace DeliveryDriver.EditorTools
         {
             var index=new StreetIndex();foreach(var e in plan.edges.Concat(plan.authoredLinks))index.Add(e);
             int attempts=0,promoted=0,splits=0,routed=0,groups=0,profileReject=0,geometryReject=0,connectorReject=0;
+            int terrainReject=0,qualityReject=0,graphReject=0,measured=0;
+            // The outer stage still verifies the original network and quality.
+            // Every group must also pass relative to both its input and stage input.
+            var stageQuality=Measure(plan,settings);
             foreach(string city in new[]{"Ankara","İstanbul"})
             {
                 if(!plan.detachedEdges.Any(e=>e.sector==city))continue;
@@ -308,9 +312,17 @@ namespace DeliveryDriver.EditorTools
                         foreach(var next in left.Where(x=>nodes.Contains(x.a)||nodes.Contains(x.b)).ToList()){left.Remove(next);todo.Enqueue(next);}
                     }
                     groups++;
-                    if(group.Any(e=>!LocalProfileSafe(e.points))){profileReject++;continue;}
+                    string groupLabel="Interior group "+groups+" ("+group.Count+" segments, first node "+first.a.id+")";
+                    if(group.Any(e=>!LocalProfileSafe(e.points))){profileReject++;plan.notes.Add(groupLabel+": profile rejected.");continue;}
                     if(group.Any(e=>!RouteClear(e.points,CityBounds(city))||StreetCrosses(e.a,e.b,e.points,index)||!StreetAngles(e.a,e.b,e.points,index)))
-                    {geometryReject++;continue;}
+                    {geometryReject++;plan.notes.Add(groupLabel+": geometry/protection rejected.");continue;}
+                    var groupQuality=Measure(plan,settings);
+                    // Snapshot the lists, not the whole scene or sampled geometry. Trial
+                    // connections only change membership and degrees, never old paths.
+                    var oldEdges=plan.edges.ToList();
+                    var oldDetached=plan.detachedEdges.ToList();
+                    int groupStartAttempts=attempts,groupStartMeasured=measured;
+                    int groupStartTerrain=terrainReject,groupStartQuality=qualityReject,groupStartGraph=graphReject;
                     // Detached degrees are diagnostic and may be stale after pruning.
                     var oldDegrees=nodes.ToDictionary(n=>n,n=>n.degree);
                     foreach(var n in nodes)n.degree=index.At(n).Count()+group.Count(e=>e.a==n||e.b==n);
@@ -334,9 +346,22 @@ namespace DeliveryDriver.EditorTools
                                 }
                             }
                         }
-                        foreach(var item in options.OrderBy(x=>x.cost).ThenBy(x=>x.edge.a.id).ThenBy(x=>x.sample).Take(64))
+                        // Prefer healthy host edges, but do not rule out a split of
+                        // a flagged edge if its full-network metrics still pass.
+                        var bestCost=float.PositiveInfinity;
+                        float bestSeverity=float.PositiveInfinity;
+                        Edge bestOld=null,bestA=null,bestB=null,bestConnector=null;
+                        Node bestJunction=null,bestSource=null;
+                        QualityReport bestQuality=null;
+                        int measuredInGroup=0;
+                        int routedInGroup=0;
+                        var hostHealthy=options.Select(x=>x.edge).Distinct().ToDictionary(e=>e,e=>RadiusOk(e.points,e.kind));
+                        foreach(var item in options.OrderBy(x=>hostHealthy[x.edge]?0:1).ThenBy(x=>x.cost).ThenBy(x=>x.edge.a.id).ThenBy(x=>x.edge.b.id).ThenBy(x=>x.sample).ThenBy(x=>x.source.id).Take(64))
                         {
-                            if(++attempts>settings.localRepairBudget)break;
+                            // Bound full city remeasurement independently of cheap
+                            // connector attempts. Continue after the first viable route.
+                            if(attempts>=settings.localRepairBudget||measuredInGroup>=12)break;
+                            attempts++;
                             if(attempts%12==0&&EditorUtility.DisplayCancelableProgressBar("V7.2","Interior junction attempt "+attempts,.65f))throw new OperationCanceledException();
                             var old=item.edge;
                             var junction=new Node{id=plan.nodes.Max(n=>n.id)+1,position=old.points[item.sample],sector=city,degree=2};
@@ -346,26 +371,71 @@ namespace DeliveryDriver.EditorTools
                             List<Vector3> path=null;
                             try
                             {
-                                if(!TryStreet(item.source,junction,CityBounds(city),RoadKind.Collector,index,false,out path)&&routed<12&&settings.terrainRepair)
+                                if(!TryStreet(item.source,junction,CityBounds(city),RoadKind.Collector,index,false,out path)&&routed<12&&routedInGroup<6&&settings.terrainRepair)
+                                {
+                                    int beforeRouted=routed;
                                     TryRepairRoute(item.source,junction,CityBounds(city),index,ref routed,out path);
+                                    routedInGroup+=routed-beforeRouted;
+                                }
                                 if(path==null||!LocalProfileSafe(path)||!RadiusOk(path,RoadKind.Collector)||!RouteClear(path,CityBounds(city))||
                                     !StreetAngles(item.source,junction,path,index)||StreetCrosses(item.source,junction,path,index))
                                 {connectorReject++;continue;}
                                 var connector=new Edge{a=item.source,b=junction,sector=city,kind=RoadKind.Collector,points=path};
-                                int at=plan.edges.IndexOf(old);plan.edges[at]=a;plan.edges.Insert(at+1,b);
+                                int at=plan.edges.IndexOf(old);
+                                plan.edges[at]=a;plan.edges.Insert(at+1,b);
                                 plan.nodes.Add(junction);junction.degree++;item.source.degree++;
                                 foreach(var e in group){plan.detachedEdges.Remove(e);plan.edges.Add(e);}
-                                plan.edges.Add(connector);index.Add(connector);splits++;promoted+=group.Count;success=true;
-                                break;
+                                plan.edges.Add(connector);
+                                try
+                                {
+                                    measured++;measuredInGroup++;
+                                    var q=Measure(plan,settings);
+                                    if(q.ankaraTiles<groupQuality.ankaraTiles||q.istanbulTiles<groupQuality.istanbulTiles||
+                                        (groupQuality.bridgeGraphConnected&&!q.bridgeGraphConnected)||
+                                        q.bridgeGap+.01f<groupQuality.bridgeGap||NetworkIdentityIssue(plan)!=null)
+                                    {graphReject++;continue;}
+                                    if(!NoTerrainRegression(groupQuality,q,settings)||!NoTerrainRegression(stageQuality,q,settings))
+                                    {terrainReject++;continue;}
+                                    if(!NoLocalQualityRegression(groupQuality,q)||!NoLocalQualityRegression(stageQuality,q))
+                                    {qualityReject++;continue;}
+                                    // Actual candidate quality, not endpoint distance, decides.
+                                    float cost=BalancedCost(q,settings);
+                                    if(bestOld==null||cost<bestCost-.000001f||
+                                        Mathf.Abs(cost-bestCost)<=.000001f&&q.verticalSeverity<bestSeverity)
+                                    {
+                                        bestCost=cost;bestSeverity=q.verticalSeverity;bestQuality=q;
+                                        bestOld=old;bestA=a;bestB=b;bestConnector=connector;
+                                        bestJunction=junction;bestSource=item.source;
+                                    }
+                                }
+                                finally
+                                {
+                                    item.source.degree--;junction.degree--;plan.nodes.Remove(junction);
+                                    plan.edges.Clear();plan.edges.AddRange(oldEdges);
+                                    plan.detachedEdges.Clear();plan.detachedEdges.AddRange(oldDetached);
+                                }
                             }
-                            finally{if(!success){index.Remove(a);index.Remove(b);index.Add(old);}}
+                            finally{index.Remove(a);index.Remove(b);index.Add(old);}
                         }
+                        if(bestOld!=null)
+                        {
+                            int at=plan.edges.IndexOf(bestOld);plan.edges[at]=bestA;plan.edges.Insert(at+1,bestB);
+                            plan.nodes.Add(bestJunction);bestJunction.degree++;bestSource.degree++;
+                            foreach(var e in group){plan.detachedEdges.Remove(e);plan.edges.Add(e);}
+                            plan.edges.Add(bestConnector);
+                            index.Remove(bestOld);index.Add(bestA);index.Add(bestB);index.Add(bestConnector);
+                            splits++;promoted+=group.Count;success=true;
+                        }
+                        plan.notes.Add(groupLabel+": "+(success?"ACCEPTED; cut/fill "+bestQuality.meanCut.ToString("F3")+"/"+bestQuality.meanFill.ToString("F3")+" m, extra "+(bestQuality.extraFraction*100f).ToString("F2")+"%, radius flags "+bestQuality.sharpRoads:"NO SAFE CANDIDATE")+
+                            "; attempts "+(attempts-groupStartAttempts)+", measured "+(measured-groupStartMeasured)+
+                            ", terrain rejects "+(terrainReject-groupStartTerrain)+", quality rejects "+(qualityReject-groupStartQuality)+
+                            ", graph rejects "+(graphReject-groupStartGraph)+".");
                     }
                     finally{if(!success){foreach(var e in group)index.Remove(e);foreach(var n in nodes)n.degree=oldDegrees[n];}}
                 }
             }
             gradingSurface=null;
-            plan.notes.Add("Interior T-junction repair: "+splits+" preview splits, "+promoted+" promoted segments, "+attempts+" candidates, "+routed+" routed attempts; groups "+groups+", profile rejected "+profileReject+", geometry/protection rejected "+geometryReject+", connector rejects "+connectorReject+". No spline asset split.");
+            plan.notes.Add("Interior T-junction repair: "+splits+" preview splits, "+promoted+" promoted segments, "+attempts+" candidates, "+routed+" routed attempts; groups "+groups+", profile rejected "+profileReject+", geometry/protection rejected "+geometryReject+", connector rejects "+connectorReject+", measured "+measured+", terrain rejects "+terrainReject+", quality rejects "+qualityReject+", graph rejects "+graphReject+". Independent group trials; no spline asset split.");
         }
 
         private void RelocateBridgeGate()

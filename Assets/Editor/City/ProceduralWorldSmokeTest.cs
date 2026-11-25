@@ -200,6 +200,7 @@ namespace DeliveryDriver.EditorTools
                         "V7.1 modified original terrain.");
                 settings.localOptimization=true;
                 TestExactRoadSplit();
+                TestLocalQualityGuard();
                 var local=ProceduralWorldPlanner.Build(settings,emptySea,scene);
                 Verify(local,settings,0);
                 Require(local.version.StartsWith("V7.2")&&local.virtualReport!=null&&local.virtualSections.Count>0,"V7.2 virtual terrain missing.");
@@ -275,6 +276,21 @@ namespace DeliveryDriver.EditorTools
                 }
             }
             Require(plan.edges.All(e => visited.Contains(e.a) && visited.Contains(e.b)), "Disconnected road graph.");
+        }
+
+        private static void TestLocalQualityGuard()
+        {
+            var before=new ProceduralWorldPlanner.QualityReport{meanCut=.60f,meanFill=.48f,sharpRoads=19,verticalSeverity=37.5f,junctionGradeFlags=282};
+            var candidate=new ProceduralWorldPlanner.QualityReport{meanCut=.59f,meanFill=.48f,sharpRoads=19,verticalSeverity=37.4f,junctionGradeFlags=282};
+            Require(ProceduralWorldPlanner.NoLocalQualityRegression(before,candidate),"Safe local quality candidate rejected.");
+            candidate.meanFill=.61f;
+            Require(!ProceduralWorldPlanner.NoLocalQualityRegression(before,candidate),"Regressed fill candidate accepted.");
+            candidate.meanFill=.48f;candidate.sharpRoads=20;
+            Require(!ProceduralWorldPlanner.NoLocalQualityRegression(before,candidate),"New radius flag accepted.");
+            candidate.sharpRoads=19;candidate.verticalSeverity=37.6f;
+            Require(!ProceduralWorldPlanner.NoLocalQualityRegression(before,candidate),"Vertical severity regression accepted.");
+            candidate.verticalSeverity=37.4f;candidate.junctionGradeFlags=283;
+            Require(!ProceduralWorldPlanner.NoLocalQualityRegression(before,candidate),"Junction regression accepted.");
         }
 
         private static void TestExactRoadSplit()

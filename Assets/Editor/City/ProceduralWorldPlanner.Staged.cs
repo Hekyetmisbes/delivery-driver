@@ -39,6 +39,12 @@ namespace DeliveryDriver.EditorTools
             return BalancedCost(b,s)<=BalancedCost(a,s)+.005f&&b.meanCut+b.meanFill<=a.meanCut+a.meanFill+.005f&&
                 b.peak<=a.peak+.02f&&b.extraFraction<=a.extraFraction+.0005f;
         }
+        internal static bool NoLocalQualityRegression(QualityReport a,QualityReport b)
+        {
+            return b.meanCut<=a.meanCut+.005f&&b.meanFill<=a.meanFill+.005f&&
+                b.sharpRoads<=a.sharpRoads&&b.verticalSeverity<=a.verticalSeverity+.0001f&&
+                b.junctionGradeFlags<=a.junctionGradeFlags;
+        }
         private static string StageGraphIssue(Plan before,Plan after,Settings s,bool allowSplit=false,bool allowBridgeMove=false)
         {
             if(after.edges.Count<before.edges.Count)return "retained edge count decreased";
@@ -127,9 +133,7 @@ namespace DeliveryDriver.EditorTools
                     if(graphIssue!=null)reason="network/access regression: "+graphIssue;
                     else if(!NoTerrainRegression(current.quality,candidate.quality,s))reason="earthworks regression";
                     else if(s.localOptimization&&name.StartsWith("5",StringComparison.Ordinal)&&name.Length>1&&char.IsLetter(name[1])&&
-                        (candidate.quality.meanCut>current.quality.meanCut+.005f||candidate.quality.meanFill>current.quality.meanFill+.005f||
-                         candidate.quality.sharpRoads>current.quality.sharpRoads||candidate.quality.verticalSeverity>current.quality.verticalSeverity+.0001f||
-                         candidate.quality.junctionGradeFlags>current.quality.junctionGradeFlags))reason="local quality regression";
+                        !NoLocalQualityRegression(current.quality,candidate.quality))reason="local quality regression";
                     else if(!benefit(current,candidate))reason="no measurable improvement";
                 }
                 catch(InvalidOperationException ex){reason=ex.Message;}
