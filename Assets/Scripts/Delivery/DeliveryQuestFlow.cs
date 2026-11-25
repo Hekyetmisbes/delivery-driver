@@ -88,8 +88,8 @@ internal static class DeliveryQuestFlow
             quest.Cargo.CargoHealth = 100f;
         }
 
-        QuestManager.Instance.AddAvailableQuest(quest);
-        QuestManager.Instance.StartQuest(quest);
+        if (!QuestManager.Instance.TryStartExternalQuest(quest))
+            return null;
 
         if (showDebugInfo)
         {

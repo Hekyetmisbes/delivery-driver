@@ -115,6 +115,9 @@ namespace DeliveryDriver.Quest
             }
 
             if (!PersistSnapshot(quest)) return;
+            if (manager != null && manager.IsRestoringQuest(quest))
+                return;
+
             QuestDatabaseService.Instance.InsertQuestEvent(
                 quest.QuestID,
                 playerId,

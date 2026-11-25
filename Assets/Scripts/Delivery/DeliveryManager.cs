@@ -387,6 +387,7 @@ public class DeliveryManager : MonoBehaviour
 
         QuestManager.Instance.OnQuestCompleted.AddListener(HandleQuestCompleted);
         QuestManager.Instance.OnQuestFailed.AddListener(HandleQuestFailed);
+        QuestManager.Instance.QuestAbandoned += HandleQuestAbandoned;
     }
 
     private void UnsubscribeFromQuestEvents()
@@ -398,6 +399,7 @@ public class DeliveryManager : MonoBehaviour
 
         QuestManager.Instance.OnQuestCompleted.RemoveListener(HandleQuestCompleted);
         QuestManager.Instance.OnQuestFailed.RemoveListener(HandleQuestFailed);
+        QuestManager.Instance.QuestAbandoned -= HandleQuestAbandoned;
     }
 
     private void Update()
@@ -708,6 +710,11 @@ public class DeliveryManager : MonoBehaviour
         if (useQuestSystem)
         {
             CreateDeliveryQuest(spawnPos, currentMissionType);
+            if (currentDeliveryQuest == null && QuestManager.Instance != null)
+            {
+                HandleDeliveryFailure("Quest activation failed");
+                return;
+            }
             UpdateQuestWithDelivery(currentDeliveryStops, currentDeliveryStopNeighborhoods);
         }
 
@@ -1096,7 +1103,7 @@ public class DeliveryManager : MonoBehaviour
 
         if (useQuestSystem && currentDeliveryQuest != null && QuestManager.Instance != null && currentDeliveryQuest.Status == QuestStatus.Active)
         {
-            if (!QuestManager.Instance.CommitExternalDeliveryStop(currentDeliveryQuest))
+            if (!QuestManager.Instance.CommitExternalDeliveryStop(currentDeliveryQuest, currentDeliveryStopIndex))
             {
                 HandleDeliveryFailure("Delivery parking handoff failed");
             }
@@ -1907,7 +1914,12 @@ public class DeliveryManager : MonoBehaviour
     /// </summary>
     public void OnBoxDelivered(DeliveryBox box)
     {
-        CompleteDelivery();
+        if (box == null || box != currentBox)
+            return;
+
+        ResolvePlayerTransform();
+        if (IsPlayerFullyInsideDeliveryParkingBay(cachedPlayerTransform))
+            TryCompleteCurrentDeliveryStop();
     }
 
     /// <summary>
@@ -1988,6 +2000,12 @@ public class DeliveryManager : MonoBehaviour
         }
 
         HandleDeliveryFailure(QuestManager.Instance != null ? QuestManager.Instance.LastFailureReason : "Delivery failed");
+    }
+
+    private void HandleQuestAbandoned(QuestData quest)
+    {
+        if (ReferenceEquals(quest, currentDeliveryQuest))
+            FinalizeDeliveryLifecycle(false);
     }
 
     private void HandleDeliveryFailure(string reason)
