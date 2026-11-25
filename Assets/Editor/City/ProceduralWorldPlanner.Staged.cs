@@ -73,6 +73,18 @@ namespace DeliveryDriver.EditorTools
             }
             finally{s.qualityDesign=true;}
             baseline.quality=Measure(baseline,s);
+            if((s.buildAnkara&&baseline.quality.ankaraTiles<12)||(s.buildIstanbul&&baseline.quality.istanbulTiles<12)||!baseline.quality.bridgeGraphConnected)
+            {
+                s.qualityDesign=false;
+                try
+                {
+                    var guarded=BuildV6(s,layout,scene);guarded.quality=Measure(guarded,s);
+                    if(guarded.quality.ankaraTiles>=baseline.quality.ankaraTiles&&guarded.quality.istanbulTiles>=baseline.quality.istanbulTiles&&
+                        (!baseline.quality.bridgeGraphConnected||guarded.quality.bridgeGraphConnected)&&guarded.BridgeCount>=baseline.BridgeCount&&
+                        guarded.authoredLinks.Count>=baseline.authoredLinks.Count)baseline=guarded;
+                }
+                finally{s.qualityDesign=true;}
+            }
             var views=new List<StageView>();
             var reports=new List<string>();
             string settingsText=DescribeSettings(s);
@@ -82,8 +94,8 @@ namespace DeliveryDriver.EditorTools
                 // Deep-copy snapshots because the next stage edits its own geometry.
                 views.Add(new StageView{label=label,accepted=accepted,snapshot=JsonUtility.FromJson<PreviewSnapshot>(JsonUtility.ToJson(snap))});
             }
-            reports.Add("Stage 0 V6 base ("+timer.Elapsed.TotalSeconds.ToString("F1")+" s): "+StageMetrics(baseline));
-            SaveView(baseline,"0 V6 base",true);
+            reports.Add("Stage 0 base "+baseline.version+" ("+timer.Elapsed.TotalSeconds.ToString("F1")+" s): "+StageMetrics(baseline));
+            SaveView(baseline,"0 "+baseline.version+" base",true);
             Plan current=baseline;
             void Stage(string name,Action<ProceduralWorldPlanner> change,Func<Plan,Plan,bool> benefit)
             {
@@ -92,6 +104,7 @@ namespace DeliveryDriver.EditorTools
                 var candidate=CopyStage(current,s,scene);
                 var planner=new ProceduralWorldPlanner(s,layout,scene,candidate);
                 string reason=null;
+                int startNotes=candidate.notes.Count;
                 try
                 {
                     candidate.terrainCells.Clear();planner.AnalyzeTerrain();
@@ -109,7 +122,10 @@ namespace DeliveryDriver.EditorTools
                 bool accepted=reason==null;
                 string line=name+" ["+(accepted?"ACCEPTED":"ROLLED BACK: "+reason)+"] "+
                     clock.Elapsed.TotalSeconds.ToString("F1")+" s; before "+StageMetrics(current)+"; candidate "+StageMetrics(candidate);
+                string details=string.Join(" | ",candidate.notes.Skip(startNotes));
+                if(!string.IsNullOrEmpty(details))line+="; "+details;
                 reports.Add(line);
+                candidate.stageReports.Clear();candidate.stageReports.AddRange(reports);
                 candidate.notes.Insert(0,line);
                 // Candidate paths are preserved even when a stage rolls back. Overlays
                 // reflect current paths; parcel/park accessibility is only final-stage data.
@@ -129,11 +145,15 @@ namespace DeliveryDriver.EditorTools
             {
                 x.plan.parcels.Clear();x.BuildParcels();x.EvaluateOpenSpaceAccess();
             },(a,b)=>true);
+            bool urbanScreened=views.Last().accepted;
             current.version="V7.1 optimized";
             current.stageReports.Clear();current.stageReports.AddRange(reports);
             current.stageViews.AddRange(views);
             current.quality=Measure(current,s);
-            current.previewCriteriaMet=(!s.buildAnkara||current.quality.ankaraTiles==12)&&
+            bool validGrades=true;
+            try{new ProceduralWorldPlanner(s,layout,scene,current).ValidateStageGrades();}
+            catch(InvalidOperationException){validGrades=false;}
+            current.previewCriteriaMet=validGrades&&urbanScreened&&(!s.buildAnkara||current.quality.ankaraTiles==12)&&
                 (!s.buildIstanbul||current.quality.istanbulTiles==12)&&current.quality.bridgeGraphConnected&&
                 (!s.protectKizilay||!s.buildAnkara||current.authoredLinks.Count(e=>e.sector=="Ankara")>=s.authoredLinkTarget)&&
                 current.detachedEdges.Count==0&&current.quality.sharpRoads==0&&current.accessResults.All(a=>a.connected);
@@ -142,8 +162,9 @@ namespace DeliveryDriver.EditorTools
             current.notes.Clear();current.warnings.Clear();
             current.notes.Add("V7.1 base vs final: "+StageMetrics(baseline)+" / "+StageMetrics(current));
             current.notes.Add("Mandatory preview checks: "+(current.previewCriteriaMet?"PASS":"NOT MET")+"; Generate remains locked.");
-            current.notes.Add("Profile/geometry stages preserve original graph and authored link paths. Bridge endpoints fixed; no protected-zone exception.");
-            current.notes.Add("Park and lot overlays: "+current.parcels.Count+" screened lots, "+current.quality.accessibleParks+"/"+current.openSpaces.Count+" screened park access.");
+            current.notes.Add("Profile/geometry stages preserve original graph and authored link paths. Bridge endpoints fixed; no protected-zone exception. Short stubs are diagnostics, not pruned by this preservation-first mode.");
+            current.notes.Add(urbanScreened?"Park and lot overlays: "+current.parcels.Count+" sampled lots, "+current.quality.matchedLots+" measured prefab fits, "+current.quality.accessibleParks+"/"+current.openSpaces.Count+" screened park access.":"Urban screening rolled back; parcel/park data is historical and not verified for the final plan.");
+            if(!validGrades)current.warnings.Add("Final mandatory sampled grade validation failed.");
             if(current.detachedEdges.Count>0)current.warnings.Add(current.detachedEdges.Count+" detached segments still unresolved; purple diagnostic only.");
             if(!current.previewCriteriaMet)current.warnings.Add("Mandatory preview criteria incomplete; inspect stage reports. No generation.");
             if(current.quality.bridgeGap< (layout.AcrossMax(layout.sea)-layout.AcrossMin(layout.sea))*s.bridgeSeparation && s.bridges&&s.buildAnkara&&s.buildIstanbul)
@@ -376,11 +397,16 @@ namespace DeliveryDriver.EditorTools
         {
             var index=new StreetIndex();foreach(var e in plan.edges.Concat(plan.authoredLinks))index.Add(e);
             int count=0;
+            string sector=null;
             foreach(var e in plan.edges.Where(e=>!e.Bridge&&!RadiusOk(e.points,e.kind)).ToList())
             {
                 if(++count>100)break;
                 Rect bounds=e.sector=="Ankara"?plan.layout.Ankara(settings.ankaraLow):plan.layout.Istanbul(settings.ankaraLow);
-                gradingSurface=e.sector=="Ankara"&&settings.districtGrading?new GradingSurface(plan.layout,bounds,settings.grade):null;
+                if(sector!=e.sector)
+                {
+                    sector=e.sector;
+                    gradingSurface=e.sector=="Ankara"&&settings.districtGrading?new GradingSurface(plan.layout,bounds,settings.grade):null;
+                }
                 index.Remove(e);
                 try
                 {

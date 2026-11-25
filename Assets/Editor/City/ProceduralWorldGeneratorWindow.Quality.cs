@@ -132,7 +132,7 @@ namespace DeliveryDriver.EditorTools
         }
         private void DrawStageComparison()
         {
-            if(comparisonOwner==null||comparisonOwner.stageViews.Count==0||analysisOnly)return;
+            if(preview==null||comparisonOwner==null||comparisonOwner.stageViews.Count==0||analysisOnly)return;
             var views=comparisonOwner.stageViews;
             stageChoice=Mathf.Clamp(stageChoice,0,views.Count-1);
             stageChoice=EditorGUILayout.Popup("Stage comparison",stageChoice,views.Select(x=>x.label).ToArray());
@@ -155,7 +155,7 @@ namespace DeliveryDriver.EditorTools
         private void WriteStageCheckpoints(ProceduralWorldPlanner.Plan plan,string key,string scenePath)
         {
             finalStageKey=key;finalStageSettings=ProceduralWorldPlanner.DescribeSettings(settings);finalStageScene=scenePath;
-            if(!autoCheckpoints||plan.stageViews.Count==0)return;
+            if(!autoCheckpoints||plan.stageViews.Count==0||string.IsNullOrEmpty(scenePath))return;
             try
             {
                 string folder=Path.Combine(Directory.GetCurrentDirectory(),"Library","ProceduralWorldCheckpoints",
@@ -224,6 +224,7 @@ namespace DeliveryDriver.EditorTools
             }
             var timer=System.Diagnostics.Stopwatch.StartNew();
             var refined=ProceduralWorldPlanner.RefineRegion(settings,detected,scene,preview,region);
+            refined.previewCriteriaMet=false;
             preview=refined;layout=detected;analysisOnly=false;
             SetStatus("District refinement completed in "+timer.Elapsed.TotalSeconds.ToString("F1")+" s. Original full plan remains in session cache.");
         }

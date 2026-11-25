@@ -383,6 +383,7 @@ namespace DeliveryDriver.EditorTools
                     preview = ProceduralWorldPlanner.Build(settings, layout, scene);
                     preview.warnings.Insert(0, "BRIDGES NOT PLANNED: " + ex.Message);
                     previewFingerprint=null;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);previewScenePath=scene.path;analysisOnly=false;
+                    comparisonOwner=preview;finalStageKey=null;finalStageSettings=previewSettings;finalStageScene=scene.path;preview.previewCriteriaMet=false;
                     SetStatus("City-only preview shown. Adjust bridge settings or try another seed to preview both bridge links. Scene generation is locked during preview iteration.", MessageType.Warning);
                     Debug.LogWarning("[ProceduralWorld] " + ex.Message);
                 }
