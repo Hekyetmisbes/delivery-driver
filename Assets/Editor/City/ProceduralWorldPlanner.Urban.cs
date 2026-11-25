@@ -30,6 +30,9 @@ namespace DeliveryDriver.EditorTools
             public string sector, district;
             public Vector3[] corners;
             public Rect bounds;
+            public bool accessible;
+            public string prefab;
+            public float frontage, depth, foundationRelief, accessGrade;
         }
         internal sealed class AnalysisLine
         {
@@ -39,7 +42,7 @@ namespace DeliveryDriver.EditorTools
 
         // Baseline comparison is read-only and uses the exact V5 code path with V6
         // features disabled. No scene state is shared between candidate planners.
-        internal static Plan Build(Settings settings, Layout layout, Scene scene)
+        private static Plan BuildV6(Settings settings, Layout layout, Scene scene)
         {
             if (!settings.urbanDesign) return BuildV5(settings, layout, scene);
             Plan candidate = null, baseline = null;
@@ -338,10 +341,12 @@ namespace DeliveryDriver.EditorTools
 
         private void FinishUrbanPlan()
         {
-            plan.version="V6";
+            plan.version=settings.qualityDesign?"V7":"V6";
+            if(settings.qualityDesign) CleanAndBalanceRoads();
             BuildAnalysisLines();
             BuildEarthworkLines();
             BuildParcels();
+            if(settings.qualityDesign) EvaluateOpenSpaceAccess();
             ValidateUrbanPlan();
             foreach(var anchor in settings.accessAnchors)
             {
@@ -466,6 +471,8 @@ namespace DeliveryDriver.EditorTools
                     yield return new Vector2Int(x,z);
             }
             var counts=new Dictionary<string,int>();
+            var catalog=settings.qualityDesign?RoadsideBuildingPlacementTool.ReadPreviewFootprints():null;
+            if(settings.qualityDesign)plan.notes.Add("Prefab footprint catalog: "+catalog.Count+" usable measured models (unmatched lots are not counted as verified prefab fits).");
             int perCity=settings.buildAnkara&&settings.buildIstanbul?1500:3000;
             int processed=0;
             foreach(var e in plan.edges.Where(e=>!e.Bridge).OrderBy(e=>e.kind==RoadKind.Local?0:1).ThenBy(e=>e.a.id))
@@ -491,6 +498,10 @@ namespace DeliveryDriver.EditorTools
                             if(sectorCount>=perCity)break;
                             float halfWidth=10f,depth=22f;
                             if(StreetStyle(p).density<.65f){halfWidth=14f;depth=30f;}
+                            var model=catalog==null?default:catalog.Where(m=>m.size.x<=halfWidth*2f && m.size.y<=depth)
+                                .OrderByDescending(m=>m.size.x*m.size.y).FirstOrDefault();
+                            if(catalog!=null && catalog.Count>0 && string.IsNullOrEmpty(model.name))continue;
+                            if(!string.IsNullOrEmpty(model.name)){halfWidth=Mathf.Max(3f,model.size.x*.5f+1f);depth=Mathf.Max(6f,model.size.y+2f);}
                             Vector2 front=p+right*sign*(RoadClearance+4f);
                             Vector2 back=front+right*sign*depth;
                             var corners=new[]{front-forward*halfWidth,front+forward*halfWidth,
@@ -515,12 +526,21 @@ namespace DeliveryDriver.EditorTools
                                 if(!ok)break;
                             }
                             if(!ok||hi-lo>3f)continue;
+                            float access=0f;
+                            if(settings.qualityDesign)
+                            {
+                                float roadY=Mathf.Lerp(a.y,b.y,Mathf.Clamp01(Vector2.Distance(XZ(a),p)/len));
+                                if(!plan.layout.TryHeight(front,out float frontY))continue;
+                                access=Mathf.Abs(frontY-roadY)/Mathf.Max(1f,Vector2.Distance(front,p));
+                                if(access>settings.parcelAccessGrade)continue;
+                            }
                             // Conservative bounding-box clearance test: any road sample
                             // inside the inflated lot rejects it, even between lot probes.
                             if(roadIndex.Query(Rect.MinMaxRect(box.xMin-RoadClearance,box.yMin-RoadClearance,
                                 box.xMax+RoadClearance,box.yMax+RoadClearance)).Any(r=>r.points.Any(q=>Contains(box,XZ(q),RoadClearance))))continue;
                             var lot=new UrbanArea{kind=AreaKind.BuildingLot,sector=e.sector,district=DistrictName(p,e.sector),
-                                bounds=box,corners=corners.Select(q=>{plan.layout.TryHeight(q,out float y);return XYZ(q,y+.5f);}).ToArray()};
+                                bounds=box,corners=corners.Select(q=>{plan.layout.TryHeight(q,out float y);return XYZ(q,y+.5f);}).ToArray(),
+                                accessible=settings.qualityDesign, prefab=model.name,frontage=halfWidth*2f,depth=depth,foundationRelief=hi-lo,accessGrade=access};
                             plan.parcels.Add(lot);sectorCount++;counts[e.sector]=sectorCount;
                             foreach(var k in Cells(box))
                             {if(!occupied.TryGetValue(k,out List<Rect> list))occupied[k]=list=new List<Rect>();list.Add(box);}
