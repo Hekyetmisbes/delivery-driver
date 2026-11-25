@@ -26,7 +26,7 @@ namespace DeliveryDriver.EditorTools
         private bool showPreview = true;
         private bool showArterials = true, showCollectors = true, showLocals = true, showLinks = true, showBridgeLines = true;
         private bool showDetached = true;
-        private bool showGrading = true;
+        private bool showGrading = true, xrayPreview = true;
         private bool busy;
 
         [MenuItem("Tools/Delivery Driver/City/Procedural World Generator", false, 1)]
@@ -122,6 +122,7 @@ namespace DeliveryDriver.EditorTools
                 }
                 showPreview = EditorGUILayout.Toggle("Show Scene View preview", showPreview);
                 EditorGUI.BeginChangeCheck();
+                xrayPreview = EditorGUILayout.Toggle("X-ray road preview", xrayPreview);
                 showArterials = EditorGUILayout.Toggle("Arterials (blue)", showArterials);
                 showCollectors = EditorGUILayout.Toggle("Collectors (orange)", showCollectors);
                 showLocals = EditorGUILayout.Toggle("Local streets (gray)", showLocals);
@@ -572,66 +573,72 @@ namespace DeliveryDriver.EditorTools
         private void DrawPreview(SceneView sceneView)
         {
             if (!showPreview || layout == null || Event.current.type != EventType.Repaint) return;
-            Handles.color = new Color(.25f, .75f, .95f, .9f);
-            DrawArea(layout.Ankara(settings.ankaraLow), "Ankara (12 tiles)");
-            Handles.color = new Color(.95f, .65f, .25f, .9f);
-            DrawArea(layout.Istanbul(settings.ankaraLow), "Istanbul (12 tiles)");
-            Handles.color = new Color(.25f, .45f, 1f, .8f);
-            DrawArea(layout.sea, layout.SeaTerrainCount == 0 ? "Sea (empty corridor)" : "Sea (4 tiles)");
-            if (cachedPreview != preview)
+            var oldZTest = Handles.zTest;
+            try
             {
-                previewGeometry.Clear();
-                cachedPreview = preview;
-            }
-            if (preview == null) return;
-            foreach (var kind in new[] { ProceduralWorldPlanner.RoadKind.Local, ProceduralWorldPlanner.RoadKind.Collector,
-                ProceduralWorldPlanner.RoadKind.Arterial, ProceduralWorldPlanner.RoadKind.Bridge })
-            {
-                if (kind == ProceduralWorldPlanner.RoadKind.Local && !showLocals ||
-                    kind == ProceduralWorldPlanner.RoadKind.Collector && !showCollectors ||
-                    kind == ProceduralWorldPlanner.RoadKind.Arterial && !showArterials ||
-                    kind == ProceduralWorldPlanner.RoadKind.Bridge && !showBridgeLines) continue;
-                float thickness;
-                switch (kind)
+                if (xrayPreview) Handles.zTest = UnityEngine.Rendering.CompareFunction.Always;
+                Handles.color = new Color(.25f, .75f, .95f, .9f);
+                DrawArea(layout.Ankara(settings.ankaraLow), "Ankara (12 tiles)");
+                Handles.color = new Color(.95f, .65f, .25f, .9f);
+                DrawArea(layout.Istanbul(settings.ankaraLow), "Istanbul (12 tiles)");
+                Handles.color = new Color(.25f, .45f, 1f, .8f);
+                DrawArea(layout.sea, layout.SeaTerrainCount == 0 ? "Sea (empty corridor)" : "Sea (4 tiles)");
+                if (cachedPreview != preview)
                 {
-                    case ProceduralWorldPlanner.RoadKind.Arterial:
-                        Handles.color = new Color(.10f, .68f, 1f, 1f); thickness = 4.5f; break;
-                    case ProceduralWorldPlanner.RoadKind.Collector:
-                        Handles.color = new Color(1f, .55f, .12f, .95f); thickness = 2.8f; break;
-                    case ProceduralWorldPlanner.RoadKind.Bridge:
-                        Handles.color = Color.yellow; thickness = 5f; break;
-                    default:
-                        Handles.color = new Color(.88f, .91f, .93f, .82f); thickness = 1.4f; break;
+                    previewGeometry.Clear();
+                    cachedPreview = preview;
                 }
-                foreach (var edge in preview.edges)
+                if (preview == null) return;
+                foreach (var kind in new[] { ProceduralWorldPlanner.RoadKind.Local, ProceduralWorldPlanner.RoadKind.Collector,
+                    ProceduralWorldPlanner.RoadKind.Arterial, ProceduralWorldPlanner.RoadKind.Bridge })
                 {
-                    if (edge.kind != kind) continue;
-                    Handles.DrawAAPolyLine(thickness, PreviewPoints(edge));
+                    if (kind == ProceduralWorldPlanner.RoadKind.Local && !showLocals ||
+                        kind == ProceduralWorldPlanner.RoadKind.Collector && !showCollectors ||
+                        kind == ProceduralWorldPlanner.RoadKind.Arterial && !showArterials ||
+                        kind == ProceduralWorldPlanner.RoadKind.Bridge && !showBridgeLines) continue;
+                    float thickness;
+                    switch (kind)
+                    {
+                        case ProceduralWorldPlanner.RoadKind.Arterial:
+                            Handles.color = new Color(.10f, .68f, 1f, 1f); thickness = 4.5f; break;
+                        case ProceduralWorldPlanner.RoadKind.Collector:
+                            Handles.color = new Color(1f, .55f, .12f, .95f); thickness = 2.8f; break;
+                        case ProceduralWorldPlanner.RoadKind.Bridge:
+                            Handles.color = Color.yellow; thickness = 5f; break;
+                        default:
+                            Handles.color = new Color(.88f, .91f, .93f, .82f); thickness = 1.4f; break;
+                    }
+                    foreach (var edge in preview.edges)
+                    {
+                        if (edge.kind != kind) continue;
+                        Handles.DrawAAPolyLine(thickness, PreviewPoints(edge));
+                    }
                 }
-            }
-            if (showDetached)
-            {
-                Handles.color = new Color(.92f, .35f, .95f, .9f);
-                foreach (var edge in preview.detachedEdges)
-                    Handles.DrawAAPolyLine(2f, PreviewPoints(edge));
-            }
-            if (showGrading)
-            {
-                Handles.color = new Color(1f, .24f, .20f, .95f);
-                foreach (Vector3 point in preview.gradingMarkers)
-                    Handles.DrawLine(point + Vector3.up * 2f, point + Vector3.up * 9f, 2f);
-            }
-            if (showLinks)
-            {
-                Handles.color = new Color(.24f, 1f, .35f, 1f);
-                foreach (var link in preview.authoredLinks)
+                if (showDetached)
                 {
-                    Handles.DrawAAPolyLine(4f, PreviewPoints(link));
-                    Vector3 anchor = link.points[0] + Vector3.up;
-                    Handles.SphereHandleCap(0, anchor, Quaternion.identity,
-                        HandleUtility.GetHandleSize(anchor) * .12f, EventType.Repaint);
+                    Handles.color = new Color(.92f, .35f, .95f, .9f);
+                    foreach (var edge in preview.detachedEdges)
+                        Handles.DrawAAPolyLine(2f, PreviewPoints(edge));
+                }
+                if (showGrading)
+                {
+                    Handles.color = new Color(1f, .24f, .20f, .95f);
+                    foreach (Vector3 point in preview.gradingMarkers)
+                        Handles.DrawLine(point + Vector3.up * 2f, point + Vector3.up * 9f, 2f);
+                }
+                if (showLinks)
+                {
+                    Handles.color = new Color(.24f, 1f, .35f, 1f);
+                    foreach (var link in preview.authoredLinks)
+                    {
+                        Handles.DrawAAPolyLine(4f, PreviewPoints(link));
+                        Vector3 anchor = link.points[0] + Vector3.up;
+                        Handles.SphereHandleCap(0, anchor, Quaternion.identity,
+                            HandleUtility.GetHandleSize(anchor) * .12f, EventType.Repaint);
+                    }
                 }
             }
+            finally { Handles.zTest = oldZTest; }
         }
 
         private Vector3[] PreviewPoints(ProceduralWorldPlanner.Edge edge)
