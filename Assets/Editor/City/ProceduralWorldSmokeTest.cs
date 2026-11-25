@@ -59,7 +59,7 @@ namespace DeliveryDriver.EditorTools
                 foreach (int seed in new[] { 4281, 5342, 22, 12345 })
                 {
                     settings.seed = seed;
-                    try { both = ProceduralWorldPlanner.Build(settings, layout, scene); break; }
+                    try { var candidate = ProceduralWorldPlanner.Build(settings, layout, scene); Verify(candidate, settings, 2); both = candidate; break; }
                     catch (InvalidOperationException ex) { Debug.LogWarning("[ProceduralWorldSmoke] Seed " + seed + ": " + ex.Message); }
                 }
                 Require(both != null, "No flat synthetic two-city seed could be planned.");
@@ -85,6 +85,37 @@ namespace DeliveryDriver.EditorTools
                 }
                 var asymmetric = ProceduralWorldPlanner.Build(settings, emptySea, scene);
                 Verify(asymmetric, settings, 2);
+                // Ankara regression: three height bands with sharp tile seams, on a
+                // temporary scene only. V4 should connect all three depth bands
+                // using the declared virtual grading budget, without editing terrain.
+                settings.buildIstanbul = false;
+                settings.bridges = false;
+                settings.ankaraLow = true;
+                settings.ankaraBackbone = true;
+                settings.districtGrading = true;
+                settings.districtGradingLimit = 30f;
+                settings.grade = .10f;
+                settings.maxCutFill = 6f;
+                var land = emptySea.tiles.Where(t => t.row < 3).ToList();
+                foreach (var tile in land)
+                {
+                    float[,] heights = new float[33, 33];
+                    for (int z=0;z<33;z++)
+                    for (int x=0;x<33;x++) heights[z,x] = (2-tile.row)*18f/80f;
+                    tile.terrain.terrainData.SetHeights(0,0,heights);
+                }
+                var before = land.Select(t => t.terrain.terrainData.GetHeights(0,0,33,33).Cast<float>().ToArray()).ToList();
+                var hillside = ProceduralWorldPlanner.Build(settings, emptySea, scene);
+                Verify(hillside, settings, 0);
+                Require(hillside.edges.Any(e => e.kind == ProceduralWorldPlanner.RoadKind.Arterial),
+                    "Hillside preview has no backbone arterials.");
+                Require(land.Where(t => hillside.edges.Any(e => e.points.Any(p =>
+                    t.area.Contains(ProceduralWorldPlanner.XZ(p))))).Select(t => t.row).Distinct().Count() == 3,
+                    "Hillside retained network did not reach all three depth bands.");
+                Require(hillside.gradingMarkers.Count > 0, "Stepped terrain did not report any extra grading samples.");
+                for(int i=0;i<land.Count;i++)
+                    Require(before[i].SequenceEqual(land[i].terrain.terrainData.GetHeights(0,0,33,33).Cast<float>()),
+                        "Preview modified synthetic terrain height data.");
                 // Rotate the placement convention (not the Terrain objects): the same layout must work on Z.
                 foreach (var tile in emptySea.tiles)
                 {
@@ -99,7 +130,7 @@ namespace DeliveryDriver.EditorTools
                     tile.terrain.transform.position += Vector3.forward * 100f;
                 var wider = ProceduralWorldPlanner.DetectLayout(scene);
                 Require(Mathf.Abs(wider.sea.height - 300f) < .01f, "Actual sea gap width was not inferred.");
-                Debug.Log("[ProceduralWorldSmoke] PASS: 28/24 terrain detection, empty sea bridges, X/Z orientation, real sea width, deterministic road plan and grade checks. No assets written.");
+                Debug.Log("[ProceduralWorldSmoke] PASS: 28/24 terrain detection, empty sea bridges, X/Z orientation, real sea width, deterministic road plan, stepped Ankara coverage and read-only grading checks. No assets written.");
             }
             catch (Exception ex)
             {
