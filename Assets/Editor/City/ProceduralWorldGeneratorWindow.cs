@@ -79,7 +79,7 @@ namespace DeliveryDriver.EditorTools
         private void OnGUI()
         {
             scroll = EditorGUILayout.BeginScrollView(scroll);
-            EditorGUILayout.LabelField("Procedural World Generator V7 - Quality Preview", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Procedural World Generator V7.1 - Staged Optimization Preview", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("Preview iteration only. No scene, mesh or terrain asset changes. Generation is intentionally locked until the road layout is approved.", MessageType.Info);
             using (new EditorGUI.DisabledScope(busy || EditorApplication.isPlayingOrWillChangePlaymode))
             {
@@ -154,6 +154,7 @@ namespace DeliveryDriver.EditorTools
                 settings.maxCutFill = Mathf.Clamp(EditorGUILayout.FloatField("Max cut/fill (m)", settings.maxCutFill), 1f, 20f);
                 settings.blend = Mathf.Clamp(EditorGUILayout.FloatField("Terrain shoulder blend (m)", settings.blend), 3f, 30f);
                 settings.seaY = EditorGUILayout.FloatField("Sea surface Y", settings.seaY);
+                if(Mathf.Abs(settings.seaY)<.0001f)EditorGUILayout.HelpBox("Sea Y is effectively zero; scientific notation such as -2E-05 is valid. Keep the same value for comparisons.",MessageType.Info);
                 settings.bridgeClearance = Mathf.Clamp(EditorGUILayout.FloatField("Bridge clearance (m)", settings.bridgeClearance), 3f, 30f);
                 if (EditorGUI.EndChangeCheck())
                 {
@@ -355,7 +356,8 @@ namespace DeliveryDriver.EditorTools
             string key=ProceduralWorldPlanner.PreviewFingerprint(settings,layout,scene);
             if(TryCachedPlan(key,out var cached))
             {
-                preview=cached;analysisOnly=false;previewFingerprint=key;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);previewScenePath=scene.path;
+                preview=cached;comparisonOwner=cached;analysisOnly=false;previewFingerprint=key;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);previewScenePath=scene.path;
+                finalStageKey=key;finalStageSettings=previewSettings;finalStageScene=scene.path;
                 SetStatus("Preview cache hit: "+stopwatch.Elapsed.TotalSeconds.ToString("F2")+" s including input verification.");return;
             }
             // Preserve the last successful preview if planning is canceled or fails.
@@ -366,6 +368,8 @@ namespace DeliveryDriver.EditorTools
                 preview.notes.Insert(0,"Planning elapsed: "+stopwatch.Elapsed.TotalSeconds.ToString("F1")+" s (including input verification and selected guard comparisons).");
                 previewFingerprint=key;previewSettings=ProceduralWorldPlanner.DescribeSettings(settings);previewScenePath=scene.path;analysisOnly=false;
                 CachePlan(key,preview);
+                comparisonOwner=preview;
+                WriteStageCheckpoints(preview,key,scene.path);
                 SetStatus("Preview ready: " + preview.edges.Count + " retained segments, " + preview.detachedEdges.Count + " detached, " + preview.BridgeCount + " planned bridges. No scene assets changed.", preview.detachedEdges.Count > 0 ? MessageType.Warning : MessageType.Info);
             }
             catch (ProceduralWorldPlanner.BridgePlanningException ex) when (allowBridgeFallback)

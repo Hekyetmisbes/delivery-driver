@@ -22,6 +22,8 @@ namespace DeliveryDriver.EditorTools
             public bool terrainRepair = true;
             public bool urbanDesign = true, urbanGuard = true;
             public bool qualityDesign = true, qualityGuard = true;
+            public bool stagedOptimization = true;
+            public int profileSweeps = 16;
             public float preferredGrading = 15f, minTurnRadius = 18f, minLocalStub = 45f;
             public float arterialLengthTarget = .15f, collectorLengthTarget = .25f;
             public float parcelAccessGrade = .15f;
@@ -117,6 +119,9 @@ namespace DeliveryDriver.EditorTools
             public readonly List<AnchorResult> accessResults = new List<AnchorResult>();
             public string version = "V5";
             public QualityReport quality;
+            public readonly List<StageView> stageViews = new List<StageView>();
+            public readonly List<string> stageReports = new List<string>();
+            public bool previewCriteriaMet;
             public readonly List<AnalysisLine> gradingZones = new List<AnalysisLine>();
             public readonly List<Edge> detachedEdges = new List<Edge>(); // Feasible individual roads, not connected to the retained network.
             public readonly List<Rect> protectedAreas = new List<Rect>();

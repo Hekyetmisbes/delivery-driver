@@ -28,6 +28,8 @@ namespace DeliveryDriver.EditorTools
         internal static Plan Build(Settings settings,Layout layout,Scene scene)
         {
             layout.rawTerrainCache.Clear();
+            if(settings.qualityDesign && settings.urbanDesign && settings.stagedOptimization)
+                return BuildStaged(settings,layout,scene);
             if(!settings.qualityDesign||!settings.urbanDesign)
             {
                 bool old=settings.qualityDesign;settings.qualityDesign=false;

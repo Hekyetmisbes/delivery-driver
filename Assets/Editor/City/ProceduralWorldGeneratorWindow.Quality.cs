@@ -17,11 +17,14 @@ namespace DeliveryDriver.EditorTools
         private readonly List<string> cacheOrder=new List<string>();
         private bool qualitySettingsOpen=true,qualityWeightsOpen=false,storageOpen=true,cacheEnabled=true;
         private NeighborhoodZone refineZone;
+        private ProceduralWorldPlanner.Plan comparisonOwner;
+        private int stageChoice;
+        private bool autoCheckpoints=true;
         private int refineTile;
 
         private void OnPreviewSceneChanged(Scene oldScene,Scene newScene)
         {
-            preview=null;layout=null;previewFingerprint=null;analysisCache=null;analysisCacheKey=null;
+            comparisonOwner=null;preview=null;layout=null;previewFingerprint=null;analysisCache=null;analysisCacheKey=null;
             planCache.Clear();cacheOrder.Clear();settings.accessAnchors.Clear();anchorSamples=null;pickAnchor=false;
             refineZone=null;Repaint();SceneView.RepaintAll();
         }
@@ -39,12 +42,19 @@ namespace DeliveryDriver.EditorTools
         }
         private void DrawQualityControls()
         {
-            qualitySettingsOpen=EditorGUILayout.Foldout(qualitySettingsOpen,"V7 Urban Quality",true);
+            qualitySettingsOpen=EditorGUILayout.Foldout(qualitySettingsOpen,"V7.1 Urban Quality",true);
             if(!qualitySettingsOpen)return;
             settings.qualityDesign=EditorGUILayout.Toggle("Enable V7 quality design",settings.qualityDesign);
             using(new EditorGUI.DisabledScope(!settings.qualityDesign))
             {
-                settings.qualityGuard=EditorGUILayout.Toggle("Preserve V6 quality",settings.qualityGuard);
+                settings.stagedOptimization=EditorGUILayout.Toggle("V7.1 staged optimization",settings.stagedOptimization);
+                using(new EditorGUI.DisabledScope(settings.stagedOptimization))
+                    settings.qualityGuard=EditorGUILayout.Toggle("Preserve V6 quality (legacy V7)",settings.qualityGuard);
+                if(settings.stagedOptimization)
+                {
+                    settings.profileSweeps=EditorGUILayout.IntSlider("Profile optimization sweeps",settings.profileSweeps,4,40);
+                    EditorGUILayout.HelpBox("V6 is the starting graph. Each candidate is checked independently; coverage, existing access, grade and bridge connectivity cannot regress. Existing radius defects remain diagnostic until repaired.",MessageType.Info);
+                }
                 settings.preferredGrading=EditorGUILayout.Slider("Preferred grading cap (m)",settings.preferredGrading,Mathf.Max(10f,settings.maxCutFill),30f);
                 settings.minTurnRadius=EditorGUILayout.Slider("Local turn radius (m)",settings.minTurnRadius,8f,45f);
                 settings.minLocalStub=EditorGUILayout.Slider("Short local stub (m)",settings.minLocalStub,20f,90f);
@@ -69,6 +79,7 @@ namespace DeliveryDriver.EditorTools
             if(preview.quality==null)return;
             var q=preview.quality;
             EditorGUILayout.LabelField("Urban quality score",q.score.ToString("F1")+"/100");
+            if(preview.version.StartsWith("V7.1"))EditorGUILayout.HelpBox(preview.previewCriteriaMet?"Mandatory preview checks passed; bake remains locked.":"Mandatory preview checks NOT met. Score does not override them.",preview.previewCriteriaMet?MessageType.Info:MessageType.Warning);
             EditorGUILayout.LabelField("Connectivity / terrain / geometry",q.connectivity.ToString("F0")+" / "+q.terrainFit.ToString("F0")+" / "+q.geometry.ToString("F0"));
             EditorGUILayout.LabelField("Prefab fit / bridge / park",q.parcels.ToString("F0")+" / "+q.bridges.ToString("F0")+" / "+q.parks.ToString("F0"));
             EditorGUILayout.LabelField("Ankara / Istanbul coverage",q.ankaraTiles+"/12 / "+q.istanbulTiles+"/12");
@@ -86,6 +97,8 @@ namespace DeliveryDriver.EditorTools
             storageOpen=EditorGUILayout.Foldout(storageOpen,"Preview cache, snapshots & district refinement",true);
             if(!storageOpen)return;
             cacheEnabled=EditorGUILayout.Toggle("Reuse verified previews",cacheEnabled);
+            autoCheckpoints=EditorGUILayout.Toggle("Auto-save V7.1 checkpoints",autoCheckpoints);
+            DrawStageComparison();
             EditorGUILayout.LabelField("Session cache",planCache.Count+"/3 road plans");
             if(GUILayout.Button("Clear preview caches"))
             {planCache.Clear();cacheOrder.Clear();analysisCache=null;analysisCacheKey=null;}
@@ -113,9 +126,53 @@ namespace DeliveryDriver.EditorTools
             var lines=new List<string>{"Selected layout: "+preview.version,"Retained/detached roads: "+preview.edges.Count+" / "+preview.detachedEdges.Count,
                 "Bridges: "+preview.BridgeCount,"Authored proposals: "+preview.authoredLinks.Count,
                 "Open spaces / lots: "+preview.openSpaces.Count+" / "+preview.parcels.Count};
-            lines.AddRange(preview.notes);lines.AddRange(preview.warnings.Select(x=>"WARNING: "+x));
+            lines.AddRange(preview.stageReports);lines.AddRange(preview.notes);lines.AddRange(preview.warnings.Select(x=>"WARNING: "+x));
             lines.Add("--- Settings at calculation ---");lines.Add(previewSettings??"Unknown");
             return string.Join("\n",lines);
+        }
+        private void DrawStageComparison()
+        {
+            if(comparisonOwner==null||comparisonOwner.stageViews.Count==0||analysisOnly)return;
+            var views=comparisonOwner.stageViews;
+            stageChoice=Mathf.Clamp(stageChoice,0,views.Count-1);
+            stageChoice=EditorGUILayout.Popup("Stage comparison",stageChoice,views.Select(x=>x.label).ToArray());
+            if(GUILayout.Button("View selected stage (read only)"))
+            {
+                var saved=views[stageChoice].snapshot;
+                preview=ProceduralWorldPlanner.Restore(saved,comparisonOwner.layout,settings);
+                previewFingerprint=null;previewSettings=saved.settingsDescription;previewScenePath=saved.scenePath;
+                SetStatus("Historical stage view; refinement disabled. Return to final plan to continue.");
+                SceneView.RepaintAll();
+            }
+            if(GUILayout.Button("Return to final optimized plan"))
+            {
+                preview=comparisonOwner;previewFingerprint=finalStageKey;previewSettings=finalStageSettings;
+                previewScenePath=finalStageScene;SceneView.RepaintAll();
+            }
+        }
+
+        private string finalStageKey,finalStageSettings,finalStageScene;
+        private void WriteStageCheckpoints(ProceduralWorldPlanner.Plan plan,string key,string scenePath)
+        {
+            finalStageKey=key;finalStageSettings=ProceduralWorldPlanner.DescribeSettings(settings);finalStageScene=scenePath;
+            if(!autoCheckpoints||plan.stageViews.Count==0)return;
+            try
+            {
+                string folder=Path.Combine(Directory.GetCurrentDirectory(),"Library","ProceduralWorldCheckpoints",
+                    DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff")+"-"+key.Substring(0,8));
+                Directory.CreateDirectory(folder);
+                for(int i=0;i<plan.stageViews.Count;i++)
+                {
+                    var view=plan.stageViews[i];
+                    // Intermediate snapshots are diagnostic only, not refinable inputs.
+                    File.WriteAllText(Path.Combine(folder,i.ToString("D2")+"-"+(view.accepted?"accepted":"rejected")+".json"),
+                        JsonUtility.ToJson(view.snapshot,false));
+                }
+                File.WriteAllText(Path.Combine(folder,"final.json"),JsonUtility.ToJson(
+                    ProceduralWorldPlanner.Capture(plan,key,scenePath,finalStageSettings),false));
+                plan.notes.Add("V7.1 checkpoints saved to "+folder);
+            }
+            catch(Exception ex){plan.warnings.Add("Checkpoint write failed (preview retained): "+ex.Message);}
         }
         private void SavePreview()
         {
@@ -139,7 +196,7 @@ namespace DeliveryDriver.EditorTools
             var detected=ProceduralWorldPlanner.DetectLayout(scene);
             string key=ProceduralWorldPlanner.PreviewFingerprint(settings,detected,scene);
             var loaded=ProceduralWorldPlanner.Restore(saved,detected,settings);
-            layout=detected;preview=loaded;analysisOnly=false;
+            layout=detected;preview=loaded;comparisonOwner=loaded;analysisOnly=false;
             previewFingerprint=key==saved.fingerprint?key:null;previewSettings=saved.settingsDescription;previewScenePath=saved.scenePath;
             if(previewFingerprint==null)
                 SetStatus("Loaded view-only snapshot; current terrain, scene inputs or settings differ. Refinement disabled. Saved metrics describe the original plan.",MessageType.Warning);

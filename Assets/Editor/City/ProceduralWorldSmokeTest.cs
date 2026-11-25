@@ -159,7 +159,7 @@ namespace DeliveryDriver.EditorTools
                     "Straight path radius must be infinite.");
                 Require(Mathf.Abs(ProceduralWorldPlanner.TurnRadius(new Vector2(10,0),new Vector2(0,10),new Vector2(-10,0))-10f)<.01f,
                     "Circular radius calculation is wrong.");
-                settings.qualityDesign=true;settings.qualityGuard=false;
+                settings.qualityDesign=true;settings.qualityGuard=false;settings.stagedOptimization=false;
                 var quality=ProceduralWorldPlanner.Build(settings,emptySea,scene);
                 Verify(quality,settings,0);
                 Require(quality.version=="V7"&&quality.quality!=null,"V7 quality plan or report missing.");
@@ -185,6 +185,20 @@ namespace DeliveryDriver.EditorTools
                 for(int i=0;i<land.Count;i++)
                     Require(before[i].SequenceEqual(land[i].terrain.terrainData.GetHeights(0,0,33,33).Cast<float>()),
                         "V7 modified original terrain.");
+                // V7.1 must not trade away the baseline network to improve geometry.
+                settings.stagedOptimization=true;
+                var staged=ProceduralWorldPlanner.Build(settings,emptySea,scene);
+                Verify(staged,settings,0);
+                Require(staged.version.StartsWith("V7.1")&&staged.stageReports.Count>=6,"Staged preview/report missing.");
+                Require(staged.stageViews.Count>=6,"Stage history missing.");
+                var baseView=ProceduralWorldPlanner.Restore(staged.stageViews[0].snapshot,emptySea,settings);
+                Require(staged.edges.Count>=baseView.edges.Count&&staged.detachedEdges.Count<=baseView.detachedEdges.Count,
+                    "Staged optimization lost the baseline network.");
+                Require(staged.quality.istanbulTiles>=baseView.quality.istanbulTiles,"Staged optimization lost city coverage.");
+                for(int i=0;i<land.Count;i++)
+                    Require(before[i].SequenceEqual(land[i].terrain.terrainData.GetHeights(0,0,33,33).Cast<float>()),
+                        "V7.1 modified original terrain.");
+                settings.stagedOptimization=false;
                 // Rotate the placement convention (not the Terrain objects): the same layout must work on Z.
                 foreach (var tile in emptySea.tiles)
                 {
