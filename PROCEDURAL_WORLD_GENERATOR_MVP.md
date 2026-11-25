@@ -1,53 +1,63 @@
-# Procedural World Generator MVP
+# Procedural World Generator V2 — preview iteration
 
-Branch: feature/procedural-world-generator-mvp
+**Branch:** feature/procedural-world-generator-mvp
 
-## Quick start (Unity Editor)
+**Generation is intentionally locked.** No Unity scene, terrain asset, road mesh, or authored road is modified by Preview. The previous bake code is retained for later integration, but V2 road hierarchy and authored-road proposals are not yet baked. Do not use the old Master Builders to test this layout.
 
-1. Pull the branch and open **a copy of GameScene.unity**. Ensure Git LFS assets are present.
-2. Open **Tools > Delivery Driver > City > Procedural World Generator**.
-3. Click **Detect Terrain Layout & City Roots**. The scene must contain 24 land Terrain objects in two axis-aligned, equally sized 4x3 blocks with a positive sea gap, or 28 Terrain objects including the four middle sea tiles. Both X and Z layouts are supported.
-4. Check the Ankara and Istanbul root fields, side toggle, and **Sea surface Y**. The actual gap between city shores (empty space or four sea tiles) is the sea corridor; no normal city roads or terrain deformation are allowed there.
-5. To test just Ankara, uncheck Generate Istanbul. Keep Protect existing Kizilay district enabled. Click **Preview Layout**. Cyan/orange lines are roads; yellow lines are the two bridge routes when both cities are selected.
-6. Review warnings. If a city cannot connect its two gates, try a different seed or spacing. If the terrain is too steep, change the cut/fill budget cautiously or test one city first.
-7. Click **Generate Roads & Bridges**. The tool clones affected land TerrainData and uses the existing SimpleRoadPlacementTool mesh, collider, sidewalk, lane marking, intersection, and bridge code.
-8. Inspect the resulting scene and drive it before saving. The original TerrainData references can be restored with **Clear Generated Roads / Restore Terrain**. The generated mesh/terrain assets under Assets/Art/Terrains/ProceduralGenerated are deliberately retained on Clear for Undo. Delete old unused build folders only after confirming no scene references and no need for Undo.
+## Test in Unity
 
-## What this MVP does
+1. Pull the branch and open GameScene (Git LFS assets present).
+2. Tools > Delivery Driver > City > Procedural World Generator.
+3. Detect Terrain Layout & City Roots. Supports 24 land tiles (two 4 x 3 blocks with an empty water gap), or 28 including four sea tiles, along X or Z.
+4. Confirm city roots, city side and actual Sea surface Y; keep Protect existing Kizilay district enabled.
+5. Select both cities and two bridges, then Preview Layout. For troubleshooting, deselect bridges or one city. No scene assets are written.
+6. Inspect the whole city and individual districts in top-down Scene View. Use the road class visibility toggles to inspect the primary network separately.
+7. Send the preview screenshot, counts, and warnings before enabling generation in a later revision.
 
-- 12+12 land tile detection with optional four sea tiles, real corridor width, seeded scattered road nodes, district-sensitive node spacing, connected road component and optional cycles, varied curved paths rather than a square road grid.
-- Bounded elevation profiles and corridor-local cut/fill on cloned land tiles; no writes to sea tiles, protected Kizilay or the immediate area of existing authored roads.
-- Shared explicit intersection references and the same sampled road polyline for the spline and baked asphalt geometry; one network refresh after baking.
-- Two actual bridge paths spanning the middle row (if both cities selected and a feasible plan exists). Bridge supports use the existing road generator.
-- No deletion or rewriting of existing manual roads, optional continuation from one suitable existing dead end per city, no automatic splitting of authored roads.
-- Manifest-based undo/clear, persisted generated meshes and terrain assets. No automatic scene save.
+## Recommended first settings
 
-## Known limitations / local testing required
+| Setting | Value |
+|---|---:|
+| Seed | 4281 |
+| Arterial spacing | 600 m |
+| Collector spacing | 250 m |
+| Local street spacing | 95 m |
+| Candidate budget per land tile | 180 |
+| Straight road preference | 0.70 |
+| Organic curvature | 0.35 |
+| Local alternate routes | 0.75 |
+| Existing road connection target | 4 |
+| Bridge separation target | 65% |
+| Maximum grade | 10% |
+| Max cut/fill | 6 m |
+| Bridge clearance | 8 m |
 
-- No Unity editor execution was available when creating the branch. This is a source-level MVP, not a tested release.
-- Uniform road/sidewalk width in each build; mixed-width junctions and preservation of baked elevation when manually rebuilding a generated road with Shift are not implemented yet.
-- The road planner uses sampled curved candidate paths and rejects unsafe slopes/crossings; it is not a full terrain A* solver. It may skip isolated nodes, or reject the whole preview if both bridges cannot be linked. Very steep terrain can need a different seed, spacing or larger cut/fill budget.
-- Road grade validation and sampled terrain clearance are not a replacement for Play Mode vehicle driving, physics and visual junction seam tests.
-- A generated graph remains available for pathfinding during city streaming, while random NPC selection stays restricted to active roads. Verify transition corridors, NPC routing and cross-city GPS locally. No changes to quest data or transition triggers.
-- No procedural buildings, nature, landmark, water, or optimization bake in this first version. Use the existing roadside tool only on selected generated roads with its global clearing disabled.
-- The old Ankara/Istanbul Master Builder windows still exist; don't run them on the same scene. They are not yet migrated to the shared planner.
-- Scene/terrain content was not read from LFS remotely. Actual tile count, orientation, roots, heightmap resolution and sea surface must be verified by the tool in Unity.
-- Do not merge into main until the scene copy compiles and the generated roads, two bridges, Clear/Undo and save/reload are verified.
+## Preview legend
 
-## Test checklist
+- Blue: arterials (primary corridor segments).
+- Orange: collectors (secondary corridor segments).
+- Gray/white: local streets.
+- Yellow: bridges.
+- Green: proposed links from existing authored roads to the new graph. These are not actual connections yet; no existing road has been split.
 
-- [ ] No compile errors after Unity imports the new files.
-- [ ] Run Tools > Delivery Driver > City > Run Procedural Planner Smoke Test and confirm PASS in Console (temporary synthetic flat 28/24-tile scene, no scene assets written).
-- [ ] Detect confirms 24 or 28 terrain objects, correct city sides and real sea gap.
-- [ ] Preview does not change the scene or terrain assets.
-- [ ] Ankara-only preview/generation preserves Kizilay.
-- [ ] Roads have usable spline, asphalt and MeshCollider on Road layer.
-- [ ] Road shoulders, slopes and intersection joins are visually sound; test with minivan.
-- [ ] Two-city preview creates exactly two bridge links.
-- [ ] Drive across both bridges and verify NPC/GPS behavior in both directions.
-- [ ] Save/reopen scene copy; generated meshes and TerrainData still exist.
-- [ ] Clear restores original TerrainData and preserves manual roads/buildings; Undo works.
+## What changed
 
-### Bridge preview troubleshooting
+The V1 scattered point graph has been replaced by a nested, variably spaced street scaffold. Major streets are prioritized; local streets use seeded omissions, small coherent offsets and district-specific density, bend and jitter preferences. A limited diagonal gap-repair pass reconnects otherwise isolated areas. The slope solver, road clearance, protected areas and explicit graph endpoints remain in use. Budget scales with the number of land tiles (12 per city); it is a city-wide candidate cap derived from a per-tile setting, not a strict per-tile quota. Any necessary spacing adjustment is reported. Bridge selection evaluates available corridor pairs and prefers a much larger lateral gap; infeasible target separation is reported. If bridge approaches cannot be joined to the city graph, a city-only preview can still be shown.
 
-The bridge planner searches independent approach lengths and perpendicular/diagonal corridors, with a grade-bounded elevation profile rather than a fixed flat deck. It preserves existing roads and protected districts, and reports rejection counts for protected areas, existing roads, missing terrain, width/bounds and grade/height. Check Sea surface Y against the water plane. If two bridges cannot be planned, Preview can still display city roads without bridges, explicitly marked as a fallback. Generate remains strict unless Connect with two bridges is unchecked. No bridge is silently omitted during generation.
+## Limits
+
+- Street scaffold is still based on a warped, hierarchical grid, not a full terrain-aware A* or independently rotated district layout. Visual quality needs iteration.
+- Road classes are planning/preview metadata; mixed-width geometry and junctions are not implemented.
+- Existing-road proposals are sampled from endpoints and suitable interior road locations; count is a target, not guaranteed. They are not included in the actual road graph and no road is split. Explicit connection/bake implementation is deferred.
+- The wider bridge separation is a preference, not a guarantee. Protected districts, existing roads, grade limits and minimum physical separation are not bypassed.
+- No Unity Editor runtime was available for this update. Compile, synthetic smoke test and real scene preview must be verified locally.
+- No buildings, water, mesh, terrain deformation or optimization bake is performed in this iteration.
+
+## Local checks
+
+- [ ] Unity compiles.
+- [ ] Tools > Delivery Driver > City > Run Procedural Planner Smoke Test prints PASS. This temporary synthetic test checks 24/28 tile detection, orientation, seed repeatability, hierarchy classes, grade, connected graph and two bridges; it does not test the actual GameScene.
+- [ ] Preview shows all three road classes with coherent main corridors.
+- [ ] Kizilay is preserved and proposed links are visible if feasible.
+- [ ] Compare bridge spacing and report any fallback or missing connection warnings.
+- [ ] Generate button remains disabled.
