@@ -26,6 +26,7 @@ namespace DeliveryDriver.EditorTools
         private bool showPreview = true;
         private bool showArterials = true, showCollectors = true, showLocals = true, showLinks = true, showBridgeLines = true;
         private bool showDetached = true;
+        private bool showGrading = true;
         private bool busy;
 
         [MenuItem("Tools/Delivery Driver/City/Procedural World Generator", false, 1)]
@@ -60,7 +61,7 @@ namespace DeliveryDriver.EditorTools
         private void OnGUI()
         {
             scroll = EditorGUILayout.BeginScrollView(scroll);
-            EditorGUILayout.LabelField("Procedural World Generator V3 - Hillside Preview", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Procedural World Generator V4 - Ankara Backbone Preview", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("Preview iteration only. No scene, mesh or terrain asset changes. Generation is intentionally locked until the road layout is approved.", MessageType.Info);
             using (new EditorGUI.DisabledScope(busy || EditorApplication.isPlayingOrWillChangePlaymode))
             {
@@ -101,6 +102,14 @@ namespace DeliveryDriver.EditorTools
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Terrain and bridges", EditorStyles.boldLabel);
                 settings.terrainRepair = EditorGUILayout.Toggle("Terrain-aware network repair", settings.terrainRepair);
+                settings.ankaraBackbone = EditorGUILayout.Toggle("Ankara backbone first", settings.ankaraBackbone);
+                using (new EditorGUI.DisabledScope(!settings.ankaraBackbone || !settings.buildAnkara))
+                {
+                    settings.districtGrading = EditorGUILayout.Toggle("Ankara virtual district grading", settings.districtGrading);
+                    using (new EditorGUI.DisabledScope(!settings.districtGrading))
+                        settings.districtGradingLimit = EditorGUILayout.Slider("District grading limit (m)", settings.districtGradingLimit, 6f, 80f);
+                }
+                EditorGUILayout.HelpBox("Ankara only: virtual grading is an explicit total cut/fill allowance (at least normal road cut/fill). No TerrainData writes. Red markers identify road samples requiring more than the normal budget.", MessageType.Info);
                 settings.grade = EditorGUILayout.Slider("Maximum grade (%)", settings.grade * 100f, 4f, 15f) / 100f;
                 settings.maxCutFill = Mathf.Clamp(EditorGUILayout.FloatField("Max cut/fill (m)", settings.maxCutFill), 1f, 20f);
                 settings.blend = Mathf.Clamp(EditorGUILayout.FloatField("Terrain shoulder blend (m)", settings.blend), 3f, 30f);
@@ -119,6 +128,7 @@ namespace DeliveryDriver.EditorTools
                 showBridgeLines = EditorGUILayout.Toggle("Bridges (yellow)", showBridgeLines);
                 showLinks = EditorGUILayout.Toggle("Existing-road proposals (green)", showLinks);
                 showDetached = EditorGUILayout.Toggle("Detached roads (purple)", showDetached);
+                showGrading = EditorGUILayout.Toggle("Extra grading markers (red)", showGrading);
                 if (EditorGUI.EndChangeCheck()) SceneView.RepaintAll();
 
                 EditorGUILayout.Space();
@@ -144,7 +154,7 @@ namespace DeliveryDriver.EditorTools
                 bool hasBuild = FindStates(SceneManager.GetActiveScene()).Count > 0;
                 using (new EditorGUI.DisabledScope(true))
                     GUILayout.Button("Generate Roads & Bridges (locked for preview)", GUILayout.Height(36f));
-                EditorGUILayout.HelpBox("Road classes currently affect the plan and preview, not mesh widths. Green connections are proposals; existing roads are unchanged.", MessageType.Info);
+                EditorGUILayout.HelpBox("Road classes affect the plan and preview, not mesh widths. Green connections are proposals. District grading is hypothetical and must be validated before baking. Existing roads and terrain are unchanged.", MessageType.Info);
                 using (new EditorGUI.DisabledScope(!hasBuild))
                 {
                     if (GUILayout.Button("Clear Generated Roads / Restore Terrain", GUILayout.Height(28f)) &&
@@ -604,6 +614,12 @@ namespace DeliveryDriver.EditorTools
                 Handles.color = new Color(.92f, .35f, .95f, .9f);
                 foreach (var edge in preview.detachedEdges)
                     Handles.DrawAAPolyLine(2f, PreviewPoints(edge));
+            }
+            if (showGrading)
+            {
+                Handles.color = new Color(1f, .24f, .20f, .95f);
+                foreach (Vector3 point in preview.gradingMarkers)
+                    Handles.DrawLine(point + Vector3.up * 2f, point + Vector3.up * 9f, 2f);
             }
             if (showLinks)
             {
