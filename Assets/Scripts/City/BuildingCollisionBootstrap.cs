@@ -282,12 +282,26 @@ namespace DeliveryDriver.City
             BoxCollider collider = candidate.GetComponent<BoxCollider>();
             if (collider == null)
             {
+                GameObject colliderObject = candidate;
+                if (Application.isPlaying &&
+                    candidate.TryGetComponent(out MeshRenderer renderer) &&
+                    renderer.isPartOfStaticBatch)
+                {
+                    // Unity tries to fit the collider to the combined mesh during AddComponent.
+                    colliderObject = new GameObject("BuildingCollider")
+                    {
+                        layer = candidate.layer,
+                        tag = candidate.tag
+                    };
+                    colliderObject.transform.SetParent(candidate.transform, false);
+                }
+
 #if UNITY_EDITOR
                 collider = !Application.isPlaying && useEditorUndo
                     ? Undo.AddComponent<BoxCollider>(candidate)
-                    : candidate.AddComponent<BoxCollider>();
+                    : colliderObject.AddComponent<BoxCollider>();
 #else
-                collider = candidate.AddComponent<BoxCollider>();
+                collider = colliderObject.AddComponent<BoxCollider>();
 #endif
             }
 
@@ -374,7 +388,6 @@ namespace DeliveryDriver.City
             bool hasBounds = false;
             Matrix4x4 worldToLocal = root.worldToLocalMatrix;
 
-            // 1. MeshFilter'ların sharedMesh orijinal yerel bounds'larını kullan (Dünya rotasyonundan asla etkilenmez)
             MeshFilter[] meshFilters = root.GetComponentsInChildren<MeshFilter>(true);
             if (meshFilters != null && meshFilters.Length > 0)
             {
@@ -386,13 +399,25 @@ namespace DeliveryDriver.City
                         continue;
                     }
 
-                    Bounds mb = mf.sharedMesh.bounds;
+                    Bounds mb;
+                    Matrix4x4 localMatrix;
+                    if (mf.TryGetComponent(out MeshRenderer renderer) && renderer.isPartOfStaticBatch)
+                    {
+                        // sharedMesh can represent multiple buildings after static batching.
+                        mb = renderer.bounds;
+                        localMatrix = worldToLocal;
+                    }
+                    else
+                    {
+                        mb = mf.sharedMesh.bounds;
+                        localMatrix = worldToLocal * mf.transform.localToWorldMatrix;
+                    }
+
                     if (mb.size.sqrMagnitude < 0.001f)
                     {
                         continue;
                     }
 
-                    Matrix4x4 localMatrix = worldToLocal * mf.transform.localToWorldMatrix;
                     Vector3 min = mb.min;
                     Vector3 max = mb.max;
                     Vector3[] corners =
