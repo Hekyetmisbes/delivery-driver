@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using DeliveryDriver.City;
 using UnityEngine;
 
 namespace TrafficSystem.Spline
@@ -30,6 +31,16 @@ namespace TrafficSystem.Spline
             AddUsableRoads(GetComponentsInChildren<SplineRoad>(true));
             AddUsableRoads(FindObjectsByType<SplineRoad>(FindObjectsInactive.Exclude, FindObjectsSortMode.None));
 
+            // Keep the generated world's graph available when a visual city is streamed out.
+            // Random NPC spawn selection below still only uses active roads.
+            foreach (var state in FindObjectsByType<ProceduralWorldBuildState>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                foreach (Transform root in state.cityRoots)
+                    if (root != null) AddUsableRoads(root.GetComponentsInChildren<SplineRoad>(true));
+                foreach (GameObject root in state.generatedRoots)
+                    if (root != null) AddUsableRoads(root.GetComponentsInChildren<SplineRoad>(true));
+            }
+
             intersections.Clear();
             HashSet<RoadIntersection> uniqueIntersections = new HashSet<RoadIntersection>();
             RoadIntersection[] childIntersections = GetComponentsInChildren<RoadIntersection>(true);
@@ -50,6 +61,12 @@ namespace TrafficSystem.Spline
                 }
             }
 
+            foreach (SplineRoad road in roads)
+            {
+                if (road == null) continue;
+                if (road.startIntersection != null) uniqueIntersections.Add(road.startIntersection);
+                if (road.endIntersection != null) uniqueIntersections.Add(road.endIntersection);
+            }
             intersections.AddRange(uniqueIntersections);
 
             foreach (var intersection in intersections)
@@ -99,8 +116,15 @@ namespace TrafficSystem.Spline
 
         public SplineRoad GetRandomRoad()
         {
-            if (roads.Count == 0) return null;
-            return roads[Random.Range(0, roads.Count)];
+            SplineRoad selected = null;
+            int activeCount = 0;
+            foreach (SplineRoad road in roads)
+            {
+                if (road == null || !road.gameObject.activeInHierarchy || !road.IsUsable) continue;
+                activeCount++;
+                if (Random.Range(0, activeCount) == 0) selected = road;
+            }
+            return selected;
         }
 
         public List<SplineRoad> GetRoadsInSector(string sectorTag)
