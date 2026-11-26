@@ -208,6 +208,26 @@ namespace DeliveryDriver.EditorTools
                 var sampleA=new ProceduralWorldPlanner.VirtualSample{kind=3,position=new Vector3(2,1,0),center=new Vector3(2,1,0),distanceFromA=2};
                 var sampleB=new ProceduralWorldPlanner.VirtualSample{kind=3,position=new Vector3(2,2,0),center=new Vector3(2,2,0),distanceFromA=2};
                 Require(ProceduralWorldPlanner.VirtualHeightConflict(1,2)&&!ProceduralWorldPlanner.VirtualHeightConflict(1,1.5f),"Virtual height conflict threshold changed.");
+                Require(ProceduralWorldPlanner.ShareVirtualNode(edgeA,edgeB)&&!ProceduralWorldPlanner.ShareVirtualNode(edgeA,edgeC),"Virtual topology relation incorrect.");
+                Require(Mathf.Abs(ProceduralWorldPlanner.JunctionCurvature(Vector3.zero,new Vector3(-10,1,0),new Vector3(10,1,0))-.02f)<.0001f&&
+                    ProceduralWorldPlanner.JunctionCurvature(Vector3.zero,new Vector3(-10,1,0),new Vector3(10,-1,0))<.0001f&&
+                    ProceduralWorldPlanner.JunctionCurvature(Vector3.zero,new Vector3(0,1,10),new Vector3(10,1,0))<0,
+                    "Shared junction curvature mismatch.");
+                var va=new ProceduralWorldPlanner.VirtualTerrainReport{topologySchema=1,issues=new List<ProceduralWorldPlanner.VirtualIssue>()};
+                var vb=new ProceduralWorldPlanner.VirtualTerrainReport{topologySchema=1,issues=new List<ProceduralWorldPlanner.VirtualIssue>()};
+                Require(ProceduralWorldPlanner.NoVirtualRegression(va,vb),"Identical complete virtual reports rejected.");
+                vb.closeSampleCells=1;
+                Require(!ProceduralWorldPlanner.NoVirtualRegression(va,vb),"New close virtual conflict accepted.");
+                vb.closeSampleCells=0;vb.omittedIssues=1;
+                Require(!ProceduralWorldPlanner.NoVirtualRegression(va,vb),"Incomplete virtual evidence accepted.");
+                vb.omittedIssues=0;va.closeSampleCells=vb.closeSampleCells=1;
+                va.issues.Add(new ProceduralWorldPlanner.VirtualIssue{cell=new Vector2Int(1,1),minSeparation=.3f,maxCloseDelta=1f});
+                vb.issues.Add(new ProceduralWorldPlanner.VirtualIssue{cell=new Vector2Int(2,1),minSeparation=.3f,maxCloseDelta=.8f});
+                Require(!ProceduralWorldPlanner.NoVirtualRegression(va,vb),"Close conflict moved to new cell.");
+                vb.issues[0].cell=va.issues[0].cell;vb.issues[0].maxCloseDelta=1.1f;
+                Require(!ProceduralWorldPlanner.NoVirtualRegression(va,vb),"Worse close conflict accepted.");
+                vb.issues[0].maxCloseDelta=.8f;
+                Require(ProceduralWorldPlanner.NoVirtualRegression(va,vb),"Improved close conflict rejected.");
                 Require(ProceduralWorldPlanner.VirtualPairKind(edgeA,sampleA,edgeB,sampleB,6)==ProceduralWorldPlanner.VirtualIssueKind.SharedJunction,"Shared junction evidence not recognized.");
                 Require(ProceduralWorldPlanner.VirtualPairKind(edgeA,sampleA,edgeC,sampleB,6)==ProceduralWorldPlanner.VirtualIssueKind.IndependentRoad,"Coincident but unrelated roads misclassified.");
                 sampleB.kind=8;
@@ -241,6 +261,8 @@ namespace DeliveryDriver.EditorTools
                     vr.diagnosticCells==vr.sharedJunctionCells+vr.independentRoadCells+vr.ambiguousCells&&
                     vr.diagnosticCells==vr.closeSampleCells+vr.coarseOnlyCells+vr.unknownProximityCells,
                     "Virtual cell classification totals inconsistent.");
+                Require(vr.topologySchema==1&&vr.diagnosticCells==vr.connectedOnlyCells+vr.unrelatedOnlyCells+vr.mixedTopologyCells+vr.unknownTopologyCells,
+                    "Virtual topology relation counts inconsistent.");
                 Require(vr.missingSections==vr.missingCenterSections+vr.missingFootprintSections+vr.missingOuterSections&&
                     vr.issueCount==vr.issues.Count+vr.omittedIssues,"Virtual issue totals inconsistent.");
                 Require(rr.diagnosticSchema==1&&JsonUtility.ToJson(vr)==JsonUtility.ToJson(rr),"Virtual issue snapshot lost provenance.");

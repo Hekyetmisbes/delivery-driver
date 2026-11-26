@@ -20,6 +20,7 @@ namespace DeliveryDriver.EditorTools
             // Schema 0 is the legacy snapshot; schema 1 has bounded diagnostic evidence.
             public int diagnosticSchema,diagnosticCells,additionalConflictCells,overflowCells,overflowSamples;
             public int sharedJunctionCells,independentRoadCells,ambiguousCells,closeSampleCells,coarseOnlyCells,unknownProximityCells;
+            public int topologySchema,connectedOnlyCells,unrelatedOnlyCells,mixedTopologyCells,unknownTopologyCells;
             public int missingCenterSections,missingFootprintSections,missingOuterSections,issueCount,omittedIssues;
             public int missingCoastSamples,missingCityGapSamples,missingOutsideSamples;
             public float maxShoulderSlope,maxConflictDelta;
@@ -40,7 +41,8 @@ namespace DeliveryDriver.EditorTools
             public VirtualIssueKind kind;
             public Vector3 position;
             public Vector2Int cell;
-            public bool legacyConflict,overflow;
+            public bool legacyConflict,overflow,hasConnectedPair,hasUnrelatedPair;
+            public float maxCloseDelta;
             public float maxDelta,minSeparation,leftSlope,rightSlope;
             public int maxSampleA=-1,maxSampleB=-1,closestSampleA=-1,closestSampleB=-1;
             public string reason;
@@ -82,6 +84,8 @@ namespace DeliveryDriver.EditorTools
             return missingMask;
         }
         internal static bool VirtualHeightConflict(float a,float b)=>Mathf.Abs(a-b)>.5f;
+        internal static bool ShareVirtualNode(Edge a,Edge b)=>
+            a.a!=null&&(a.a==b.a||a.a==b.b)||a.b!=null&&(a.b==b.a||a.b==b.b);
         internal static VirtualIssueKind VirtualPairKind(Edge a,VirtualSample sa,Edge b,VirtualSample sb,float half)
         {
             // Topology alone is insufficient. Both station distances and actual XZ
@@ -117,10 +121,11 @@ namespace DeliveryDriver.EditorTools
         internal static string VirtualDiagnosticSummary(VirtualTerrainReport r)
         {
             if(r==null||r.diagnosticSchema!=1)return "Virtual issue details unavailable (legacy or intermediate preview).";
-            return "Virtual diagnostics V7.2.5: legacy conflict cells "+r.conflictingCells+", additional all-pair conflict cells "+r.additionalConflictCells+
+            return "Virtual diagnostics: legacy conflict cells "+r.conflictingCells+", additional all-pair conflict cells "+r.additionalConflictCells+
                 ", unresolved/overflow union "+r.diagnosticCells+" (overflow cells/samples "+r.overflowCells+"/"+r.overflowSamples+
                 "); shared-junction / independent-road / ambiguous "+r.sharedJunctionCells+" / "+r.independentRoadCells+" / "+r.ambiguousCells+
                 "; close (<=0.5m XZ) / coarse-only / unknown proximity "+r.closeSampleCells+" / "+r.coarseOnlyCells+" / "+r.unknownProximityCells+
+                (r.topologySchema==1?"; topology connected-only / unrelated-only / mixed / unknown "+r.connectedOnlyCells+" / "+r.unrelatedOnlyCells+" / "+r.mixedTopologyCells+" / "+r.unknownTopologyCells:"")+
                 "; max observed height delta "+r.maxConflictDelta.ToString("F2")+" m. All remain warnings/blockers. "+
                 "Missing sections center / footprint / outer-only "+r.missingCenterSections+" / "+r.missingFootprintSections+" / "+r.missingOuterSections+
                 "; missing point context sea/shore / city gap / outside "+r.missingCoastSamples+" / "+r.missingCityGapSamples+" / "+r.missingOutsideSamples+
@@ -864,6 +869,230 @@ namespace DeliveryDriver.EditorTools
             plan.notes.Add("Alternate park perimeter entrances: "+gained+" additional screened parks. No paths baked.");
         }
 
+        // True junction transition curvature uses the same direction and denominator
+        // as MeasureVertical. Negative value means not a straight-through pair.
+        internal static float JunctionCurvature(Vector3 center,Vector3 a,Vector3 b)
+        {
+            Vector3 da=a-center,db=b-center;
+            float dl=XZ(da).magnitude,dr=XZ(db).magnitude;
+            if(dl<.001f||dr<.001f||Vector2.Dot(XZ(da)/dl,XZ(db)/dr)>-.7071f)return -1f;
+            return Mathf.Abs(da.y/dl+db.y/dr)/Mathf.Max(1f,(dl+dr)*.5f);
+        }
+        private static Vector3 JunctionNeighbor(Node n,Edge e)=>n==e.a?e.points[1]:e.points[e.points.Count-2];
+        private static (int count,float severity) JunctionStats(Node n,List<Edge> roads,float limit)
+        {
+            int count=0;float severity=0;
+            for(int i=0;i<roads.Count;i++)for(int j=i+1;j<roads.Count;j++)
+            {
+                float k=JunctionCurvature(n.position,JunctionNeighbor(n,roads[i]),JunctionNeighbor(n,roads[j]));
+                if(k>limit){count++;severity+=k-limit;}
+            }
+            return (count,severity);
+        }
+        private static bool JunctionImproved((int count,float severity) a,(int count,float severity) b)=>
+            b.count<=a.count&&b.severity<=a.severity+.000001f&&(b.count<a.count||b.severity<a.severity-.000001f);
+
+        // Coordinate descent over one shared endpoint and bounded approach windows.
+        // Uses the same sample/midpoint bounds as the earlier shared profile solver.
+        // Everything beyond the window, and all other nodes, remains immutable.
+        private bool SolveJunctionWindow(Node node,List<Edge> roads,bool moveNode,float weight)
+        {
+            var vars=new List<HeightVar>();
+            var paths=new Dictionary<Edge,HeightVar[]>();
+            var terms=new Dictionary<HeightVar,List<(HeightVar a,HeightVar b,HeightVar c,float dl,float dr,float scale,bool junction)>>();
+            bool SafeLocation(Vector2 p)=>!IsProtected(p,RoadClearance+settings.blend)&&!obstacles.Near(p,RoadClearance*2f+settings.blend);
+            HeightVar New(Vector3 p,bool fixedHeight)
+            {
+                var v=new HeightVar{pos=XZ(p),y=p.y,fixedHeight=fixedHeight||!SafeLocation(XZ(p))};
+                vars.Add(v);return v;
+            }
+            var shared=New(node.position,!moveNode);
+            foreach(var e in roads)
+            {
+                var path=new HeightVar[e.points.Count];float distance=0f;
+                for(int k=0;k<path.Length;k++)
+                {
+                    int i=e.a==node?k:path.Length-1-k;
+                    Vector3 point=e.points[i];
+                    if(k>0)distance+=Vector2.Distance(XZ(point),path[e.a==node?i-1:i+1].pos);
+                    bool end=k==path.Length-1;
+                    var v=k==0?shared:New(point,end||distance>40f);
+                    Vector2 tangent=XZ(e.points[Mathf.Min(i+1,path.Length-1)]-e.points[Mathf.Max(i-1,0)]);
+                    var ground=StageGround(XZ(point),tangent,out float lo,out float hi);
+                    v.lo=Mathf.Max(v.lo,lo);v.hi=Mathf.Min(v.hi,hi);v.ground.AddRange(ground);path[i]=v;
+                }
+                for(int i=1;i<path.Length;i++)
+                {
+                    var a=path[i-1];var b=path[i];float len=Vector2.Distance(a.pos,b.pos);
+                    if(len<.001f)return false;
+                    Vector2 midpoint=(a.pos+b.pos)*.5f;
+                    if(!SafeLocation(midpoint)){a.fixedHeight=true;b.fixedHeight=true;}
+                    var ground=StageGround(midpoint,b.pos-a.pos,out float lo,out float hi);
+                    var pair=new HeightPair{a=a,b=b,rise=len*settings.grade,length=len,lo=lo,hi=hi,midGround=ground};
+                    a.adjacent.Add(pair);b.adjacent.Add(pair);
+                }
+                paths.Add(e,path);
+            }
+            void Term(HeightVar a,HeightVar b,HeightVar c,bool junction)
+            {
+                float dl=Vector2.Distance(a.pos,b.pos),dr=Vector2.Distance(c.pos,b.pos);
+                if(dl<.001f||dr<.001f)return;
+                float scale=junction?Mathf.Max(1f,(dl+dr)*.5f):(dl+dr)*.5f;
+                foreach(var v in new[]{a,b,c}.Distinct())
+                {
+                    if(v.fixedHeight)continue;
+                    if(!terms.TryGetValue(v,out var list))terms[v]=list=new List<(HeightVar,HeightVar,HeightVar,float,float,float,bool)>();
+                    list.Add((a,b,c,dl,dr,scale,junction));
+                }
+            }
+            foreach(var path in paths.Values)
+                for(int i=1;i<path.Length-1;i++)Term(path[i-1],path[i],path[i+1],false);
+            // Include fixed incident approaches too; eligible roads can fit them
+            // without moving bridge/authored geometry or the locked shared node.
+            var first=new List<HeightVar>();
+            foreach(var e in plan.edges.Concat(plan.authoredLinks).Where(e=>e.a==node||e.b==node))
+            {
+                if(paths.TryGetValue(e,out var path))first.Add(path[e.a==node?1:path.Length-2]);
+                else {var p=JunctionNeighbor(node,e);first.Add(new HeightVar{pos=XZ(p),y=p.y,fixedHeight=true});}
+            }
+            for(int i=0;i<first.Count;i++)for(int j=i+1;j<first.Count;j++)
+                if(Vector2.Dot((first[i].pos-shared.pos).normalized,(first[j].pos-shared.pos).normalized)<=-.7071f)
+                    Term(first[i],shared,first[j],true);
+            float limit=1f/Mathf.Max(1f,settings.verticalRadius);
+            bool moved=false;
+            for(int pass=0;pass<12;pass++)
+            for(int i=0;i<vars.Count;i++)
+            {
+                var v=vars[pass%2==0?i:vars.Count-1-i];
+                if(v.fixedHeight||v.ground.Count==0||!terms.TryGetValue(v,out var bends))continue;
+                float lo=v.lo,hi=v.hi;
+                foreach(var pair in v.adjacent)
+                {
+                    float other=pair.Other(v).y;
+                    lo=Mathf.Max(lo,Mathf.Max(other-pair.rise,2f*pair.lo-other));
+                    hi=Mathf.Min(hi,Mathf.Min(other+pair.rise,2f*pair.hi-other));
+                }
+                if(lo>hi||v.y<lo-.002f||v.y>hi+.002f)continue;
+                float Cost(float y)
+                {
+                    float total=0;
+                    foreach(var pair in v.adjacent)
+                    foreach(float h in pair.midGround)
+                    {
+                        float d=Mathf.Abs((y+pair.Other(v).y)*.5f-h);
+                        total+=pair.length*(d+2f*Mathf.Max(0,d-settings.maxCutFill)+4f*Mathf.Max(0,d-settings.preferredGrading));
+                    }
+                    float Y(HeightVar x)=>x==v?y:x.y;
+                    foreach(var t in bends)
+                    {
+                        float k=Mathf.Abs((Y(t.c)-Y(t.b))/t.dr-(Y(t.b)-Y(t.a))/t.dl)/t.scale;
+                        total+=weight*(t.junction?3f:1f)*Mathf.Max(0,k-limit);
+                    }
+                    return total;
+                }
+                float left=lo,right=hi;
+                for(int k=0;k<12;k++)
+                {
+                    float a=(2f*left+right)/3f,b=(left+2f*right)/3f;
+                    if(Cost(a)<Cost(b))right=b;else left=a;
+                }
+                float next=(left+right)*.5f;
+                if(Cost(next)+.0001f<Cost(v.y)&&Mathf.Abs(next-v.y)>.0001f){v.y=next;moved=true;}
+            }
+            if(!moved)return false;
+            node.position=XYZ(shared.pos,shared.y);
+            foreach(var entry in paths)
+                entry.Key.points=entry.Value.Select(v=>XYZ(v.pos,v.y)).ToList();
+            return true;
+        }
+        private static Dictionary<Node,List<Edge>> JunctionIncident(Plan p)=>p.edges.Concat(p.authoredLinks)
+            .SelectMany(e=>new[]{(node:e.a,edge:e),(node:e.b,edge:e)})
+            .GroupBy(x=>x.node).ToDictionary(g=>g.Key,g=>g.Select(x=>x.edge).Distinct().ToList());
+        private static bool JunctionEditable(Edge e,HashSet<Edge> retained)=>e.sector=="Ankara"&&!e.Bridge&&retained.Contains(e)&&e.points.Count>2;
+        private static List<int> SharedJunctionTargets(Plan p,Settings s)
+        {
+            var retained=new HashSet<Edge>(p.edges);
+            float limit=1f/Mathf.Max(1f,s.verticalRadius);
+            return JunctionIncident(p).Where(x=>x.Key.id>=0&&x.Value.Any(e=>JunctionEditable(e,retained)))
+                .Select(x=>(node:x.Key,stats:JunctionStats(x.Key,x.Value,limit)))
+                .Where(x=>x.stats.count>0).OrderByDescending(x=>x.stats.severity).ThenBy(x=>x.node.id)
+                .Take(32).Select(x=>x.node.id).ToList();
+        }
+        private void FinishSharedJunctions(IReadOnlyList<int> targetIds)
+        {
+            var incident=JunctionIncident(plan);
+            var detachedNodes=new HashSet<Node>(plan.detachedEdges.SelectMany(e=>new[]{e.a,e.b}));
+            var retained=new HashSet<Edge>(plan.edges);
+            bool Editable(Edge e)=>JunctionEditable(e,retained);
+            float limit=1f/Mathf.Max(1f,settings.verticalRadius);
+            var byId=incident.Keys.Where(n=>n.id>=0).ToDictionary(n=>n.id);
+            var targets=targetIds.Where(byId.ContainsKey).Select(id=>byId[id]).ToList();
+            var stageInput=Measure(plan,settings);var current=stageInput;
+            int attempts=0,accepted=0,profileReject=0,qualityReject=0,noBenefit=0;
+            foreach(var n in targets)
+            {
+                var all=incident[n];var roads=all.Where(Editable).ToList();
+                var prior=JunctionStats(n,all,limit);if(prior.count==0||roads.Count==0)continue;
+                var original=roads.ToDictionary(e=>e,e=>e.points);
+                var position=n.position;
+                bool allowMove=!n.gate&&!detachedNodes.Contains(n)&&all.All(Editable);
+                Dictionary<Edge,List<Vector3>> best=null;Vector3 bestNode=position;
+                QualityReport bestQuality=null;var bestStats=prior;
+                foreach(bool move in allowMove?new[]{false,true}:new[]{false})
+                {
+                    attempts++;
+                    if(EditorUtility.DisplayCancelableProgressBar("V7.2.6 city finish","Shared junction "+n.id+" / trial "+attempts,.88f))throw new OperationCanceledException();
+                    try
+                    {
+                        if(!SolveJunctionWindow(n,roads,move,2400f)){noBenefit++;continue;}
+                        if(roads.Any(e=>!e.points[0].Equals(e.a.position)||!e.points[e.points.Count-1].Equals(e.b.position)||!LocalProfileSafe(e.points)))
+                        {profileReject++;continue;}
+                        var stats=JunctionStats(n,all,limit);
+                        if(!JunctionImproved(prior,stats)){noBenefit++;continue;}
+                        var q=Measure(plan,settings);
+                        if(!NoTerrainRegression(current,q,settings)||!NoTerrainRegression(stageInput,q,settings)||
+                            !NoLocalQualityRegression(current,q)||!NoLocalQualityRegression(stageInput,q)||
+                            q.verticalDefects>current.verticalDefects||q.verticalDefects>stageInput.verticalDefects||
+                            q.junctionGradeFlags>current.junctionGradeFlags||q.score+.0001f<stageInput.score)
+                        {qualityReject++;continue;}
+                        if(best==null||stats.count<bestStats.count||stats.count==bestStats.count&&stats.severity<bestStats.severity)
+                        {best=roads.ToDictionary(e=>e,e=>e.points);bestNode=n.position;bestQuality=q;bestStats=stats;}
+                    }
+                    catch(InvalidOperationException){profileReject++;}
+                    finally{n.position=position;foreach(var entry in original)entry.Key.points=entry.Value;}
+                }
+                if(best!=null)
+                {
+                    n.position=bestNode;foreach(var entry in best)entry.Key.points=entry.Value;
+                    current=bestQuality;accepted++;
+                    plan.notes.Add("Junction "+n.id+" "+n.position.ToString("F1")+": "+prior.count+" -> "+bestStats.count+
+                        " flags; excess curvature "+prior.severity.ToString("F5")+" -> "+bestStats.severity.ToString("F5")+
+                        "; "+roads.Count+" approaches, node Y shift "+(bestNode.y-position.y).ToString("F3")+" m.");
+                }
+            }
+            plan.notes.Add("Shared junction finish: "+accepted+"/"+targets.Count+" target junctions improved locally; "+attempts+
+                " trials, "+profileReject+" profile rejects, "+qualityReject+" quality rejects, "+noBenefit+
+                " no-benefit; junction flags "+stageInput.junctionGradeFlags+" -> "+current.junctionGradeFlags+
+                ", vertical "+stageInput.verticalDefects+" -> "+current.verticalDefects+". Final city/virtual guards still apply.");
+        }
+        // Do not trade a better vertical profile for worse virtual ground. New
+        // close cells are forbidden, and existing close-cell deltas cannot grow.
+        internal static bool NoVirtualRegression(VirtualTerrainReport a,VirtualTerrainReport b)
+        {
+            if(a==null||b==null||a.topologySchema!=1||b.topologySchema!=1||a.issues==null||b.issues==null||
+                a.omittedIssues>0||b.omittedIssues>0||a.overflowCells>0||b.overflowCells>0)return false;
+            if(b.sections!=a.sections||b.missingSections>a.missingSections||b.missingSamples>a.missingSamples||
+                b.missingCenterSections>a.missingCenterSections||b.missingFootprintSections>a.missingFootprintSections||
+                b.protectedSamples>a.protectedSamples||b.parcelSamples>a.parcelSamples||b.steepSections>a.steepSections||
+                b.conflictingCells>a.conflictingCells||b.diagnosticCells>a.diagnosticCells||b.closeSampleCells>a.closeSampleCells||
+                b.unrelatedOnlyCells+b.mixedTopologyCells>a.unrelatedOnlyCells+a.mixedTopologyCells||
+                b.maxConflictDelta>a.maxConflictDelta+.001f||b.maxShoulderSlope>a.maxShoulderSlope+.0001f)return false;
+            var prior=a.issues.Where(x=>x.minSeparation>=0&&x.minSeparation<=.5f&&
+                (int)x.kind<=2).ToDictionary(x=>x.cell,x=>x.maxCloseDelta);
+            return b.issues.Where(x=>x.minSeparation>=0&&x.minSeparation<=.5f&&(int)x.kind<=2)
+                .All(x=>prior.TryGetValue(x.cell,out float delta)&&x.maxCloseDelta<=delta+.001f);
+        }
+
         private void BuildLocalDiagnostics()
         {
             plan.hotspots.Clear();plan.verticalFlags.Clear();
@@ -895,7 +1124,7 @@ namespace DeliveryDriver.EditorTools
         private void BuildVirtualTerrain()
         {
             plan.virtualSections.Clear();
-            var report=new VirtualTerrainReport{diagnosticSchema=1,issues=new List<VirtualIssue>()};plan.virtualReport=report;
+            var report=new VirtualTerrainReport{diagnosticSchema=1,topologySchema=1,issues=new List<VirtualIssue>()};plan.virtualReport=report;
             var roads=plan.edges.Where(e=>!e.Bridge).ToList();
             float spacing=Mathf.Max(settings.virtualSectionSpacing,roads.Sum(e=>Length(e.points))/12000f);
             report.spacing=spacing;
@@ -1039,7 +1268,8 @@ namespace DeliveryDriver.EditorTools
                 if(++examined%4096==0&&EditorUtility.DisplayCancelableProgressBar("V7.2.5 virtual diagnostics","Classifying sample cells "+examined+"/"+evidence.Count,.97f))
                     throw new OperationCanceledException();
                 var cell=entry.Value;bool legacy=conflicts.Contains(entry.Key),found=false,shared=false,independent=false,ambiguous=false;
-                float maxDelta=0f,minSeparation=float.PositiveInfinity;
+                bool connectedPair=false,unrelatedPair=false;
+                float maxDelta=0f,maxCloseDelta=0f,minSeparation=float.PositiveInfinity;
                 int maxA=-1,maxB=-1,closestA=-1,closestB=-1;
                 Vector3 focus=cell.samples[0].sample.position;
                 for(int i=0;i<cell.samples.Count;i++)
@@ -1051,6 +1281,8 @@ namespace DeliveryDriver.EditorTools
                     float delta=Mathf.Abs(a.sample.position.y-b.sample.position.y);
                     if(delta>maxDelta){maxDelta=delta;maxA=i;maxB=j;focus=(a.sample.position+b.sample.position)*.5f;}
                     float separation=Vector2.Distance(XZ(a.sample.position),XZ(b.sample.position));
+                    if(ShareVirtualNode(a.owner,b.owner))connectedPair=true;else unrelatedPair=true;
+                    if(separation<=.5f)maxCloseDelta=Mathf.Max(maxCloseDelta,delta);
                     if(separation<minSeparation){minSeparation=separation;closestA=i;closestB=j;}
                     var kind=VirtualPairKind(a.owner,a.sample,b.owner,b.sample,half);
                     shared|=kind==VirtualIssueKind.SharedJunction;independent|=kind==VirtualIssueKind.IndependentRoad;
@@ -1060,6 +1292,10 @@ namespace DeliveryDriver.EditorTools
                 report.diagnosticCells++;
                 if(found&&!legacy)report.additionalConflictCells++;
                 if(cell.overflow)report.overflowCells++;
+                if(cell.overflow||!found)report.unknownTopologyCells++;
+                else if(connectedPair&&unrelatedPair)report.mixedTopologyCells++;
+                else if(connectedPair)report.connectedOnlyCells++;
+                else report.unrelatedOnlyCells++;
                 VirtualIssueKind classification=VirtualIssueKind.AmbiguousOverlap;
                 if(!cell.overflow&&!ambiguous&&found&&shared&&!independent)classification=VirtualIssueKind.SharedJunction;
                 else if(!cell.overflow&&!ambiguous&&found&&independent&&!shared)classification=VirtualIssueKind.IndependentRoad;
@@ -1071,7 +1307,7 @@ namespace DeliveryDriver.EditorTools
                 else report.unknownProximityCells++;
                 report.maxConflictDelta=Mathf.Max(report.maxConflictDelta,maxDelta);
                 AddVirtualIssue(report,new VirtualIssue{kind=classification,position=focus,cell=entry.Key,legacyConflict=legacy,overflow=cell.overflow,
-                    maxDelta=maxDelta,minSeparation=found?minSeparation:-1f,
+                    maxDelta=maxDelta,maxCloseDelta=maxCloseDelta,hasConnectedPair=connectedPair,hasUnrelatedPair=unrelatedPair,minSeparation=found?minSeparation:-1f,
                     maxSampleA=maxA,maxSampleB=maxB,closestSampleA=closestA,closestSampleB=closestB,
                     reason=cell.overflow?"Cell sample cap reached; unresolved":!found?"Legacy conflict without complete pair evidence":
                         minSeparation<=.5f?"Close sample height mismatch; not a mesh collision":"Coarse-cell alias possible; not cleared",

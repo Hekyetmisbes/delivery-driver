@@ -45,6 +45,14 @@ namespace DeliveryDriver.EditorTools
                 b.sharpRoads<=a.sharpRoads&&b.verticalSeverity<=a.verticalSeverity+.0001f&&
                 b.junctionGradeFlags<=a.junctionGradeFlags;
         }
+        private static bool PreserveCityAccess(Plan before,Plan after)
+        {
+            if(after.quality.matchedLots<before.quality.matchedLots||after.quality.accessibleParks<before.quality.accessibleParks)return false;
+            foreach(string city in new[]{"Ankara","İstanbul"})
+                if(after.parcels.Count(x=>x.sector==city&&x.accessible&&!string.IsNullOrEmpty(x.prefab))<
+                    before.parcels.Count(x=>x.sector==city&&x.accessible&&!string.IsNullOrEmpty(x.prefab)))return false;
+            return before.openSpaces.Where(x=>x.accessible).All(x=>after.openSpaces.Any(y=>y.accessible&&y.sector==x.sector&&y.bounds.Equals(x.bounds)));
+        }
         private static string StageGraphIssue(Plan before,Plan after,Settings s,bool allowSplit=false,bool allowBridgeMove=false)
         {
             if(after.edges.Count<before.edges.Count)return "retained edge count decreased";
@@ -132,8 +140,14 @@ namespace DeliveryDriver.EditorTools
                     string graphIssue=StageGraphIssue(current,candidate,s,allowSplit,allowBridgeMove);
                     if(graphIssue!=null)reason="network/access regression: "+graphIssue;
                     else if(!NoTerrainRegression(current.quality,candidate.quality,s))reason="earthworks regression";
-                    else if(s.localOptimization&&name.StartsWith("5",StringComparison.Ordinal)&&name.Length>1&&char.IsLetter(name[1])&&
-                        !NoLocalQualityRegression(current.quality,candidate.quality))reason="local quality regression";
+                    else if(s.localOptimization&&((name.StartsWith("5",StringComparison.Ordinal)&&name.Length>1&&char.IsLetter(name[1]))||
+                        name.StartsWith("7",StringComparison.Ordinal))&&!NoLocalQualityRegression(current.quality,candidate.quality))reason="local quality regression";
+                    else if(name.StartsWith("7",StringComparison.Ordinal)&&
+                        (!PreserveCityAccess(current,candidate)||candidate.quality.score+.0001f<current.quality.score||
+                         candidate.quality.verticalDefects>current.quality.verticalDefects))
+                        reason="city readiness regression (lots, parks, score or vertical flags)";
+                    else if(name.StartsWith("7",StringComparison.Ordinal)&&!NoVirtualRegression(current.virtualReport,candidate.virtualReport))
+                        reason="virtual terrain regression or incomplete evidence";
                     else if(!benefit(current,candidate))reason="no measurable improvement";
                 }
                 catch(InvalidOperationException ex){reason=ex.Message;}
@@ -150,7 +164,7 @@ namespace DeliveryDriver.EditorTools
                 // reflect current paths; parcel/park accessibility is only final-stage data.
                 candidate.earthworks.Clear();candidate.gradingZones.Clear();candidate.gradingMarkers.Clear();
                 planner.BuildEarthworkLines();planner.BuildGradingZones();
-                candidate.version=(s.localOptimization?"V7.2 ":"V7.1 ")+name+(accepted?"":" rejected (diagnostic)");
+                candidate.version=(s.localOptimization?"V7.2.6 ":"V7.1 ")+name+(accepted?"":" rejected (diagnostic)");
                 SaveView(candidate,name+(accepted?" accepted":" rejected"),accepted);
                 if(accepted)current=candidate;
             }
@@ -174,7 +188,30 @@ namespace DeliveryDriver.EditorTools
                 if(s.localOptimization)x.FindAlternateParkAccess();
             },(a,b)=>true);
             bool urbanScreened=views.Last().accepted;
-            current.version=s.localOptimization?"V7.2.5 optimized":"V7.1 optimized";
+            if(s.localOptimization&&urbanScreened)
+            {
+                // Stage 6 is the verified city baseline. Compare final terrain
+                // evidence and rescreen actual parcel/park access after trial.
+                var targets=SharedJunctionTargets(current,s);
+                if(targets.Count>0)
+                {
+                    new ProceduralWorldPlanner(s,layout,scene,current).BuildVirtualTerrain();
+                    // Two disjoint batches, independently screened: one failed
+                    // batch must not discard a safe improvement in the other.
+                    for(int offset=0;offset<targets.Count;offset+=16)
+                    {
+                        var batch=targets.Skip(offset).Take(16).ToList();
+                        Stage(offset==0?"7a Shared junction city finish":"7b Shared junction city finish",x=>
+                        {
+                            x.FinishSharedJunctions(batch);
+                            x.plan.parcels.Clear();x.BuildParcels();x.EvaluateOpenSpaceAccess();x.FindAlternateParkAccess();
+                            x.BuildVirtualTerrain();
+                        },(a,b)=>b.quality.junctionGradeFlags<a.quality.junctionGradeFlags||
+                            b.quality.verticalDefects<a.quality.verticalDefects||b.quality.verticalSeverity<a.quality.verticalSeverity-.0001f);
+                    }
+                }
+            }
+            current.version=s.localOptimization?"V7.2.6 optimized":"V7.1 optimized";
             current.stageReports.Clear();current.stageReports.AddRange(reports);
             current.stageViews.AddRange(views);
             current.quality=Measure(current,s);

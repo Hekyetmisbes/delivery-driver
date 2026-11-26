@@ -172,6 +172,7 @@ namespace DeliveryDriver.EditorTools
                 issue.kind==ProceduralWorldPlanner.VirtualIssueKind.AmbiguousOverlap)
             {
                 EditorGUILayout.LabelField("4m cell / legacy",issue.cell+" / "+issue.legacyConflict);
+                if(report.topologySchema==1)EditorGUILayout.LabelField("Shared / unrelated node pairs",issue.hasConnectedPair+" / "+issue.hasUnrelatedPair);
                 EditorGUILayout.LabelField("Observed max height delta",issue.maxDelta.ToString("F2")+" m");
                 EditorGUILayout.LabelField("Closest conflicting XZ samples",issue.minSeparation<0?"Unknown":issue.minSeparation.ToString("F2")+" m");
                 if(issue.maxSampleA>=0)EditorGUILayout.LabelField("Max delta sample indices",issue.maxSampleA+" / "+issue.maxSampleB);
