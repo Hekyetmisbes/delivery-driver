@@ -201,6 +201,13 @@ namespace DeliveryDriver.EditorTools
                 settings.localOptimization=true;
                 TestExactRoadSplit();
                 TestLocalQualityGuard();
+                Require(Mathf.Abs(ProceduralWorldPlanner.PilotStampHeight(10f,0f,0f,5f,10f,6f,0f,80f)-4f)<.0001f,
+                    "Pilot stamp ignored cut budget.");
+                Require(Mathf.Abs(ProceduralWorldPlanner.PilotStampHeight(10f,0f,15f,5f,10f,6f,0f,80f)-10f)<.0001f,
+                    "Pilot stamp modified ground beyond blend.");
+                var pilotFixture=new ProceduralWorldPlanner.PilotSurface{nx=2,nz=2,stepX=1,stepZ=1,proposed=new[]{0f,2f,2f,4f}};
+                Require(ProceduralWorldPlanner.PilotHeight(pilotFixture,new Vector2(.5f,.5f),out float pilotY)&&Mathf.Abs(pilotY-2f)<.0001f&&
+                    !ProceduralWorldPlanner.PilotHeight(pilotFixture,new Vector2(2f,0f),out _),"Pilot bilinear height interpolation incorrect.");
                 var junction=new ProceduralWorldPlanner.Node{position=Vector3.zero};
                 var edgeA=new ProceduralWorldPlanner.Edge{a=junction,b=new ProceduralWorldPlanner.Node()};
                 var edgeB=new ProceduralWorldPlanner.Edge{a=junction,b=new ProceduralWorldPlanner.Node()};
@@ -209,6 +216,8 @@ namespace DeliveryDriver.EditorTools
                 var sampleB=new ProceduralWorldPlanner.VirtualSample{kind=3,position=new Vector3(2,2,0),center=new Vector3(2,2,0),distanceFromA=2};
                 Require(ProceduralWorldPlanner.VirtualHeightConflict(1,2)&&!ProceduralWorldPlanner.VirtualHeightConflict(1,1.5f),"Virtual height conflict threshold changed.");
                 Require(ProceduralWorldPlanner.ShareVirtualNode(edgeA,edgeB)&&!ProceduralWorldPlanner.ShareVirtualNode(edgeA,edgeC),"Virtual topology relation incorrect.");
+                Require(ProceduralWorldPlanner.LargestPilotRoadGroup(new List<ProceduralWorldPlanner.Edge>{edgeA,edgeB,edgeC})==2,
+                    "Pilot connected road grouping incorrect.");
                 Require(Mathf.Abs(ProceduralWorldPlanner.JunctionCurvature(Vector3.zero,new Vector3(-10,1,0),new Vector3(10,1,0))-.02f)<.0001f&&
                     ProceduralWorldPlanner.JunctionCurvature(Vector3.zero,new Vector3(-10,1,0),new Vector3(10,-1,0))<.0001f&&
                     ProceduralWorldPlanner.JunctionCurvature(Vector3.zero,new Vector3(0,1,10),new Vector3(10,1,0))<0,

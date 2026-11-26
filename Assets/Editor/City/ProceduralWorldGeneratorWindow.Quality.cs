@@ -26,7 +26,7 @@ namespace DeliveryDriver.EditorTools
         {
             comparisonOwner=null;preview=null;layout=null;previewFingerprint=null;analysisCache=null;analysisCacheKey=null;
             planCache.Clear();cacheOrder.Clear();settings.accessAnchors.Clear();anchorSamples=null;pickAnchor=false;
-            refineZone=null;Repaint();SceneView.RepaintAll();
+            refineZone=null;pilotSurface=null;pilotOwner=null;Repaint();SceneView.RepaintAll();
         }
         private bool TryCachedPlan(string key,out ProceduralWorldPlanner.Plan p)
         {
@@ -115,6 +115,7 @@ namespace DeliveryDriver.EditorTools
             EditorGUILayout.LabelField("Screened park access",q.accessibleParks+"/"+q.totalParks);
             EditorGUILayout.LabelField("Bridge separation",q.bridgeGap.ToString("F0")+" m");
             EditorGUILayout.LabelField("Requested bridge graph",q.bridgeGraphConnected?"Connected / not required":"Incomplete");
+            DrawPilotControls();
         }
         private int virtualSectionIndex;
         private void DrawSectionInspector()
@@ -226,12 +227,86 @@ namespace DeliveryDriver.EditorTools
             }
             EditorGUILayout.HelpBox("Snapshots include road paths and overlays, never a scene bake. Exact scene/settings fingerprint is required to refine. Local refinement keeps topology and exterior roads fixed; parcel/access overlays are refreshed. Save the preferred layout before experimenting.",MessageType.Info);
         }
+        private ProceduralWorldPlanner.PilotSurface pilotSurface;
+        private ProceduralWorldPlanner.Plan pilotOwner;
+        private bool pilotOpen=true,pilotAnkara,pilotOverlay=true;
+        private bool HasPilot=>pilotSurface!=null&&pilotOwner==preview&&previewFingerprint==pilotSurface.fingerprint;
+        private void DrawPilotControls()
+        {
+            if(preview==null||analysisOnly||preview.virtualReport==null)return;
+            pilotOpen=EditorGUILayout.Foldout(pilotOpen,"V7.3 Neighborhood pilot (read only)",true);
+            if(!pilotOpen)return;
+            pilotAnkara=EditorGUILayout.Popup("Pilot city",pilotAnkara?1:0,new[]{"Istanbul","Ankara"})==1;
+            using(new EditorGUI.DisabledScope(string.IsNullOrEmpty(previewFingerprint)))
+                if(GUILayout.Button("Find and preflight 250m neighborhood"))Run(PreflightPilot);
+            if(!HasPilot)return;
+            EditorGUILayout.HelpBox(pilotSurface.Summary()+" Results describe the inputs at the last preflight; rerun after any scene/settings edits.",pilotSurface.Pass?MessageType.Info:MessageType.Warning);
+            pilotOverlay=EditorGUILayout.Toggle("Show pilot surface overlay",pilotOverlay);
+            if(GUILayout.Button("Focus pilot neighborhood"))
+            {
+                var view=SceneView.lastActiveSceneView;var c=pilotSurface.region.center;
+                if(view!=null){view.pivot=new Vector3(c.x,0,c.y);view.size=190f;
+                    if(ProceduralWorldPlanner.PilotHeight(pilotSurface,c,out float y))view.pivot=new Vector3(c.x,y,c.y);
+                    view.Repaint();}
+            }
+            if(GUILayout.Button("Save pilot surface JSON"))Run(SavePilotSurface);
+        }
+        private void PreflightPilot()
+        {
+            var scene=SceneManager.GetActiveScene();var detected=ProceduralWorldPlanner.DetectLayout(scene);
+            string key=ProceduralWorldPlanner.PreviewFingerprint(settings,detected,scene);
+            if(key!=previewFingerprint||scene.path!=previewScenePath)throw new InvalidOperationException("Preview inputs changed. Recalculate before pilot preflight.");
+            var result=ProceduralWorldPlanner.FindPilotSurface(settings,detected,scene,preview,pilotAnkara?"Ankara":"İstanbul",key);
+            pilotSurface=result;pilotOwner=preview;pilotOverlay=true;showPreview=true;
+            SetStatus(result.Pass?"Local pilot preflight passed; full generation still locked.":"Pilot preflight blocked; inspect report.",result.Pass?MessageType.Info:MessageType.Warning);
+            SceneView.RepaintAll();
+        }
+        private void SavePilotSurface()
+        {
+            if(!HasPilot)return;
+            var scene=SceneManager.GetActiveScene();var detected=ProceduralWorldPlanner.DetectLayout(scene);
+            if(scene.path!=pilotSurface.scenePath||ProceduralWorldPlanner.PreviewFingerprint(settings,detected,scene)!=pilotSurface.fingerprint)
+                throw new InvalidOperationException("Pilot inputs changed. Rerun preflight before export.");
+            string path=EditorUtility.SaveFilePanel("Save read-only pilot surface",Path.Combine(Directory.GetCurrentDirectory(),"Library"),"V73-pilot","json");
+            if(!string.IsNullOrEmpty(path))File.WriteAllText(path,JsonUtility.ToJson(pilotSurface,false));
+        }
+        private void DrawPilotOverlay()
+        {
+            if(!HasPilot||!pilotOverlay)return;
+            var r=pilotSurface.region;
+            Vector3 Lift(Vector2 v)
+            {
+                ProceduralWorldPlanner.PilotHeight(pilotSurface,v,out float h);
+                return new Vector3(v.x,h+1f,v.y);
+            }
+            Handles.color=pilotSurface.Pass?new Color(.2f,1f,.65f,1f):new Color(1f,.45f,.1f,1f);
+            var a=Lift(r.min);var b=Lift(new Vector2(r.xMax,r.yMin));var c=Lift(r.max);var d=Lift(new Vector2(r.xMin,r.yMax));
+            Handles.DrawAAPolyLine(4f,a,b,c,d,a);
+            Handles.Label(Lift(r.center),"V7.3 PILOT — "+(pilotSurface.Pass?"LOCAL PREFLIGHT PASS":"BLOCKED"));
+            if(pilotSurface.complete)
+            {
+                // Decimated bilinear heightfield wire view, not a scene mesh.
+                const int divisions=16;
+                for(int i=0;i<=divisions;i++)
+                {
+                    var row=new Vector3[divisions+1];var col=new Vector3[divisions+1];
+                    for(int j=0;j<=divisions;j++)
+                    {
+                        row[j]=Lift(new Vector2(Mathf.Lerp(r.xMin,r.xMax,j/(float)divisions),Mathf.Lerp(r.yMin,r.yMax,i/(float)divisions)));
+                        col[j]=Lift(new Vector2(Mathf.Lerp(r.xMin,r.xMax,i/(float)divisions),Mathf.Lerp(r.yMin,r.yMax,j/(float)divisions)));
+                    }
+                    Handles.DrawAAPolyLine(1f,row);Handles.DrawAAPolyLine(1f,col);
+                }
+            }
+            if(pilotSurface.maxPenetration>0){Handles.color=Color.red;Handles.DrawWireDisc(pilotSurface.worstPoint,Vector3.up,4f);}
+        }
         private string PreviewReportText()
         {
             var lines=new List<string>{"Selected layout: "+preview.version,"Retained/detached roads: "+preview.edges.Count+" / "+preview.detachedEdges.Count,
                 "Bridges: "+preview.BridgeCount,"Authored proposals: "+preview.authoredLinks.Count,
                 "Open spaces / lots: "+preview.openSpaces.Count+" / "+preview.parcels.Count};
             lines.AddRange(preview.stageReports);lines.AddRange(preview.notes);lines.AddRange(preview.warnings.Select(x=>"WARNING: "+x));
+            if(HasPilot)lines.Add(pilotSurface.Summary());
             lines.Add("--- Settings at calculation ---");lines.Add(previewSettings??"Unknown");
             return string.Join("\n",lines);
         }

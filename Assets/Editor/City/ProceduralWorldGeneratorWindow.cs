@@ -706,6 +706,7 @@ namespace DeliveryDriver.EditorTools
                 }
                 if (preview == null) return;
                 if (showTerrainAnalysis) DrawAnalysisLayer();
+                if (!analysisOnly) DrawPilotOverlay();
                 if (!analysisOnly)
                 {
                     if (showOpenSpaces)
