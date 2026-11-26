@@ -211,6 +211,16 @@ namespace DeliveryDriver.EditorTools
                     new Vector3(5,0,5),new Vector3(0,0,5)},4f);}
                 catch(InvalidOperationException){tightLoopRejected=true;}
                 Require(tightLoopRejected,"Overlapping vehicle turn fillets accepted.");
+                var trackerFixture=ProceduralWorldPilotDriveCheck.RoundedLoop(new List<Vector3>{Vector3.zero,new Vector3(20,0,0),
+                    new Vector3(20,0,20),new Vector3(0,0,20)},4f);
+                var tracker=new ProceduralWorldPilotDriveCheck.PilotLoopTracker(trackerFixture);
+                tracker.Project(trackerFixture[trackerFixture.Count-2],true,out float initialStation);
+                tracker.Project(trackerFixture[trackerFixture.Count-1],true,out _);
+                tracker.Project(trackerFixture[0],true,out float seamStation);
+                tracker.Project(trackerFixture[1],true,out float afterSeamStation);
+                Require(initialStation>tracker.Length-1f&&Mathf.Abs(seamStation-tracker.Length)<.001f&&
+                    afterSeamStation>tracker.Length&&Vector3.Distance(tracker.At(afterSeamStation),trackerFixture[1])<.001f,
+                    "Pilot dynamic loop station wrap failed.");
                 var longStraight=new List<Vector3>{Vector3.zero,new Vector3(60,0,0),new Vector3(60,0,20),new Vector3(0,0,20)};
                 Require(ProceduralWorldPilotDriveCheck.TryPilotStraight(longStraight,out Vector3 driveStart,out Vector3 driveDirection)&&
                     Vector3.Distance(driveStart,new Vector3(5,0,0))<.001f&&driveDirection==Vector3.right&&

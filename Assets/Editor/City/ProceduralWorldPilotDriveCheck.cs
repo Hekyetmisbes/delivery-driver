@@ -335,7 +335,7 @@ namespace DeliveryDriver.EditorTools
             }
             return null;
         }
-        private static void Check(bool dynamicTest=false)
+        private static void Check(bool dynamicTest=false,bool loopTest=false)
         {
             var scene=SceneManager.GetActiveScene();
             if(EditorApplication.isPlayingOrWillChangePlaymode||EditorApplication.isCompiling||
@@ -393,7 +393,7 @@ namespace DeliveryDriver.EditorTools
                         "; "+label+"; candidates tried/constructed "+trials+"/"+constructed+
                         "; route "+names+". Nominal upright static geometry only; compressed-envelope clearance is diagnostic, negative means potential bottoming. "+
                         "Not loaded equilibrium, lane routing, dynamic steering, braking, suspension, traffic or driving PASS. No scene/save changes.");
-                    if(dynamicTest)RunIsolatedDynamics(scene,root,car,path,asphalt);
+                    if(dynamicTest)RunIsolatedDynamics(scene,root,car,path,asphalt,loopTest);
                     else
                     {
                         var view=SceneView.lastActiveSceneView;

@@ -11,17 +11,22 @@ namespace DeliveryDriver.EditorTools
     internal static partial class ProceduralWorldPilotDriveCheck
     {
         private const string DynamicMenu="Tools/Delivery Driver/City/Run Pilot Minivan Physics Test";
+        private const string LoopMenu="Tools/Delivery Driver/City/Run Pilot Minivan Closed Loop Physics Test";
         private const float Step=.02f,TestMass=1500f,TargetSpeed=10f/3.6f;
         private sealed class DynamicStats
         {
             public string phase="setup";
             public int steps,groundedMin=4,groundSamples,stableSteps;
             public float clearance=float.PositiveInfinity,maxSpeed,maxForwardSpeed,maxLateral,maxTilt,distance,stopDistance,settledClearance;
+            public float routeProgress,routeLength,maxSteer;
+            public int curveSteps;
             public string Summary()=>"phase "+phase+", physics steps "+steps+", distance "+distance.ToString("F2")+
                 " m, speed peak "+(maxSpeed*3.6f).ToString("F2")+" km/h, minimum grounded asphalt wheels after initial settling "+
                 (groundSamples==0?"unmeasured":groundedMin+"/4")+" ("+groundSamples+" samples), min sampled body clearance "+
                 (float.IsPositiveInfinity(clearance)?"unmeasured":clearance.ToString("F3")+" m")+
-                ", maximum lateral deviation "+maxLateral.ToString("F3")+" m, max tilt "+maxTilt.ToString("F2")+" deg";
+                ", maximum lateral deviation "+maxLateral.ToString("F3")+" m, max tilt "+maxTilt.ToString("F2")+" deg"+
+                (routeLength>0f?", closed route progress "+routeProgress.ToString("F2")+"/"+routeLength.ToString("F2")+
+                " m, peak front steering "+maxSteer.ToString("F2")+" deg, curve-speed steps "+curveSteps:"");
         }
 
         [MenuItem(DynamicMenu,false,3)]
@@ -34,6 +39,85 @@ namespace DeliveryDriver.EditorTools
         }
         [MenuItem(DynamicMenu,true)]
         private static bool CanRunDynamics()=>CanRun();
+        [MenuItem(LoopMenu,false,4)]
+        private static void RunLoopMenu()
+        {
+            try{Check(true,true);}
+            catch(OperationCanceledException){Debug.Log("[ProceduralWorld] V7.7 Minivan loop cancelled; temporary objects removed.");}
+            catch(Exception ex){Debug.LogException(ex);}
+            finally{EditorUtility.ClearProgressBar();}
+        }
+        [MenuItem(LoopMenu,true)]
+        private static bool CanRunLoop()=>CanRun();
+
+        // Unwrapped arc-distance tracking on the static-proven closed
+        // polyline. Local search only after initialization; no jumping
+        // across the loop to claim progress.
+        internal sealed class PilotLoopTracker
+        {
+            private readonly List<Vector3> path;
+            private readonly float[] cumulative;
+            private int cursor;
+            private bool initialized;
+            public float Progress{get;private set;}
+            public float Length=>cumulative[path.Count];
+            public PilotLoopTracker(List<Vector3> points)
+            {
+                if(points==null||points.Count<3)throw new InvalidOperationException("Invalid dynamic loop path.");
+                path=new List<Vector3>(points);cumulative=new float[path.Count+1];
+                for(int i=0;i<path.Count;i++)
+                {
+                    float length=Vector2.Distance(XZ(path[i]),XZ(path[(i+1)%path.Count]));
+                    if(length<.0001f)throw new InvalidOperationException("Duplicate dynamic loop sample.");
+                    cumulative[i+1]=cumulative[i]+length;
+                }
+            }
+            private int Index(int segment)=>((segment%path.Count)+path.Count)%path.Count;
+            private float Station(int segment)
+            {
+                int index=Index(segment);
+                return ((segment-index)/path.Count)*Length+cumulative[index];
+            }
+            public float Project(Vector3 position,bool update,out float station)
+            {
+                int first=initialized?cursor-16:0,last=initialized?cursor+16:path.Count-1,best=first;
+                float distance=float.PositiveInfinity;station=0f;
+                for(int i=first;i<=last;i++)
+                {
+                    int index=Index(i);Vector2 a=XZ(path[index]),d=XZ(path[(index+1)%path.Count])-a;
+                    float t=Mathf.Clamp01(Vector2.Dot(XZ(position)-a,d)/d.sqrMagnitude);
+                    float error=(XZ(position)-(a+d*t)).sqrMagnitude;
+                    if(error<distance){distance=error;best=i;station=Station(i)+d.magnitude*t;}
+                }
+                if(update)
+                {
+                    if(initialized&&Mathf.Abs(station-Progress)>.5f)
+                        throw new InvalidOperationException("Unexpected route progress jump "+(station-Progress).ToString("F3")+" m.");
+                    initialized=true;cursor=best;Progress=station;
+                }
+                return Mathf.Sqrt(distance);
+            }
+            public Vector3 At(float station)
+            {
+                float local=Mathf.Repeat(station,Length);
+                int i=Array.BinarySearch(cumulative,local);
+                if(i<0)i=~i-1;
+                i=Mathf.Clamp(i,0,path.Count-1);
+                return Vector3.Lerp(path[i],path[(i+1)%path.Count],(local-cumulative[i])/(cumulative[i+1]-cumulative[i]));
+            }
+            public bool CurveAhead(float station)
+            {
+                // Check 8m ahead in 1m windows. Begin slowing before the
+                // arc, not after steering has already begun.
+                for(int i=0;i<8;i++)
+                {
+                    Vector2 a=XZ(At(station+i+1f)-At(station+i));
+                    Vector2 b=XZ(At(station+i+2f)-At(station+i+1f));
+                    if(Vector2.Angle(a,b)>2f)return true;
+                }
+                return false;
+            }
+        }
 
         // Find an already statically verified straight corridor. Leave five
         // metres at each end; never use an open boundary terminal.
@@ -72,7 +156,9 @@ namespace DeliveryDriver.EditorTools
         }
         private static void CopyCommon(Collider from,Collider to)
         {
-            to.sharedMaterial=from.sharedMaterial;
+            // Native WheelCollider friction is set via its dedicated curves.
+            // Unity does not support assigning Collider.sharedMaterial here.
+            if(!(to is WheelCollider))to.sharedMaterial=from.sharedMaterial;
             to.contactOffset=from.contactOffset;
             to.includeLayers=from.includeLayers;to.excludeLayers=from.excludeLayers;
             to.layerOverridePriority=from.layerOverridePriority;
@@ -116,7 +202,7 @@ namespace DeliveryDriver.EditorTools
                 throw new InvalidOperationException("Missing vehicle setting "+key);
             return p.floatValue;
         }
-        private static void RunIsolatedDynamics(Scene source,GameObject sourceRoot,Vehicle car,List<Vector3> path,List<MeshCollider> sourceAsphalt)
+        private static void RunIsolatedDynamics(Scene source,GameObject sourceRoot,Vehicle car,List<Vector3> path,List<MeshCollider> sourceAsphalt,bool loopTest)
         {
             if(!TryPilotStraight(path,out Vector3 start,out Vector3 forward))
                 throw new InvalidOperationException("V7.6 physics test requires 45m verified straight route; no simulation performed.");
@@ -212,6 +298,14 @@ namespace DeliveryDriver.EditorTools
                     throw new InvalidOperationException("Physics isolation verification failed. No simulation started.");
                 var contacts=new Collider[128];
                 float sampledClearance=0f;
+                var tracker=loopTest?new PilotLoopTracker(path):null;
+                float rearZ=(car.wheels[2].z+car.wheels[3].z)*.5f;
+                float originStation=0f;Vector3 lastPosition=rb.position;
+                if(loopTest)
+                {
+                    tracker.Project(rb.position+rb.rotation*new Vector3(0f,0f,rearZ),true,out originStation);
+                    stats.routeLength=tracker.Length;
+                }
                 void Sample(bool requireGround)
                 {
                     int grounded=0;
@@ -230,14 +324,33 @@ namespace DeliveryDriver.EditorTools
                         if(grounded!=4)throw new InvalidOperationException("Lost four-wheel asphalt support ("+grounded+"/4).");
                     }
                     stats.maxSpeed=Mathf.Max(stats.maxSpeed,rb.linearVelocity.magnitude);
-                    if(stats.phase=="straight acceleration")
-                        stats.maxForwardSpeed=Mathf.Max(stats.maxForwardSpeed,Vector3.Dot(rb.linearVelocity,forward));
+                    if(stats.phase=="straight acceleration"||stats.phase=="closed loop")
+                        stats.maxForwardSpeed=Mathf.Max(stats.maxForwardSpeed,Vector3.Dot(rb.linearVelocity,rb.rotation*Vector3.forward));
                     stats.maxTilt=Mathf.Max(stats.maxTilt,Vector3.Angle(rb.rotation*Vector3.up,Vector3.up));
                     Vector3 delta=rb.position-start;
-                    stats.distance=Vector3.Dot(delta,forward);
-                    float lateral=Mathf.Abs(Vector3.Dot(delta,rotation*Vector3.right));
+                    float lateral;
+                    if(loopTest)
+                    {
+                        Vector3 rear=rb.position+rb.rotation*new Vector3(0f,0f,rearZ);
+                        float rearError=tracker.Project(rear,true,out float station);
+                        float rootError=tracker.Project(rb.position,false,out _);
+                        lateral=Mathf.Max(rearError,rootError);
+                        stats.routeProgress=station-originStation;
+                        if(stats.phase!="gravity settling")
+                            stats.distance+=Vector2.Distance(XZ(rb.position),XZ(lastPosition));
+                        lastPosition=rb.position;
+                        Vector3 tangent=tracker.At(station+1f)-tracker.At(station);
+                        if(Vector2.Angle(XZ(rb.rotation*Vector3.forward),XZ(tangent))>45f||
+                            stats.routeProgress<-.5f||stats.routeProgress>stats.routeLength+10f)
+                            throw new InvalidOperationException("Vehicle reversed or left bounded closed route.");
+                    }
+                    else
+                    {
+                        stats.distance=Vector3.Dot(delta,forward);
+                        lateral=Mathf.Abs(Vector3.Dot(delta,rotation*Vector3.right));
+                    }
                     stats.maxLateral=Mathf.Max(stats.maxLateral,lateral);
-                    if(lateral>1f||stats.distance<-.5f||stats.distance>35f||stats.maxTilt>15f)
+                    if(lateral>1f||(!loopTest&&(stats.distance<-.5f||stats.distance>35f))||stats.maxTilt>15f)
                         throw new InvalidOperationException("Vehicle left bounded test corridor or exceeded tilt limit.");
                     float clearance=float.PositiveInfinity;
                     for(int z=-1;z<=1;z++)for(int x=-1;x<=1;x++)
@@ -262,7 +375,8 @@ namespace DeliveryDriver.EditorTools
                     if(float.IsNaN(rb.position.y)||float.IsInfinity(rb.position.y))throw new InvalidOperationException("Invalid physics pose.");
                     Sample(grounded);
                     if(stats.steps%25==0&&EditorUtility.DisplayCancelableProgressBar("V7.6 isolated Minivan physics",
-                        stats.Summary(),Mathf.Clamp01(stats.steps/2500f)))throw new OperationCanceledException();
+                        stats.Summary(),loopTest?Mathf.Clamp01(stats.routeProgress/stats.routeLength):Mathf.Clamp01(stats.steps/2500f)))
+                        throw new OperationCanceledException();
                 }
                 stats.phase="gravity settling";
                 foreach(var w in wheels){w.motorTorque=0f;w.brakeTorque=brake;w.steerAngle=0f;}
@@ -275,6 +389,39 @@ namespace DeliveryDriver.EditorTools
                 }
                 if(stats.stableSteps<50)throw new InvalidOperationException("Minivan did not settle under gravity in six simulated seconds.");
                 stats.settledClearance=sampledClearance;
+                if(loopTest)
+                {
+                    originStation=tracker.Progress;stats.routeProgress=0f;
+                    stats.phase="closed loop";
+                    for(int i=0;i<24000&&stats.routeProgress<stats.routeLength;i++)
+                    {
+                        float station=tracker.Progress;
+                        bool curve=tracker.CurveAhead(station);
+                        float target=curve?5f/3.6f:TargetSpeed;
+                        if(curve)stats.curveSteps++;
+                        float error=target-Vector3.Dot(rb.linearVelocity,rb.rotation*Vector3.forward);
+                        float torque=Mathf.Clamp(error*180f,0f,motor*.25f);
+                        float brakeTorque=Mathf.Clamp(-error*300f,0f,brake*.25f);
+                        Vector3 rear=rb.position+rb.rotation*new Vector3(0f,0f,rearZ);
+                        Vector3 aim=tracker.At(station+2.5f);
+                        Vector3 localAim=Quaternion.Inverse(rb.rotation)*(aim-rear);
+                        float curvature=2f*localAim.x/Mathf.Max(.01f,localAim.x*localAim.x+localAim.z*localAim.z);
+                        float requested=Mathf.Atan(car.wheelbase*curvature)*Mathf.Rad2Deg;
+                        // Bound by actual prefab steering limit; no pose
+                        // teleport, forced path velocity or extra grip.
+                        float steer=Mathf.Clamp(requested,-steerLimit,steerLimit);
+                        wheels[0].steerAngle=steer<0f?Mathf.Max(-steerLimit,steer*ackermann):steer;
+                        wheels[1].steerAngle=steer>0f?Mathf.Min(steerLimit,steer*ackermann):steer;
+                        stats.maxSteer=Mathf.Max(stats.maxSteer,Mathf.Max(Mathf.Abs(wheels[0].steerAngle),Mathf.Abs(wheels[1].steerAngle)));
+                        for(int w=0;w<4;w++){wheels[w].motorTorque=torque*(w<2?bias:1f-bias)*.5f;wheels[w].brakeTorque=brakeTorque;}
+                        Tick(true);
+                    }
+                    if(stats.routeProgress<stats.routeLength||stats.curveSteps==0||stats.maxForwardSpeed<2f||
+                        stats.distance<stats.routeLength-2f)
+                        throw new InvalidOperationException("Minivan failed to complete one bounded physical lap.");
+                }
+                else
+                {
                 stats.phase="straight acceleration";
                 for(int i=0;i<1500&&stats.distance<20f;i++)
                 {
@@ -293,6 +440,7 @@ namespace DeliveryDriver.EditorTools
                     Tick(true);
                 }
                 if(stats.distance<20f||stats.maxForwardSpeed<2f)throw new InvalidOperationException("Minivan failed to accelerate/cover 20m.");
+                }
                 stats.phase="braking";float brakingStart=stats.distance;stats.stableSteps=0;
                 foreach(var w in wheels){w.motorTorque=0f;w.brakeTorque=brake*.5f;w.steerAngle=0f;}
                 for(int i=0;i<400;i++)
@@ -305,14 +453,17 @@ namespace DeliveryDriver.EditorTools
                 if(stats.stableSteps<25||stats.stopDistance<-.1f||stats.stopDistance>10f)
                     throw new InvalidOperationException("Minivan failed bounded braking and stop.");
                 if(source.isDirty||source.GetPhysicsScene().Equals(physics))throw new InvalidOperationException("Source isolation changed during test.");
-                result="[ProceduralWorld] V7.6 MINIVAN ISOLATED STRAIGHT PHYSICS PASS: "+source.path+
+                result="[ProceduralWorld] "+(loopTest?"V7.7 MINIVAN ISOLATED CLOSED LOOP PHYSICS PASS: ":"V7.6 MINIVAN ISOLATED STRAIGHT PHYSICS PASS: ")+source.path+
                     "; native wheel rig "+TestMass.ToString("F0")+" kg, original spring/damper/friction, copied static colliders "+copies.Count+
                     "; "+stats.Summary()+", forward speed peak "+(stats.maxForwardSpeed*3.6f).ToString("F2")+
                     " km/h, settled clearance "+stats.settledClearance.ToString("F3")+" m, braking distance "+
-                    stats.stopDistance.ToString("F2")+" m; actual simulated acceleration and stop only. No CarController update, cargo, full loop, user driving or traffic certification.";
+                    stats.stopDistance.ToString("F2")+" m; "+(loopTest?
+                    "Actual isolated native-wheel closed lap and stop; low-speed centerline test only. No CarController update, cargo, lane routing, user driving or traffic certification.":
+                    "Actual simulated acceleration and stop only. No CarController update, cargo, full loop, user driving or traffic certification.");
             }
             catch(OperationCanceledException){throw;}
-            catch(Exception ex){throw new InvalidOperationException("V7.6 MINIVAN ISOLATED PHYSICS BLOCKED: "+stats.Summary()+"; "+ex.Message,ex);}
+            catch(Exception ex){throw new InvalidOperationException((loopTest?"V7.7 MINIVAN ISOLATED CLOSED LOOP PHYSICS BLOCKED: ":
+                "V7.6 MINIVAN ISOLATED PHYSICS BLOCKED: ")+stats.Summary()+"; "+ex.Message,ex);}
             finally
             {
                 // Never save these temporary scenes or enter Play Mode.
