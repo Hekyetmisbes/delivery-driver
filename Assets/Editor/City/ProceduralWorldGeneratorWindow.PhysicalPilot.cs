@@ -14,8 +14,66 @@ namespace DeliveryDriver.EditorTools
     public sealed partial class ProceduralWorldGeneratorWindow
     {
         private const string PhysicalPilotRoot="Assets/ProceduralPilotTests";
-        private bool physicalPilotBuilding;
+        private bool physicalPilotBuilding,physicalPilotQueued;
+        private ProceduralWorldPlanner.Plan queuedPilotPlan;
+        private ProceduralWorldPlanner.PilotSurface queuedPilotSurface;
+        private Scene queuedPilotScene;
         private string lastPhysicalPilotSummary,lastPhysicalPilotScene;
+
+        // Scene creation, modal dialogs and asset import must not run inside the
+        // window's IMGUI layout event. Revalidate the exact request after it ends.
+        private void QueuePhysicalPilot()
+        {
+            if(busy||physicalPilotBuilding||physicalPilotQueued||!HasPilot||!PhysicalPilotEligible(pilotSurface))return;
+            physicalPilotQueued=true;
+            queuedPilotPlan=preview;queuedPilotSurface=pilotSurface;
+            queuedPilotScene=SceneManager.GetActiveScene();
+            EditorApplication.delayCall+=RunQueuedPhysicalPilot;
+            SetStatus("Physical pilot queued for the next editor update.");
+            Repaint();
+        }
+
+        private void CancelQueuedPhysicalPilot()
+        {
+            EditorApplication.delayCall-=RunQueuedPhysicalPilot;
+            physicalPilotQueued=false;
+            queuedPilotPlan=null;queuedPilotSurface=null;queuedPilotScene=default;
+        }
+
+        private void RunQueuedPhysicalPilot()
+        {
+            var expectedPlan=queuedPilotPlan;var expectedSurface=queuedPilotSurface;var expectedScene=queuedPilotScene;
+            bool queued=physicalPilotQueued;
+            CancelQueuedPhysicalPilot();
+            if(!queued||this==null)return;
+            Run(()=>
+            {
+                if(preview!=expectedPlan||pilotSurface!=expectedSurface||SceneManager.GetActiveScene()!=expectedScene)
+                    throw new InvalidOperationException("Pilot selection or active scene changed before the queued build. Run preflight again.");
+                BuildPhysicalPilot();
+            });
+        }
+
+        private static string PilotSceneState(Scene scene)
+        {
+            return scene.IsValid()?"handle "+scene.handle+", name '"+scene.name+"', path '"+scene.path+
+                "', loaded "+scene.isLoaded+", dirty "+scene.isDirty:"invalid handle "+scene.handle;
+        }
+
+        private static void ActivatePilotScene(Scene scene,string context)
+        {
+            if(!scene.IsValid()||!scene.isLoaded)
+                throw new InvalidOperationException(context+": scene is invalid or not loaded ("+PilotSceneState(scene)+
+                    "); active "+PilotSceneState(SceneManager.GetActiveScene())+", open count "+SceneManager.sceneCount+".");
+            // NewScene(Additive) can already select the new scene. Verify actual
+            // active identity, not just the return value of a redundant request.
+            if(SceneManager.GetActiveScene()==scene)return;
+            bool accepted=SceneManager.SetActiveScene(scene);
+            if(SceneManager.GetActiveScene()!=scene)
+                throw new InvalidOperationException(context+": SetActiveScene returned "+accepted+
+                    "; target "+PilotSceneState(scene)+"; active "+PilotSceneState(SceneManager.GetActiveScene())+
+                    "; open count "+SceneManager.sceneCount+".");
+        }
 
         private static bool PhysicalPilotEligible(ProceduralWorldPlanner.PilotSurface p)
         {
@@ -45,8 +103,10 @@ namespace DeliveryDriver.EditorTools
         {
             if(!HasPilot||!PhysicalPilotEligible(pilotSurface))
                 throw new InvalidOperationException("Run a passing zero-grading Istanbul pilot preflight first.");
-            if(EditorApplication.isPlayingOrWillChangePlaymode)
-                throw new InvalidOperationException("Physical pilot is an edit-mode operation only.");
+            if(EditorApplication.isPlayingOrWillChangePlaymode||EditorApplication.isCompiling)
+                throw new InvalidOperationException("Physical pilot requires idle edit mode, outside compilation and play mode.");
+            if(PrefabStageUtility.GetCurrentPrefabStage()!=null)
+                throw new InvalidOperationException("Exit Prefab Mode before building a physical pilot.");
             Scene source=SceneManager.GetActiveScene();
             if(SceneManager.sceneCount!=1||source.isDirty||source.path!="Assets/Scenes/GameScene.unity")
                 throw new InvalidOperationException("Open only the saved GameScene in edit mode. Save or discard your own changes before building a pilot.");
@@ -70,6 +130,8 @@ namespace DeliveryDriver.EditorTools
                 " other touching corridors, all buildings and gameplay systems are excluded. GameScene is not modified. Continue?",
                 "Build separate scene","Cancel"))return;
 
+            if(SceneManager.sceneCount!=1||SceneManager.GetActiveScene()!=source||source.isDirty)
+                throw new InvalidOperationException("Source scene changed during confirmation; pilot not created.");
             var originalData=sourceTile.terrain.terrainData;
             var originalMaterial=sourceTile.terrain.materialTemplate;
             bool originalDataDirty=EditorUtility.IsDirty(originalData);
@@ -79,8 +141,7 @@ namespace DeliveryDriver.EditorTools
             string folder=null,scenePath=null;
             bool saved=false;
             var looseMeshes=new HashSet<Mesh>();
-            Undo.IncrementCurrentGroup();int group=Undo.GetCurrentGroup();
-            Undo.SetCurrentGroupName("Build isolated physical pilot");
+            int group=-1;
             physicalPilotBuilding=true;
             try
             {
@@ -97,8 +158,18 @@ namespace DeliveryDriver.EditorTools
                 scenePath=folder+"/PhysicalPilot.unity";
 
                 test=EditorSceneManager.NewScene(NewSceneSetup.EmptyScene,NewSceneMode.Additive);
-                if(!test.IsValid()||!test.isLoaded||test==source||!SceneManager.SetActiveScene(test))
-                    throw new InvalidOperationException("Could not activate isolated pilot scene.");
+                if(!test.IsValid()||test==source||!test.isLoaded||SceneManager.sceneCount!=2||
+                    !source.IsValid()||!source.isLoaded||source.isDirty)
+                    throw new InvalidOperationException("Isolated pilot scene creation failed: target "+PilotSceneState(test)+
+                        "; source "+PilotSceneState(source)+"; active "+PilotSceneState(SceneManager.GetActiveScene())+
+                        "; open count "+SceneManager.sceneCount+".");
+                ActivatePilotScene(test,"Isolated pilot scene activation failed");
+                Debug.Log("[ProceduralWorld] V7.3.1 isolated scene active: "+PilotSceneState(test)+
+                    "; source "+PilotSceneState(source)+".");
+                // Do not create or revert an Undo group until the target scene
+                // has been verified. Early activation failures own no edits.
+                Undo.IncrementCurrentGroup();group=Undo.GetCurrentGroup();
+                Undo.SetCurrentGroupName("Build isolated physical pilot");
                 var root=NewRoot(test,"PW Physical Pilot - Infrastructure Only",null);
                 var roadsRoot=NewRoot(test,"Roads and junction visuals",root.transform).transform;
                 var nodesRoot=NewRoot(test,"Nodes - open means omitted city branches",root.transform).transform;
@@ -228,22 +299,28 @@ namespace DeliveryDriver.EditorTools
             {
                 // Undo only our own group while the test scene is active.
                 // Never clear, save, refresh network or delete assets in GameScene.
-                if(test.IsValid()&&test.isLoaded&&test!=source)
+                if(group>=0)
                 {
-                    SceneManager.SetActiveScene(test);
-                    foreach(var obj in test.GetRootGameObjects())
-                        foreach(var filter in obj.GetComponentsInChildren<MeshFilter>(true))
-                            if(filter.sharedMesh!=null&&!AssetDatabase.Contains(filter.sharedMesh))looseMeshes.Add(filter.sharedMesh);
+                    if(test.IsValid()&&test.isLoaded&&test!=source)
+                    {
+                        foreach(var obj in test.GetRootGameObjects())
+                            foreach(var filter in obj.GetComponentsInChildren<MeshFilter>(true))
+                                if(filter.sharedMesh!=null&&!AssetDatabase.Contains(filter.sharedMesh))looseMeshes.Add(filter.sharedMesh);
+                    }
+                    Undo.RevertAllDownToGroup(group);
                 }
-                Undo.RevertAllDownToGroup(group);
                 throw;
             }
             finally
             {
                 try
                 {
-                    if(source.IsValid()&&source.isLoaded)SceneManager.SetActiveScene(source);
-                    if(test.IsValid()&&test.isLoaded&&test!=source&&!EditorSceneManager.CloseScene(test,true))
+                    if(source.IsValid()&&source.isLoaded)
+                    {
+                        try{ActivatePilotScene(source,"Restore original active scene failed");}
+                        catch(Exception ex){Debug.LogException(ex);}
+                    }
+                    if(test.IsValid()&&test!=source&&!EditorSceneManager.CloseScene(test,true))
                         Debug.LogError("[ProceduralWorld] Could not close isolated pilot scene. Close it manually without saving any failed result.");
                     if(!saved)
                     {
@@ -253,7 +330,12 @@ namespace DeliveryDriver.EditorTools
                             Debug.LogError("[ProceduralWorld] Failed to delete disposable pilot folder: "+folder);
                     }
                 }
-                finally{physicalPilotBuilding=false;}
+                finally
+                {
+                    physicalPilotBuilding=false;
+                    if(SceneManager.GetActiveScene()!=source)
+                        OnPreviewSceneChanged(source,SceneManager.GetActiveScene());
+                }
             }
             var asset=AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath);
             if(asset!=null){Selection.activeObject=asset;EditorGUIUtility.PingObject(asset);}

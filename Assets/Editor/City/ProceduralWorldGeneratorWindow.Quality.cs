@@ -254,8 +254,8 @@ namespace DeliveryDriver.EditorTools
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("V7.3.1 Physical pilot — isolated scene",EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("First infrastructure proof: only the largest connected group of complete roads, original heightmap cloned without grading. Other corridors, buildings and driving are not included. GameScene and full Generate remain untouched.",MessageType.Info);
-            using(new EditorGUI.DisabledScope(!PhysicalPilotEligible(pilotSurface)))
-                if(GUILayout.Button("Build isolated physical pilot"))Run(BuildPhysicalPilot);
+            using(new EditorGUI.DisabledScope(physicalPilotQueued||!PhysicalPilotEligible(pilotSurface)))
+                if(GUILayout.Button("Build isolated physical pilot"))QueuePhysicalPilot();
             if(!string.IsNullOrEmpty(lastPhysicalPilotSummary))
             {
                 EditorGUILayout.HelpBox(lastPhysicalPilotSummary,MessageType.Info);

@@ -59,6 +59,7 @@ namespace DeliveryDriver.EditorTools
 
         private void OnDisable()
         {
+            CancelQueuedPhysicalPilot();
             SceneView.duringSceneGui -= DrawPreview;
             SceneView.duringSceneGui -= PickAnchorInScene;
             anchorSamples=null;pickAnchor=false;
@@ -82,7 +83,7 @@ namespace DeliveryDriver.EditorTools
             scroll = EditorGUILayout.BeginScrollView(scroll);
             EditorGUILayout.LabelField("Procedural World Generator V7.2 - Local Optimization Preview", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("Preview iteration only. No scene, mesh or terrain asset changes. Generation is intentionally locked until the road layout is approved.", MessageType.Info);
-            using (new EditorGUI.DisabledScope(busy || EditorApplication.isPlayingOrWillChangePlaymode))
+            using (new EditorGUI.DisabledScope(busy || physicalPilotQueued || EditorApplication.isPlayingOrWillChangePlaymode))
             {
                 if (GUILayout.Button("Detect Terrain Layout & City Roots", GUILayout.Height(28f))) Run(Detect);
                 if (layout != null)
