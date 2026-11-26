@@ -206,6 +206,11 @@ namespace DeliveryDriver.EditorTools
                     !ProceduralWorldGeneratorWindow.PilotTriangleOverlapsRect(new Vector2(2,2),new Vector2(3,2),new Vector2(2,3),pilotRect)&&
                     ProceduralWorldGeneratorWindow.PilotTriangleOverlapsRect(new Vector2(1,-1),new Vector2(2,0),new Vector2(1,1),pilotRect),
                     "Pilot building paved triangle overlap test failed.");
+                Require(Mathf.Abs(ProceduralWorldGeneratorWindow.PilotTriangleGrade(Vector3.zero,new Vector3(1,0,0),
+                    new Vector3(0,.6f,6))-.1f)<.0001f&&
+                    ProceduralWorldGeneratorWindow.PilotTriangleGrade(Vector3.zero,new Vector3(1,0,0),new Vector3(0,.6f,1))>.15f&&
+                    float.IsInfinity(ProceduralWorldGeneratorWindow.PilotTriangleGrade(Vector3.zero,Vector3.up,Vector3.right)),
+                    "Pilot pedestrian approach grade must measure physical triangle slope.");
                 Require(Mathf.Abs(ProceduralWorldPlanner.PilotStampHeight(10f,0f,0f,5f,10f,6f,0f,80f)-4f)<.0001f,
                     "Pilot stamp ignored cut budget.");
                 Require(Mathf.Abs(ProceduralWorldPlanner.PilotStampHeight(10f,0f,15f,5f,10f,6f,0f,80f)-10f)<.0001f,

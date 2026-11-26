@@ -325,10 +325,12 @@ namespace DeliveryDriver.EditorTools
                 {
                     // Road meshes already persisted; prefab-owned meshes must
                     // remain read-only asset references, not be persisted again.
-                    buildingReport=PlacePilotBuildings(test,root.transform,roadsRoot,terrainCollider,plan,pilot,scope,physicalRoads);
+                    buildingReport=PlacePilotBuildings(test,root.transform,roadsRoot,terrainCollider,plan,pilot,scope,physicalRoads,folder,sidewalk);
                     if(buildingReport.placed==0)
                         throw new InvalidOperationException("No pilot buildings passed physical lot checks. "+buildingReport.Summary()+
-                            " "+string.Join(" | ",buildingReport.records.Select(r=>r.reason)));
+                            " "+string.Join(" | ",buildingReport.records.GroupBy(r=>r.reason).Select(g=>g.Count()+"x "+g.Key))+
+                            "; raw curb measurements "+string.Join(", ",buildingReport.records.Where(r=>r.curbMeasured)
+                                .Select(r=>r.index+":"+r.curbStep.ToString("F3")+"m")));
                     int finalRays=ValidatePilotColliders(paths,junctionParents,localLayout,out float finalError);
                     if(finalRays!=raySamples||Mathf.Abs(finalError-maxSurfaceError)>.0001f)
                         throw new InvalidOperationException("Road collider evidence changed after building placement.");
@@ -361,7 +363,7 @@ namespace DeliveryDriver.EditorTools
                         "; source-to-piece mapping "+string.Join(", ",scope.sourceEdges.Select(x=>x.Value.a.id+"-"+x.Value.b.id+" => "+x.Key.a.id+"-"+x.Key.b.id))+". ":
                         (pilot.roadCount-edges.Count)+" touching corridors excluded. ")+
                     (buildings?buildingReport.Summary()+" BuildingReport.json includes each accepted/rejected lot. "+
-                        "Scene-local physical placement only; entrance orientation is a +Z convention, no constructed driveways, boundary connections or driving test. ":
+                        "Physical pedestrian approaches to nominal facade only; actual doors, driveways, boundary connections and driving not validated. ":
                         "0 buildings placed. Scene-local infrastructure proof only; boundary connections to outside city, lot access, building placement and driving not validated. ")+
                     "Full Generate locked.";
                 File.WriteAllText(folder+"/PilotReport.txt",summary);
@@ -424,7 +426,7 @@ namespace DeliveryDriver.EditorTools
         // NativeFormatImporter warned when a main mesh and several subassets
         // were written then explicitly reimported. Keep one mesh per file for
         // disposable pilots; the production persistence path is untouched.
-        private static int PersistPilotMeshes(GameObject root,string folder)
+        private static int PersistPilotMeshes(GameObject root,string folder,string meshDirectory="Meshes")
         {
             var filters=root.GetComponentsInChildren<MeshFilter>(true);
             var colliders=root.GetComponentsInChildren<MeshCollider>(true);
@@ -432,7 +434,7 @@ namespace DeliveryDriver.EditorTools
             var colliderMeshes=colliders.Select(c=>c.sharedMesh).ToArray();
             var meshes=filterMeshes.Concat(colliderMeshes).Where(m=>m!=null).Distinct().ToList();
             if(meshes.Count==0)throw new InvalidOperationException("Pilot contains no meshes to persist.");
-            string guid=AssetDatabase.CreateFolder(folder,"Meshes");
+            string guid=AssetDatabase.CreateFolder(folder,meshDirectory);
             if(string.IsNullOrEmpty(guid))throw new InvalidOperationException("Could not create pilot mesh folder.");
             string meshFolder=AssetDatabase.GUIDToAssetPath(guid);
             var expected=new Dictionary<Mesh,string>();

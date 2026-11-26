@@ -261,7 +261,7 @@ namespace DeliveryDriver.EditorTools
             using(new EditorGUI.DisabledScope(physicalPilotQueued||!PhysicalPilotEligible(pilotSurface)))
                 if(GUILayout.Button("Build expanded physical neighborhood"))QueuePhysicalPilot(true);
             EditorGUILayout.LabelField("V7.4 Building placement pilot — isolated scene",EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("Build a new connected neighborhood with catalogue buildings on verified plan lots. Existing pilot scenes remain unchanged. Road frontage, actual ground and paved mesh clearance checked; no driveway construction or gameplay.",MessageType.Info);
+            EditorGUILayout.HelpBox("Build a new connected neighborhood with catalogue buildings on verified plan lots. Existing pilot scenes remain unchanged. Road frontage, actual ground and paved mesh clearance checked. V7.4a builds physical pedestrian approaches to resolve curb gaps; no driveway construction or gameplay.",MessageType.Info);
             using(new EditorGUI.DisabledScope(physicalPilotQueued||!PhysicalPilotEligible(pilotSurface)))
                 if(GUILayout.Button("Build neighborhood with buildings"))QueuePhysicalPilot(true,true);
             if(!string.IsNullOrEmpty(lastPhysicalPilotSummary))

@@ -18,19 +18,21 @@ namespace DeliveryDriver.EditorTools
             public int index,sourceA,sourceB;
             public string plannedPrefab,placedPrefab,reason;
             public Vector3 position;
-            public float frontageDistance,groundRelief,accessGrade,curbStep;
+            public float frontageDistance,groundRelief,accessGrade,curbStep,approachLength,approachSeam;
+            public bool curbMeasured;
             public bool placed;
         }
         [Serializable] private sealed class PilotBuildingReport
         {
-            public int candidates,placed,skipped,uniquePrefabs,boxColliders;
-            public float maxGroundRelief,maxAccessGrade,maxCurbStep;
+            public int candidates,placed,skipped,uniquePrefabs,boxColliders,accessMeshes,accessRaySamples,curbsMeasured;
+            public float maxGroundRelief,maxAccessGrade,maxCurbStep,maxApproachSeam;
             public List<PilotLotRecord> records=new List<PilotLotRecord>();
             public string Summary()=>"Buildings placed / eligible plan lots "+placed+"/"+candidates+
                 ", skipped "+skipped+", distinct prefab assets "+uniquePrefabs+", building box colliders "+boxColliders+
                 ", maximum sampled foundation relief "+maxGroundRelief.ToString("F3")+" m, maximum sampled approach grade "+
-                (maxAccessGrade*100f).ToString("F1")+"%, maximum sampled curb step "+maxCurbStep.ToString("F3")+
-                " m; zero grading. Unplaced lots remain empty.";
+                (maxAccessGrade*100f).ToString("F1")+"%, raw sidewalk/ground step max "+maxCurbStep.ToString("F3")+
+                " m ("+curbsMeasured+" measured lots), pedestrian approach meshes "+accessMeshes+", approach ray samples "+accessRaySamples+
+                ", maximum approach seam "+maxApproachSeam.ToString("F3")+" m; zero grading. Unplaced lots remain empty.";
         }
         private sealed class PilotPrefab
         {
@@ -68,6 +70,22 @@ namespace DeliveryDriver.EditorTools
             Vector2 Normal(Vector2 v)=>new Vector2(-v.y,v.x);
             return !Separates(Vector2.right)&&!Separates(Vector2.up)&&!Separates(Normal(b-a))&&
                 !Separates(Normal(c-b))&&!Separates(Normal(a-c));
+        }
+        private sealed class PilotApproach
+        {
+            public Vector3[] top,bottom;
+            public int[] triangles;
+            public Rect bounds;
+            public float grade,length,seam;
+            public MeshCollider collider;
+            public Collider sidewalk;
+            public BoxCollider facade;
+        }
+        internal static float PilotTriangleGrade(Vector3 a,Vector3 b,Vector3 c)
+        {
+            Vector3 normal=Vector3.Cross(b-a,c-a);
+            return Mathf.Abs(normal.y)<.000001f?float.PositiveInfinity:
+                new Vector2(normal.x,normal.z).magnitude/Mathf.Abs(normal.y);
         }
         private static Vector2 PilotXZ(Vector3 v)=>new Vector2(v.x,v.z);
         private static Rect PilotBox(IEnumerable<Vector2> points)
@@ -113,9 +131,128 @@ namespace DeliveryDriver.EditorTools
             }
             return best;
         }
+        // Physical pedestrian approach: a narrow supported strip from the
+        // existing outer sidewalk to the nominal building front. Never flatten
+        // source terrain or accept a raw curb gap as a safe transition.
+        private bool TryPlanPilotApproach(Vector2 start,Vector2 end,Vector2 right,float facadeY,float roadY,
+            Collider sidewalk,TerrainCollider terrain,Rect region,out PilotApproach approach,out string reason)
+        {
+            approach=null;reason="Approach mesh could not be planned";
+            const float half=.6f;
+            float length=Vector2.Distance(start,end);
+            if(length<.5f||length>20f)return false;
+            int steps=Mathf.CeilToInt(length/.5f);
+            var top=new Vector3[(steps+1)*3];var bottom=new Vector3[top.Length];
+            var starts=new float[3];var tris=new List<int>();float grade=0f;
+            for(int c=0;c<3;c++)
+                if(!PilotSurfaceRay(sidewalk,start+right*((c-1)*half),roadY,out starts[c]))
+                {reason="Approach start missing sidewalk across width";return false;}
+            for(int i=0;i<=steps;i++)
+            for(int c=0;c<3;c++)
+            {
+                float t=i/(float)steps;
+                Vector2 pos=Vector2.Lerp(start,end,t)+right*((c-1)*half);
+                if(!ProceduralWorldPlanner.Contains(region,pos)||!PilotSurfaceRay(terrain,pos,roadY,out float ground))
+                {reason="Approach outside pilot or missing ground";return false;}
+                float y=Mathf.Lerp(starts[c],facadeY,t);
+                if(y<ground-.001f){reason="Approach surface below sampled terrain";return false;}
+                top[i*3+c]=new Vector3(pos.x,y,pos.y);
+                bottom[i*3+c]=new Vector3(pos.x,Mathf.Min(y-.005f,ground-.02f),pos.y);
+            }
+            void Tri(int a,int b,int c)
+            {
+                if(Vector3.Cross(top[b]-top[a],top[c]-top[a]).y<0f){int swap=b;b=c;c=swap;}
+                tris.Add(a);tris.Add(b);tris.Add(c);
+                grade=Mathf.Max(grade,PilotTriangleGrade(top[a],top[b],top[c]));
+            }
+            for(int i=0;i<steps;i++)for(int c=0;c<2;c++)
+            {
+                int a=i*3+c,b=a+1,d=a+3,e=d+1;
+                Tri(a,b,d);Tri(b,e,d);
+            }
+            if(grade>settings.parcelAccessGrade+.001f){reason="Constructed approach grade exceeds limit: "+(grade*100f).ToString("F1")+"%";return false;}
+            for(int i=0;i<tris.Count;i+=3)
+            {
+                Vector3 a=top[tris[i]],b=top[tris[i+1]],c=top[tris[i+2]];
+                foreach(var sample in new[]{(a+b+c)/3f,(a+b)*.5f,(b+c)*.5f,(c+a)*.5f})
+                    if(!PilotSurfaceRay(terrain,PilotXZ(sample),roadY,out float ground)||sample.y<ground-.001f)
+                    {reason="Approach triangle intersects sampled terrain";return false;}
+            }
+            approach=new PilotApproach{top=top,bottom=bottom,triangles=tris.ToArray(),grade=grade,length=length,
+                bounds=PilotBox(top.Select(PilotXZ)),sidewalk=sidewalk};
+            reason=null;return true;
+        }
+        private void BuildPilotApproach(Scene test,Transform root,Material material,PilotApproach approach,int lot)
+        {
+            var obj=NewRoot(test,"Pedestrian approach "+lot.ToString("D3"),root);
+            var vertices=approach.top.Concat(approach.bottom).Select(obj.transform.InverseTransformPoint).ToArray();
+            var triangles=new List<int>(approach.triangles);
+            int count=approach.top.Length,rows=count/3;
+            // Close the support skirt on both sides and ends. Top triangles
+            // alone define the walkable surface and its measured gradient.
+            void Wall(int a,int b)
+            {
+                triangles.Add(a);triangles.Add(b);triangles.Add(a+count);
+                triangles.Add(b);triangles.Add(b+count);triangles.Add(a+count);
+            }
+            for(int i=0;i<rows-1;i++){Wall(i*3,(i+1)*3);Wall((i+1)*3+2,i*3+2);}
+            for(int c=0;c<2;c++){Wall(c+1,c);Wall((rows-1)*3+c,(rows-1)*3+c+1);}
+            var mesh=new Mesh{name="Pilot pedestrian approach "+lot};
+            mesh.vertices=vertices;mesh.triangles=triangles.ToArray();mesh.RecalculateNormals();mesh.RecalculateBounds();
+            var filter=Undo.AddComponent<MeshFilter>(obj);filter.sharedMesh=mesh;
+            var renderer=Undo.AddComponent<MeshRenderer>(obj);renderer.sharedMaterial=material;
+            var collider=Undo.AddComponent<MeshCollider>(obj);collider.sharedMesh=mesh;collider.convex=false;
+            approach.collider=collider;
+        }
+        private static int ValidatePilotApproach(PilotApproach approach,TerrainCollider terrain,out float seam)
+        {
+            var c=approach.collider;
+            if(c==null||!c.enabled||c.sharedMesh==null||c.GetComponent<MeshFilter>()?.sharedMesh!=c.sharedMesh)
+                throw new InvalidOperationException("Pilot pedestrian approach collider missing.");
+            int probes=0;seam=0f;
+            for(int i=0;i<approach.triangles.Length;i+=3)
+            {
+                Vector3 a=approach.top[approach.triangles[i]],b=approach.top[approach.triangles[i+1]],
+                    d=approach.top[approach.triangles[i+2]];
+                Vector3 sample=(a+b+d)/3f;
+                if(!PilotSurfaceRay(c,PilotXZ(sample),sample.y,out float y)||Mathf.Abs(y-sample.y)>.01f||
+                    !PilotSurfaceRay(terrain,PilotXZ(sample),sample.y,out float ground)||ground-y>.001f)
+                    throw new InvalidOperationException("Pilot pedestrian approach collider surface mismatch at "+sample.ToString("F3"));
+                probes++;
+            }
+            // First row lies 5cm inside the existing sidewalk. Probe just
+            // inside the new strip and compare the actual overlapping surfaces.
+            for(int col=0;col<2;col++)
+            {
+                Vector3 a=(approach.top[col]+approach.top[col+1])*.5f;
+                Vector3 b=(approach.top[col+3]+approach.top[col+4])*.5f;
+                Vector3 q=Vector3.Lerp(a,b,.02f);
+                if(!PilotSurfaceRay(c,PilotXZ(q),q.y,out float rampY)||
+                    !PilotSurfaceRay(approach.sidewalk,PilotXZ(q),q.y,out float sidewalkY))
+                    throw new InvalidOperationException("Pilot approach/sidewalk seam ray missing.");
+                seam=Mathf.Max(seam,Mathf.Abs(rampY-sidewalkY));probes++;
+            }
+            if(approach.facade==null||!approach.facade.enabled)
+                throw new InvalidOperationException("Pilot building facade collider missing.");
+            var box=approach.facade;
+            Vector3 min=box.center-box.size*.5f,max=box.center+box.size*.5f;
+            int last=approach.top.Length-3;
+            for(int col=0;col<3;col++)
+            {
+                Vector3 point=approach.top[last+col];
+                Vector3 local=box.transform.InverseTransformPoint(point);
+                Vector3 target=box.transform.TransformPoint(new Vector3(Mathf.Clamp(local.x,min.x,max.x),min.y,max.z));
+                float error=Vector3.Distance(target,point);
+                if(error>.02f)throw new InvalidOperationException("Pilot approach does not reach nominal facade base.");
+                seam=Mathf.Max(seam,error);
+            }
+            if(seam>.02f)throw new InvalidOperationException("Pilot approach seam exceeds 0.02m.");
+            return probes;
+        }
         private PilotBuildingReport PlacePilotBuildings(Scene test,Transform parent,Transform roadsRoot,TerrainCollider terrain,
             ProceduralWorldPlanner.Plan source,ProceduralWorldPlanner.PilotSurface pilot,
-            ProceduralWorldPlanner.PilotNeighborhoodScope scope,Dictionary<ProceduralWorldPlanner.Edge,SplineRoad> roads)
+            ProceduralWorldPlanner.PilotNeighborhoodScope scope,Dictionary<ProceduralWorldPlanner.Edge,SplineRoad> roads,
+            string folder,Material approachMaterial)
         {
             var report=new PilotBuildingReport();
             var lots=source.parcels.Where(l=>l.sector==pilot.city&&l.accessible&&!string.IsNullOrEmpty(l.prefab)&&
@@ -148,8 +285,10 @@ namespace DeliveryDriver.EditorTools
                 }
             }
             var occupied=new List<Rect>();
+            var approaches=new List<PilotApproach>();
             var uses=new Dictionary<string,int>();
             var root=NewRoot(test,"Buildings - verified pilot lots",parent).transform;
+            var accessRoot=NewRoot(test,"Pedestrian approaches - verified local mesh",parent).transform;
             Physics.SyncTransforms();
             for(int i=0;i<lots.Count;i++)
             {
@@ -183,36 +322,44 @@ namespace DeliveryDriver.EditorTools
                     Mathf.Abs(roadY-frontage.center.y-.03f)>.15f||
                     !PilotSurfaceRay(sidewalk,roadCenter+inward*(settings.width*.5f+settings.sidewalk*.5f),roadY,out float sidewalkY))
                 {record.reason="Missing actual road/sidewalk frontage collider";continue;}
-                // Probe walking approach to front lot line, not a built driveway.
-                // Sample at <=1m, using actual cloned terrain collider only.
-                bool access=true;float peak=0f,run=frontage.distance-paved;
+                // Record the original step even for rejected lots. A large
+                // raw step is not accepted as-is: build and validate an actual
+                // graded pedestrian approach instead of raising the threshold.
+                float run=frontage.distance-paved;
                 if(run<=0f){record.reason="Invalid approach length";continue;}
-                Vector2 edgePoint=roadCenter+inward*(paved-.05f);
+                Vector2 edgePoint=roadCenter+inward*(paved-.05f),approachEnd=front+inward;
                 if(!PilotSurfaceRay(sidewalk,edgePoint,roadY,out float outerSidewalkY)||
-                    !PilotSurfaceRay(terrain,roadCenter+inward*paved,roadY,out float previous))
+                    !PilotSurfaceRay(terrain,roadCenter+inward*paved,roadY,out float adjacentGround))
                 {record.reason="Missing outer sidewalk or adjacent ground";continue;}
-                // A curb is a discrete pedestrian step, not a terrain slope.
-                // Screen it separately; do not certify a driveway/ramp.
-                record.curbStep=Mathf.Abs(outerSidewalkY-previous);
-                if(record.curbStep>.25f){record.reason="Curb step exceeds 0.25m";continue;}
-                int steps=Mathf.Max(1,Mathf.CeilToInt(run));
-                float previousRoad=frontage.center.y;
-                for(int k=1;k<=steps;k++)
+                record.curbStep=Mathf.Abs(outerSidewalkY-adjacentGround);record.curbMeasured=true;
+                report.curbsMeasured++;report.maxCurbStep=Mathf.Max(report.maxCurbStep,record.curbStep);
+                Rect accessBox=PilotBox(new[]{edgePoint-right*.6f,edgePoint+right*.6f,approachEnd-right*.6f,approachEnd+right*.6f});
+                if(!PilotRectInside(pilot.region,accessBox)||occupied.Any(r=>r.Overlaps(accessBox))||
+                    source.protectedAreas.Any(r=>r.Overlaps(accessBox))||source.openSpaces.Any(s=>s.bounds.Overlaps(accessBox))||
+                    source.parcels.Any(l=>l!=lot&&l.bounds.Overlaps(accessBox)))
+                {record.reason="Approach corridor overlaps reserved area";continue;}
+                bool access=true;
+                int steps=Mathf.Max(1,Mathf.CeilToInt((run+1f)/.5f));
+                for(int k=0;k<=steps&&access;k++)for(int col=-1;col<=1;col++)
                 {
-                    Vector2 pos=roadCenter+inward*(paved+run*k/steps);
+                    Vector2 pos=roadCenter+inward*(paved+(run+1f)*k/steps)+right*(col*.6f);
                     if(source.protectedAreas.Any(r=>ProceduralWorldPlanner.Contains(r,pos,1f))||
-                        source.openSpaces.Any(s=>ProceduralWorldPlanner.Contains(s.bounds,pos))||
-                        lots.Any(l=>l!=lot&&ProceduralWorldPlanner.Contains(l.bounds,pos))||
                         scope.edges.Any(e=>e!=frontage.edge&&e.points.Skip(1).Select((v,j)=>
-                            ProceduralWorldPlanner.DistanceSquared(pos,PilotXZ(e.points[j]),PilotXZ(v))<paved*paved).Any(x=>x))||
-                        !PilotSurfaceRay(terrain,pos,roadY,out float h)){access=false;break;}
-                    peak=Mathf.Max(peak,Mathf.Max(Mathf.Abs(h-previous),Mathf.Abs(h-previousRoad))/(run/steps));
-                    previous=h;previousRoad=h;
+                            ProceduralWorldPlanner.DistanceSquared(pos,PilotXZ(e.points[j]),PilotXZ(v))<paved*paved).Any(x=>x)))
+                    {access=false;break;}
                 }
-                record.accessGrade=peak;
-                if(!access||peak>settings.parcelAccessGrade+.001f)
-                {record.reason="Sampled physical approach blocked or too steep";continue;}
-                var choices=catalog.Where(m=>m.width+2f<=width+.001f&&m.depth+2f<=depth+.001f)
+                if(!access){record.reason="Approach corridor blocked by another road or protected area";continue;}
+                // No paved mesh overlap after the 5cm intended sidewalk seam
+                // and a small transition band; test actual paved triangles.
+                Vector2 corridorCenter=(edgePoint+approachEnd)*.5f;
+                Vector2 CorridorLocal(Vector2 pos)=>new Vector2(Vector2.Dot(pos-corridorCenter,right),Vector2.Dot(pos-corridorCenter,inward));
+                float accessLength=Vector2.Distance(edgePoint,approachEnd);
+                var corridorRect=new Rect(-.6f,-accessLength*.5f+.15f,1.2f,accessLength-.15f);
+                if(triangles.Any(t=>t.bounds.xMax>=accessBox.xMin&&t.bounds.xMin<=accessBox.xMax&&
+                    t.bounds.yMax>=accessBox.yMin&&t.bounds.yMin<=accessBox.yMax&&
+                    PilotTriangleOverlapsRect(CorridorLocal(t.a),CorridorLocal(t.b),CorridorLocal(t.c),corridorRect)))
+                {record.reason="Approach corridor intersects actual paved mesh";continue;}
+                var choices=catalog.Where(m=>m.width>=1.2f&&m.width+2f<=width+.001f&&m.depth+2f<=depth+.001f)
                     .OrderBy(m=>uses.TryGetValue(m.path,out int used)?used:0)
                     .ThenByDescending(m=>m.path==lot.prefab).ThenByDescending(m=>m.width*m.depth)
                     .ThenBy(m=>m.path,StringComparer.Ordinal).ToList();
@@ -247,13 +394,10 @@ namespace DeliveryDriver.EditorTools
                     }
                     if(!groundOk||high-low>PilotFoundationRelief)
                     {record.reason="Building footprint ground missing or relief exceeds 0.25m";continue;}
-                    // Continue the sampled approach from the lot line to the
-                    // model's nominal front face. No fabricated access mesh.
-                    if(!PilotSurfaceRay(terrain,front+inward,roadY,out float facadeGround)||
-                        Mathf.Abs(facadeGround-previous)>settings.parcelAccessGrade+.001f||
-                        high+.02f-facadeGround>.27f)
-                    {record.reason="Front setback ground or foundation step failed";continue;}
-                    float modelPeak=Mathf.Max(peak,Mathf.Abs(facadeGround-previous));
+                    if(!TryPlanPilotApproach(edgePoint,approachEnd,right,high+.02f,roadY,sidewalk,terrain,pilot.region,
+                        out var approach,out string approachReason))
+                    {record.reason=approachReason;continue;}
+                    float modelPeak=approach.grade;
                     // Use the original prefab scale and center offset; base at
                     // highest sampled ground plus 2cm, no retaining foundation.
                     var instance=PrefabUtility.InstantiatePrefab(model.asset,root) as GameObject;
@@ -278,17 +422,36 @@ namespace DeliveryDriver.EditorTools
                         !PilotRectInside(lot.bounds,new Rect(collision.bounds.min.x,collision.bounds.min.z,
                             collision.bounds.size.x,collision.bounds.size.z)))
                         throw new InvalidOperationException("Actual pilot building bounds/collider differ from planned fit at lot "+i);
-                    occupied.Add(box);uses.TryGetValue(model.path,out int count);uses[model.path]=count+1;
+                    approach.facade=collision;
+                    BuildPilotApproach(test,accessRoot,approachMaterial,approach,i);
+                    Physics.SyncTransforms();
+                    ValidatePilotApproach(approach,terrain,out float seam);
+                    approach.seam=seam;approaches.Add(approach);
+                    occupied.Add(box);occupied.Add(approach.bounds);
+                    uses.TryGetValue(model.path,out int count);uses[model.path]=count+1;
                     record.placed=true;record.placedPrefab=model.path;record.position=instance.transform.position;
-                    record.groundRelief=high-low;record.accessGrade=modelPeak;record.reason="Placed; sampled foundation and road approach passed";
+                    record.groundRelief=high-low;record.accessGrade=modelPeak;record.approachLength=approach.length;
+                    record.approachSeam=seam;record.reason="Placed; foundation and physical pedestrian approach passed";
                     report.placed++;report.boxColliders++;
                     report.maxGroundRelief=Mathf.Max(report.maxGroundRelief,high-low);
                     report.maxAccessGrade=Mathf.Max(report.maxAccessGrade,modelPeak);
-                    report.maxCurbStep=Mathf.Max(report.maxCurbStep,record.curbStep);break;
+                    report.maxApproachSeam=Mathf.Max(report.maxApproachSeam,seam);break;
+                }
+            }
+            if(approaches.Count>0)
+            {
+                report.accessMeshes=PersistPilotMeshes(accessRoot.gameObject,folder,"AccessMeshes");
+                Physics.SyncTransforms();
+                foreach(var approach in approaches)
+                {
+                    report.accessRaySamples+=ValidatePilotApproach(approach,terrain,out float seam);
+                    if(Mathf.Abs(seam-approach.seam)>.0001f)
+                        throw new InvalidOperationException("Pilot approach seam changed after mesh persistence.");
                 }
             }
             report.uniquePrefabs=uses.Count;report.skipped=report.candidates-report.placed;
-            if(report.records.Count!=report.candidates||root.childCount!=report.placed)
+            if(report.records.Count!=report.candidates||root.childCount!=report.placed||
+                accessRoot.childCount!=report.placed||report.accessMeshes!=report.placed)
                 throw new InvalidOperationException("Pilot building accounting mismatch.");
             return report;
         }
