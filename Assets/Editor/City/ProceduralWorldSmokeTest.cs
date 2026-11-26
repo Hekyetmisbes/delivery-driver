@@ -201,6 +201,11 @@ namespace DeliveryDriver.EditorTools
                 settings.localOptimization=true;
                 TestExactRoadSplit();
                 TestLocalQualityGuard();
+                var pilotRect=new Rect(-1,-1,2,2);
+                Require(ProceduralWorldGeneratorWindow.PilotTriangleOverlapsRect(new Vector2(-3,0),new Vector2(3,0),new Vector2(0,3),pilotRect)&&
+                    !ProceduralWorldGeneratorWindow.PilotTriangleOverlapsRect(new Vector2(2,2),new Vector2(3,2),new Vector2(2,3),pilotRect)&&
+                    ProceduralWorldGeneratorWindow.PilotTriangleOverlapsRect(new Vector2(1,-1),new Vector2(2,0),new Vector2(1,1),pilotRect),
+                    "Pilot building paved triangle overlap test failed.");
                 Require(Mathf.Abs(ProceduralWorldPlanner.PilotStampHeight(10f,0f,0f,5f,10f,6f,0f,80f)-4f)<.0001f,
                     "Pilot stamp ignored cut budget.");
                 Require(Mathf.Abs(ProceduralWorldPlanner.PilotStampHeight(10f,0f,15f,5f,10f,6f,0f,80f)-10f)<.0001f,

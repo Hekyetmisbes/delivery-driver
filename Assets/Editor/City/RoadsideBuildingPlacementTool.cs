@@ -1239,7 +1239,7 @@ namespace DeliveryDriver.EditorTools
             return false;
         }
 
-        private static bool TryCalculatePreciseLocalBounds(Transform root, out Bounds localBounds)
+        internal static bool TryCalculatePreciseLocalBounds(Transform root, out Bounds localBounds)
         {
             localBounds = default;
             if (root == null)

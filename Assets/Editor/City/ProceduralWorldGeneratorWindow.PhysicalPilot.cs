@@ -14,7 +14,7 @@ namespace DeliveryDriver.EditorTools
     public sealed partial class ProceduralWorldGeneratorWindow
     {
         private const string PhysicalPilotRoot="Assets/ProceduralPilotTests";
-        private bool physicalPilotBuilding,physicalPilotQueued,queuedExpandedPilot;
+        private bool physicalPilotBuilding,physicalPilotQueued,queuedExpandedPilot,queuedBuildingsPilot;
         private ProceduralWorldPlanner.Plan queuedPilotPlan;
         private ProceduralWorldPlanner.PilotSurface queuedPilotSurface;
         private Scene queuedPilotScene;
@@ -22,10 +22,10 @@ namespace DeliveryDriver.EditorTools
 
         // Scene creation, modal dialogs and asset import must not run inside the
         // window's IMGUI layout event. Revalidate the exact request after it ends.
-        private void QueuePhysicalPilot(bool expanded=false)
+        private void QueuePhysicalPilot(bool expanded=false,bool buildings=false)
         {
             if(busy||physicalPilotBuilding||physicalPilotQueued||!HasPilot||!PhysicalPilotEligible(pilotSurface))return;
-            physicalPilotQueued=true;queuedExpandedPilot=expanded;
+            physicalPilotQueued=true;queuedExpandedPilot=expanded;queuedBuildingsPilot=buildings;
             queuedPilotPlan=preview;queuedPilotSurface=pilotSurface;
             queuedPilotScene=SceneManager.GetActiveScene();
             EditorApplication.delayCall+=RunQueuedPhysicalPilot;
@@ -36,21 +36,21 @@ namespace DeliveryDriver.EditorTools
         private void CancelQueuedPhysicalPilot()
         {
             EditorApplication.delayCall-=RunQueuedPhysicalPilot;
-            physicalPilotQueued=false;queuedExpandedPilot=false;
+            physicalPilotQueued=false;queuedExpandedPilot=false;queuedBuildingsPilot=false;
             queuedPilotPlan=null;queuedPilotSurface=null;queuedPilotScene=default;
         }
 
         private void RunQueuedPhysicalPilot()
         {
             var expectedPlan=queuedPilotPlan;var expectedSurface=queuedPilotSurface;var expectedScene=queuedPilotScene;
-            bool queued=physicalPilotQueued,expanded=queuedExpandedPilot;
+            bool queued=physicalPilotQueued,expanded=queuedExpandedPilot,buildings=queuedBuildingsPilot;
             CancelQueuedPhysicalPilot();
             if(!queued||this==null)return;
             Run(()=>
             {
                 if(preview!=expectedPlan||pilotSurface!=expectedSurface||SceneManager.GetActiveScene()!=expectedScene)
                     throw new InvalidOperationException("Pilot selection or active scene changed before the queued build. Run preflight again.");
-                BuildPhysicalPilot(expanded);
+                BuildPhysicalPilot(expanded,buildings);
             });
         }
 
@@ -99,8 +99,9 @@ namespace DeliveryDriver.EditorTools
             return mat;
         }
 
-        private void BuildPhysicalPilot(bool expanded)
+        private void BuildPhysicalPilot(bool expanded,bool buildings)
         {
+            if(buildings&&!expanded)throw new InvalidOperationException("Buildings require a complete neighborhood scope.");
             if(!HasPilot||!PhysicalPilotEligible(pilotSurface))
                 throw new InvalidOperationException("Run a passing zero-grading Istanbul pilot preflight first.");
             if(EditorApplication.isPlayingOrWillChangePlaymode||EditorApplication.isCompiling)
@@ -135,7 +136,7 @@ namespace DeliveryDriver.EditorTools
                 }
             }
             var edges=expanded?scope.edges:ProceduralWorldPlanner.PhysicalPilotRoads(plan,pilot,settings);
-            string version=expanded?"V7.3.2":"V7.3.1";
+            string version=buildings?"V7.4":expanded?"V7.3.2":"V7.3.1";
             var sourceTile=detected.tiles.Single(t=>t.row==pilot.row&&t.column==pilot.column);
             var nodes=edges.SelectMany(e=>new[]{e.a,e.b}).Distinct().OrderBy(n=>n.id).ToList();
             if(nodes.Select(n=>n.position).Distinct().Count()!=nodes.Count||nodes.Any(n=>n.gate||n.existing!=null))
@@ -150,7 +151,8 @@ namespace DeliveryDriver.EditorTools
                     " clipped pieces, "+scope.terminals.Count+" open boundary terminals, "+scope.fullJunctions+
                     " complete junctions, "+scope.footprintOnly+" touching roads outside inset.":
                     ". Only "+edges.Count+" complete connected roads are included; "+(pilot.roadCount-edges.Count)+" other touching corridors excluded.")+
-                " All buildings and gameplay systems are excluded. GameScene is not modified. Continue?",
+                (buildings?" Actual catalogue buildings on verified local lots will be added in the new scene.":" All buildings are excluded.")+
+                " Gameplay systems are excluded. GameScene is not modified. Continue?",
                 "Build separate scene","Cancel"))return;
 
             if(SceneManager.sceneCount!=1||SceneManager.GetActiveScene()!=source||source.isDirty||
@@ -175,7 +177,7 @@ namespace DeliveryDriver.EditorTools
                         throw new InvalidOperationException("Could not create pilot asset root.");
                 }
                 string folderGuid=AssetDatabase.CreateFolder(PhysicalPilotRoot,
-                    (expanded?"Istanbul_Neighborhood_":"Istanbul_")+DateTime.UtcNow.ToString("yyyyMMdd_HHmmss")+"_"+Guid.NewGuid().ToString("N").Substring(0,8));
+                    (buildings?"Istanbul_Buildings_":expanded?"Istanbul_Neighborhood_":"Istanbul_")+DateTime.UtcNow.ToString("yyyyMMdd_HHmmss")+"_"+Guid.NewGuid().ToString("N").Substring(0,8));
                 if(string.IsNullOrEmpty(folderGuid))throw new InvalidOperationException("Could not create unique pilot folder.");
                 folder=AssetDatabase.GUIDToAssetPath(folderGuid);
                 scenePath=folder+"/PhysicalPilot.unity";
@@ -193,7 +195,7 @@ namespace DeliveryDriver.EditorTools
                 // has been verified. Early activation failures own no edits.
                 Undo.IncrementCurrentGroup();group=Undo.GetCurrentGroup();
                 Undo.SetCurrentGroupName("Build isolated physical pilot");
-                var root=NewRoot(test,"PW Physical Pilot - Infrastructure Only",null);
+                var root=NewRoot(test,buildings?"PW Physical Pilot - Neighborhood and Buildings":"PW Physical Pilot - Infrastructure Only",null);
                 var roadsRoot=NewRoot(test,"Roads and junction visuals",root.transform).transform;
                 var nodesRoot=NewRoot(test,expanded?"Nodes - boundary terminals are open":"Nodes - open means omitted city branches",root.transform).transform;
 
@@ -248,6 +250,7 @@ namespace DeliveryDriver.EditorTools
                     junctionParents.Add(intersection,roadsRoot);
                 }
                 var paths=new Dictionary<SplineRoad,List<Vector3>>();
+                var physicalRoads=new Dictionary<ProceduralWorldPlanner.Edge,SplineRoad>();
                 foreach(var e in edges)
                 {
                     var original=expanded?scope.sourceEdges[e]:e;
@@ -261,7 +264,7 @@ namespace DeliveryDriver.EditorTools
                     road.startIntersection=intersections[e.a];road.endIntersection=intersections[e.b];
                     road.startIntersection.RegisterConnectedRoad(road);
                     road.endIntersection.RegisterConnectedRoad(road);
-                    paths.Add(road,path);
+                    paths.Add(road,path);physicalRoads.Add(e,road);
                 }
                 SimpleRoadPlacementTool.BakePlannedRoads(paths,junctionParents,detected.sea,
                     settings.width,settings.sidewalk,settings.seaY,asphalt,sidewalk,markings);
@@ -317,6 +320,26 @@ namespace DeliveryDriver.EditorTools
                 int savedRaySamples=ValidatePilotColliders(paths,junctionParents,localLayout,out float savedSurfaceError);
                 if(savedRaySamples!=raySamples||Mathf.Abs(savedSurfaceError-maxSurfaceError)>.0001f)
                     throw new InvalidOperationException("Pilot collider evidence changed after mesh persistence.");
+                PilotBuildingReport buildingReport=null;
+                if(buildings)
+                {
+                    // Road meshes already persisted; prefab-owned meshes must
+                    // remain read-only asset references, not be persisted again.
+                    buildingReport=PlacePilotBuildings(test,root.transform,roadsRoot,terrainCollider,plan,pilot,scope,physicalRoads);
+                    if(buildingReport.placed==0)
+                        throw new InvalidOperationException("No pilot buildings passed physical lot checks. "+buildingReport.Summary()+
+                            " "+string.Join(" | ",buildingReport.records.Select(r=>r.reason)));
+                    int finalRays=ValidatePilotColliders(paths,junctionParents,localLayout,out float finalError);
+                    if(finalRays!=raySamples||Mathf.Abs(finalError-maxSurfaceError)>.0001f)
+                        throw new InvalidOperationException("Road collider evidence changed after building placement.");
+                    if(source.isDirty||sourceTile.terrain.terrainData!=originalData||sourceTile.terrain.materialTemplate!=originalMaterial||
+                        EditorUtility.IsDirty(originalData)!=originalDataDirty||
+                        (originalMaterial!=null&&EditorUtility.IsDirty(originalMaterial)!=originalMaterialDirty)||
+                        ProceduralWorldPlanner.PreviewFingerprint(settings,detected,source)!=key)
+                        throw new InvalidOperationException("Source inputs changed during building placement.");
+                    File.WriteAllText(folder+"/BuildingReport.json",JsonUtility.ToJson(buildingReport,true));
+                    AssetDatabase.ImportAsset(folder+"/BuildingReport.json");
+                }
                 AssetDatabase.SaveAssetIfDirty(data);
                 if(terrainMaterial!=null)AssetDatabase.SaveAssetIfDirty(terrainMaterial);
                 AssetDatabase.SaveAssetIfDirty(asphalt);
@@ -324,7 +347,7 @@ namespace DeliveryDriver.EditorTools
                 AssetDatabase.SaveAssetIfDirty(markings);
                 var colliderCount=root.GetComponentsInChildren<MeshCollider>(true).Count(c=>c.enabled&&c.sharedMesh!=null);
                 var roadIds=string.Join(", ",edges.Select(e=>e.a.id+"-"+e.b.id));
-                string summary=version+(expanded?" PHYSICAL NEIGHBORHOOD PASS: ":" PHYSICAL INFRASTRUCTURE PASS: ")+scenePath+
+                string summary=version+(buildings?" PHYSICAL BUILDING PILOT PASS: ":expanded?" PHYSICAL NEIGHBORHOOD PASS: ":" PHYSICAL INFRASTRUCTURE PASS: ")+scenePath+
                     "; source fingerprint "+key+"; tile ["+pilot.row+","+pilot.column+"] "+pilot.region.ToString("F1")+
                     "; roads "+paths.Count+" ("+roadIds+"), nodes "+nodes.Count+
                     ", open/external branch nodes "+open.Count+", full junction meshes "+junctionParents.Count(x=>x.Key.connectedRoads.Count>=3)+
@@ -337,7 +360,10 @@ namespace DeliveryDriver.EditorTools
                         ", centerline bounds "+scope.centerlineBounds.ToString("F2")+
                         "; source-to-piece mapping "+string.Join(", ",scope.sourceEdges.Select(x=>x.Value.a.id+"-"+x.Value.b.id+" => "+x.Key.a.id+"-"+x.Key.b.id))+". ":
                         (pilot.roadCount-edges.Count)+" touching corridors excluded. ")+
-                    "0 buildings placed. Scene-local infrastructure proof only; boundary connections to outside city, lot access, building placement and driving not validated. Full Generate locked.";
+                    (buildings?buildingReport.Summary()+" BuildingReport.json includes each accepted/rejected lot. "+
+                        "Scene-local physical placement only; entrance orientation is a +Z convention, no constructed driveways, boundary connections or driving test. ":
+                        "0 buildings placed. Scene-local infrastructure proof only; boundary connections to outside city, lot access, building placement and driving not validated. ")+
+                    "Full Generate locked.";
                 File.WriteAllText(folder+"/PilotReport.txt",summary);
                 AssetDatabase.ImportAsset(folder+"/PilotReport.txt");
                 if(!EditorSceneManager.SaveScene(test,scenePath))
