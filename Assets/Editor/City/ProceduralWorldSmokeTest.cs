@@ -201,6 +201,16 @@ namespace DeliveryDriver.EditorTools
                 settings.localOptimization=true;
                 TestExactRoadSplit();
                 TestLocalQualityGuard();
+                var loop=ProceduralWorldPilotDriveCheck.RoundedLoop(new List<Vector3>{Vector3.zero,new Vector3(20,0,0),
+                    new Vector3(20,0,20),new Vector3(0,0,20)},4f);
+                Require(loop.Count>200&&loop.All(v=>v.x>=-.001f&&v.x<=20.001f&&v.z>=-.001f&&v.z<=20.001f)&&
+                    Enumerable.Range(0,loop.Count).All(i=>Vector3.Distance(loop[i],loop[(i+1)%loop.Count])<=.251f),
+                    "Pilot rounded closed route escaped bounds or sample spacing.");
+                bool tightLoopRejected=false;
+                try{ProceduralWorldPilotDriveCheck.RoundedLoop(new List<Vector3>{Vector3.zero,new Vector3(5,0,0),
+                    new Vector3(5,0,5),new Vector3(0,0,5)},4f);}
+                catch(InvalidOperationException){tightLoopRejected=true;}
+                Require(tightLoopRejected,"Overlapping vehicle turn fillets accepted.");
                 var pilotRect=new Rect(-1,-1,2,2);
                 Require(ProceduralWorldGeneratorWindow.PilotTriangleOverlapsRect(new Vector2(-3,0),new Vector2(3,0),new Vector2(0,3),pilotRect)&&
                     !ProceduralWorldGeneratorWindow.PilotTriangleOverlapsRect(new Vector2(2,2),new Vector2(3,2),new Vector2(2,3),pilotRect)&&
