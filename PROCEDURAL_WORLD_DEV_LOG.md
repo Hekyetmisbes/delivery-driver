@@ -135,3 +135,47 @@ User supplied full report, screenshot and checkpoint ZIP D4F44654. Direct ZIP in
 Direct checkpoint audit: mapped all 50 hotspot intervals by exact endpoint coordinates to five roads. 214–238: 23 intervals, peak 19.10505m, 80/80 sampled slopes at absolute grade >=9.99%; 625–638: 9, 17.69637m, 27/32; 637–638: 8, 17.36954m, 21/21; 279–290: 8, 15.80659m, 44/44; 290–291: 2, 15.49053m, 12/12. All hotspot endpoint nodes have reported degree 2. Fixed-endpoint smoothing has essentially no grade slack on four of five roads. This is sampled geometry, not proof a feasible shift exists.
 
 V7.2.4 implementation: extend Stage 5a with bounded shared-node height-chain shift trials after existing hotspot refinement. Seed both samples of the worst interval; try +/-0.5, 1.5, 3, 6m; propagate minimum necessary displacement through neighboring samples using remaining grade slack. Lock bridge/authored/detached/external endpoints, protected/obstacle locations and outside 450m radius; cap sample and relaxation budgets. Preserve XZ and topology, validate all touched road endpoints/profile/grade, apply existing global terrain/local-quality guards against trial and stage input; rollback candidate changes via finally. Accept only actual peak or balanced-cost improvement. Five worst target roads, max 40 trials. Test helper assertions for saturated/free grade slack; no Unity compilation or smoke test run here. Cache fingerprint v5. No changes to 5b policy, thresholds, scenes, terrain, physical road generation or Generate lock. Virtual diagnostics still 11866 sections, 209 missing, 234 incompatible cells, 313 steep, 3 parcel, zero protected; virtual classification deferred to next focused increment. Test same seed/settings; report new Hotspot height chains line and 5b. This is a bounded heuristic, not a guaranteed peak reduction or exact terrain solve; if no candidate survives, report blocker and move to virtual terrain/route design rather than repeat blind budget tuning.
+
+
+## 2026-11-26 — V7.2.4 measured Unity test and conversation handoff
+
+**Latest tested source reference:** `2884db8d34d4165680517dfaeb9c1febff216300` (V7.2.4 height-chain implementation, fingerprint v5; local Git SHA not separately supplied). Branch: `feature/procedural-world-generator-mvp`. User supplied screenshot, report and checkpoint ZIP `20261126-154121-073-506C181F.zip`. ZIP opened directly and all 13 JSON snapshots found. Scene: `Assets/Scenes/GameScene.unity`; Unity 6000.3.12f1; seed 4281. Final fingerprint `506C181FF18B88CAC2B4B3EEFCC5C166D1DD9BA080ACA2AB56CA12D54758018A`. No raw ZIP committed. Console and smoke-test output not supplied.
+
+### Measured final state
+
+| Metric | V7.2.4 final |
+|---|---:|
+| Urban score | 90.052101 (display 90.1/100) |
+| Ankara / Istanbul coverage | 12/12 + 12/12 |
+| Retained / detached | 2871 / 10 |
+| Authored proposals / bridges | 4 / 2 |
+| Bridge gap | 1242.21875 m |
+| Ankara mean cut / fill | 0.59651536 / 0.48043573 m |
+| Peak / extra grading | 19.10505295 m / 6.07093945% |
+| Sharp streets / short stubs | 19 / 22 |
+| Vertical flags / severity | 1748 / 27.73098183 |
+| Junction grade flags | 268 |
+| Prefab fits / parks accessible | 1987 / 72 of 73 |
+| Hotspot intervals | 50 on five roads (previous mapping) |
+| Terrain seams >1m | 0/17 |
+| Virtual terrain | 11866 valid sections, spacing 24.16817474 m, 209 missing sections, 0 missing shoulder samples, 234 incompatible 4m cells, 313 steep sections, 3 parcel samples, 0 protected samples |
+| Planning time | 227.8 s |
+| Mandatory preview checks | NOT MET; Generate locked |
+
+Stage 5a rolled back (9.9s): fixed-endpoint refinement 0/5 roads; height chains 5 target roads, 40 trials, 0 accepted, 0 fixed/boundary rejects, 0 profile rejects, 40 quality/no-benefit rejects. This last category combines different reasons; it does not establish that every trial failed an actual quality threshold. Stage 5b rolled back (6.4s): same V7.2.3 outcomes (5+11 measured candidates, all 16 terrain rejects, 112 no-path, 0 promotions). Prepared groups' vertical severity rounded to zero, but not applied to final graph. Stage 5c 2/19 improved locally but rollback, 5d accepted 122/180 with 2064->1748 vertical flags and 282->268 junction flags, 5e no improvement (126 protected rejects), stage 6 accepted. Offline JSON equality verified 04-accepted vs 06-rejected and 07-rejected for nodes, edges, detached, links and quality. No graph/geometry regression from these rejected stages. 227.8s vs previous 124.4s is an observed timing increase, not an isolated benchmark of the patch (base stage also increased from 47.3s to 73.0s). No new C# changes in this handoff entry.
+
+## NEXT CHAT — START HERE: V7.2.5 Virtual Terrain diagnostics
+
+The user is starting a new conversation due to chat length. Read this log (especially this entry), AGENTS.md and PROCEDURAL_WORLD_V72_REPORT.md before making changes. Use current feature branch; inspect head before writing. V7.1 is the successful architectural reference, V7.2.4 the latest measured source baseline. Preserve all accepted roads/coverage and the low earthwork metrics; keep Generate locked. No scene, terrain asset, collider, spline or mesh bake changes at this stage. No more blind T-junction or height-chain budget increases.
+
+**Next concrete task (not yet implemented):** V7.2.5 Virtual Terrain conflict classification and inspection, read-only preview. Inspect BuildVirtualTerrain in ProceduralWorldPlanner.Local.cs, snapshot Capture/Restore in ProceduralWorldPlanner.Preview.cs, quality inspector in ProceduralWorldGeneratorWindow.Quality.cs, Scene View layers in ProceduralWorldGeneratorWindow.cs, final mandatory checks in ProceduralWorldPlanner.Staged.cs and smoke test. Current virtual terrain is sparse 7-point sections plus shoulder samples, with a 4m cell dictionary and >0.5m difference check between distinct roads. A cell is a coarse diagnostic, not a proven physical collision. Do not simply suppress all conflicts between roads sharing a node.
+
+1. Preserve existing 234 conflict-cell baseline and blocking guard; separately classify conflicts near an actually shared junction (with location/footprint checks) versus independent-road overlap, and ambiguous/other cases. Report counts without double-counting total cells; retain unresolved or incompatible shared-junction demands as blockers. Keep all relevant sample provenance (road IDs, cell/position, sample kind, requested heights and delta), rather than only the most recent owner; use bounded storage and deterministic ordering. Distinguish coarse-cell aliasing from confirmed sample conflicts where possible, without claiming mesh clearance.
+2. Diagnose 209 missing sections with center/side/outer-blend reason, sample coordinate, road IDs and section position; distinguish missing road footprint from missing shoulder/outer terrain and likely coast/tile-boundary context without inventing terrain. Do not reduce counts by silently skipping failures.
+3. Diagnose 313 steep sections by location and severity; retaining wall candidates are not built walls or count of actual required walls. Preserve 3 parcel and 0 protected sample measurements and all protection checks.
+4. Add read-only issue inspection/focus in editor and include detailed summary in Copy preview report and JSON snapshots. Maintain compatibility with old snapshot format where feasible, bump fingerprint/cache key if semantics change; add focused smoke tests for shared junction vs independent overlap, conflicting heights, missing footprint/shoulder, and unchanged terrain. Do not weaken final mandatory checks or enable Generate.
+5. Run user's Unity test on same scene and all previous settings; request report first, focused screenshots/JSON only if needed. Acceptance: original road network, all 24 tiles, 4 authored links, 2 bridges, 0.60/0.48m, 6.1% preserved (same precision); diagnostic totals explain previous metrics or explicitly account for any changed counting method; all unresolved issues still block generation. No numerical improvement required from diagnostic-only patch.
+
+After V7.2.5: V7.2.6 focus on vertical profile and shared junction transitions (1748/268); V7.2.7 targeted lateral/route and horizontal bend improvements, revisit 10 detached segments and 5 hotspot roads when geometry/surface constraints better understood; verified Kizilay bridge corridor design separately (126/126 protected rejects); remaining park access and short stubs are secondary. V7.3 continuous virtual terrain/corridor and production validation; V8 controlled physical generation using Simple Road Placement Tool, then minivan drive tests. This is an adjustable roadmap, not implemented work.
+
+For each next commit append test findings, exact source revision, measured vs expected, decisions, limitations and next task to this file. Keep raw JSON checkpoints archived outside Unity Library on user's machine. User can send full report alone for routine tests. Do not require them to re-explain prior versions. The current handoff changes documentation only; next chat should implement V7.2.5 after source review.
