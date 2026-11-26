@@ -14,7 +14,7 @@ namespace DeliveryDriver.EditorTools
     public sealed partial class ProceduralWorldGeneratorWindow
     {
         private const string PhysicalPilotRoot="Assets/ProceduralPilotTests";
-        private bool physicalPilotBuilding,physicalPilotQueued;
+        private bool physicalPilotBuilding,physicalPilotQueued,queuedExpandedPilot;
         private ProceduralWorldPlanner.Plan queuedPilotPlan;
         private ProceduralWorldPlanner.PilotSurface queuedPilotSurface;
         private Scene queuedPilotScene;
@@ -22,10 +22,10 @@ namespace DeliveryDriver.EditorTools
 
         // Scene creation, modal dialogs and asset import must not run inside the
         // window's IMGUI layout event. Revalidate the exact request after it ends.
-        private void QueuePhysicalPilot()
+        private void QueuePhysicalPilot(bool expanded=false)
         {
             if(busy||physicalPilotBuilding||physicalPilotQueued||!HasPilot||!PhysicalPilotEligible(pilotSurface))return;
-            physicalPilotQueued=true;
+            physicalPilotQueued=true;queuedExpandedPilot=expanded;
             queuedPilotPlan=preview;queuedPilotSurface=pilotSurface;
             queuedPilotScene=SceneManager.GetActiveScene();
             EditorApplication.delayCall+=RunQueuedPhysicalPilot;
@@ -36,21 +36,21 @@ namespace DeliveryDriver.EditorTools
         private void CancelQueuedPhysicalPilot()
         {
             EditorApplication.delayCall-=RunQueuedPhysicalPilot;
-            physicalPilotQueued=false;
+            physicalPilotQueued=false;queuedExpandedPilot=false;
             queuedPilotPlan=null;queuedPilotSurface=null;queuedPilotScene=default;
         }
 
         private void RunQueuedPhysicalPilot()
         {
             var expectedPlan=queuedPilotPlan;var expectedSurface=queuedPilotSurface;var expectedScene=queuedPilotScene;
-            bool queued=physicalPilotQueued;
+            bool queued=physicalPilotQueued,expanded=queuedExpandedPilot;
             CancelQueuedPhysicalPilot();
             if(!queued||this==null)return;
             Run(()=>
             {
                 if(preview!=expectedPlan||pilotSurface!=expectedSurface||SceneManager.GetActiveScene()!=expectedScene)
                     throw new InvalidOperationException("Pilot selection or active scene changed before the queued build. Run preflight again.");
-                BuildPhysicalPilot();
+                BuildPhysicalPilot(expanded);
             });
         }
 
@@ -99,7 +99,7 @@ namespace DeliveryDriver.EditorTools
             return mat;
         }
 
-        private void BuildPhysicalPilot()
+        private void BuildPhysicalPilot(bool expanded)
         {
             if(!HasPilot||!PhysicalPilotEligible(pilotSurface))
                 throw new InvalidOperationException("Run a passing zero-grading Istanbul pilot preflight first.");
@@ -115,19 +115,24 @@ namespace DeliveryDriver.EditorTools
             var pilot=pilotSurface;var plan=preview;
             if(key!=pilot.fingerprint||key!=previewFingerprint||source.path!=pilot.scenePath)
                 throw new InvalidOperationException("Pilot inputs changed. Recalculate and preflight before building.");
-            var edges=ProceduralWorldPlanner.PhysicalPilotRoads(plan,pilot,settings);
+            var scope=expanded?ProceduralWorldPlanner.BuildPilotNeighborhoodScope(plan,pilot,settings):null;
+            var edges=expanded?scope.edges:ProceduralWorldPlanner.PhysicalPilotRoads(plan,pilot,settings);
+            string version=expanded?"V7.3.2":"V7.3.1";
             var sourceTile=detected.tiles.Single(t=>t.row==pilot.row&&t.column==pilot.column);
             var nodes=edges.SelectMany(e=>new[]{e.a,e.b}).Distinct().OrderBy(n=>n.id).ToList();
             if(nodes.Select(n=>n.position).Distinct().Count()!=nodes.Count||nodes.Any(n=>n.gate||n.existing!=null))
                 throw new InvalidOperationException("Pilot includes coincident distinct nodes, gate or authored intersection.");
             var degrees=nodes.ToDictionary(n=>n,n=>edges.Count(e=>e.a==n||e.b==n));
-            var open=nodes.Where(n=>plan.edges.Concat(plan.authoredLinks).Any(e=>
+            var open=expanded?scope.terminals:nodes.Where(n=>plan.edges.Concat(plan.authoredLinks).Any(e=>
                 (e.a==n||e.b==n)&&!edges.Contains(e))).ToHashSet();
             if(LayerMask.NameToLayer("Road")<0)throw new InvalidOperationException("Required Road physics layer is missing.");
             if(!EditorUtility.DisplayDialog("Build isolated physical pilot?",
                 "Create a new, separate test scene and independent assets under "+PhysicalPilotRoot+
-                ". Only "+edges.Count+" complete connected roads are included; "+(pilot.roadCount-edges.Count)+
-                " other touching corridors, all buildings and gameplay systems are excluded. GameScene is not modified. Continue?",
+                (expanded?". Expanded scope: "+scope.represented+" source roads, "+scope.edges.Count+" pieces, "+scope.clipped+
+                    " clipped pieces, "+scope.terminals.Count+" open boundary terminals, "+scope.fullJunctions+
+                    " complete junctions, "+scope.footprintOnly+" touching roads outside inset.":
+                    ". Only "+edges.Count+" complete connected roads are included; "+(pilot.roadCount-edges.Count)+" other touching corridors excluded.")+
+                " All buildings and gameplay systems are excluded. GameScene is not modified. Continue?",
                 "Build separate scene","Cancel"))return;
 
             if(SceneManager.sceneCount!=1||SceneManager.GetActiveScene()!=source||source.isDirty)
@@ -152,7 +157,7 @@ namespace DeliveryDriver.EditorTools
                         throw new InvalidOperationException("Could not create pilot asset root.");
                 }
                 string folderGuid=AssetDatabase.CreateFolder(PhysicalPilotRoot,
-                    "Istanbul_"+DateTime.UtcNow.ToString("yyyyMMdd_HHmmss")+"_"+Guid.NewGuid().ToString("N").Substring(0,8));
+                    (expanded?"Istanbul_Neighborhood_":"Istanbul_")+DateTime.UtcNow.ToString("yyyyMMdd_HHmmss")+"_"+Guid.NewGuid().ToString("N").Substring(0,8));
                 if(string.IsNullOrEmpty(folderGuid))throw new InvalidOperationException("Could not create unique pilot folder.");
                 folder=AssetDatabase.GUIDToAssetPath(folderGuid);
                 scenePath=folder+"/PhysicalPilot.unity";
@@ -164,7 +169,7 @@ namespace DeliveryDriver.EditorTools
                         "; source "+PilotSceneState(source)+"; active "+PilotSceneState(SceneManager.GetActiveScene())+
                         "; open count "+SceneManager.sceneCount+".");
                 ActivatePilotScene(test,"Isolated pilot scene activation failed");
-                Debug.Log("[ProceduralWorld] V7.3.1 isolated scene active: "+PilotSceneState(test)+
+                Debug.Log("[ProceduralWorld] "+version+" isolated scene active: "+PilotSceneState(test)+
                     "; source "+PilotSceneState(source)+".");
                 // Do not create or revert an Undo group until the target scene
                 // has been verified. Early activation failures own no edits.
@@ -172,7 +177,7 @@ namespace DeliveryDriver.EditorTools
                 Undo.SetCurrentGroupName("Build isolated physical pilot");
                 var root=NewRoot(test,"PW Physical Pilot - Infrastructure Only",null);
                 var roadsRoot=NewRoot(test,"Roads and junction visuals",root.transform).transform;
-                var nodesRoot=NewRoot(test,"Nodes - open means omitted city branches",root.transform).transform;
+                var nodesRoot=NewRoot(test,expanded?"Nodes - boundary terminals are open":"Nodes - open means omitted city branches",root.transform).transform;
 
                 // Clone the complete native tile to retain original resolution and
                 // halo. No SetHeights, no mutation or assignment of source data.
@@ -216,7 +221,7 @@ namespace DeliveryDriver.EditorTools
                 var junctionParents=new Dictionary<RoadIntersection,Transform>();
                 foreach(var n in nodes)
                 {
-                    var obj=NewRoot(test,(open.Contains(n)?"Pilot_OpenNode_":"Pilot_Node_")+n.id,nodesRoot);
+                    var obj=NewRoot(test,(open.Contains(n)?(expanded?"Pilot_BoundaryTerminal_":"Pilot_OpenNode_"):"Pilot_Node_")+n.id,nodesRoot);
                     obj.transform.position=n.position;
                     var intersection=Undo.AddComponent<RoadIntersection>(obj);
                     intersection.sectorTag=n.sector;
@@ -227,7 +232,9 @@ namespace DeliveryDriver.EditorTools
                 var paths=new Dictionary<SplineRoad,List<Vector3>>();
                 foreach(var e in edges)
                 {
-                    var obj=NewRoot(test,"Pilot_Road_"+e.a.id+"_"+e.b.id,roadsRoot);
+                    var original=expanded?scope.sourceEdges[e]:e;
+                    var obj=NewRoot(test,"Pilot_Road_"+original.a.id+"_"+original.b.id+
+                        (expanded?"_piece_"+e.a.id+"_"+e.b.id:""),roadsRoot);
                     var road=Undo.AddComponent<SplineRoad>(obj);
                     road.sectorTag=e.sector;
                     road.laneWidth=Mathf.Min(settings.width*.25f,2.1f);
@@ -255,6 +262,23 @@ namespace DeliveryDriver.EditorTools
                         entry.Value.connectedRoads.Any(r=>r==null||r.gameObject.scene!=test))
                         throw new InvalidOperationException("Pilot junction road membership mismatch.");
                 int raySamples=ValidatePilotColliders(paths,junctionParents,localLayout,out float maxSurfaceError);
+                if(expanded)
+                {
+                    if(junctionParents.Count(x=>x.Key.connectedRoads.Count>=3)!=scope.fullJunctions)
+                        throw new InvalidOperationException("Complete pilot junction count changed during baking.");
+                    // A mitered corner or junction mouth can extend beyond the
+                    // centerline inset. Screen the actual generated meshes too.
+                    foreach(var filter in roadsRoot.GetComponentsInChildren<MeshFilter>(true))
+                    {
+                        if(!filter.gameObject.activeInHierarchy||filter.sharedMesh==null)continue;
+                        foreach(var vertex in filter.sharedMesh.vertices)
+                        {
+                            var world=filter.transform.TransformPoint(vertex);
+                            if(!ProceduralWorldPlanner.Contains(pilot.region,ProceduralWorldPlanner.XZ(world),.01f))
+                                throw new InvalidOperationException("Expanded pilot mesh outside verified region: "+filter.name+" at "+world.ToString("F3"));
+                        }
+                    }
+                }
 
                 // Scene-local lighting only. No global RenderSettings or game
                 // manager/bootstrap objects; this is not a playable game scene yet.
@@ -277,14 +301,19 @@ namespace DeliveryDriver.EditorTools
                 AssetDatabase.SaveAssetIfDirty(markings);
                 var colliderCount=root.GetComponentsInChildren<MeshCollider>(true).Count(c=>c.enabled&&c.sharedMesh!=null);
                 var roadIds=string.Join(", ",edges.Select(e=>e.a.id+"-"+e.b.id));
-                string summary="V7.3.1 PHYSICAL INFRASTRUCTURE PASS: "+scenePath+
+                string summary=version+(expanded?" PHYSICAL NEIGHBORHOOD PASS: ":" PHYSICAL INFRASTRUCTURE PASS: ")+scenePath+
                     "; source fingerprint "+key+"; tile ["+pilot.row+","+pilot.column+"] "+pilot.region.ToString("F1")+
                     "; roads "+paths.Count+" ("+roadIds+"), nodes "+nodes.Count+
                     ", open/external branch nodes "+open.Count+", full junction meshes "+junctionParents.Count(x=>x.Key.connectedRoads.Count>=3)+
                     ", mesh colliders "+colliderCount+", asphalt collider ray samples "+raySamples+
                     ", max ray surface deviation "+maxSurfaceError.ToString("F3")+" m; terrain original clone, zero grading; "+
-                    (pilot.roadCount-edges.Count)+" touching corridors excluded, 0 buildings placed. "+
-                    "Scene-local infrastructure proof only; boundary connections, lot access, building placement and driving not validated. Full Generate locked.";
+                    (expanded?"source roads represented / touching "+scope.represented+"/"+scope.touching+
+                        ", whole / clipped pieces "+scope.whole+"/"+scope.clipped+", outside inset "+scope.footprintOnly+
+                        ", open boundary terminals "+scope.terminals.Count+", components "+scope.components+
+                        ", centerline bounds "+scope.centerlineBounds.ToString("F2")+
+                        "; source-to-piece mapping "+string.Join(", ",scope.sourceEdges.Select(x=>x.Value.a.id+"-"+x.Value.b.id+" => "+x.Key.a.id+"-"+x.Key.b.id))+". ":
+                        (pilot.roadCount-edges.Count)+" touching corridors excluded. ")+
+                    "0 buildings placed. Scene-local infrastructure proof only; boundary connections to outside city, lot access, building placement and driving not validated. Full Generate locked.";
                 File.WriteAllText(folder+"/PilotReport.txt",summary);
                 AssetDatabase.ImportAsset(folder+"/PilotReport.txt");
                 if(!EditorSceneManager.SaveScene(test,scenePath))

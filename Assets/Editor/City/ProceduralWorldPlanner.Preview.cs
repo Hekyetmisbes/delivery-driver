@@ -343,6 +343,144 @@ namespace DeliveryDriver.EditorTools
                 throw new InvalidOperationException("Pilot road scope no longer matches the verified surface.");
             return group;
         }
+        internal sealed class PilotFragment
+        {
+            public List<Vector3> points=new List<Vector3>();
+            public bool originalStart,originalEnd;
+        }
+        // Liang-Barsky clipping in XZ, with interpolated original Y. No
+        // resampling, smoothing, snapping or cross-road endpoint merging.
+        internal static bool ClipPilotSegment(Rect r,Vector3 a,Vector3 b,out float enter,out float exit)
+        {
+            float lo=0f,hi=1f;
+            bool Bound(float p,float q)
+            {
+                if(p==0f)return q>=0f;
+                float t=q/p;
+                if(p<0f){if(t>hi)return false;lo=Mathf.Max(lo,t);}
+                else {if(t<lo)return false;hi=Mathf.Min(hi,t);}
+                return true;
+            }
+            Vector3 d=b-a;
+            bool ok=Bound(-d.x,a.x-r.xMin)&&Bound(d.x,r.xMax-a.x)&&
+                Bound(-d.z,a.z-r.yMin)&&Bound(d.z,r.yMax-a.z);
+            enter=lo;exit=hi;
+            return ok&&hi>lo&&XZ(d).sqrMagnitude>.000001f;
+        }
+        internal static List<PilotFragment> ClipPilotPath(Rect r,List<Vector3> points)
+        {
+            var result=new List<PilotFragment>();
+            PilotFragment current=null;
+            for(int i=1;i<points.Count;i++)
+            {
+                Vector3 a=points[i-1],b=points[i];
+                if(!ClipPilotSegment(r,a,b,out float lo,out float hi))
+                {
+                    current=null;continue;
+                }
+                Vector3 start=lo==0f?a:Vector3.Lerp(a,b,lo),end=hi==1f?b:Vector3.Lerp(a,b,hi);
+                if(current==null||lo!=0f||!current.points[current.points.Count-1].Equals(start))
+                {
+                    current=new PilotFragment{originalStart=i==1&&lo==0f};
+                    current.points.Add(start);result.Add(current);
+                }
+                current.points.Add(end);
+                current.originalEnd=i==points.Count-1&&hi==1f;
+                if(hi!=1f)current=null;
+            }
+            return result;
+        }
+        internal sealed class PilotNeighborhoodScope
+        {
+            public Rect centerlineBounds;
+            public List<Edge> edges=new List<Edge>();
+            public Dictionary<Edge,Edge> sourceEdges=new Dictionary<Edge,Edge>();
+            public HashSet<Node> terminals=new HashSet<Node>();
+            public int touching,represented,whole,clipped,footprintOnly,components,fullJunctions;
+        }
+        internal static PilotNeighborhoodScope BuildPilotNeighborhoodScope(Plan source,PilotSurface pilot,Settings s)
+        {
+            // Keep the road + sidewalk footprint in the verified square.
+            // End caps are open test boundaries, never connected to absent roads.
+            float half=s.width*.5f+s.sidewalk;
+            var r=Rect.MinMaxRect(pilot.region.xMin+half,pilot.region.yMin+half,
+                pilot.region.xMax-half,pilot.region.yMax-half);
+            if(r.width<=0||r.height<=0)throw new InvalidOperationException("Pilot centerline rectangle is empty.");
+            var scope=new PilotNeighborhoodScope{centerlineBounds=r};
+            int nextId=Mathf.Min(-1,source.edges.Concat(source.authoredLinks).Concat(source.detachedEdges)
+                .SelectMany(e=>new[]{e.a.id,e.b.id}).DefaultIfEmpty(0).Min()-1);
+            Node Terminal(Vector3 pos,string sector)
+            {
+                var node=new Node{id=nextId--,position=pos,sector=sector,degree=1};
+                scope.terminals.Add(node);return node;
+            }
+            bool Touches(Edge e)
+            {
+                for(int i=1;i<e.points.Count;i++)
+                    if(PilotSegmentNear(pilot.region,e.points[i-1],e.points[i],half))return true;
+                return false;
+            }
+            foreach(var original in source.edges.Where(e=>!e.Bridge&&Touches(e)))
+            {
+                scope.touching++;
+                if(original.sector!=pilot.city||original.a==null||original.b==null||original.points.Count<2)
+                    throw new InvalidOperationException("Invalid or foreign road in verified pilot scope.");
+                if(!original.points[0].Equals(original.a.position)||
+                    !original.points[original.points.Count-1].Equals(original.b.position))
+                    throw new InvalidOperationException("Source endpoint mismatch for pilot road "+original.a.id+"-"+original.b.id);
+                if(original.points.Skip(1).Select((v,i)=>XZ(v-original.points[i]).sqrMagnitude<=.000001f).Any(x=>x))
+                    throw new InvalidOperationException("Degenerate original segment on pilot road "+original.a.id+"-"+original.b.id);
+                var pieces=ClipPilotPath(r,original.points);
+                if(pieces.Count==0){scope.footprintOnly++;continue;}
+                scope.represented++;
+                foreach(var fragment in pieces)
+                {
+                    var points=fragment.points;
+                    if(points.Any(v=>!Contains(r,XZ(v),.001f)))
+                        throw new InvalidOperationException("Clipped path escaped its centerline bounds.");
+                    float length=0f;
+                    for(int i=1;i<points.Count;i++)
+                    {
+                        float segment=Vector2.Distance(XZ(points[i-1]),XZ(points[i]));
+                        if(segment<.001f)throw new InvalidOperationException("Degenerate clipped segment on "+original.a.id+"-"+original.b.id);
+                        length+=segment;
+                    }
+                    if(length<=1f)throw new InvalidOperationException("Clipped road fragment too short on "+original.a.id+"-"+original.b.id+" ("+length.ToString("F3")+" m).");
+                    bool whole=fragment.originalStart&&fragment.originalEnd;
+                    if(whole)scope.whole++;else scope.clipped++;
+                    var edge=new Edge{a=fragment.originalStart?original.a:Terminal(points[0],original.sector),
+                        b=fragment.originalEnd?original.b:Terminal(points[points.Count-1],original.sector),
+                        points=points,sector=original.sector,kind=original.kind,spine=original.spine};
+                    scope.edges.Add(edge);scope.sourceEdges.Add(edge,original);
+                }
+            }
+            if(scope.touching!=pilot.roadCount||scope.whole!=pilot.wholeRoads||scope.represented+scope.footprintOnly!=scope.touching)
+                throw new InvalidOperationException("Clipped pilot road counts differ from verified preflight: touching "+scope.touching+
+                    ", whole "+scope.whole+", represented "+scope.represented+", outside inset "+scope.footprintOnly+".");
+            var oldGroup=PhysicalPilotRoads(source,pilot,s);
+            if(oldGroup.Any(e=>!scope.sourceEdges.Any(x=>x.Value==e&&x.Key.a==e.a&&x.Key.b==e.b&&x.Key.points.SequenceEqual(e.points))))
+                throw new InvalidOperationException("Expanded pilot lost an original complete road.");
+            var remaining=new List<Edge>(scope.edges);
+            while(remaining.Count>0)
+            {
+                var group=PilotRoadGroup(remaining);scope.components++;
+                var set=new HashSet<Edge>(group);remaining.RemoveAll(set.Contains);
+            }
+            var incident=scope.edges.SelectMany(e=>new[]{e.a,e.b}).Distinct().ToList();
+            foreach(var node in incident.Where(v=>!scope.terminals.Contains(v)))
+            {
+                int degree=scope.edges.Count(e=>e.a==node||e.b==node);
+                int originalDegree=source.edges.Concat(source.authoredLinks).Count(e=>e.a==node||e.b==node);
+                if(degree!=originalDegree)
+                    throw new InvalidOperationException("Incomplete original junction "+node.id+" in clipped region: "+degree+"/"+originalDegree+
+                        " branches. Pilot blocked; do not treat it as a complete intersection.");
+                if(degree>=3)scope.fullJunctions++;
+            }
+            if(scope.fullJunctions==0)throw new InvalidOperationException("Expanded pilot has no complete three-or-more-arm intersection.");
+            if(scope.components!=1)throw new InvalidOperationException("Expanded pilot contains "+scope.components+
+                " separate components. No artificial links will be added.");
+            return scope;
+        }
         private PilotSurface BuildPilotSurface(PilotChoice choice,string city,string fingerprint,string scenePath)
         {
             var tile=choice.tile;var data=tile.terrain.terrainData;var region=choice.region;

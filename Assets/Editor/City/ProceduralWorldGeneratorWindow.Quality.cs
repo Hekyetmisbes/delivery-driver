@@ -256,6 +256,10 @@ namespace DeliveryDriver.EditorTools
             EditorGUILayout.HelpBox("First infrastructure proof: only the largest connected group of complete roads, original heightmap cloned without grading. Other corridors, buildings and driving are not included. GameScene and full Generate remain untouched.",MessageType.Info);
             using(new EditorGUI.DisabledScope(physicalPilotQueued||!PhysicalPilotEligible(pilotSurface)))
                 if(GUILayout.Button("Build isolated physical pilot"))QueuePhysicalPilot();
+            EditorGUILayout.LabelField("V7.3.2 Full neighborhood pilot — isolated scene",EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("Build all connected centerline fragments inside the verified footprint inset. Preserve complete original junctions; use distinct open boundary terminals. No external roads or buildings. The first infrastructure test remains available.",MessageType.Info);
+            using(new EditorGUI.DisabledScope(physicalPilotQueued||!PhysicalPilotEligible(pilotSurface)))
+                if(GUILayout.Button("Build expanded physical neighborhood"))QueuePhysicalPilot(true);
             if(!string.IsNullOrEmpty(lastPhysicalPilotSummary))
             {
                 EditorGUILayout.HelpBox(lastPhysicalPilotSummary,MessageType.Info);

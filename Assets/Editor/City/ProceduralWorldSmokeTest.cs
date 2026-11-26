@@ -220,6 +220,39 @@ namespace DeliveryDriver.EditorTools
                     "Pilot connected road grouping incorrect.");
                 Require(ProceduralWorldPlanner.PilotRoadGroup(new List<ProceduralWorldPlanner.Edge>{edgeA,edgeB,edgeC})
                     .SequenceEqual(new[]{edgeA,edgeB}),"Physical pilot selected a disconnected road or changed source order.");
+                var clipRect=new Rect(0,0,10,10);
+                var clipPath=new List<Vector3>{new Vector3(-5,0,5),new Vector3(5,2,5),new Vector3(15,4,5)};
+                var clips=ProceduralWorldPlanner.ClipPilotPath(clipRect,clipPath);
+                Require(clips.Count==1&&!clips[0].originalStart&&!clips[0].originalEnd&&clips[0].points.Count==3&&
+                    clips[0].points[0]==new Vector3(0,1,5)&&clips[0].points[2]==new Vector3(10,3,5),
+                    "Pilot clipping must retain interior points and interpolate height.");
+                var reentry=ProceduralWorldPlanner.ClipPilotPath(clipRect,new List<Vector3>{
+                    new Vector3(5,0,5),new Vector3(15,0,5),new Vector3(15,0,8),new Vector3(5,0,8)});
+                Require(reentry.Count==2&&reentry[0].originalStart&&!reentry[0].originalEnd&&
+                    !reentry[1].originalStart&&reentry[1].originalEnd,"Pilot clipping falsely joined an outside excursion.");
+                Require(ProceduralWorldPlanner.ClipPilotPath(clipRect,new List<Vector3>{new Vector3(-5,0,-5),Vector3.zero}).Count==0,
+                    "Corner-only contact is not a road fragment.");
+                var scopeFixture=new ProceduralWorldPlanner.Plan();
+                var hub=new ProceduralWorldPlanner.Node{id=1,position=new Vector3(50,0,50),sector="İstanbul"};
+                ProceduralWorldPlanner.Edge Arm(int id,Vector3 end)
+                {
+                    var node=new ProceduralWorldPlanner.Node{id=id,position=end,sector=hub.sector};
+                    var edge=new ProceduralWorldPlanner.Edge{a=hub,b=node,sector=hub.sector,points=new List<Vector3>{hub.position,end}};
+                    scopeFixture.nodes.Add(node);scopeFixture.edges.Add(edge);return edge;
+                }
+                scopeFixture.nodes.Add(hub);
+                var arm1=Arm(2,new Vector3(25,0,50));var arm2=Arm(3,new Vector3(50,0,75));
+                var arm3=Arm(4,new Vector3(120,0,50));
+                var scopeSettings=new ProceduralWorldPlanner.Settings{width=8f,sidewalk=2f};
+                var scopePilot=new ProceduralWorldPlanner.PilotSurface{city=hub.sector,region=new Rect(0,0,100,100),
+                    roadCount=3,wholeRoads=2,connectedWholeRoads=2};
+                var neighborhood=ProceduralWorldPlanner.BuildPilotNeighborhoodScope(scopeFixture,scopePilot,scopeSettings);
+                Require(neighborhood.edges.Count==3&&neighborhood.whole==2&&neighborhood.clipped==1&&
+                    neighborhood.fullJunctions==1&&neighborhood.components==1&&neighborhood.terminals.Count==1&&
+                    neighborhood.edges[0].a==hub&&neighborhood.edges[1].b==arm2.b&&
+                    neighborhood.edges[2].b.position==new Vector3(94,0,50)&&neighborhood.edges[2].b!=arm3.b&&
+                    arm3.points[1]==new Vector3(120,0,50)&&scopeFixture.edges[0]==arm1,
+                    "Expanded pilot did not preserve original node/path identities or create a distinct boundary terminal.");
                 Require(Mathf.Abs(ProceduralWorldPlanner.JunctionCurvature(Vector3.zero,new Vector3(-10,1,0),new Vector3(10,1,0))-.02f)<.0001f&&
                     ProceduralWorldPlanner.JunctionCurvature(Vector3.zero,new Vector3(-10,1,0),new Vector3(10,-1,0))<.0001f&&
                     ProceduralWorldPlanner.JunctionCurvature(Vector3.zero,new Vector3(0,1,10),new Vector3(10,1,0))<0,
