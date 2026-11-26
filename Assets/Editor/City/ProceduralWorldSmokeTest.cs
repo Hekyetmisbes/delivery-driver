@@ -211,6 +211,11 @@ namespace DeliveryDriver.EditorTools
                     new Vector3(5,0,5),new Vector3(0,0,5)},4f);}
                 catch(InvalidOperationException){tightLoopRejected=true;}
                 Require(tightLoopRejected,"Overlapping vehicle turn fillets accepted.");
+                var longStraight=new List<Vector3>{Vector3.zero,new Vector3(60,0,0),new Vector3(60,0,20),new Vector3(0,0,20)};
+                Require(ProceduralWorldPilotDriveCheck.TryPilotStraight(longStraight,out Vector3 driveStart,out Vector3 driveDirection)&&
+                    Vector3.Distance(driveStart,new Vector3(5,0,0))<.001f&&driveDirection==Vector3.right&&
+                    !ProceduralWorldPilotDriveCheck.TryPilotStraight(new List<Vector3>{Vector3.zero,new Vector3(20,0,0),
+                        new Vector3(20,0,20),new Vector3(0,0,20)},out _,out _),"Pilot straight physics test corridor selection failed.");
                 // Actual Minivan-like wheel reference: 0.153m compressed
                 // contact, 0.30m travel, 0.5 target. Fully compressed differs
                 // from the nominal pose by 0.15m; do not silently lift it.

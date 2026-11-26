@@ -11,7 +11,7 @@ namespace DeliveryDriver.EditorTools
 {
     // Read-only geometry proof in the saved pilot scene. No Play Mode, prefab
     // instantiation, save/load systems, scene writes or global physics changes.
-    internal static class ProceduralWorldPilotDriveCheck
+    internal static partial class ProceduralWorldPilotDriveCheck
     {
         private const string Menu="Tools/Delivery Driver/City/Validate Pilot Minivan Loop";
         private const string PrefabPath="Assets/Resources/Company/Vehicles/Minivan.prefab";
@@ -335,7 +335,7 @@ namespace DeliveryDriver.EditorTools
             }
             return null;
         }
-        private static void Check()
+        private static void Check(bool dynamicTest=false)
         {
             var scene=SceneManager.GetActiveScene();
             if(EditorApplication.isPlayingOrWillChangePlaymode||EditorApplication.isCompiling||
@@ -393,8 +393,12 @@ namespace DeliveryDriver.EditorTools
                         "; "+label+"; candidates tried/constructed "+trials+"/"+constructed+
                         "; route "+names+". Nominal upright static geometry only; compressed-envelope clearance is diagnostic, negative means potential bottoming. "+
                         "Not loaded equilibrium, lane routing, dynamic steering, braking, suspension, traffic or driving PASS. No scene/save changes.");
-                    var view=SceneView.lastActiveSceneView;
-                    if(view!=null){view.pivot=path[0];view.size=35f;view.Repaint();}
+                    if(dynamicTest)RunIsolatedDynamics(scene,root,car,path,asphalt);
+                    else
+                    {
+                        var view=SceneView.lastActiveSceneView;
+                        if(view!=null){view.pivot=path[0];view.size=35f;view.Repaint();}
+                    }
                     return;
                 }
             }
