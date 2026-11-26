@@ -246,7 +246,7 @@ namespace DeliveryDriver.EditorTools
             if(GUILayout.Button("Focus pilot neighborhood"))
             {
                 var view=SceneView.lastActiveSceneView;var c=pilotSurface.region.center;
-                if(view!=null){view.pivot=new Vector3(c.x,0,c.y);view.size=190f;
+                if(view!=null){view.pivot=new Vector3(c.x,0,c.y);view.size=pilotSurface.region.width*.76f;
                     if(ProceduralWorldPlanner.PilotHeight(pilotSurface,c,out float y))view.pivot=new Vector3(c.x,y,c.y);
                     view.Repaint();}
             }
@@ -254,16 +254,20 @@ namespace DeliveryDriver.EditorTools
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("V7.3.1 Physical pilot — isolated scene",EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("First infrastructure proof: only the largest connected group of complete roads, original heightmap cloned without grading. Other corridors, buildings and driving are not included. GameScene and full Generate remain untouched.",MessageType.Info);
-            using(new EditorGUI.DisabledScope(physicalPilotQueued||!PhysicalPilotEligible(pilotSurface)))
+            using(new EditorGUI.DisabledScope(physicalPilotQueued||!PhysicalPilotEligible(pilotSurface)||pilotSurface.region.width!=250f))
                 if(GUILayout.Button("Build isolated physical pilot"))QueuePhysicalPilot();
             EditorGUILayout.LabelField("V7.3.2 Full neighborhood pilot — isolated scene",EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("Build all connected centerline fragments inside the verified footprint inset. If this square is disconnected, automatically search for another verified zero-grading Istanbul square. Preserve complete junctions; no artificial links, external roads or buildings.",MessageType.Info);
-            using(new EditorGUI.DisabledScope(physicalPilotQueued||!PhysicalPilotEligible(pilotSurface)))
+            using(new EditorGUI.DisabledScope(physicalPilotQueued||!PhysicalPilotEligible(pilotSurface)||pilotSurface.region.width!=250f))
                 if(GUILayout.Button("Build expanded physical neighborhood"))QueuePhysicalPilot(true);
             EditorGUILayout.LabelField("V7.4 Building placement pilot — isolated scene",EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("Build a new connected neighborhood with catalogue buildings on verified plan lots. Existing pilot scenes remain unchanged. Road frontage, actual ground and paved mesh clearance checked. V7.4a builds physical pedestrian approaches to resolve curb gaps; no driveway construction or gameplay.",MessageType.Info);
-            using(new EditorGUI.DisabledScope(physicalPilotQueued||!PhysicalPilotEligible(pilotSurface)))
+            using(new EditorGUI.DisabledScope(physicalPilotQueued||!PhysicalPilotEligible(pilotSurface)||pilotSurface.region.width!=250f))
                 if(GUILayout.Button("Build neighborhood with buildings"))QueuePhysicalPilot(true,true);
+            EditorGUILayout.LabelField("V7.9 Wider physical district — isolated scene",EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("Try a 500m square, then 375m if preflight blocks; at least 22 matched lots and 22 actual verified buildings. Same strict zero-grading, topology, mesh, collider and access checks. No 250m fallback, no source scene edits. Previous successful scenes remain unchanged.",MessageType.Info);
+            using(new EditorGUI.DisabledScope(physicalPilotQueued||!PhysicalPilotEligible(pilotSurface)))
+                if(GUILayout.Button("Build wider district with buildings"))QueuePhysicalPilot(true,true,true);
             if(!string.IsNullOrEmpty(lastPhysicalPilotSummary))
             {
                 EditorGUILayout.LabelField("Last successful physical build (may be an earlier attempt)");

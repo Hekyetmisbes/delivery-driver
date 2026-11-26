@@ -268,8 +268,11 @@ namespace DeliveryDriver.EditorTools
             h=Mathf.Lerp(a,b,z-iz);return true;
         }
         internal static PilotSurface FindPilotSurface(Settings s,Layout l,Scene scene,Plan source,string city,string fingerprint,
-            bool expanded=false)
+            bool expanded=false,float size=250f,int minimumLots=1)
         {
+            if(size!=250f&&size!=375f&&size!=500f)
+                throw new InvalidOperationException("Unsupported physical pilot search size.");
+            if(minimumLots<1)throw new InvalidOperationException("Invalid minimum pilot lot count.");
             if(source==null||source.quality==null||source.virtualReport==null||source.virtualReport.diagnosticSchema!=1||
                 source.virtualReport.issues==null||source.virtualReport.omittedIssues>0||source.virtualReport.overflowCells>0)
                 throw new InvalidOperationException("Complete final virtual diagnostics are required for pilot preflight.");
@@ -277,23 +280,26 @@ namespace DeliveryDriver.EditorTools
             Rect cityBounds=city=="Ankara"?l.Ankara(s.ankaraLow):l.Istanbul(s.ankaraLow);
             var lots=source.parcels.Where(x=>x.sector==city&&x.accessible&&!string.IsNullOrEmpty(x.prefab)).ToList();
             var choices=new List<PilotChoice>();
-            // Fixed 250m neighborhood squares on land tile interiors; keep a
-            // halo for stamp influences, native interpolation and road-edge probes.
-            const float size=250f;
+            // Interior squares on one native terrain tile, with unchanged
+            // influence halo and native sampling budget. The wider city
+            // search uses the existing 125m grid to avoid undersampling
+            // candidate positions as the square grows.
+            float stride=size==250f?size*.5f:125f;
             foreach(var tile in l.tiles.Where(x=>x.row!=3&&cityBounds.Contains(x.area.center)).OrderBy(x=>x.row).ThenBy(x=>x.column))
             {
                 float dx=tile.area.width/(tile.terrain.terrainData.heightmapResolution-1);
                 float dz=tile.area.height/(tile.terrain.terrainData.heightmapResolution-1);
                 float halo=s.width*.5f+s.sidewalk+s.blend+2f*Mathf.Sqrt(dx*dx+dz*dz)+2f;
-                for(float x=tile.area.xMin+halo;x+size<=tile.area.xMax-halo;x+=size*.5f)
-                for(float z=tile.area.yMin+halo;z+size<=tile.area.yMax-halo;z+=size*.5f)
+                for(float x=tile.area.xMin+halo;x+size<=tile.area.xMax-halo;x+=stride)
+                for(float z=tile.area.yMin+halo;z+size<=tile.area.yMax-halo;z+=stride)
                 {
                     var r=new Rect(x,z,size,size);
                     int count=lots.Count(a=>PilotContains(r,a.bounds));
-                    if(count>0)choices.Add(new PilotChoice{tile=tile,region=r,lots=count});
+                    if(count>=minimumLots)choices.Add(new PilotChoice{tile=tile,region=r,lots=count});
                 }
             }
-            if(choices.Count==0)throw new InvalidOperationException("No 250m interior pilot square with a measured prefab-fit lot found.");
+            if(choices.Count==0)throw new InvalidOperationException("No "+size.ToString("F0")+
+                "m interior pilot square with at least "+minimumLots+" matched prefab-fit lots found.");
             // Prefer regions with no already-known virtual issue or protected
             // area, then more lots. This is a pilot selection, not city clearance.
             var shortlist=choices.OrderBy(c=>source.virtualReport.issues.Count(i=>Contains(c.region,XZ(i.position),s.width*.5f+s.sidewalk+s.blend)))
@@ -309,7 +315,7 @@ namespace DeliveryDriver.EditorTools
                 const int maxSurfaceTrials=16;
                 for(int i=0;i<shortlist.Count;i++)
                 {
-                    if(EditorUtility.DisplayCancelableProgressBar("V7.3.2a connected neighborhood",
+                    if(EditorUtility.DisplayCancelableProgressBar(size.ToString("F0")+"m connected neighborhood",
                         "Screening square "+(i+1)+"/"+shortlist.Count+"; native trials "+surfaceTrials+"/"+maxSurfaceTrials,
                         .1f+.8f*i/shortlist.Count))throw new OperationCanceledException();
                     var choice=shortlist[i];
@@ -337,7 +343,7 @@ namespace DeliveryDriver.EditorTools
                     if(failures.Count<6)failures.Add(choice.region.ToString("F1")+": "+candidate.Summary());
                     if(surfaceTrials>=maxSurfaceTrials)break;
                 }
-                throw new InvalidOperationException("No connected zero-grading neighborhood found in bounded search. "+
+                throw new InvalidOperationException("No connected "+size.ToString("F0")+"m zero-grading neighborhood found in bounded search. "+
                     "Grid candidates "+shortlist.Count+", topology rejects "+topologyRejected+", native trials/rejects "+
                     surfaceTrials+"/"+surfaceRejected+". First rejected candidates: "+string.Join(" | ",failures));
             }
@@ -695,7 +701,7 @@ namespace DeliveryDriver.EditorTools
             }
             p.complete=p.clearanceSamples>0;
             p.localPass=p.Pass;
-            p.limitation="250m interior window with external road influence halo; no physical road truncation or boundary splice planned.";
+            p.limitation=region.width.ToString("F0")+"m interior window with external road influence halo; no physical road truncation or boundary splice planned.";
             return p;
         }
 

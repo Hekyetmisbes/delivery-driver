@@ -14,7 +14,7 @@ namespace DeliveryDriver.EditorTools
     public sealed partial class ProceduralWorldGeneratorWindow
     {
         private const string PhysicalPilotRoot="Assets/ProceduralPilotTests";
-        private bool physicalPilotBuilding,physicalPilotQueued,queuedExpandedPilot,queuedBuildingsPilot;
+        private bool physicalPilotBuilding,physicalPilotQueued,queuedExpandedPilot,queuedBuildingsPilot,queuedWidePilot;
         private ProceduralWorldPlanner.Plan queuedPilotPlan;
         private ProceduralWorldPlanner.PilotSurface queuedPilotSurface;
         private Scene queuedPilotScene;
@@ -22,10 +22,10 @@ namespace DeliveryDriver.EditorTools
 
         // Scene creation, modal dialogs and asset import must not run inside the
         // window's IMGUI layout event. Revalidate the exact request after it ends.
-        private void QueuePhysicalPilot(bool expanded=false,bool buildings=false)
+        private void QueuePhysicalPilot(bool expanded=false,bool buildings=false,bool wide=false)
         {
             if(busy||physicalPilotBuilding||physicalPilotQueued||!HasPilot||!PhysicalPilotEligible(pilotSurface))return;
-            physicalPilotQueued=true;queuedExpandedPilot=expanded;queuedBuildingsPilot=buildings;
+            physicalPilotQueued=true;queuedExpandedPilot=expanded;queuedBuildingsPilot=buildings;queuedWidePilot=wide;
             queuedPilotPlan=preview;queuedPilotSurface=pilotSurface;
             queuedPilotScene=SceneManager.GetActiveScene();
             EditorApplication.delayCall+=RunQueuedPhysicalPilot;
@@ -36,21 +36,21 @@ namespace DeliveryDriver.EditorTools
         private void CancelQueuedPhysicalPilot()
         {
             EditorApplication.delayCall-=RunQueuedPhysicalPilot;
-            physicalPilotQueued=false;queuedExpandedPilot=false;queuedBuildingsPilot=false;
+            physicalPilotQueued=false;queuedExpandedPilot=false;queuedBuildingsPilot=false;queuedWidePilot=false;
             queuedPilotPlan=null;queuedPilotSurface=null;queuedPilotScene=default;
         }
 
         private void RunQueuedPhysicalPilot()
         {
             var expectedPlan=queuedPilotPlan;var expectedSurface=queuedPilotSurface;var expectedScene=queuedPilotScene;
-            bool queued=physicalPilotQueued,expanded=queuedExpandedPilot,buildings=queuedBuildingsPilot;
+            bool queued=physicalPilotQueued,expanded=queuedExpandedPilot,buildings=queuedBuildingsPilot,wide=queuedWidePilot;
             CancelQueuedPhysicalPilot();
             if(!queued||this==null)return;
             Run(()=>
             {
                 if(preview!=expectedPlan||pilotSurface!=expectedSurface||SceneManager.GetActiveScene()!=expectedScene)
                     throw new InvalidOperationException("Pilot selection or active scene changed before the queued build. Run preflight again.");
-                BuildPhysicalPilot(expanded,buildings);
+                BuildPhysicalPilot(expanded,buildings,wide);
             });
         }
 
@@ -99,11 +99,15 @@ namespace DeliveryDriver.EditorTools
             return mat;
         }
 
-        private void BuildPhysicalPilot(bool expanded,bool buildings)
+        private void BuildPhysicalPilot(bool expanded,bool buildings,bool wide=false)
         {
+            if(wide&&(!expanded||!buildings))throw new InvalidOperationException("Wider city requires a complete building neighborhood.");
+            if(PilotManualDriveWindow.HasLiveSession)throw new InvalidOperationException("End manual pilot driving before building.");
             if(buildings&&!expanded)throw new InvalidOperationException("Buildings require a complete neighborhood scope.");
             if(!HasPilot||!PhysicalPilotEligible(pilotSurface))
                 throw new InvalidOperationException("Run a passing zero-grading Istanbul pilot preflight first.");
+            if(!wide&&pilotSurface.region.width!=250f)
+                throw new InvalidOperationException("Run the 250m preflight again before using the original small-pilot buttons.");
             if(EditorApplication.isPlayingOrWillChangePlaymode||EditorApplication.isCompiling)
                 throw new InvalidOperationException("Physical pilot requires idle edit mode, outside compilation and play mode.");
             if(PrefabStageUtility.GetCurrentPrefabStage()!=null)
@@ -117,7 +121,30 @@ namespace DeliveryDriver.EditorTools
             if(key!=pilot.fingerprint||key!=previewFingerprint||source.path!=pilot.scenePath)
                 throw new InvalidOperationException("Pilot inputs changed. Recalculate and preflight before building.");
             ProceduralWorldPlanner.PilotNeighborhoodScope scope=null;
-            if(expanded)
+            if(wide)
+            {
+                // Larger candidate only. Never silently return the old
+                // 250m pilot as a successful city expansion.
+                var failures=new List<string>();
+                ProceduralWorldPlanner.PilotSurface candidate=null;
+                foreach(float size in new[]{500f,375f})
+                {
+                    try
+                    {
+                        candidate=ProceduralWorldPlanner.FindPilotSurface(settings,detected,source,plan,pilot.city,key,true,size,22);
+                    }
+                    catch(InvalidOperationException ex){failures.Add(size.ToString("F0")+"m: "+ex.Message);continue;}
+                    if(!PhysicalPilotEligible(candidate)||candidate.region.width!=size||candidate.lotCount<22)
+                        throw new InvalidOperationException("Wide pilot candidate did not satisfy size/lot/zero-grading eligibility.");
+                    break;
+                }
+                if(candidate==null)throw new InvalidOperationException("V7.9 WIDE DISTRICT PREFLIGHT BLOCKED: "+string.Join(" | ",failures));
+                pilot=candidate;
+                scope=ProceduralWorldPlanner.BuildPilotNeighborhoodScope(plan,pilot,settings);
+                pilotSurface=pilot;pilotOwner=plan;pilotOverlay=true;showPreview=true;
+                Debug.Log("[ProceduralWorld] V7.9 wider district selected: "+pilot.Summary());
+            }
+            else if(expanded)
             {
                 try{scope=ProceduralWorldPlanner.BuildPilotNeighborhoodScope(plan,pilot,settings);}
                 catch(InvalidOperationException ex)
@@ -145,8 +172,10 @@ namespace DeliveryDriver.EditorTools
             var open=expanded?scope.terminals:nodes.Where(n=>plan.edges.Concat(plan.authoredLinks).Any(e=>
                 (e.a==n||e.b==n)&&!edges.Contains(e))).ToHashSet();
             if(LayerMask.NameToLayer("Road")<0)throw new InvalidOperationException("Required Road physics layer is missing.");
-            if(!EditorUtility.DisplayDialog("Build isolated physical pilot?",
+            if(!EditorUtility.DisplayDialog(wide?"Build wider physical district?":"Build isolated physical pilot?",
                 "Create a new, separate test scene and independent assets under "+PhysicalPilotRoot+
+                (wide?". V7.9 district size "+pilot.region.width.ToString("F0")+" x "+pilot.region.height.ToString("F0")+
+                    "m, "+pilot.lotCount+" matched candidate lots (actual placement must still pass).":"")+
                 (expanded?". Expanded scope: "+scope.represented+" source roads, "+scope.edges.Count+" pieces, "+scope.clipped+
                     " clipped pieces, "+scope.terminals.Count+" open boundary terminals, "+scope.fullJunctions+
                     " complete junctions, "+scope.footprintOnly+" touching roads outside inset.":
@@ -177,7 +206,8 @@ namespace DeliveryDriver.EditorTools
                         throw new InvalidOperationException("Could not create pilot asset root.");
                 }
                 string folderGuid=AssetDatabase.CreateFolder(PhysicalPilotRoot,
-                    (buildings?"Istanbul_Buildings_":expanded?"Istanbul_Neighborhood_":"Istanbul_")+DateTime.UtcNow.ToString("yyyyMMdd_HHmmss")+"_"+Guid.NewGuid().ToString("N").Substring(0,8));
+                    (wide?"Istanbul_Buildings_Wide_"+pilot.region.width.ToString("F0")+"m_":buildings?"Istanbul_Buildings_":expanded?"Istanbul_Neighborhood_":"Istanbul_")+
+                    DateTime.UtcNow.ToString("yyyyMMdd_HHmmss")+"_"+Guid.NewGuid().ToString("N").Substring(0,8));
                 if(string.IsNullOrEmpty(folderGuid))throw new InvalidOperationException("Could not create unique pilot folder.");
                 folder=AssetDatabase.GUIDToAssetPath(folderGuid);
                 scenePath=folder+"/PhysicalPilot.unity";
@@ -331,6 +361,12 @@ namespace DeliveryDriver.EditorTools
                             " "+string.Join(" | ",buildingReport.records.GroupBy(r=>r.reason).Select(g=>g.Count()+"x "+g.Key))+
                             "; raw curb measurements "+string.Join(", ",buildingReport.records.Where(r=>r.curbMeasured)
                                 .Select(r=>r.index+":"+r.curbStep.ToString("F3")+"m")));
+                    // A wider district is useful only if it produces more
+                    // verified buildings than the known 21-building baseline.
+                    if(wide&&buildingReport.placed<22)
+                        throw new InvalidOperationException("V7.9 WIDE DISTRICT BUILDING COVERAGE BLOCKED: "+buildingReport.Summary()+
+                            " More than 21 actual buildings required. Reasons: "+
+                            string.Join(" | ",buildingReport.records.Where(r=>!r.placed).GroupBy(r=>r.reason).Select(g=>g.Count()+"x "+g.Key)));
                     int finalRays=ValidatePilotColliders(paths,junctionParents,localLayout,out float finalError);
                     if(finalRays!=raySamples||Mathf.Abs(finalError-maxSurfaceError)>.0001f)
                         throw new InvalidOperationException("Road collider evidence changed after building placement.");
@@ -351,6 +387,8 @@ namespace DeliveryDriver.EditorTools
                 var roadIds=string.Join(", ",edges.Select(e=>e.a.id+"-"+e.b.id));
                 string summary=version+(buildings?" PHYSICAL BUILDING PILOT PASS: ":expanded?" PHYSICAL NEIGHBORHOOD PASS: ":" PHYSICAL INFRASTRUCTURE PASS: ")+scenePath+
                     "; source fingerprint "+key+"; tile ["+pilot.row+","+pilot.column+"] "+pilot.region.ToString("F1")+
+                    (wide?"; V7.9 wide district "+pilot.region.width.ToString("F0")+"m, area "+(pilot.region.width*pilot.region.height).ToString("F0")+
+                        " m2; minimum 22 verified buildings met":"")+
                     "; roads "+paths.Count+" ("+roadIds+"), nodes "+nodes.Count+
                     ", open/external branch nodes "+open.Count+", full junction meshes "+junctionParents.Count(x=>x.Key.connectedRoads.Count>=3)+
                     ", mesh colliders "+colliderCount+", independent mesh assets "+meshAssets+
