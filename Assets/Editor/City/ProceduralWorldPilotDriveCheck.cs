@@ -106,7 +106,38 @@ namespace DeliveryDriver.EditorTools
             }
             return found.OrderBy(c=>c.roads.Count).ThenBy(c=>string.Join("|",c.roads.Select(r=>r.name)),StringComparer.Ordinal).ToList();
         }
-        private static List<Vector3> Anchors(Cycle cycle)
+        // Simplify only a candidate trajectory's reference polyline, never
+        // the source spline. Keep both original road endpoints (junctions).
+        // A bounded 3D segment-error test prevents shortcutting sharp bends
+        // beyond the declared tolerance. Collider validation remains mandatory.
+        internal static List<Vector3> SimplifyPilotRoad(List<Vector3> points,float tolerance)
+        {
+            if(points==null||points.Count<2||tolerance<0f||tolerance>1f)
+                throw new InvalidOperationException("Invalid pilot trajectory simplification.");
+            if(tolerance==0f)return new List<Vector3>(points);
+            var keep=new bool[points.Count];keep[0]=keep[points.Count-1]=true;
+            var pending=new Stack<(int first,int last)>();pending.Push((0,points.Count-1));
+            float limit=tolerance*tolerance;
+            while(pending.Count>0)
+            {
+                var range=pending.Pop();
+                Vector3 a=points[range.first],d=points[range.last]-a;
+                float len=d.sqrMagnitude,best=-1f;int split=-1;
+                for(int i=range.first+1;i<range.last;i++)
+                {
+                    float t=len>.00000001f?Mathf.Clamp01(Vector3.Dot(points[i]-a,d)/len):0f;
+                    float error=(points[i]-(a+d*t)).sqrMagnitude;
+                    if(error>best){best=error;split=i;}
+                }
+                if(split>=0&&best>limit)
+                {
+                    keep[split]=true;
+                    pending.Push((range.first,split));pending.Push((split,range.last));
+                }
+            }
+            return points.Where((v,i)=>keep[i]).ToList();
+        }
+        private static List<Vector3> Anchors(Cycle cycle,float tolerance)
         {
             var points=new List<Vector3>();
             for(int j=0;j<cycle.roads.Count;j++)
@@ -120,18 +151,20 @@ namespace DeliveryDriver.EditorTools
                         Vector3.Distance(road.GetControlPoint(k+2),Vector3.Lerp(a,b,2f/3f))>.001f)
                         throw new InvalidOperationException("Nonlinear pilot spline requires a different trajectory sampler.");
                 }
+                var anchors=new List<Vector3>();
                 for(int i=0;i<=road.SegmentCount;i++)
                 {
                     int k=(forward?i:road.SegmentCount-i)*3;
-                    Vector3 point=road.GetControlPoint(k);
-                    if(points.Count>0&&i==0)
-                    {
-                        if(Vector3.Distance(points[points.Count-1],point)>.001f)
-                            throw new InvalidOperationException("Cycle spline endpoints differ.");
-                        continue;
-                    }
-                    points.Add(point);
+                    anchors.Add(road.GetControlPoint(k));
                 }
+                var simplified=SimplifyPilotRoad(anchors,tolerance);
+                if(points.Count>0)
+                {
+                    if(Vector3.Distance(points[points.Count-1],simplified[0])>.001f)
+                        throw new InvalidOperationException("Cycle spline endpoints differ.");
+                    points.AddRange(simplified.Skip(1));
+                }
+                else points.AddRange(simplified);
             }
             if(Vector3.Distance(points[0],points[points.Count-1])>.001f)
                 throw new InvalidOperationException("Cycle is not closed.");
@@ -156,7 +189,9 @@ namespace DeliveryDriver.EditorTools
                 if(Mathf.Abs(angle)<.0001f)continue;
                 if(Mathf.Abs(angle)>Mathf.PI-.01f)throw new InvalidOperationException("Reversing loop corner.");
                 float trim=radius*Mathf.Tan(Mathf.Abs(angle)*.5f);
-                if(trim>=l||trim>=r)throw new InvalidOperationException("Insufficient length for Minivan turn radius at "+b.ToString("F2"));
+                if(trim>=l||trim>=r)throw new InvalidOperationException("Insufficient length for Minivan turn radius at "+b.ToString("F2")+
+                    " (angle "+(Mathf.Abs(angle)*Mathf.Rad2Deg).ToString("F2")+" deg, radius "+radius.ToString("F3")+
+                    " m, required tangent "+trim.ToString("F3")+" m, incoming/outgoing "+l.ToString("F3")+"/"+r.ToString("F3")+" m)");
                 trims[i]=trim;angles[i]=angle;
                 enter[i]=Vector3.Lerp(b,a,trim/l);exit[i]=Vector3.Lerp(b,c,trim/r);
                 centers[i]=XZ(enter[i])+Left(u)*(Mathf.Sign(angle)*radius);
@@ -166,7 +201,9 @@ namespace DeliveryDriver.EditorTools
             {
                 int next=(i+1)%n;
                 if(trims[i]+trims[next]>=lengths[i]-.001f)
-                    throw new InvalidOperationException("Adjacent Minivan turn fillets overlap.");
+                    throw new InvalidOperationException("Adjacent Minivan turn fillets overlap between "+points[i].ToString("F2")+
+                        " and "+points[next].ToString("F2")+" (required "+(trims[i]+trims[next]).ToString("F3")+
+                        " m, available "+lengths[i].ToString("F3")+" m).");
                 if(Mathf.Abs(angles[i])>.0001f)
                 {
                     Vector2 radial=XZ(enter[i])-centers[i];
@@ -267,26 +304,41 @@ namespace DeliveryDriver.EditorTools
             var car=ReadVehicle();var cycles=FindCycles(roads);
             if(cycles.Count==0)throw new InvalidOperationException("No closed route in pilot graph; open terminals excluded.");
             Physics.SyncTransforms();
-            var failures=new List<string>();
+            var failures=new List<string>();int trials=0,constructed=0;
+            // Exact original first, then progressively simplify redundant
+            // dense samples on each edge, keeping junction positions fixed.
+            // No radius, vehicle clearance or collider guard is relaxed.
             foreach(var cycle in cycles.Take(24))
             {
                 string names=string.Join(", ",cycle.roads.Select(r=>r.name));
-                List<Vector3> path;
-                try{path=RoundedLoop(Anchors(cycle),car.radius);}
-                catch(InvalidOperationException ex){failures.Add(names+": "+ex.Message);continue;}
-                string issue=CheckRoute(path,car,asphalt,ground,out int rays,out float length,out float spread);
-                if(issue!=null){failures.Add(names+": "+issue);continue;}
-                Debug.Log("[ProceduralWorld] V7.5 MINIVAN STATIC LOOP PASS: "+scene.path+
-                    "; prefab "+PrefabPath+"; body "+car.size.ToString("F2")+" m, wheelbase "+car.wheelbase.ToString("F2")+
-                    " m, conservative turn radius "+car.radius.ToString("F2")+" m; closed route "+length.ToString("F1")+
-                    " m, "+cycle.roads.Count+" roads, "+path.Count+" poses, "+rays+" asphalt probes, max wheel height spread "+
-                    spread.ToString("F3")+" m; route "+names+". Static centerline geometry only: not lane routing, dynamic steering, braking, suspension, traffic or driving PASS. No scene/save changes.");
-                var view=SceneView.lastActiveSceneView;
-                if(view!=null){view.pivot=path[0];view.size=35f;view.Repaint();}
-                return;
+                var original=Anchors(cycle,0f);
+                List<Vector3> previous=null;
+                foreach(float tolerance in new[]{0f,.01f,.05f,.15f,.35f,.75f,1f})
+                {
+                    var anchors=tolerance==0f?original:Anchors(cycle,tolerance);
+                    if(previous!=null&&anchors.SequenceEqual(previous))continue;
+                    previous=anchors;trials++;
+                    string label="trajectory reference "+anchors.Count+"/"+original.Count+" anchors, tolerance "+
+                        tolerance.ToString("F2")+" m";
+                    List<Vector3> path;
+                    try{path=RoundedLoop(anchors,car.radius);}
+                    catch(InvalidOperationException ex){failures.Add(names+" ["+label+"]: "+ex.Message);continue;}
+                    constructed++;
+                    string issue=CheckRoute(path,car,asphalt,ground,out int rays,out float length,out float spread);
+                    if(issue!=null){failures.Add(names+" ["+label+"]: "+issue);continue;}
+                    Debug.Log("[ProceduralWorld] V7.5 MINIVAN STATIC LOOP PASS: "+scene.path+
+                        "; prefab "+PrefabPath+"; body "+car.size.ToString("F2")+" m, wheelbase "+car.wheelbase.ToString("F2")+
+                        " m, conservative turn radius "+car.radius.ToString("F2")+" m; closed route "+length.ToString("F1")+
+                        " m, "+cycle.roads.Count+" roads, "+path.Count+" poses, "+rays+" asphalt probes, max wheel height spread "+
+                        spread.ToString("F3")+" m; "+label+"; candidates tried/constructed "+trials+"/"+constructed+
+                        "; route "+names+". Static centerline geometry only: not lane routing, dynamic steering, braking, suspension, traffic or driving PASS. No scene/save changes.");
+                    var view=SceneView.lastActiveSceneView;
+                    if(view!=null){view.pivot=path[0];view.size=35f;view.Repaint();}
+                    return;
+                }
             }
-            throw new InvalidOperationException("V7.5 MINIVAN STATIC LOOP BLOCKED: "+string.Join(" | ",failures)+
-                ". No road geometry changed; no Play Mode performed.");
+            throw new InvalidOperationException("V7.5 MINIVAN STATIC LOOP BLOCKED: candidates tried/constructed "+
+                trials+"/"+constructed+"; "+string.Join(" | ",failures)+". No road geometry changed; no Play Mode performed.");
         }
     }
 }

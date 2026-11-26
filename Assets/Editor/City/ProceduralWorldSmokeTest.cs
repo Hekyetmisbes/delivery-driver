@@ -211,6 +211,23 @@ namespace DeliveryDriver.EditorTools
                     new Vector3(5,0,5),new Vector3(0,0,5)},4f);}
                 catch(InvalidOperationException){tightLoopRejected=true;}
                 Require(tightLoopRejected,"Overlapping vehicle turn fillets accepted.");
+                // Dense linear samples adjacent to a real junction must not
+                // constrain a turn to a single short spline sample interval.
+                var denseRoad=new List<Vector3>{Vector3.zero,new Vector3(1,0,0),new Vector3(19,0,0),new Vector3(20,0,0)};
+                var simplifiedRoad=ProceduralWorldPilotDriveCheck.SimplifyPilotRoad(denseRoad,.01f);
+                Require(simplifiedRoad.SequenceEqual(new[]{denseRoad[0],denseRoad[3]})&&denseRoad.Count==4,
+                    "Pilot simplification did not preserve endpoints or mutated input.");
+                var denseLoop=new List<Vector3>{Vector3.zero,new Vector3(19,0,0),new Vector3(20,0,0),
+                    new Vector3(20,0,1),new Vector3(20,0,20),new Vector3(0,0,20)};
+                bool denseRejected=false;
+                try{ProceduralWorldPilotDriveCheck.RoundedLoop(denseLoop,4f);}
+                catch(InvalidOperationException){denseRejected=true;}
+                Require(denseRejected&&ProceduralWorldPilotDriveCheck.RoundedLoop(new List<Vector3>{
+                    simplifiedRoad[0],simplifiedRoad[1],new Vector3(20,0,20),new Vector3(0,0,20)},4f).Count>200,
+                    "Pilot dense anchor regression not reproduced/resolved.");
+                var bendRoad=new List<Vector3>{Vector3.zero,new Vector3(5,0,2),new Vector3(10,0,0)};
+                Require(ProceduralWorldPilotDriveCheck.SimplifyPilotRoad(bendRoad,1f).SequenceEqual(bendRoad),
+                    "Pilot simplification erased a bend outside tolerance.");
                 var pilotRect=new Rect(-1,-1,2,2);
                 Require(ProceduralWorldGeneratorWindow.PilotTriangleOverlapsRect(new Vector2(-3,0),new Vector2(3,0),new Vector2(0,3),pilotRect)&&
                     !ProceduralWorldGeneratorWindow.PilotTriangleOverlapsRect(new Vector2(2,2),new Vector2(3,2),new Vector2(2,3),pilotRect)&&
