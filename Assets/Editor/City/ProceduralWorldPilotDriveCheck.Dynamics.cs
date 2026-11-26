@@ -12,11 +12,12 @@ namespace DeliveryDriver.EditorTools
     {
         private const string DynamicMenu="Tools/Delivery Driver/City/Run Pilot Minivan Physics Test";
         private const string LoopMenu="Tools/Delivery Driver/City/Run Pilot Minivan Closed Loop Physics Test";
+        private const string ManualMenu="Tools/Delivery Driver/City/Open Pilot Manual Drive";
         private const float Step=.02f,TestMass=1500f,TargetSpeed=10f/3.6f;
         private sealed class DynamicStats
         {
             public string phase="setup";
-            public int steps,groundedMin=4,groundSamples,stableSteps;
+            public int steps,groundedMin=4,groundSamples,stableSteps,lastGrounded;
             public float clearance=float.PositiveInfinity,maxSpeed,maxForwardSpeed,maxLateral,maxTilt,distance,stopDistance,settledClearance;
             public float routeProgress,routeLength,maxSteer;
             public int curveSteps;
@@ -24,7 +25,8 @@ namespace DeliveryDriver.EditorTools
                 " m, speed peak "+(maxSpeed*3.6f).ToString("F2")+" km/h, minimum grounded asphalt wheels after initial settling "+
                 (groundSamples==0?"unmeasured":groundedMin+"/4")+" ("+groundSamples+" samples), min sampled body clearance "+
                 (float.IsPositiveInfinity(clearance)?"unmeasured":clearance.ToString("F3")+" m")+
-                ", maximum lateral deviation "+maxLateral.ToString("F3")+" m, max tilt "+maxTilt.ToString("F2")+" deg"+
+                (phase=="manual drive"?"":", maximum lateral deviation "+maxLateral.ToString("F3")+" m")+
+                ", max tilt "+maxTilt.ToString("F2")+" deg"+
                 (routeLength>0f?", closed route progress "+routeProgress.ToString("F2")+"/"+routeLength.ToString("F2")+
                 " m, peak front steering "+maxSteer.ToString("F2")+" deg, curve-speed steps "+curveSteps:"");
         }
@@ -49,6 +51,17 @@ namespace DeliveryDriver.EditorTools
         }
         [MenuItem(LoopMenu,true)]
         private static bool CanRunLoop()=>CanRun();
+        [MenuItem(ManualMenu,false,5)]
+        private static void OpenManualMenu()
+        {
+            if(PilotManualDriveWindow.HasLiveSession){PilotManualDriveWindow.FocusLiveSession();return;}
+            try{Check(true,false,true);}
+            catch(OperationCanceledException){Debug.Log("[ProceduralWorld] V7.8 manual drive setup cancelled.");}
+            catch(Exception ex){Debug.LogException(ex);}
+            finally{EditorUtility.ClearProgressBar();}
+        }
+        [MenuItem(ManualMenu,true)]
+        private static bool CanRunManual()=>CanRun();
 
         // Unwrapped arc-distance tracking on the static-proven closed
         // polyline. Local search only after initialization; no jumping
@@ -202,8 +215,9 @@ namespace DeliveryDriver.EditorTools
                 throw new InvalidOperationException("Missing vehicle setting "+key);
             return p.floatValue;
         }
-        private static void RunIsolatedDynamics(Scene source,GameObject sourceRoot,Vehicle car,List<Vector3> path,List<MeshCollider> sourceAsphalt,bool loopTest)
+        private static void RunIsolatedDynamics(Scene source,GameObject sourceRoot,Vehicle car,List<Vector3> path,List<MeshCollider> sourceAsphalt,bool loopTest,bool manualTest=false)
         {
+            if(loopTest&&manualTest)throw new InvalidOperationException("Choose either automated loop or manual drive.");
             if(!TryPilotStraight(path,out Vector3 start,out Vector3 forward))
                 throw new InvalidOperationException("V7.6 physics test requires 45m verified straight route; no simulation performed.");
             if(source.isDirty||SceneManager.sceneCount!=1||SceneManager.GetActiveScene()!=source)
@@ -233,7 +247,7 @@ namespace DeliveryDriver.EditorTools
             var originalWheels=new[]{controller.frontLeftCollider,controller.frontRightCollider,
                 controller.rearLeftCollider,controller.rearRightCollider};
             var stats=new DynamicStats();Scene staging=default,local=default;
-            string result=null;
+            string result=null;bool sessionTransferred=false;
             try
             {
                 local=EditorSceneManager.NewPreviewScene();
@@ -314,17 +328,21 @@ namespace DeliveryDriver.EditorTools
                         if(w.GetGroundHit(out WheelHit hit))
                         {
                             if(hit.collider==null||!asphaltSet.Contains(hit.collider))
+                            {
+                                stats.lastGrounded=grounded;
                                 throw new InvalidOperationException("Wheel contacted non-asphalt "+(hit.collider==null?"unknown":hit.collider.name));
+                            }
                             grounded++;
                         }
                     }
+                    stats.lastGrounded=grounded;
                     if(requireGround)
                     {
                         stats.groundSamples++;stats.groundedMin=Mathf.Min(stats.groundedMin,grounded);
                         if(grounded!=4)throw new InvalidOperationException("Lost four-wheel asphalt support ("+grounded+"/4).");
                     }
                     stats.maxSpeed=Mathf.Max(stats.maxSpeed,rb.linearVelocity.magnitude);
-                    if(stats.phase=="straight acceleration"||stats.phase=="closed loop")
+                    if(stats.phase=="straight acceleration"||stats.phase=="closed loop"||stats.phase=="manual drive")
                         stats.maxForwardSpeed=Mathf.Max(stats.maxForwardSpeed,Vector3.Dot(rb.linearVelocity,rb.rotation*Vector3.forward));
                     stats.maxTilt=Mathf.Max(stats.maxTilt,Vector3.Angle(rb.rotation*Vector3.up,Vector3.up));
                     Vector3 delta=rb.position-start;
@@ -344,13 +362,24 @@ namespace DeliveryDriver.EditorTools
                             stats.routeProgress<-.5f||stats.routeProgress>stats.routeLength+10f)
                             throw new InvalidOperationException("Vehicle reversed or left bounded closed route.");
                     }
+                    else if(manualTest&&stats.phase=="manual drive")
+                    {
+                        // Manual driving may use any represented road, not
+                        // just the automated centerline loop. All actual
+                        // contact, footprint, clearance and collision tests
+                        // below remain mandatory; no open-road extrapolation.
+                        lateral=0f;
+                        stats.distance+=Vector2.Distance(XZ(rb.position),XZ(lastPosition));
+                        lastPosition=rb.position;
+                    }
                     else
                     {
                         stats.distance=Vector3.Dot(delta,forward);
                         lateral=Mathf.Abs(Vector3.Dot(delta,rotation*Vector3.right));
                     }
                     stats.maxLateral=Mathf.Max(stats.maxLateral,lateral);
-                    if(lateral>1f||(!loopTest&&(stats.distance<-.5f||stats.distance>35f))||stats.maxTilt>15f)
+                    if(lateral>1f||(!loopTest&&(!manualTest||stats.phase!="manual drive")&&
+                        (stats.distance<-.5f||stats.distance>35f))||stats.maxTilt>15f)
                         throw new InvalidOperationException("Vehicle left bounded test corridor or exceeded tilt limit.");
                     float clearance=float.PositiveInfinity;
                     for(int z=-1;z<=1;z++)for(int x=-1;x<=1;x++)
@@ -389,6 +418,74 @@ namespace DeliveryDriver.EditorTools
                 }
                 if(stats.stableSteps<50)throw new InvalidOperationException("Minivan did not settle under gravity in six simulated seconds.");
                 stats.settledClearance=sampledClearance;
+                if(manualTest)
+                {
+                    // Transfer only the owned preview PhysicsScene. Close
+                    // staging and restore the saved source before the live
+                    // editor window can receive any user input.
+                    if(!SceneManager.SetActiveScene(source)||SceneManager.GetActiveScene()!=source||
+                        !EditorSceneManager.CloseScene(staging,true)||SceneManager.sceneCount!=1||source.isDirty)
+                        throw new InvalidOperationException("Could not restore clean source before manual session.");
+                    staging=default;
+                    stats.phase="manual drive";stats.distance=0f;lastPosition=rb.position;
+                    float currentSteer=0f;
+                    float steerRate=ReadFloat(settings,"steeringInputRate");
+                    float coast=ReadFloat(settings,"coastBrakeTorque");
+                    if(steerRate<=0f||coast<0f)
+                        throw new InvalidOperationException("Invalid manual steering/coast settings.");
+                    void ManualStep(float throttle,float steerInput,bool braking)
+                    {
+                        if(EditorApplication.isPlayingOrWillChangePlaymode||EditorApplication.isCompiling||
+                            !source.IsValid()||!source.isLoaded||source.isDirty||SceneManager.sceneCount!=1||
+                            SceneManager.GetActiveScene()!=source||!local.IsValid()||!physics.IsValid()||
+                            physics.Equals(Physics.defaultPhysicsScene)||physics.Equals(source.GetPhysicsScene())||
+                            vehicle==null||vehicle.scene!=local)
+                            throw new InvalidOperationException("Manual drive isolation changed; stopping before next step.");
+                        float speed=Vector3.Dot(rb.linearVelocity,rb.rotation*Vector3.forward);
+                        // A conservative low-speed manual sandbox, not the
+                        // production CarController. Gas only forward; S/Space
+                        // brakes. No autonomous steering or pose manipulation.
+                        float desiredSpeed=Mathf.Abs(steerInput)>.05f?5f/3.6f:TargetSpeed;
+                        float error=desiredSpeed-speed;
+                        float torque=braking?0f:Mathf.Clamp(error*180f,0f,motor*.25f)*Mathf.Clamp01(throttle);
+                        float brakingTorque=braking?brake*.5f:
+                            throttle>.01f?Mathf.Clamp(-error*300f,0f,brake*.25f):coast;
+                        currentSteer=Mathf.MoveTowards(currentSteer,Mathf.Clamp(steerInput,-1f,1f)*steerLimit,
+                            steerRate*steerLimit*Step);
+                        wheels[0].steerAngle=currentSteer<0f?Mathf.Max(-steerLimit,currentSteer*ackermann):currentSteer;
+                        wheels[1].steerAngle=currentSteer>0f?Mathf.Min(steerLimit,currentSteer*ackermann):currentSteer;
+                        stats.maxSteer=Mathf.Max(stats.maxSteer,Mathf.Max(Mathf.Abs(wheels[0].steerAngle),Mathf.Abs(wheels[1].steerAngle)));
+                        for(int w=0;w<4;w++)
+                        {
+                            wheels[w].motorTorque=torque*(w<2?bias:1f-bias)*.5f;
+                            wheels[w].brakeTorque=brakingTorque;
+                        }
+                        physics.Simulate(Step);stats.steps++;
+                        if(float.IsNaN(rb.position.y)||float.IsInfinity(rb.position.y))
+                            throw new InvalidOperationException("Invalid manual physics pose.");
+                        Sample(true);
+                    }
+                    string ManualReport()=>"Speed "+(rb.linearVelocity.magnitude*3.6f).ToString("F1")+" km/h | "+
+                        "distance "+stats.distance.ToString("F1")+" m | clearance "+sampledClearance.ToString("F3")+
+                        " m | last sampled asphalt wheels "+stats.lastGrounded+"/4\n"+stats.Summary()+
+                        ", peak steering "+stats.maxSteer.ToString("F1")+" deg";
+                    void CloseManual()
+                    {
+                        if(local.IsValid()&&!EditorSceneManager.ClosePreviewScene(local))
+                            throw new InvalidOperationException("Could not close manual physics preview scene. Restart the editor without saving temporary changes.");
+                        local=default;
+                        Debug.Log("[ProceduralWorld] V7.8 MANUAL DRIVE SESSION ENDED: "+source.path+"; "+stats.Summary()+
+                            ", peak steering "+stats.maxSteer.ToString("F1")+" deg; temporary preview closed. "+
+                            "Source still clean: "+(source.IsValid()&&source.isLoaded&&!source.isDirty)+
+                            ". No automated manual-driving PASS, no scene save by tool.");
+                    }
+                    PilotManualDriveWindow.OpenSession(source,rb,wheels,car.center,car.size,path,ManualStep,ManualReport,CloseManual);
+                    sessionTransferred=true;
+                    Debug.Log("[ProceduralWorld] V7.8 MANUAL DRIVE READY: "+source.path+
+                        "; settled native 1500kg rig, clearance "+stats.settledClearance.ToString("F3")+
+                        " m; temporary local physics; manual W/A/D, S/Space brake. No Play Mode, no CarController or save initialization.");
+                    return;
+                }
                 if(loopTest)
                 {
                     originStation=tracker.Progress;stats.routeProgress=0f;
@@ -462,14 +559,15 @@ namespace DeliveryDriver.EditorTools
                     "Actual simulated acceleration and stop only. No CarController update, cargo, full loop, user driving or traffic certification.");
             }
             catch(OperationCanceledException){throw;}
-            catch(Exception ex){throw new InvalidOperationException((loopTest?"V7.7 MINIVAN ISOLATED CLOSED LOOP PHYSICS BLOCKED: ":
+            catch(Exception ex){throw new InvalidOperationException((manualTest?"V7.8 MANUAL DRIVE SETUP BLOCKED: ":
+                loopTest?"V7.7 MINIVAN ISOLATED CLOSED LOOP PHYSICS BLOCKED: ":
                 "V7.6 MINIVAN ISOLATED PHYSICS BLOCKED: ")+stats.Summary()+"; "+ex.Message,ex);}
             finally
             {
                 // Never save these temporary scenes or enter Play Mode.
                 // Do not clear source dirty state or alter global physics.
                 bool closed=true;
-                if(local.IsValid()&&!EditorSceneManager.ClosePreviewScene(local))
+                if(!sessionTransferred&&local.IsValid()&&!EditorSceneManager.ClosePreviewScene(local))
                 {closed=false;Debug.LogError("[ProceduralWorld] Could not close temporary physics preview scene.");}
                 if(staging.IsValid()&&staging.isLoaded)
                 {

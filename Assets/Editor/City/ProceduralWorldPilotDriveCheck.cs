@@ -335,9 +335,11 @@ namespace DeliveryDriver.EditorTools
             }
             return null;
         }
-        private static void Check(bool dynamicTest=false,bool loopTest=false)
+        private static void Check(bool dynamicTest=false,bool loopTest=false,bool manualTest=false)
         {
             var scene=SceneManager.GetActiveScene();
+            if(PilotManualDriveWindow.HasLiveSession)
+                throw new InvalidOperationException("Close the active pilot manual drive session first.");
             if(EditorApplication.isPlayingOrWillChangePlaymode||EditorApplication.isCompiling||
                 SceneManager.sceneCount!=1||scene.isDirty||!scene.path.StartsWith("Assets/ProceduralPilotTests/Istanbul_Buildings_",StringComparison.Ordinal)||
                 scene.name!="PhysicalPilot")
@@ -393,7 +395,7 @@ namespace DeliveryDriver.EditorTools
                         "; "+label+"; candidates tried/constructed "+trials+"/"+constructed+
                         "; route "+names+". Nominal upright static geometry only; compressed-envelope clearance is diagnostic, negative means potential bottoming. "+
                         "Not loaded equilibrium, lane routing, dynamic steering, braking, suspension, traffic or driving PASS. No scene/save changes.");
-                    if(dynamicTest)RunIsolatedDynamics(scene,root,car,path,asphalt,loopTest);
+                    if(dynamicTest)RunIsolatedDynamics(scene,root,car,path,asphalt,loopTest,manualTest);
                     else
                     {
                         var view=SceneView.lastActiveSceneView;
