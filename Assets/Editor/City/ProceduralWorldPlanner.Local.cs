@@ -295,6 +295,150 @@ namespace DeliveryDriver.EditorTools
             plan.notes.Add("Local "+(mode==0?"hotspot":mode==1?"bend":"vertical")+" refinement: "+changed+"/"+roads.Count+" eligible roads improved; unchanged endpoints.");
         }
 
+        private sealed class HotspotHeightSample
+        {
+            public Vector3 position;
+            public Node node;
+            public bool locked;
+            public readonly List<(HotspotHeightSample other,float length)> adjacent=new List<(HotspotHeightSample,float)>();
+        }
+
+        // Propagate only the displacement necessary to maintain the original grade
+        // bound. A saturated slope has zero slack; an unconstrained neighbor can
+        // absorb the displacement without moving.
+        internal static float HotspotNeighborShift(float shift,float signedRise,float maximumRise)
+        {
+            return Mathf.Max(0f,shift-Mathf.Max(0f,maximumRise-signedRise));
+        }
+
+        private void RefineHotspotHeightChains()
+        {
+            var targets=plan.edges.Where(e=>e.sector=="Ankara"&&!e.Bridge)
+                .Select(e=>(edge:e,earth:RoadEarth(e.points)))
+                .Where(x=>x.earth.peak>settings.preferredGrading)
+                .OrderByDescending(x=>x.earth.peak).ThenBy(x=>x.edge.a.id).Take(5).Select(x=>x.edge).ToList();
+            if(targets.Count==0)return;
+            var stageInput=Measure(plan,settings);
+            int tested=0,blocked=0,profileRejected=0,qualityRejected=0,accepted=0;
+            foreach(var target in targets)
+            {
+                var earth=RoadEarth(target.points);
+                if(earth.peak<=settings.preferredGrading)continue;
+                var baseline=Measure(plan,settings);
+                var movable=plan.edges.Where(e=>e.sector=="Ankara"&&!e.Bridge).ToList();
+                var fixedNodes=new HashSet<Node>(plan.edges.Where(e=>e.Bridge||e.sector!="Ankara")
+                    .Concat(plan.authoredLinks).Concat(plan.detachedEdges).SelectMany(e=>new[]{e.a,e.b}));
+                var shared=new Dictionary<Node,HotspotHeightSample>();
+                var paths=new Dictionary<Edge,HotspotHeightSample[]>();
+                HotspotHeightSample Junction(Node n)
+                {
+                    if(!shared.TryGetValue(n,out var v))
+                        shared[n]=v=new HotspotHeightSample{position=n.position,node=n,locked=n.gate||fixedNodes.Contains(n)};
+                    return v;
+                }
+                foreach(var e in movable)
+                {
+                    var path=new HotspotHeightSample[e.points.Count];
+                    for(int i=0;i<path.Length;i++)
+                    {
+                        path[i]=i==0?Junction(e.a):i==path.Length-1?Junction(e.b):new HotspotHeightSample{position=e.points[i]};
+                        if(i>0)
+                        {
+                            float len=Vector2.Distance(XZ(path[i-1].position),XZ(path[i].position));
+                            path[i-1].adjacent.Add((path[i],len));path[i].adjacent.Add((path[i-1],len));
+                        }
+                    }
+                    paths[e]=path;
+                }
+                var seedPath=paths[target];int pivot=Mathf.Clamp(earth.index,1,seedPath.Length-1);
+                Vector2 center=XZ((seedPath[pivot-1].position+seedPath[pivot].position)*.5f);
+                Dictionary<HotspotHeightSample,float> best=null;
+                QualityReport bestQuality=null;
+                float bestTargetPeak=earth.peak;
+                bool CanMove(HotspotHeightSample v)
+                {
+                    Vector2 p=XZ(v.position);
+                    return !v.locked&&Vector2.Distance(center,p)<=450f&&
+                        !IsProtected(p,RoadClearance+settings.blend)&&!obstacles.Near(p,RoadClearance*2f+settings.blend);
+                }
+                // All paths and shared node positions must agree throughout a trial.
+                void Apply(Dictionary<HotspotHeightSample,float> changes,Dictionary<Edge,List<Vector3>> originals)
+                {
+                    foreach(var entry in changes)
+                        if(entry.Key.node!=null)entry.Key.node.position=entry.Key.position+Vector3.up*entry.Value;
+                    foreach(var e in originals.Keys)
+                    {
+                        var path=paths[e];var points=new List<Vector3>(path.Length);
+                        foreach(var v in path)
+                            points.Add(v.position+Vector3.up*(changes.TryGetValue(v,out float dy)?dy:0f));
+                        e.points=points;
+                    }
+                }
+                void RestoreTrial(Dictionary<HotspotHeightSample,float> changes,Dictionary<Edge,List<Vector3>> originals)
+                {
+                    foreach(var entry in changes)if(entry.Key.node!=null)entry.Key.node.position=entry.Key.position;
+                    foreach(var entry in originals)entry.Key.points=entry.Value;
+                }
+                foreach(float sign in new[]{-1f,1f})
+                foreach(float amount in new[]{.5f,1.5f,3f,6f})
+                {
+                    tested++;
+                    if(EditorUtility.DisplayCancelableProgressBar("V7.2 hotspot height chain","Candidate "+tested,.63f))throw new OperationCanceledException();
+                    var magnitudes=new Dictionary<HotspotHeightSample,float>();
+                    var queue=new Queue<HotspotHeightSample>();
+                    bool feasible=true;
+                    void RequireShift(HotspotHeightSample v,float value)
+                    {
+                        if(value<=.0001f||magnitudes.TryGetValue(v,out float prior)&&value<=prior+.0001f)return;
+                        if(!CanMove(v)||magnitudes.Count>=5000){feasible=false;return;}
+                        magnitudes[v]=value;queue.Enqueue(v);
+                    }
+                    RequireShift(seedPath[pivot-1],amount);RequireShift(seedPath[pivot],amount);
+                    int relaxations=0;
+                    while(feasible&&queue.Count>0)
+                    {
+                        if(++relaxations>100000){feasible=false;break;}
+                        var v=queue.Dequeue();float shift=magnitudes[v];
+                        foreach(var link in v.adjacent)
+                        {
+                            float signedRise=sign*(v.position.y-link.other.position.y);
+                            RequireShift(link.other,HotspotNeighborShift(shift,signedRise,settings.grade*link.length));
+                        }
+                    }
+                    if(!feasible){blocked++;continue;}
+                    var changes=magnitudes.ToDictionary(x=>x.Key,x=>sign*x.Value);
+                    var originals=paths.Where(x=>x.Value.Any(v=>changes.ContainsKey(v))).ToDictionary(x=>x.Key,x=>x.Key.points);
+                    try
+                    {
+                        Apply(changes,originals);
+                        if(originals.Keys.Any(e=>!e.points[0].Equals(e.a.position)||!e.points[e.points.Count-1].Equals(e.b.position)||!LocalProfileSafe(e.points)))
+                        {profileRejected++;continue;}
+                        float targetPeak=RoadEarth(target.points).peak;
+                        if(targetPeak>=earth.peak-.001f){qualityRejected++;continue;}
+                        var q=Measure(plan,settings);
+                        if(!NoTerrainRegression(baseline,q,settings)||!NoTerrainRegression(stageInput,q,settings)||
+                            !NoLocalQualityRegression(baseline,q)||!NoLocalQualityRegression(stageInput,q)||
+                            (q.peak>=baseline.peak-.001f&&BalancedCost(q,settings)>=BalancedCost(baseline,settings)-.001f))
+                        {qualityRejected++;continue;}
+                        if(bestQuality==null||q.peak<bestQuality.peak-.001f||
+                            Mathf.Abs(q.peak-bestQuality.peak)<=.001f&&BalancedCost(q,settings)<BalancedCost(bestQuality,settings))
+                        {best=changes;bestQuality=q;bestTargetPeak=targetPeak;}
+                    }
+                    finally{RestoreTrial(changes,originals);}
+                }
+                if(best!=null)
+                {
+                    var originals=paths.Where(x=>x.Value.Any(v=>best.ContainsKey(v))).ToDictionary(x=>x.Key,x=>x.Key.points);
+                    Apply(best,originals);accepted++;
+                    plan.notes.Add("Hotspot height chain "+target.a.id+"-"+target.b.id+": "+earth.peak.ToString("F3")+" -> "+bestTargetPeak.ToString("F3")+
+                        " m; "+originals.Count+" affected roads, "+best.Count+" samples; XZ topology unchanged.");
+                }
+            }
+            plan.notes.Add("Hotspot height chains: "+targets.Count+" target roads, "+tested+" trials, "+accepted+
+                " accepted; "+blocked+" fixed/boundary rejects, "+profileRejected+" profile rejects, "+qualityRejected+
+                " quality/no-benefit rejects. Shared endpoints, maximum 450 m radius; no XZ changes.");
+        }
+
         private void RepairWithInteriorJunctions()
         {
             var index=new StreetIndex();foreach(var e in plan.edges.Concat(plan.authoredLinks))index.Add(e);

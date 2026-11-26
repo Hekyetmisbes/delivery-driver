@@ -83,7 +83,7 @@ namespace DeliveryDriver.EditorTools
             using(var stream=new CryptoStream(Stream.Null,hash,CryptoStreamMode.Write))
             using(var writer=new BinaryWriter(stream))
             {
-                writer.Write("delivery-driver-procedural-preview-v7.2-local-v4");
+                writer.Write("delivery-driver-procedural-preview-v7.2-local-v5");
                 writer.Write(scene.path??"");writer.Write(DescribeSettings(s));
                 void Vec(Vector3 v){writer.Write(v.x);writer.Write(v.y);writer.Write(v.z);}
                 void Matrix(Matrix4x4 m){for(int i=0;i<16;i++)writer.Write(m[i]);}

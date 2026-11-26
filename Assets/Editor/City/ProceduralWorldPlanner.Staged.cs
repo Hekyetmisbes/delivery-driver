@@ -162,7 +162,7 @@ namespace DeliveryDriver.EditorTools
             Stage("5 Bridge approach refinement",x=>x.RefineFixedGateBridges(),(a,b)=>b.quality.bridgeGap>a.quality.bridgeGap+.01f);
             if(s.localOptimization)
             {
-                Stage("5a Hotspot optimization",x=>x.RefineLocalRoads(0),(a,b)=>b.quality.peak<a.quality.peak-.001f||BalancedCost(b.quality,s)<BalancedCost(a.quality,s)-.001f);
+                Stage("5a Hotspot optimization",x=>{x.RefineLocalRoads(0);x.RefineHotspotHeightChains();},(a,b)=>b.quality.peak<a.quality.peak-.001f||BalancedCost(b.quality,s)<BalancedCost(a.quality,s)-.001f);
                 Stage("5b Interior T-junction repair",x=>x.RepairWithInteriorJunctions(),(a,b)=>b.detachedEdges.Count<a.detachedEdges.Count,true);
                 Stage("5c Local bend smoothing",x=>x.RefineLocalRoads(1),(a,b)=>b.quality.sharpRoads<a.quality.sharpRoads);
                 Stage("5d Vertical curve smoothing",x=>x.RefineLocalRoads(2),(a,b)=>b.quality.verticalDefects<a.quality.verticalDefects||b.quality.verticalSeverity<a.quality.verticalSeverity-.0001f);

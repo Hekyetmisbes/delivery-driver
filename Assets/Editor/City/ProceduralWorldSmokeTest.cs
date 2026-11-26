@@ -201,6 +201,8 @@ namespace DeliveryDriver.EditorTools
                 settings.localOptimization=true;
                 TestExactRoadSplit();
                 TestLocalQualityGuard();
+                Require(Mathf.Abs(ProceduralWorldPlanner.HotspotNeighborShift(2f,1f,1f)-2f)<.0001f,"Saturated profile failed to propagate displacement.");
+                Require(ProceduralWorldPlanner.HotspotNeighborShift(2f,-1f,1f)<.0001f,"Grade slack failed to absorb displacement.");
                 var local=ProceduralWorldPlanner.Build(settings,emptySea,scene);
                 Verify(local,settings,0);
                 Require(local.version.StartsWith("V7.2")&&local.virtualReport!=null&&local.virtualSections.Count>0,"V7.2 virtual terrain missing.");
