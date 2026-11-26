@@ -265,7 +265,7 @@ namespace DeliveryDriver.EditorTools
             using(new EditorGUI.DisabledScope(physicalPilotQueued||!PhysicalPilotEligible(pilotSurface)||pilotSurface.region.width!=250f))
                 if(GUILayout.Button("Build neighborhood with buildings"))QueuePhysicalPilot(true,true);
             EditorGUILayout.LabelField("V7.9 Wider physical district — isolated scene",EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("Try a 500m square, then 375m if preflight blocks; at least 22 matched lots and 22 actual verified buildings. Same strict zero-grading, topology, mesh, collider and access checks. No 250m fallback, no source scene edits. Previous successful scenes remain unchanged.",MessageType.Info);
+            EditorGUILayout.HelpBox("Try up to three distinct 500m candidates, then up to two 375m candidates if preflight or measured geometry/coverage blocks. Failed disposable builds are rolled back before retry. At least 22 matched lots and 22 verified buildings. Same strict checks; no 250m fallback, no source scene edits.",MessageType.Info);
             using(new EditorGUI.DisabledScope(physicalPilotQueued||!PhysicalPilotEligible(pilotSurface)))
                 if(GUILayout.Button("Build wider district with buildings"))QueuePhysicalPilot(true,true,true);
             if(!string.IsNullOrEmpty(lastPhysicalPilotSummary))

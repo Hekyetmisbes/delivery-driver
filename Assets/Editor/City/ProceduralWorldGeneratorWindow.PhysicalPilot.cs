@@ -99,7 +99,53 @@ namespace DeliveryDriver.EditorTools
             return mat;
         }
 
+        // Only explicit measured candidate failures are retryable. Unexpected
+        // exceptions, cancellation, ownership or cleanup failures stop the run.
+        private sealed class PilotCandidateRejected : InvalidOperationException
+        {
+            public PilotCandidateRejected(string message):base(message){}
+        }
         private void BuildPhysicalPilot(bool expanded,bool buildings,bool wide=false)
+        {
+            if(!wide){BuildPhysicalPilotAttempt(expanded,buildings,false,250f,null,true);return;}
+            if(!expanded||!buildings)throw new InvalidOperationException("Wider city requires a complete building neighborhood.");
+            var excluded=new HashSet<Rect>();
+            var failures=new List<string>();
+            bool confirm=true;
+            foreach(float size in new[]{500f,375f})
+            {
+                int limit=size==500f?3:2;
+                for(int attempt=0;attempt<limit;attempt++)
+                {
+                    try
+                    {
+                        BuildPhysicalPilotAttempt(true,true,true,size,excluded,confirm);
+                        return; // Successful build, or explicit dialog cancellation.
+                    }
+                    catch(ProceduralWorldPlanner.PilotSearchExhaustedException ex)
+                    {
+                        failures.Add(size.ToString("F0")+"m search exhausted: "+ex.Message);
+                        Debug.Log("[ProceduralWorld] V7.9a "+failures[failures.Count-1]);
+                        break;
+                    }
+                    catch(PilotCandidateRejected ex)
+                    {
+                        if(pilotSurface==null||pilotSurface.region.width!=size||
+                            !excluded.Add(pilotSurface.region))
+                            throw new InvalidOperationException("Retry candidate identity could not be verified.",ex);
+                        confirm=false; // The initial confirmation covers bounded retries.
+                        string detail=pilotSurface.region.ToString("F3")+": "+ex.Message;
+                        failures.Add(detail);
+                        Debug.LogWarning("[ProceduralWorld] V7.9a physical candidate rejected and rolled back ("+
+                            excluded.Count+"/5): "+detail);
+                    }
+                }
+            }
+            throw new InvalidOperationException("V7.9a WIDE DISTRICT BLOCKED: bounded candidate search/build attempts exhausted. "+
+                "Rejected physical regions "+excluded.Count+". "+string.Join(" | ",failures));
+        }
+
+        private void BuildPhysicalPilotAttempt(bool expanded,bool buildings,bool wide,float wideSize,HashSet<Rect> excluded,bool confirm)
         {
             if(wide&&(!expanded||!buildings))throw new InvalidOperationException("Wider city requires a complete building neighborhood.");
             if(PilotManualDriveWindow.HasLiveSession)throw new InvalidOperationException("End manual pilot driving before building.");
@@ -123,22 +169,10 @@ namespace DeliveryDriver.EditorTools
             ProceduralWorldPlanner.PilotNeighborhoodScope scope=null;
             if(wide)
             {
-                // Larger candidate only. Never silently return the old
-                // 250m pilot as a successful city expansion.
-                var failures=new List<string>();
-                ProceduralWorldPlanner.PilotSurface candidate=null;
-                foreach(float size in new[]{500f,375f})
-                {
-                    try
-                    {
-                        candidate=ProceduralWorldPlanner.FindPilotSurface(settings,detected,source,plan,pilot.city,key,true,size,22);
-                    }
-                    catch(InvalidOperationException ex){failures.Add(size.ToString("F0")+"m: "+ex.Message);continue;}
-                    if(!PhysicalPilotEligible(candidate)||candidate.region.width!=size||candidate.lotCount<22)
-                        throw new InvalidOperationException("Wide pilot candidate did not satisfy size/lot/zero-grading eligibility.");
-                    break;
-                }
-                if(candidate==null)throw new InvalidOperationException("V7.9 WIDE DISTRICT PREFLIGHT BLOCKED: "+string.Join(" | ",failures));
+                // Re-screen exact source inputs for every distinct candidate.
+                var candidate=ProceduralWorldPlanner.FindPilotSurface(settings,detected,source,plan,pilot.city,key,true,wideSize,22,excluded);
+                if(!PhysicalPilotEligible(candidate)||candidate.region.width!=wideSize||candidate.lotCount<22)
+                    throw new InvalidOperationException("Wide pilot candidate did not satisfy size/lot/zero-grading eligibility.");
                 pilot=candidate;
                 scope=ProceduralWorldPlanner.BuildPilotNeighborhoodScope(plan,pilot,settings);
                 pilotSurface=pilot;pilotOwner=plan;pilotOverlay=true;showPreview=true;
@@ -172,10 +206,11 @@ namespace DeliveryDriver.EditorTools
             var open=expanded?scope.terminals:nodes.Where(n=>plan.edges.Concat(plan.authoredLinks).Any(e=>
                 (e.a==n||e.b==n)&&!edges.Contains(e))).ToHashSet();
             if(LayerMask.NameToLayer("Road")<0)throw new InvalidOperationException("Required Road physics layer is missing.");
-            if(!EditorUtility.DisplayDialog(wide?"Build wider physical district?":"Build isolated physical pilot?",
+            if(confirm&&!EditorUtility.DisplayDialog(wide?"Build wider physical district?":"Build isolated physical pilot?",
                 "Create a new, separate test scene and independent assets under "+PhysicalPilotRoot+
                 (wide?". V7.9 district size "+pilot.region.width.ToString("F0")+" x "+pilot.region.height.ToString("F0")+
-                    "m, "+pilot.lotCount+" matched candidate lots (actual placement must still pass).":"")+
+                    "m, "+pilot.lotCount+" matched candidate lots (actual placement must still pass). "+
+                    "On a measured geometry or building coverage rejection, discard the disposable candidate and try up to three 500m and two 375m candidates in total. Cancel via progress bar.":"")+
                 (expanded?". Expanded scope: "+scope.represented+" source roads, "+scope.edges.Count+" pieces, "+scope.clipped+
                     " clipped pieces, "+scope.terminals.Count+" open boundary terminals, "+scope.fullJunctions+
                     " complete junctions, "+scope.footprintOnly+" touching roads outside inset.":
@@ -326,7 +361,7 @@ namespace DeliveryDriver.EditorTools
                         {
                             var world=filter.transform.TransformPoint(vertex);
                             if(!ProceduralWorldPlanner.Contains(pilot.region,ProceduralWorldPlanner.XZ(world),.01f))
-                                throw new InvalidOperationException("Expanded pilot mesh outside verified region: "+filter.name+" at "+world.ToString("F3"));
+                                throw new PilotCandidateRejected("Expanded pilot mesh outside verified region: "+filter.name+" at "+world.ToString("F3"));
                         }
                     }
                 }
@@ -357,14 +392,14 @@ namespace DeliveryDriver.EditorTools
                     // remain read-only asset references, not be persisted again.
                     buildingReport=PlacePilotBuildings(test,root.transform,roadsRoot,terrainCollider,plan,pilot,scope,physicalRoads,folder,sidewalk);
                     if(buildingReport.placed==0)
-                        throw new InvalidOperationException("No pilot buildings passed physical lot checks. "+buildingReport.Summary()+
+                        throw new PilotCandidateRejected("No pilot buildings passed physical lot checks. "+buildingReport.Summary()+
                             " "+string.Join(" | ",buildingReport.records.GroupBy(r=>r.reason).Select(g=>g.Count()+"x "+g.Key))+
                             "; raw curb measurements "+string.Join(", ",buildingReport.records.Where(r=>r.curbMeasured)
                                 .Select(r=>r.index+":"+r.curbStep.ToString("F3")+"m")));
                     // A wider district is useful only if it produces more
                     // verified buildings than the known 21-building baseline.
                     if(wide&&buildingReport.placed<22)
-                        throw new InvalidOperationException("V7.9 WIDE DISTRICT BUILDING COVERAGE BLOCKED: "+buildingReport.Summary()+
+                        throw new PilotCandidateRejected("V7.9 WIDE DISTRICT BUILDING COVERAGE BLOCKED: "+buildingReport.Summary()+
                             " More than 21 actual buildings required. Reasons: "+
                             string.Join(" | ",buildingReport.records.Where(r=>!r.placed).GroupBy(r=>r.reason).Select(g=>g.Count()+"x "+g.Key)));
                     int finalRays=ValidatePilotColliders(paths,junctionParents,localLayout,out float finalError);
@@ -388,7 +423,7 @@ namespace DeliveryDriver.EditorTools
                 string summary=version+(buildings?" PHYSICAL BUILDING PILOT PASS: ":expanded?" PHYSICAL NEIGHBORHOOD PASS: ":" PHYSICAL INFRASTRUCTURE PASS: ")+scenePath+
                     "; source fingerprint "+key+"; tile ["+pilot.row+","+pilot.column+"] "+pilot.region.ToString("F1")+
                     (wide?"; V7.9 wide district "+pilot.region.width.ToString("F0")+"m, area "+(pilot.region.width*pilot.region.height).ToString("F0")+
-                        " m2; minimum 22 verified buildings met":"")+
+                        " m2; minimum 22 verified buildings met; V7.9a previously rejected physical candidates "+excluded.Count:"")+
                     "; roads "+paths.Count+" ("+roadIds+"), nodes "+nodes.Count+
                     ", open/external branch nodes "+open.Count+", full junction meshes "+junctionParents.Count(x=>x.Key.connectedRoads.Count>=3)+
                     ", mesh colliders "+colliderCount+", independent mesh assets "+meshAssets+
@@ -434,20 +469,37 @@ namespace DeliveryDriver.EditorTools
             {
                 try
                 {
+                    bool cleaned=true;
                     if(source.IsValid()&&source.isLoaded)
                     {
                         try{ActivatePilotScene(source,"Restore original active scene failed");}
-                        catch(Exception ex){Debug.LogException(ex);}
+                        catch(Exception ex){cleaned=false;Debug.LogException(ex);}
                     }
+                    else cleaned=false;
                     if(test.IsValid()&&test!=source&&!EditorSceneManager.CloseScene(test,true))
+                    {
+                        cleaned=false;
                         Debug.LogError("[ProceduralWorld] Could not close isolated pilot scene. Close it manually without saving any failed result.");
+                    }
                     if(!saved)
                     {
                         foreach(var mesh in looseMeshes)
                             if(mesh!=null&&!AssetDatabase.Contains(mesh))Object.DestroyImmediate(mesh);
                         if(!string.IsNullOrEmpty(folder)&&AssetDatabase.IsValidFolder(folder)&&!AssetDatabase.DeleteAsset(folder))
+                        {
+                            cleaned=false;
                             Debug.LogError("[ProceduralWorld] Failed to delete disposable pilot folder: "+folder);
+                        }
                     }
+                    // A retry may only start after confirmed cleanup. Do not
+                    // clear source dirtiness or ignore a failed asset deletion.
+                    if(wide&&(!cleaned||!source.IsValid()||!source.isLoaded||source.isDirty||
+                        SceneManager.GetActiveScene()!=source||SceneManager.sceneCount!=1||
+                        (!saved&&!string.IsNullOrEmpty(folder)&&AssetDatabase.IsValidFolder(folder))||
+                        sourceTile.terrain.terrainData!=originalData||sourceTile.terrain.materialTemplate!=originalMaterial||
+                        EditorUtility.IsDirty(originalData)!=originalDataDirty||
+                        (originalMaterial!=null&&EditorUtility.IsDirty(originalMaterial)!=originalMaterialDirty)))
+                        throw new InvalidOperationException("Wide district cleanup/source verification failed. Stop; do not save unexpected changes.");
                 }
                 finally
                 {
@@ -534,7 +586,7 @@ namespace DeliveryDriver.EditorTools
             }
             Physics.SyncTransforms();
             int probes=0;float largest=0f;
-            void Probe(Vector3 expected)
+            void Probe(Vector3 expected,string context)
             {
                 Vector2 xz=ProceduralWorldPlanner.XZ(expected);
                 if(!ground.TryHeight(xz,out float terrainY))throw new InvalidOperationException("Pilot collider probe outside cloned land.");
@@ -544,8 +596,14 @@ namespace DeliveryDriver.EditorTools
                     if(c.Raycast(ray,out RaycastHit hit,10f)&&hit.point.y>top){top=hit.point.y;found=true;}
                 float error=Mathf.Abs(top-(expected.y+.03f));
                 if(!found||error>.15f||terrainY-top>.08f)
-                    throw new InvalidOperationException("Pilot asphalt collider continuity/clearance failed at "+expected+
-                        (found?"; surface Y "+top.ToString("F3")+", terrain "+terrainY.ToString("F3"):"; no collider ray hit"));
+                {
+                    string nearest=string.Join(" | ",asphalt.OrderBy(c=>c.bounds.SqrDistance(expected)).Take(3).Select(c=>
+                        c.transform.parent.name+"/"+c.name+" bounds "+c.bounds.ToString("F3")+
+                        ", vertices "+c.sharedMesh.vertexCount+", triangles "+(c.sharedMesh.triangles.Length/3)));
+                    throw new PilotCandidateRejected("Pilot asphalt collider continuity/clearance failed at "+expected.ToString("F3")+
+                        (found?"; surface Y "+top.ToString("F3")+", terrain "+terrainY.ToString("F3"):"; no collider ray hit")+
+                        "; "+context+"; nearest asphalt meshes: "+nearest);
+                }
                 largest=Mathf.Max(largest,error);probes++;
             }
             foreach(var pair in roads)
@@ -561,11 +619,18 @@ namespace DeliveryDriver.EditorTools
                 {
                     Vector3 mid=Vector3.Lerp(a,b,(j+.5f)/stations);
                     foreach(float offset in new[]{-settings.width*.4f,0f,settings.width*.4f})
-                        Probe(mid+new Vector3(right.x*offset,0,right.y*offset));
+                        Probe(mid+new Vector3(right.x*offset,0,right.y*offset),
+                            "road "+pair.Key.name+", segment "+i+"/"+(pair.Value.Count-1)+
+                            ", station "+(j+1)+"/"+stations+", lateral offset "+offset.ToString("F3")+
+                            " m, segment "+a.ToString("F3")+" -> "+b.ToString("F3")+
+                            ", start/end "+pair.Key.startIntersection.name+"/"+pair.Key.endIntersection.name+
+                            " degrees "+pair.Key.startIntersection.connectedRoads.Count+"/"+pair.Key.endIntersection.connectedRoads.Count);
                 }
             }
             foreach(var entry in junctionParents)
-                if(entry.Key.connectedRoads.Count>=2)Probe(entry.Key.transform.position);
+                if(entry.Key.connectedRoads.Count>=2)Probe(entry.Key.transform.position,
+                    "junction "+entry.Key.name+" degree "+entry.Key.connectedRoads.Count+
+                    ", roads "+string.Join(", ",entry.Key.connectedRoads.Select(r=>r.name)));
             maxError=largest;
             return probes;
         }

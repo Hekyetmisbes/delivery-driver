@@ -267,8 +267,12 @@ namespace DeliveryDriver.EditorTools
             float b=Mathf.Lerp(p.proposed[(iz+1)*p.nx+ix],p.proposed[(iz+1)*p.nx+ix+1],x-ix);
             h=Mathf.Lerp(a,b,z-iz);return true;
         }
+        internal sealed class PilotSearchExhaustedException : InvalidOperationException
+        {
+            public PilotSearchExhaustedException(string message):base(message){}
+        }
         internal static PilotSurface FindPilotSurface(Settings s,Layout l,Scene scene,Plan source,string city,string fingerprint,
-            bool expanded=false,float size=250f,int minimumLots=1)
+            bool expanded=false,float size=250f,int minimumLots=1,HashSet<Rect> excluded=null)
         {
             if(size!=250f&&size!=375f&&size!=500f)
                 throw new InvalidOperationException("Unsupported physical pilot search size.");
@@ -294,11 +298,12 @@ namespace DeliveryDriver.EditorTools
                 for(float z=tile.area.yMin+halo;z+size<=tile.area.yMax-halo;z+=stride)
                 {
                     var r=new Rect(x,z,size,size);
+                    if(excluded!=null&&excluded.Contains(r))continue;
                     int count=lots.Count(a=>PilotContains(r,a.bounds));
                     if(count>=minimumLots)choices.Add(new PilotChoice{tile=tile,region=r,lots=count});
                 }
             }
-            if(choices.Count==0)throw new InvalidOperationException("No "+size.ToString("F0")+
+            if(choices.Count==0)throw new PilotSearchExhaustedException("No "+size.ToString("F0")+
                 "m interior pilot square with at least "+minimumLots+" matched prefab-fit lots found.");
             // Prefer regions with no already-known virtual issue or protected
             // area, then more lots. This is a pilot selection, not city clearance.
@@ -343,7 +348,7 @@ namespace DeliveryDriver.EditorTools
                     if(failures.Count<6)failures.Add(choice.region.ToString("F1")+": "+candidate.Summary());
                     if(surfaceTrials>=maxSurfaceTrials)break;
                 }
-                throw new InvalidOperationException("No connected "+size.ToString("F0")+"m zero-grading neighborhood found in bounded search. "+
+                throw new PilotSearchExhaustedException("No connected "+size.ToString("F0")+"m zero-grading neighborhood found in bounded search. "+
                     "Grid candidates "+shortlist.Count+", topology rejects "+topologyRejected+", native trials/rejects "+
                     surfaceTrials+"/"+surfaceRejected+". First rejected candidates: "+string.Join(" | ",failures));
             }
