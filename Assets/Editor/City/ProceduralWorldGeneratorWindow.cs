@@ -192,7 +192,7 @@ namespace DeliveryDriver.EditorTools
                         terrainLayer == TerrainLayer.Seams ? "Seams: green <=1 m, orange <=6 m, red >6 m sampled height discontinuity." :
                         terrainLayer == TerrainLayer.Hotspots ? "Hotspots: red sampled road cross-sections above preferred grading cap." :
                         terrainLayer == TerrainLayer.VerticalProfile ? "Vertical profile: flagged interior grade transitions; junction transitions reported separately." :
-                        terrainLayer == TerrainLayer.VirtualTerrain ? "Virtual terrain: gray original cross-sections; green proposed road/shoulder, orange flagged. Sampled only, no TerrainData writes." :
+                        terrainLayer == TerrainLayer.VirtualTerrain ? "Virtual terrain: gray original, green proposed, orange flagged, magenta issue markers, yellow selected issue. Sampled only, no TerrainData writes." :
                         terrainLayer == TerrainLayer.GradingZones ? "Grading zones: green <=3 m, yellow ordinary budget, orange <=10 m, red preferred cap, purple above preferred cap. Sampled road segments only." :
                         "Earthworks: red cut, blue fill; brighter = beyond ordinary road grading budget. Available after road preview.";
                     EditorGUILayout.HelpBox(legend, MessageType.Info);
@@ -914,6 +914,29 @@ namespace DeliveryDriver.EditorTools
                 Handles.DrawLines(Batch(213,()=>preview.virtualSections.Where(x=>!x.flagged).SelectMany(x=>Lines(x.proposed))));
                 Handles.color=new Color(1f,.47f,.1f,1f);
                 Handles.DrawLines(Batch(214,()=>preview.virtualSections.Where(x=>x.flagged).SelectMany(x=>Lines(x.proposed))));
+                var report=preview.virtualReport;
+                if(report!=null&&report.diagnosticSchema==1&&report.issues!=null)
+                {
+                    IEnumerable<Vector3> Markers()
+                    {
+                        foreach(var issue in report.issues)
+                        {
+                            Vector3 p=issue.position+Vector3.up*2f;
+                            yield return p-Vector3.right*2f;yield return p+Vector3.right*2f;
+                            yield return p-Vector3.forward*2f;yield return p+Vector3.forward*2f;
+                        }
+                    }
+                    Handles.color=new Color(1f,.2f,.65f,.9f);
+                    Handles.DrawLines(Batch(215,Markers));
+                    if(selectedVirtualReport==report&&selectedVirtualIssue!=null)
+                    {
+                        Handles.color=Color.yellow;
+                        var issue=selectedVirtualIssue;
+                        Handles.DrawWireDisc(issue.position+Vector3.up*2f,Vector3.up,5f);
+                        foreach(var sample in issue.samples)
+                            Handles.DrawLine(sample.position,sample.position+Vector3.up*3f);
+                    }
+                }
                 return;
             }
             if(terrainLayer==TerrainLayer.GradingZones)

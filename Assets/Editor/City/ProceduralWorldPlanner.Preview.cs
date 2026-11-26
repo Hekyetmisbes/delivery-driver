@@ -83,7 +83,7 @@ namespace DeliveryDriver.EditorTools
             using(var stream=new CryptoStream(Stream.Null,hash,CryptoStreamMode.Write))
             using(var writer=new BinaryWriter(stream))
             {
-                writer.Write("delivery-driver-procedural-preview-v7.2-local-v5");
+                writer.Write("delivery-driver-procedural-preview-v7.2-local-v6");
                 writer.Write(scene.path??"");writer.Write(DescribeSettings(s));
                 void Vec(Vector3 v){writer.Write(v.x);writer.Write(v.y);writer.Write(v.z);}
                 void Matrix(Matrix4x4 m){for(int i=0;i<16;i++)writer.Write(m[i]);}
@@ -183,6 +183,16 @@ namespace DeliveryDriver.EditorTools
             result.virtualSections.AddRange(saved.virtualSections??new List<VirtualSection>());result.virtualReport=saved.virtualReport;
             if(result.virtualSections.Any(x=>x==null||x.original==null||x.proposed==null||x.original.Length!=7||x.proposed.Length!=7||
                 x.original.Any(v=>!Finite(v))||x.proposed.Any(v=>!Finite(v))))throw new InvalidOperationException("Invalid virtual terrain section.");
+            var diagnostic=result.virtualReport;
+            if(diagnostic!=null&&diagnostic.diagnosticSchema!=0)
+            {
+                if(diagnostic.diagnosticSchema!=1||diagnostic.issues==null||diagnostic.issues.Count>VirtualIssueLimit||
+                    diagnostic.issues.Any(x=>x==null||!Finite(x.position)||x.samples==null||x.samples.Count>VirtualCellSampleLimit||
+                        x.samples.Any(v=>v==null||!Finite(v.position)||!Finite(v.center))))
+                    throw new InvalidOperationException("Invalid virtual diagnostic evidence.");
+                if(diagnostic.diagnosticCells>0||diagnostic.issueCount>0||diagnostic.omittedIssues>0)
+                    result.previewCriteriaMet=false;
+            }
             foreach(var a in saved.access??new List<SavedAccess>())
             {
                 var anchor=s.accessAnchors.FirstOrDefault(x=>ObjectId(x.road)==a.roadId&&Mathf.Abs(x.t-a.t)<.0001f);

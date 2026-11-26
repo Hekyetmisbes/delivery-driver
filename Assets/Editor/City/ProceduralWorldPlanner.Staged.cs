@@ -174,7 +174,7 @@ namespace DeliveryDriver.EditorTools
                 if(s.localOptimization)x.FindAlternateParkAccess();
             },(a,b)=>true);
             bool urbanScreened=views.Last().accepted;
-            current.version=s.localOptimization?"V7.2 optimized":"V7.1 optimized";
+            current.version=s.localOptimization?"V7.2.5 optimized":"V7.1 optimized";
             current.stageReports.Clear();current.stageReports.AddRange(reports);
             current.stageViews.AddRange(views);
             current.quality=Measure(current,s);
@@ -203,7 +203,7 @@ namespace DeliveryDriver.EditorTools
             {
                 finalPlanner.BuildLocalDiagnostics();
                 finalPlanner.BuildVirtualTerrain();
-                if(current.quality.verticalDefects>0||current.quality.junctionGradeFlags>0||current.virtualReport.conflictingCells>0||current.virtualReport.protectedSamples>0||current.virtualReport.missingSections>0||current.virtualReport.missingSamples>0||current.virtualReport.parcelSamples>0||current.virtualReport.steepSections>0||current.quality.peak>s.preferredGrading+.01f)
+                if(current.quality.verticalDefects>0||current.quality.junctionGradeFlags>0||current.virtualReport.conflictingCells>0||current.virtualReport.diagnosticCells>0||current.virtualReport.overflowCells>0||current.virtualReport.omittedIssues>0||current.virtualReport.protectedSamples>0||current.virtualReport.missingSections>0||current.virtualReport.missingSamples>0||current.virtualReport.parcelSamples>0||current.virtualReport.steepSections>0||current.quality.peak>s.preferredGrading+.01f)
                     current.previewCriteriaMet=false;
                 current.notes.RemoveAll(n=>n.StartsWith("Mandatory preview checks:"));
                 current.notes.Add("Mandatory preview checks: "+(current.previewCriteriaMet?"PASS":"NOT MET")+"; Generate remains locked.");

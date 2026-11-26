@@ -108,6 +108,7 @@ namespace DeliveryDriver.EditorTools
                     EditorGUILayout.LabelField("Overlap cells / steep sections",r.conflictingCells+" / "+r.steepSections);
                     EditorGUILayout.LabelField("Protected / parcel samples",r.protectedSamples+" / "+r.parcelSamples);
                     DrawSectionInspector();
+                    DrawVirtualIssueInspector(r);
                 }
             }
             EditorGUILayout.LabelField("Prefab-fit accessible lots",q.matchedLots+"/"+preview.parcels.Count);
@@ -134,6 +135,66 @@ namespace DeliveryDriver.EditorTools
                 var view=SceneView.lastActiveSceneView;
                 if(view!=null){view.pivot=section.proposed[3];view.size=35f;view.Repaint();}
             }
+        }
+        private int virtualIssueIndex,virtualIssueFilter;
+        private static readonly string[] VirtualIssueFilters={"All","Shared junction","Independent roads","Ambiguous / overflow","Missing sections","Missing shoulders","Steep sections","Protected samples","Parcel samples"};
+        private bool virtualIssuesOpen,virtualEvidenceOpen;
+        private ProceduralWorldPlanner.VirtualIssue selectedVirtualIssue;
+        private ProceduralWorldPlanner.VirtualTerrainReport selectedVirtualReport;
+        private void DrawVirtualIssueInspector(ProceduralWorldPlanner.VirtualTerrainReport report)
+        {
+            if(report.diagnosticSchema!=1||report.issues==null)
+            {EditorGUILayout.HelpBox("Legacy snapshot: detailed virtual diagnostics require a fresh preview.",MessageType.Info);return;}
+            EditorGUILayout.HelpBox(ProceduralWorldPlanner.VirtualDiagnosticSummary(report),MessageType.Info);
+            virtualIssuesOpen=EditorGUILayout.Foldout(virtualIssuesOpen,"Inspect virtual terrain issues ("+report.issues.Count+")",true);
+            if(!virtualIssuesOpen||report.issues.Count==0)return;
+            int filter=EditorGUILayout.Popup("Issue category",virtualIssueFilter,VirtualIssueFilters);
+            if(filter!=virtualIssueFilter||selectedVirtualReport!=report){virtualIssueFilter=filter;virtualIssueIndex=0;}
+            var issues=filter==0?report.issues:report.issues.Where(x=>(int)x.kind==filter-1).ToList();
+            if(issues.Count==0)
+            {
+                if(selectedVirtualIssue!=null)SceneView.RepaintAll();
+                selectedVirtualIssue=null;selectedVirtualReport=report;EditorGUILayout.LabelField("No recorded issues in category.");return;
+            }
+            virtualIssueIndex=EditorGUILayout.IntSlider("Issue",Mathf.Clamp(virtualIssueIndex,0,issues.Count-1),0,issues.Count-1);
+            using(new EditorGUILayout.HorizontalScope())
+            {
+                if(GUILayout.Button("Previous issue"))virtualIssueIndex=Mathf.Max(0,virtualIssueIndex-1);
+                if(GUILayout.Button("Next issue"))virtualIssueIndex=Mathf.Min(issues.Count-1,virtualIssueIndex+1);
+            }
+            var issue=issues[virtualIssueIndex];
+            if(selectedVirtualIssue!=issue||selectedVirtualReport!=report)SceneView.RepaintAll();
+            selectedVirtualIssue=issue;selectedVirtualReport=report;
+            EditorGUILayout.LabelField("Issue type",issue.kind.ToString());
+            EditorGUILayout.LabelField("Location",issue.position.ToString("F2"));
+            EditorGUILayout.HelpBox(issue.reason,MessageType.Warning);
+            if(issue.kind==ProceduralWorldPlanner.VirtualIssueKind.SharedJunction||issue.kind==ProceduralWorldPlanner.VirtualIssueKind.IndependentRoad||
+                issue.kind==ProceduralWorldPlanner.VirtualIssueKind.AmbiguousOverlap)
+            {
+                EditorGUILayout.LabelField("4m cell / legacy",issue.cell+" / "+issue.legacyConflict);
+                EditorGUILayout.LabelField("Observed max height delta",issue.maxDelta.ToString("F2")+" m");
+                EditorGUILayout.LabelField("Closest conflicting XZ samples",issue.minSeparation<0?"Unknown":issue.minSeparation.ToString("F2")+" m");
+                if(issue.maxSampleA>=0)EditorGUILayout.LabelField("Max delta sample indices",issue.maxSampleA+" / "+issue.maxSampleB);
+                if(issue.closestSampleA>=0)EditorGUILayout.LabelField("Closest pair sample indices",issue.closestSampleA+" / "+issue.closestSampleB);
+            }
+            if(issue.kind==ProceduralWorldPlanner.VirtualIssueKind.SteepSection)
+                EditorGUILayout.LabelField("Left / right shoulder grade",(issue.leftSlope*100f).ToString("F1")+"% / "+(issue.rightSlope*100f).ToString("F1")+"%");
+            if(GUILayout.Button("Focus selected virtual issue"))
+            {
+                terrainLayer=TerrainLayer.VirtualTerrain;showTerrainAnalysis=true;
+                var view=SceneView.lastActiveSceneView;
+                if(view!=null){view.pivot=issue.position;view.size=35f;view.Repaint();}
+            }
+            virtualEvidenceOpen=EditorGUILayout.Foldout(virtualEvidenceOpen,"Sample provenance ("+issue.samples.Count+")",true);
+            if(virtualEvidenceOpen)
+                for(int i=0;i<issue.samples.Count;i++)
+                {
+                    var sample=issue.samples[i];
+                    EditorGUILayout.LabelField("#"+i+" Road "+sample.roadA+" -> "+sample.roadB,ProceduralWorldPlanner.VirtualSampleName(sample.kind));
+                    EditorGUILayout.LabelField("Station / XYZ",sample.distanceFromA.ToString("F1")+" m / "+sample.position.ToString("F2"));
+                    EditorGUILayout.LabelField("Ground / requested Y",sample.hasGround?sample.ground.ToString("F2")+" / "+sample.position.y.ToString("F2"):"Missing ground; reference Y only");
+                    if(!string.IsNullOrEmpty(sample.context))EditorGUILayout.HelpBox(sample.context,MessageType.Info);
+                }
         }
         private void DrawPreviewStorage()
         {

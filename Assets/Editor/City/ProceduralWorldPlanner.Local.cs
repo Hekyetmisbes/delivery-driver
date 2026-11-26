@@ -17,6 +17,116 @@ namespace DeliveryDriver.EditorTools
         {
             public int sections,missingSections,missingSamples,conflictingCells,steepSections,protectedSamples,parcelSamples;
             public float spacing;
+            // Schema 0 is the legacy snapshot; schema 1 has bounded diagnostic evidence.
+            public int diagnosticSchema,diagnosticCells,additionalConflictCells,overflowCells,overflowSamples;
+            public int sharedJunctionCells,independentRoadCells,ambiguousCells,closeSampleCells,coarseOnlyCells,unknownProximityCells;
+            public int missingCenterSections,missingFootprintSections,missingOuterSections,issueCount,omittedIssues;
+            public int missingCoastSamples,missingCityGapSamples,missingOutsideSamples;
+            public float maxShoulderSlope,maxConflictDelta;
+            public List<VirtualIssue> issues;
+        }
+        internal const int VirtualIssueLimit=12000,VirtualCellSampleLimit=64;
+        internal enum VirtualIssueKind { SharedJunction, IndependentRoad, AmbiguousOverlap, MissingSection, MissingShoulder, SteepSection, ProtectedSample, ParcelSample }
+        [Serializable] internal sealed class VirtualSample
+        {
+            public int roadA,roadB,kind;
+            public float distanceFromA,distanceFromB,ground;
+            public Vector3 position,center;
+            public bool hasGround;
+            public string context;
+        }
+        [Serializable] internal sealed class VirtualIssue
+        {
+            public VirtualIssueKind kind;
+            public Vector3 position;
+            public Vector2Int cell;
+            public bool legacyConflict,overflow;
+            public float maxDelta,minSeparation,leftSlope,rightSlope;
+            public int maxSampleA=-1,maxSampleB=-1,closestSampleA=-1,closestSampleB=-1;
+            public string reason;
+            public List<VirtualSample> samples;
+        }
+        private sealed class VirtualCell
+        {
+            public readonly List<(VirtualSample sample,Edge owner,VirtualSection section)> samples=new List<(VirtualSample,Edge,VirtualSection)>();
+            public bool overflow;
+        }
+        internal static string VirtualSampleName(int kind)
+        {
+            switch(kind)
+            {
+                case 0:return "Left outer blend";case 1:return "Left sidewalk edge";case 2:return "Left asphalt edge";
+                case 3:return "Center";case 4:return "Right asphalt edge";case 5:return "Right sidewalk edge";
+                case 6:return "Right outer blend";
+                case 7:return "Left shoulder 25%";case 8:return "Left shoulder 50%";case 9:return "Left shoulder 75%";
+                case 10:return "Right shoulder 25%";case 11:return "Right shoulder 50%";case 12:return "Right shoulder 75%";
+                default:return "Unknown sample";
+            }
+        }
+        internal static string VirtualMissingReason(int mask)
+        {
+            if((mask&(1<<3))!=0)return "Center";
+            if((mask&0x3e)!=0)return "Road footprint";
+            return "Outer blend";
+        }
+        internal static int SampleVirtualSection(Layout layout,Vector3 mid,Vector2 side,float[] offsets,VirtualSection section)
+        {
+            int missingMask=0;
+            for(int j=0;j<7;j++)
+            {
+                Vector2 pos=XZ(mid)+side*offsets[j];
+                if(!layout.TryHeight(pos,out float ground)){missingMask|=1<<j;continue;}
+                section.original[j]=XYZ(pos,ground);
+                section.proposed[j]=XYZ(pos,j==0||j==6?ground:mid.y-.12f);
+            }
+            return missingMask;
+        }
+        internal static bool VirtualHeightConflict(float a,float b)=>Mathf.Abs(a-b)>.5f;
+        internal static VirtualIssueKind VirtualPairKind(Edge a,VirtualSample sa,Edge b,VirtualSample sb,float half)
+        {
+            // Topology alone is insufficient. Both station distances and actual XZ
+            // positions must be near the same endpoint, and both samples in footprint.
+            bool near=false;
+            float reach=2f*half,reachSq=reach*reach;
+            foreach(Node node in new[]{a.a,a.b})
+            {
+                if(node==null||(node!=b.a&&node!=b.b))continue;
+                Vector2 p=XZ(node.position);
+                if((XZ(sa.position)-p).sqrMagnitude>reachSq||(XZ(sb.position)-p).sqrMagnitude>reachSq)continue;
+                near=true;
+                float da=node==a.a?sa.distanceFromA:sa.distanceFromB,db=node==b.a?sb.distanceFromA:sb.distanceFromB;
+                if(da<=reach&&db<=reach&&(XZ(sa.center)-p).sqrMagnitude<=reachSq&&(XZ(sb.center)-p).sqrMagnitude<=reachSq&&
+                    sa.kind>=1&&sa.kind<=5&&sb.kind>=1&&sb.kind<=5)return VirtualIssueKind.SharedJunction;
+            }
+            return near?VirtualIssueKind.AmbiguousOverlap:VirtualIssueKind.IndependentRoad;
+        }
+        private static void AddVirtualIssue(VirtualTerrainReport report,VirtualIssue issue)
+        {
+            report.issueCount++;
+            if(report.issues.Count<VirtualIssueLimit)report.issues.Add(issue);
+            else report.omittedIssues++;
+        }
+        private string VirtualMissingContext(Vector2 p,VirtualTerrainReport report)
+        {
+            // Geometric context, not a diagnosis of the underlying terrain asset.
+            if(Contains(plan.layout.sea,p,.01f)){report.missingCoastSamples++;return "Sea / shore bounds (no sampled terrain)";}
+            if(Contains(plan.layout.low,p,.01f)||Contains(plan.layout.high,p,.01f))
+            {report.missingCityGapSamples++;return "Inside city bounds, no covering tile";}
+            report.missingOutsideSamples++;return "Outside mapped city/sea bounds";
+        }
+        internal static string VirtualDiagnosticSummary(VirtualTerrainReport r)
+        {
+            if(r==null||r.diagnosticSchema!=1)return "Virtual issue details unavailable (legacy or intermediate preview).";
+            return "Virtual diagnostics V7.2.5: legacy conflict cells "+r.conflictingCells+", additional all-pair conflict cells "+r.additionalConflictCells+
+                ", unresolved/overflow union "+r.diagnosticCells+" (overflow cells/samples "+r.overflowCells+"/"+r.overflowSamples+
+                "); shared-junction / independent-road / ambiguous "+r.sharedJunctionCells+" / "+r.independentRoadCells+" / "+r.ambiguousCells+
+                "; close (<=0.5m XZ) / coarse-only / unknown proximity "+r.closeSampleCells+" / "+r.coarseOnlyCells+" / "+r.unknownProximityCells+
+                "; max observed height delta "+r.maxConflictDelta.ToString("F2")+" m. All remain warnings/blockers. "+
+                "Missing sections center / footprint / outer-only "+r.missingCenterSections+" / "+r.missingFootprintSections+" / "+r.missingOuterSections+
+                "; missing point context sea/shore / city gap / outside "+r.missingCoastSamples+" / "+r.missingCityGapSamples+" / "+r.missingOutsideSamples+
+                "; steep sections "+r.steepSections+", max observed shoulder grade "+(r.maxShoulderSlope*100f).ToString("F1")+"%; "+
+                "protected / parcel "+r.protectedSamples+" / "+r.parcelSamples+"; issue records "+r.issues.Count+"/"+r.issueCount+
+                " (omitted "+r.omittedIssues+"). Sparse samples, not physical collision, clearance or wall validation.";
         }
 
         // A split is valid only when the concatenated geometry is byte-for-byte
@@ -785,7 +895,7 @@ namespace DeliveryDriver.EditorTools
         private void BuildVirtualTerrain()
         {
             plan.virtualSections.Clear();
-            var report=new VirtualTerrainReport();plan.virtualReport=report;
+            var report=new VirtualTerrainReport{diagnosticSchema=1,issues=new List<VirtualIssue>()};plan.virtualReport=report;
             var roads=plan.edges.Where(e=>!e.Bridge).ToList();
             float spacing=Mathf.Max(settings.virtualSectionSpacing,roads.Sum(e=>Length(e.points))/12000f);
             report.spacing=spacing;
@@ -793,6 +903,13 @@ namespace DeliveryDriver.EditorTools
             float[] offsets={-half-blend,-half,-paved,0f,paved,half,half+blend};
             var cells=new Dictionary<Vector2Int,(float y,Edge owner,VirtualSection section)>();
             var conflicts=new HashSet<Vector2Int>();
+            var evidence=new Dictionary<Vector2Int,VirtualCell>();
+            void RecordCell(Vector2Int key,VirtualSample sample,Edge owner,VirtualSection section)
+            {
+                if(!evidence.TryGetValue(key,out var cell))evidence[key]=cell=new VirtualCell();
+                if(cell.samples.Count<VirtualCellSampleLimit)cell.samples.Add((sample,owner,section));
+                else {cell.overflow=true;report.overflowSamples++;section.flagged=true;}
+            }
             var lots=new Dictionary<Vector2Int,List<UrbanArea>>();
             Vector2Int LotCell(Vector2 p)=>new Vector2Int(Mathf.FloorToInt(p.x/80f),Mathf.FloorToInt(p.y/80f));
             foreach(var lot in plan.parcels)
@@ -809,37 +926,69 @@ namespace DeliveryDriver.EditorTools
             foreach(var e in roads)
             {
                 if(++processed%120==0&&EditorUtility.DisplayCancelableProgressBar("V7.2 virtual terrain","Cross sections "+processed+"/"+roads.Count,.94f))throw new OperationCanceledException();
-                float next=0f,travel=0f;
+                float next=0f,travel=0f,totalLength=Length(e.points);
                 for(int i=1;i<e.points.Count;i++)
                 {
                     Vector3 a=e.points[i-1],b=e.points[i];float len=Vector2.Distance(XZ(a),XZ(b));if(len<.001f)continue;
-                    if(i==1)next=Mathf.Min(spacing*.5f,Length(e.points)*.5f);
+                    if(i==1)next=Mathf.Min(spacing*.5f,totalLength*.5f);
                     while(next<=travel+len)
                     {
+                        float station=next;
                         Vector3 mid=Vector3.Lerp(a,b,Mathf.Clamp01((next-travel)/len));next+=spacing;
+                        VirtualSample Sample(int kind,Vector3 pos,float ground,bool hasGround,string context=null)=>new VirtualSample{
+                            roadA=e.a.id,roadB=e.b.id,kind=kind,position=pos,center=mid,distanceFromA=station,
+                            distanceFromB=Mathf.Max(0f,totalLength-station),ground=ground,hasGround=hasGround,context=context};
+                        void PointIssue(VirtualIssueKind kind,VirtualSample sample,string reason)
+                        {
+                            AddVirtualIssue(report,new VirtualIssue{kind=kind,position=sample.position,reason=reason,
+                                samples=new List<VirtualSample>{sample}});
+                        }
                         var tangent=XZ(b-a).normalized;var side=new Vector2(-tangent.y,tangent.x);
                         var section=new VirtualSection{original=new Vector3[7],proposed=new Vector3[7]};
-                        bool missing=false;
-                        for(int j=0;j<7;j++)
+                        int missingMask=SampleVirtualSection(plan.layout,mid,side,offsets,section);
+                        if(missingMask!=0)
                         {
-                            Vector2 pos=XZ(mid)+side*offsets[j];
-                            if(!plan.layout.TryHeight(pos,out float ground)){missing=true;break;}
-                            float target=j==0||j==6?ground:mid.y-.12f;
-                            section.original[j]=XYZ(pos,ground);section.proposed[j]=XYZ(pos,target);
+                            var missing=new List<VirtualSample>();
+                            for(int j=0;j<7;j++)
+                            {
+                                if((missingMask&(1<<j))==0)continue;
+                                Vector2 pos=XZ(mid)+side*offsets[j];
+                                missing.Add(Sample(j,XYZ(pos,mid.y-.12f),0f,false,VirtualMissingContext(pos,report)));
+                            }
+                            report.missingSections++;
+                            string reason=VirtualMissingReason(missingMask);
+                            if(reason=="Center")report.missingCenterSections++;
+                            else if(reason=="Road footprint")report.missingFootprintSections++;
+                            else report.missingOuterSections++;
+                            AddVirtualIssue(report,new VirtualIssue{kind=VirtualIssueKind.MissingSection,position=missing[0].position,
+                                reason=reason+" missing (all failed points recorded; display Y is road reference)",samples=missing});
+                            continue;
                         }
-                        if(missing){report.missingSections++;continue;}
-                        bool steep=Mathf.Abs(section.proposed[1].y-section.proposed[0].y)/blend>settings.shoulderSlopeLimit||
-                            Mathf.Abs(section.proposed[5].y-section.proposed[6].y)/blend>settings.shoulderSlopeLimit;
-                        if(steep){section.flagged=true;report.steepSections++;}
+                        float leftSlope=Mathf.Abs(section.proposed[1].y-section.proposed[0].y)/blend,
+                            rightSlope=Mathf.Abs(section.proposed[5].y-section.proposed[6].y)/blend;
+                        report.maxShoulderSlope=Mathf.Max(report.maxShoulderSlope,Mathf.Max(leftSlope,rightSlope));
+                        if(leftSlope>settings.shoulderSlopeLimit||rightSlope>settings.shoulderSlopeLimit)
+                        {
+                            section.flagged=true;report.steepSections++;
+                            var points=new List<VirtualSample>();
+                            foreach(int j in new[]{0,1,5,6})points.Add(Sample(j,section.proposed[j],section.original[j].y,true));
+                            AddVirtualIssue(report,new VirtualIssue{kind=VirtualIssueKind.SteepSection,position=mid,
+                                reason="Sampled shoulder grade exceeds limit; retaining-wall candidate only",leftSlope=leftSlope,rightSlope=rightSlope,samples=points});
+                        }
                         for(int j=1;j<6;j++)
                         {
                             Vector2 pos=XZ(section.proposed[j]);float y=section.proposed[j].y;
                             if(Mathf.Abs(y-section.original[j].y)>.5f)
                             {
-                                if(IsProtected(pos,1f)||obstacles.Near(pos,2f)){report.protectedSamples++;section.flagged=true;}
+                                if(IsProtected(pos,1f)||obstacles.Near(pos,2f))
+                                {
+                                    report.protectedSamples++;section.flagged=true;
+                                    PointIssue(VirtualIssueKind.ProtectedSample,Sample(j,section.proposed[j],section.original[j].y,true),"Protected / existing-road adjustment");
+                                }
                                 // Sparse shoulder midpoint screen for lot foundations.
                             }
                             var key=new Vector2Int(Mathf.FloorToInt(pos.x/4f),Mathf.FloorToInt(pos.y/4f));
+                            RecordCell(key,Sample(j,section.proposed[j],section.original[j].y,true),e,section);
                             if(cells.TryGetValue(key,out var old)&&old.owner!=e&&Mathf.Abs(old.y-y)>.5f)
                             {conflicts.Add(key);old.section.flagged=true;section.flagged=true;}
                             else cells[key]=(y,e,section);
@@ -849,13 +998,28 @@ namespace DeliveryDriver.EditorTools
                             Vector3 outer=section.proposed[j],inner=section.proposed[j==0?1:5];
                             foreach(float f in new[]{.25f,.5f,.75f})
                             {
+                                int kind=(j==0?7:10)+Mathf.RoundToInt(f*4f)-1;
                                 Vector3 midpoint=Vector3.Lerp(inner,outer,f);Vector2 pos=XZ(midpoint);
-                                if(!plan.layout.TryHeight(pos,out float ground)){section.flagged=true;report.missingSamples++;continue;}
+                                if(!plan.layout.TryHeight(pos,out float ground))
+                                {
+                                    section.flagged=true;report.missingSamples++;
+                                    PointIssue(VirtualIssueKind.MissingShoulder,Sample(kind,midpoint,0f,false,VirtualMissingContext(pos,report)),"Missing interior shoulder terrain");
+                                    continue;
+                                }
                                 if(Mathf.Abs(midpoint.y-ground)<=.5f)continue;
-                                if(IsProtected(pos,1f)||obstacles.Near(pos,2f)){report.protectedSamples++;section.flagged=true;}
+                                var sample=Sample(kind,midpoint,ground,true);
+                                if(IsProtected(pos,1f)||obstacles.Near(pos,2f))
+                                {
+                                    report.protectedSamples++;section.flagged=true;
+                                    PointIssue(VirtualIssueKind.ProtectedSample,sample,"Protected / existing-road adjustment");
+                                }
                                 if(lots.TryGetValue(LotCell(pos),out var list)&&list.Any(l=>l.bounds.Contains(pos)))
-                                {report.parcelSamples++;section.flagged=true;}
+                                {
+                                    report.parcelSamples++;section.flagged=true;
+                                    PointIssue(VirtualIssueKind.ParcelSample,sample,"Sampled shoulder intersects parcel bounds");
+                                }
                                 var key=new Vector2Int(Mathf.FloorToInt(pos.x/4f),Mathf.FloorToInt(pos.y/4f));
+                                RecordCell(key,sample,e,section);
                                 if(cells.TryGetValue(key,out var old)&&old.owner!=e&&Mathf.Abs(old.y-midpoint.y)>.5f)
                                 {conflicts.Add(key);old.section.flagged=true;section.flagged=true;}
                                 else cells[key]=(midpoint.y,e,section);
@@ -866,8 +1030,55 @@ namespace DeliveryDriver.EditorTools
                     travel+=len;
                 }
             }
+            // Keep the original owner algorithm and count exactly as before. Independently
+            // compare all retained provenance in each cell, including overwritten owners.
             report.sections=plan.virtualSections.Count;report.conflictingCells=conflicts.Count;
+            int examined=0;
+            foreach(var entry in evidence.OrderBy(x=>x.Key.x).ThenBy(x=>x.Key.y))
+            {
+                if(++examined%4096==0&&EditorUtility.DisplayCancelableProgressBar("V7.2.5 virtual diagnostics","Classifying sample cells "+examined+"/"+evidence.Count,.97f))
+                    throw new OperationCanceledException();
+                var cell=entry.Value;bool legacy=conflicts.Contains(entry.Key),found=false,shared=false,independent=false,ambiguous=false;
+                float maxDelta=0f,minSeparation=float.PositiveInfinity;
+                int maxA=-1,maxB=-1,closestA=-1,closestB=-1;
+                Vector3 focus=cell.samples[0].sample.position;
+                for(int i=0;i<cell.samples.Count;i++)
+                for(int j=i+1;j<cell.samples.Count;j++)
+                {
+                    var a=cell.samples[i];var b=cell.samples[j];
+                    if(a.owner==b.owner||!VirtualHeightConflict(a.sample.position.y,b.sample.position.y))continue;
+                    found=true;a.section.flagged=true;b.section.flagged=true;
+                    float delta=Mathf.Abs(a.sample.position.y-b.sample.position.y);
+                    if(delta>maxDelta){maxDelta=delta;maxA=i;maxB=j;focus=(a.sample.position+b.sample.position)*.5f;}
+                    float separation=Vector2.Distance(XZ(a.sample.position),XZ(b.sample.position));
+                    if(separation<minSeparation){minSeparation=separation;closestA=i;closestB=j;}
+                    var kind=VirtualPairKind(a.owner,a.sample,b.owner,b.sample,half);
+                    shared|=kind==VirtualIssueKind.SharedJunction;independent|=kind==VirtualIssueKind.IndependentRoad;
+                    ambiguous|=kind==VirtualIssueKind.AmbiguousOverlap;
+                }
+                if(!legacy&&!found&&!cell.overflow)continue;
+                report.diagnosticCells++;
+                if(found&&!legacy)report.additionalConflictCells++;
+                if(cell.overflow)report.overflowCells++;
+                VirtualIssueKind classification=VirtualIssueKind.AmbiguousOverlap;
+                if(!cell.overflow&&!ambiguous&&found&&shared&&!independent)classification=VirtualIssueKind.SharedJunction;
+                else if(!cell.overflow&&!ambiguous&&found&&independent&&!shared)classification=VirtualIssueKind.IndependentRoad;
+                if(classification==VirtualIssueKind.SharedJunction)report.sharedJunctionCells++;
+                else if(classification==VirtualIssueKind.IndependentRoad)report.independentRoadCells++;
+                else report.ambiguousCells++;
+                if(found&&minSeparation<=.5f)report.closeSampleCells++;
+                else if(found&&!cell.overflow)report.coarseOnlyCells++;
+                else report.unknownProximityCells++;
+                report.maxConflictDelta=Mathf.Max(report.maxConflictDelta,maxDelta);
+                AddVirtualIssue(report,new VirtualIssue{kind=classification,position=focus,cell=entry.Key,legacyConflict=legacy,overflow=cell.overflow,
+                    maxDelta=maxDelta,minSeparation=found?minSeparation:-1f,
+                    maxSampleA=maxA,maxSampleB=maxB,closestSampleA=closestA,closestSampleB=closestB,
+                    reason=cell.overflow?"Cell sample cap reached; unresolved":!found?"Legacy conflict without complete pair evidence":
+                        minSeparation<=.5f?"Close sample height mismatch; not a mesh collision":"Coarse-cell alias possible; not cleared",
+                    samples=cell.samples.Select(x=>x.sample).ToList()});
+            }
             plan.notes.Add("Virtual terrain: "+report.sections+" sampled cross-sections at nominal "+spacing.ToString("F1")+" m, "+report.missingSections+" missing sections, "+report.missingSamples+" missing shoulder samples; "+report.conflictingCells+" incompatible 4m sample cells, "+report.steepSections+" steep shoulder sections (retaining-wall candidates), "+report.protectedSamples+" protected/existing-road adjustment samples, "+report.parcelSamples+" parcel shoulder samples. Not a continuous heightmap or bake.");
+            plan.notes.Add(VirtualDiagnosticSummary(report));
         }
     }
 }

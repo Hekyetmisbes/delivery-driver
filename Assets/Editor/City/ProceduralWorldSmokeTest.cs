@@ -201,6 +201,31 @@ namespace DeliveryDriver.EditorTools
                 settings.localOptimization=true;
                 TestExactRoadSplit();
                 TestLocalQualityGuard();
+                var junction=new ProceduralWorldPlanner.Node{position=Vector3.zero};
+                var edgeA=new ProceduralWorldPlanner.Edge{a=junction,b=new ProceduralWorldPlanner.Node()};
+                var edgeB=new ProceduralWorldPlanner.Edge{a=junction,b=new ProceduralWorldPlanner.Node()};
+                var edgeC=new ProceduralWorldPlanner.Edge{a=new ProceduralWorldPlanner.Node(),b=new ProceduralWorldPlanner.Node()};
+                var sampleA=new ProceduralWorldPlanner.VirtualSample{kind=3,position=new Vector3(2,1,0),center=new Vector3(2,1,0),distanceFromA=2};
+                var sampleB=new ProceduralWorldPlanner.VirtualSample{kind=3,position=new Vector3(2,2,0),center=new Vector3(2,2,0),distanceFromA=2};
+                Require(ProceduralWorldPlanner.VirtualHeightConflict(1,2)&&!ProceduralWorldPlanner.VirtualHeightConflict(1,1.5f),"Virtual height conflict threshold changed.");
+                Require(ProceduralWorldPlanner.VirtualPairKind(edgeA,sampleA,edgeB,sampleB,6)==ProceduralWorldPlanner.VirtualIssueKind.SharedJunction,"Shared junction evidence not recognized.");
+                Require(ProceduralWorldPlanner.VirtualPairKind(edgeA,sampleA,edgeC,sampleB,6)==ProceduralWorldPlanner.VirtualIssueKind.IndependentRoad,"Coincident but unrelated roads misclassified.");
+                sampleB.kind=8;
+                Require(ProceduralWorldPlanner.VirtualPairKind(edgeA,sampleA,edgeB,sampleB,6)==ProceduralWorldPlanner.VirtualIssueKind.AmbiguousOverlap,"Shoulder near junction incorrectly classified as footprint.");
+                sampleB.kind=3;sampleB.position=new Vector3(20,2,0);
+                Require(ProceduralWorldPlanner.VirtualPairKind(edgeA,sampleA,edgeB,sampleB,6)==ProceduralWorldPlanner.VirtualIssueKind.IndependentRoad,"Shared node wrongly exempted distant conflict.");
+                Require(ProceduralWorldPlanner.VirtualMissingReason((1<<0)|(1<<6))=="Outer blend"&&
+                    ProceduralWorldPlanner.VirtualMissingReason((1<<0)|(1<<1))=="Road footprint"&&
+                    ProceduralWorldPlanner.VirtualMissingReason((1<<1)|(1<<3))=="Center","Missing section reason priority invalid.");
+                var sectionOffsets=new[]{-16f,-6f,-4f,0f,4f,6f,16f};
+                var sectionFixture=new ProceduralWorldPlanner.VirtualSection{original=new Vector3[7],proposed=new Vector3[7]};
+                var shore=emptySea.sea.xMin;
+                var shoreZ=emptySea.sea.center.y;
+                int outerMask=ProceduralWorldPlanner.SampleVirtualSection(emptySea,new Vector3(shore-10,1,shoreZ),Vector2.right,sectionOffsets,sectionFixture);
+                int footprintMask=ProceduralWorldPlanner.SampleVirtualSection(emptySea,new Vector3(shore-2,1,shoreZ),Vector2.right,sectionOffsets,sectionFixture);
+                int centerMask=ProceduralWorldPlanner.SampleVirtualSection(emptySea,new Vector3(shore+2,1,shoreZ),Vector2.right,sectionOffsets,sectionFixture);
+                Require(outerMask==(1<<6)&&footprintMask==((1<<4)|(1<<5)|(1<<6))&&
+                    (centerMask&(1<<3))!=0,"Actual empty-sea cross-section missing masks incorrect.");
                 Require(Mathf.Abs(ProceduralWorldPlanner.HotspotNeighborShift(2f,1f,1f)-2f)<.0001f,"Saturated profile failed to propagate displacement.");
                 Require(ProceduralWorldPlanner.HotspotNeighborShift(2f,-1f,1f)<.0001f,"Grade slack failed to absorb displacement.");
                 var local=ProceduralWorldPlanner.Build(settings,emptySea,scene);
@@ -211,6 +236,18 @@ namespace DeliveryDriver.EditorTools
                 var localSnap=ProceduralWorldPlanner.Capture(local,null,scene.path,ProceduralWorldPlanner.DescribeSettings(settings));
                 var localRestored=ProceduralWorldPlanner.Restore(JsonUtility.FromJson<ProceduralWorldPlanner.PreviewSnapshot>(JsonUtility.ToJson(localSnap)),emptySea,settings);
                 Require(localRestored.virtualSections.Count==local.virtualSections.Count,"Virtual section snapshot lost data.");
+                var vr=local.virtualReport;var rr=localRestored.virtualReport;
+                Require(vr.diagnosticSchema==1&&vr.diagnosticCells>=vr.conflictingCells&&
+                    vr.diagnosticCells==vr.sharedJunctionCells+vr.independentRoadCells+vr.ambiguousCells&&
+                    vr.diagnosticCells==vr.closeSampleCells+vr.coarseOnlyCells+vr.unknownProximityCells,
+                    "Virtual cell classification totals inconsistent.");
+                Require(vr.missingSections==vr.missingCenterSections+vr.missingFootprintSections+vr.missingOuterSections&&
+                    vr.issueCount==vr.issues.Count+vr.omittedIssues,"Virtual issue totals inconsistent.");
+                Require(rr.diagnosticSchema==1&&JsonUtility.ToJson(vr)==JsonUtility.ToJson(rr),"Virtual issue snapshot lost provenance.");
+                Require(vr.diagnosticCells==0||!local.previewCriteriaMet,"Virtual conflict did not block preview criteria.");
+                localSnap.virtualReport=new ProceduralWorldPlanner.VirtualTerrainReport{sections=vr.sections,conflictingCells=vr.conflictingCells};
+                var legacy=ProceduralWorldPlanner.Restore(JsonUtility.FromJson<ProceduralWorldPlanner.PreviewSnapshot>(JsonUtility.ToJson(localSnap)),emptySea,settings);
+                Require(legacy.virtualReport.diagnosticSchema==0&&legacy.virtualSections.Count==local.virtualSections.Count,"Legacy virtual snapshot no longer loads.");
                 Require(Mathf.Abs(ProceduralWorldPlanner.VerticalCurvature(new Vector3(0,0,0),new Vector3(10,1,0),new Vector3(20,0,0))-.02f)<.0001f,"Vertical curvature calculation failed.");
                 for(int i=0;i<land.Count;i++)
                     Require(before[i].SequenceEqual(land[i].terrain.terrainData.GetHeights(0,0,33,33).Cast<float>()),"V7.2 modified terrain.");
