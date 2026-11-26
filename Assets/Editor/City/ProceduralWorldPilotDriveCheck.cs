@@ -20,7 +20,8 @@ namespace DeliveryDriver.EditorTools
         {
             public Vector3 center,size;
             public Vector3[] wheels;
-            public float radius,rideOffset,wheelbase;
+            public float radius,wheelbase;
+            public float[] compressedContact,travel,target;
         }
         private sealed class Cycle
         {
@@ -57,9 +58,25 @@ namespace DeliveryDriver.EditorTools
                 steer.floatValue<=0f||steer.floatValue>=89f)
                 throw new InvalidOperationException("Minivan simplified body or steering configuration unavailable.");
             var wheels=new[]{car.frontLeftCollider,car.frontRightCollider,car.rearLeftCollider,car.rearRightCollider};
-            if(wheels.Any(w=>w==null||w.radius<=0f)||wheels.Distinct().Count()!=4)
-                throw new InvalidOperationException("Four configured Minivan wheels required.");
+            if(wheels.Any(w=>w==null||w.radius<=0f||!w.enabled||w.suspensionDistance<=0f||
+                w.suspensionSpring.targetPosition<0f||w.suspensionSpring.targetPosition>1f)||wheels.Distinct().Count()!=4)
+                throw new InvalidOperationException("Four configured Minivan wheels with valid suspension required.");
+            // This upright static envelope assumes vertical, unit-scale wheel
+            // suspension axes. Reject unsupported rigs instead of guessing.
+            if(wheels.Any(w=>(w.transform.lossyScale-Vector3.one).sqrMagnitude>.000001f||
+                Vector3.Dot(w.transform.up,car.transform.up)<.99999f))
+                throw new InvalidOperationException("Nonvertical or scaled Minivan wheel suspension unsupported.");
             Vector3[] positions=wheels.Select(w=>car.transform.InverseTransformPoint(w.transform.TransformPoint(w.center))).ToArray();
+            float[] contacts=wheels.Select((w,i)=>positions[i].y-w.radius).ToArray();
+            float[] travel=wheels.Select(w=>w.suspensionDistance).ToArray();
+            float[] target=wheels.Select(w=>w.suspensionSpring.targetPosition).ToArray();
+            // Match the existing controller's height normalization for this
+            // vertical unit-scale rig, without changing a prefab or scene.
+            var normalize=so.FindProperty("autoNormalizeWheelColliderHeights");
+            float min=contacts.Min();
+            if(normalize!=null&&normalize.boolValue&&contacts.Max()-min>=.005f)
+                for(int i=0;i<contacts.Length;i++)
+                    if(contacts[i]-min>.003f)contacts[i]=min;
             float wheelbase=Mathf.Abs((positions[0].z+positions[1].z-positions[2].z-positions[3].z)*.5f);
             // Conservative kinematic centerline approximation. Add body
             // length margin; not an Ackermann or suspension simulation.
@@ -67,7 +84,33 @@ namespace DeliveryDriver.EditorTools
             if(wheelbase<.5f||radius<=0f||size.vector3Value.x<=0f||size.vector3Value.y<=0f||size.vector3Value.z<=0f)
                 throw new InvalidOperationException("Invalid measured Minivan dimensions.");
             return new Vehicle{center=center.vector3Value,size=size.vector3Value,wheels=positions,
-                radius=radius,wheelbase=wheelbase,rideOffset=-wheels.Select((w,i)=>positions[i].y-w.radius).Min()};
+                radius=radius,wheelbase=wheelbase,compressedContact=contacts,travel=travel,target=target};
+        }
+
+        // Unity 6: targetPosition=0 fully extended, 1 fully compressed;
+        // WheelCollider.center is the upper end of downward suspension travel.
+        // https://docs.unity3d.com/6000.0/Documentation/ScriptReference/WheelCollider-suspensionSpring.html
+        // Solve a common upright root height for all four sampled wheel
+        // contacts. Nominal target is not a loaded static equilibrium.
+        internal static bool TryPilotSuspensionPose(float[] surface,float[] compressed,float[] travel,float[] target,
+            out float nominal,out float minRoot,out float maxRoot)
+        {
+            nominal=float.NegativeInfinity;minRoot=float.NegativeInfinity;maxRoot=float.PositiveInfinity;
+            if(surface==null||compressed==null||travel==null||target==null||surface.Length!=4||
+                compressed.Length!=4||travel.Length!=4||target.Length!=4)return false;
+            for(int i=0;i<4;i++)
+            {
+                if(float.IsNaN(surface[i])||float.IsInfinity(surface[i])||float.IsNaN(compressed[i])||float.IsInfinity(compressed[i])||
+                    float.IsNaN(travel[i])||float.IsInfinity(travel[i])||travel[i]<=0f||
+                    float.IsNaN(target[i])||target[i]<0f||target[i]>1f)return false;
+                float lower=surface[i]-compressed[i],upper=lower+travel[i];
+                minRoot=Mathf.Max(minRoot,lower);maxRoot=Mathf.Min(maxRoot,upper);
+                nominal=Mathf.Max(nominal,lower+travel[i]*(1f-target[i]));
+            }
+            if(minRoot>maxRoot+.00001f)return false;
+            // Do not raise the vehicle to pass the body test. The common
+            // target-derived pose must be inside actual travel for every wheel.
+            return nominal>=minRoot-.00001f&&nominal<=maxRoot+.00001f;
         }
         private static List<Cycle> FindCycles(List<SplineRoad> roads)
         {
@@ -230,9 +273,10 @@ namespace DeliveryDriver.EditorTools
             return !float.IsNegativeInfinity(height);
         }
         private static string CheckRoute(List<Vector3> path,Vehicle car,List<MeshCollider> asphalt,TerrainCollider ground,
-            out int rays,out float length,out float maxSpread)
+            out int rays,out float length,out float maxSpread,out float minNominalClearance,out float minCompressedClearance)
         {
             rays=0;length=0;maxSpread=0;
+            minNominalClearance=float.PositiveInfinity;minCompressedClearance=float.PositiveInfinity;
             var asphaltSet=new HashSet<Collider>(asphalt);
             for(int i=0;i<path.Count;i++)
             {
@@ -247,32 +291,44 @@ namespace DeliveryDriver.EditorTools
                     return "Centerline surface missing/deviates at "+p.ToString("F3");
                 rays++;
                 float lo=float.PositiveInfinity,hi=float.NegativeInfinity,bodySurface=float.NegativeInfinity;
-                string Probe(Vector3 local,bool wheel)
+                var wheelSurface=new float[4];
+                string Probe(Vector3 local,int wheelIndex)
                 {
                     Vector3 q=p+rot*new Vector3(local.x,0,local.z);
                     if(!AsphaltHeight(asphalt,q,out float y))
                         return "Vehicle footprint leaves asphalt at "+q.ToString("F3");
                     if(!ground.Raycast(new Ray(q+Vector3.up*5f,Vector3.down),out RaycastHit terrainHit,10f)||
                         terrainHit.point.y-y>.08f)return "Vehicle footprint ground clearance failed at "+q.ToString("F3");
-                    if(wheel){lo=Mathf.Min(lo,y);hi=Mathf.Max(hi,y);}
+                    if(wheelIndex>=0){lo=Mathf.Min(lo,y);hi=Mathf.Max(hi,y);wheelSurface[wheelIndex]=y;}
                     else bodySurface=Mathf.Max(bodySurface,y);
                     return null;
                 }
-                foreach(var wheel in car.wheels)
+                for(int w=0;w<car.wheels.Length;w++)
                 {
-                    string issue=Probe(wheel,true);if(issue!=null)return issue;rays++;
+                    string issue=Probe(car.wheels[w],w);if(issue!=null)return issue;rays++;
                 }
                 for(int z=-1;z<=1;z++)for(int x=-1;x<=1;x++)
                 {
-                    string issue=Probe(car.center+new Vector3(x*car.size.x*.5f,0,z*car.size.z*.5f),false);
+                    string issue=Probe(car.center+new Vector3(x*car.size.x*.5f,0,z*car.size.z*.5f),-1);
                     if(issue!=null)return issue;rays++;
                 }
                 maxSpread=Mathf.Max(maxSpread,hi-lo);
                 if(hi-lo>.15f)return "Wheel surface height spread exceeds 0.15m at "+p.ToString("F3");
-                Vector3 root=new Vector3(p.x,hi+car.rideOffset,p.z);
+                if(!TryPilotSuspensionPose(wheelSurface,car.compressedContact,car.travel,car.target,
+                    out float nominal,out float lower,out float upper))
+                    return "No common nominal suspension pose at "+p.ToString("F3")+
+                        " (root min/target/max "+lower.ToString("F3")+"/"+nominal.ToString("F3")+"/"+upper.ToString("F3")+" m).";
+                Vector3 root=new Vector3(p.x,nominal,p.z);
                 Vector3 center=root+rot*car.center;
-                if(center.y-car.size.y*.5f<Mathf.Max(roadY,bodySurface)+.01f)
-                    return "Static body underclearance at "+p.ToString("F3");
+                float surface=Mathf.Max(roadY,bodySurface),bodyBottom=car.center.y-car.size.y*.5f;
+                float clearance=nominal+bodyBottom-surface,compressedClearance=lower+bodyBottom-surface;
+                minNominalClearance=Mathf.Min(minNominalClearance,clearance);
+                minCompressedClearance=Mathf.Min(minCompressedClearance,compressedClearance);
+                if(clearance<.01f)
+                    return "Nominal static body underclearance at "+p.ToString("F3")+
+                        " (clearance "+clearance.ToString("F3")+" m, minimum 0.010 m; compressed-envelope clearance "+
+                        compressedClearance.ToString("F3")+" m, root min/target/max "+lower.ToString("F3")+"/"+
+                        nominal.ToString("F3")+"/"+upper.ToString("F3")+" m).";
                 var overlaps=Physics.OverlapBox(center,car.size*.5f,rot,~0,QueryTriggerInteraction.Ignore);
                 foreach(var collider in overlaps)
                     if(!asphaltSet.Contains(collider))return "Vehicle body overlaps "+collider.name+" at "+p.ToString("F3");
@@ -324,14 +380,19 @@ namespace DeliveryDriver.EditorTools
                     try{path=RoundedLoop(anchors,car.radius);}
                     catch(InvalidOperationException ex){failures.Add(names+" ["+label+"]: "+ex.Message);continue;}
                     constructed++;
-                    string issue=CheckRoute(path,car,asphalt,ground,out int rays,out float length,out float spread);
+                    string issue=CheckRoute(path,car,asphalt,ground,out int rays,out float length,out float spread,
+                        out float nominalClearance,out float compressedClearance);
                     if(issue!=null){failures.Add(names+" ["+label+"]: "+issue);continue;}
                     Debug.Log("[ProceduralWorld] V7.5 MINIVAN STATIC LOOP PASS: "+scene.path+
                         "; prefab "+PrefabPath+"; body "+car.size.ToString("F2")+" m, wheelbase "+car.wheelbase.ToString("F2")+
                         " m, conservative turn radius "+car.radius.ToString("F2")+" m; closed route "+length.ToString("F1")+
                         " m, "+cycle.roads.Count+" roads, "+path.Count+" poses, "+rays+" asphalt probes, max wheel height spread "+
-                        spread.ToString("F3")+" m; "+label+"; candidates tried/constructed "+trials+"/"+constructed+
-                        "; route "+names+". Static centerline geometry only: not lane routing, dynamic steering, braking, suspension, traffic or driving PASS. No scene/save changes.");
+                        spread.ToString("F3")+" m; nominal minimum body clearance "+nominalClearance.ToString("F3")+
+                        " m; minimum common compressed-envelope clearance "+compressedClearance.ToString("F3")+
+                        " m; suspension travel/target "+string.Join(", ",car.travel.Select((v,i)=>v.ToString("F3")+"m/"+car.target[i].ToString("F2")))+
+                        "; "+label+"; candidates tried/constructed "+trials+"/"+constructed+
+                        "; route "+names+". Nominal upright static geometry only; compressed-envelope clearance is diagnostic, negative means potential bottoming. "+
+                        "Not loaded equilibrium, lane routing, dynamic steering, braking, suspension, traffic or driving PASS. No scene/save changes.");
                     var view=SceneView.lastActiveSceneView;
                     if(view!=null){view.pivot=path[0];view.size=35f;view.Repaint();}
                     return;

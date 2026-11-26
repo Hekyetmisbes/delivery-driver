@@ -211,6 +211,20 @@ namespace DeliveryDriver.EditorTools
                     new Vector3(5,0,5),new Vector3(0,0,5)},4f);}
                 catch(InvalidOperationException){tightLoopRejected=true;}
                 Require(tightLoopRejected,"Overlapping vehicle turn fillets accepted.");
+                // Actual Minivan-like wheel reference: 0.153m compressed
+                // contact, 0.30m travel, 0.5 target. Fully compressed differs
+                // from the nominal pose by 0.15m; do not silently lift it.
+                var flatWheelSurface=new[]{.15f,.15f,.15f,.15f};
+                var wheelContact=new[]{.153f,.153f,.153f,.153f};
+                var suspensionTravel=new[]{.3f,.3f,.3f,.3f};
+                var suspensionTarget=new[]{.5f,.5f,.5f,.5f};
+                Require(ProceduralWorldPilotDriveCheck.TryPilotSuspensionPose(flatWheelSurface,wheelContact,suspensionTravel,
+                    suspensionTarget,out float nominalRoot,out float compressedRoot,out float extendedRoot)&&
+                    Mathf.Abs(nominalRoot-.147f)<.0001f&&Mathf.Abs(compressedRoot+.003f)<.0001f&&
+                    Mathf.Abs(extendedRoot-.297f)<.0001f&&nominalRoot+.075f-.15f>.01f&&compressedRoot+.075f-.15f<0f,
+                    "Pilot suspension nominal/full-compression distinction incorrect.");
+                Require(!ProceduralWorldPilotDriveCheck.TryPilotSuspensionPose(new[]{0f,0f,0f,.4f},wheelContact,suspensionTravel,
+                    suspensionTarget,out _,out _,out _),"Pilot accepted incompatible wheel travel intervals.");
                 // Dense linear samples adjacent to a real junction must not
                 // constrain a turn to a single short spline sample interval.
                 var denseRoad=new List<Vector3>{Vector3.zero,new Vector3(1,0,0),new Vector3(19,0,0),new Vector3(20,0,0)};
