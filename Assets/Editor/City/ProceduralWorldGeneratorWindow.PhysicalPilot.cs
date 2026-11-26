@@ -115,7 +115,25 @@ namespace DeliveryDriver.EditorTools
             var pilot=pilotSurface;var plan=preview;
             if(key!=pilot.fingerprint||key!=previewFingerprint||source.path!=pilot.scenePath)
                 throw new InvalidOperationException("Pilot inputs changed. Recalculate and preflight before building.");
-            var scope=expanded?ProceduralWorldPlanner.BuildPilotNeighborhoodScope(plan,pilot,settings):null;
+            ProceduralWorldPlanner.PilotNeighborhoodScope scope=null;
+            if(expanded)
+            {
+                try{scope=ProceduralWorldPlanner.BuildPilotNeighborhoodScope(plan,pilot,settings);}
+                catch(InvalidOperationException ex)
+                {
+                    // A rectangular crop can disconnect an otherwise connected
+                    // city. Re-select a verified square; never discard components
+                    // or invent links to force this crop to pass.
+                    Debug.Log("[ProceduralWorld] V7.3.2a current square rejected: "+ex.Message+" Searching another square.");
+                    var replacement=ProceduralWorldPlanner.FindPilotSurface(settings,detected,source,plan,pilot.city,key,true);
+                    if(!PhysicalPilotEligible(replacement))
+                        throw new InvalidOperationException("Replacement pilot did not pass zero-grading eligibility.");
+                    scope=ProceduralWorldPlanner.BuildPilotNeighborhoodScope(plan,replacement,settings);
+                    pilot=replacement;
+                    pilotSurface=pilot;pilotOwner=plan;pilotOverlay=true;showPreview=true;
+                    Debug.Log("[ProceduralWorld] V7.3.2a replacement: "+pilot.Summary());
+                }
+            }
             var edges=expanded?scope.edges:ProceduralWorldPlanner.PhysicalPilotRoads(plan,pilot,settings);
             string version=expanded?"V7.3.2":"V7.3.1";
             var sourceTile=detected.tiles.Single(t=>t.row==pilot.row&&t.column==pilot.column);
@@ -135,13 +153,13 @@ namespace DeliveryDriver.EditorTools
                 " All buildings and gameplay systems are excluded. GameScene is not modified. Continue?",
                 "Build separate scene","Cancel"))return;
 
-            if(SceneManager.sceneCount!=1||SceneManager.GetActiveScene()!=source||source.isDirty)
-                throw new InvalidOperationException("Source scene changed during confirmation; pilot not created.");
+            if(SceneManager.sceneCount!=1||SceneManager.GetActiveScene()!=source||source.isDirty||
+                ProceduralWorldPlanner.PreviewFingerprint(settings,detected,source)!=key)
+                throw new InvalidOperationException("Source scene or inputs changed during confirmation; pilot not created.");
             var originalData=sourceTile.terrain.terrainData;
             var originalMaterial=sourceTile.terrain.materialTemplate;
             bool originalDataDirty=EditorUtility.IsDirty(originalData);
             bool originalMaterialDirty=originalMaterial!=null&&EditorUtility.IsDirty(originalMaterial);
-            lastPhysicalPilotSummary=null;lastPhysicalPilotScene=null;
             Scene test=default;
             string folder=null,scenePath=null;
             bool saved=false;
@@ -291,9 +309,14 @@ namespace DeliveryDriver.EditorTools
                     (originalMaterial!=null&&EditorUtility.IsDirty(originalMaterial)!=originalMaterialDirty)||
                     ProceduralWorldPlanner.PreviewFingerprint(settings,detected,source)!=key)
                     throw new InvalidOperationException("Source scene/input changed unexpectedly; abort pilot without saving GameScene.");
-                PersistMeshes(new List<GameObject>{root},folder);
+                int meshAssets=PersistPilotMeshes(root,folder);
                 foreach(var mesh in looseMeshes)
                     if(mesh==null||!AssetDatabase.Contains(mesh))throw new InvalidOperationException("Pilot mesh persistence failed.");
+                // Recheck collider references and sampled surface after saving
+                // independent native mesh assets, before declaring a scene pass.
+                int savedRaySamples=ValidatePilotColliders(paths,junctionParents,localLayout,out float savedSurfaceError);
+                if(savedRaySamples!=raySamples||Mathf.Abs(savedSurfaceError-maxSurfaceError)>.0001f)
+                    throw new InvalidOperationException("Pilot collider evidence changed after mesh persistence.");
                 AssetDatabase.SaveAssetIfDirty(data);
                 if(terrainMaterial!=null)AssetDatabase.SaveAssetIfDirty(terrainMaterial);
                 AssetDatabase.SaveAssetIfDirty(asphalt);
@@ -305,7 +328,8 @@ namespace DeliveryDriver.EditorTools
                     "; source fingerprint "+key+"; tile ["+pilot.row+","+pilot.column+"] "+pilot.region.ToString("F1")+
                     "; roads "+paths.Count+" ("+roadIds+"), nodes "+nodes.Count+
                     ", open/external branch nodes "+open.Count+", full junction meshes "+junctionParents.Count(x=>x.Key.connectedRoads.Count>=3)+
-                    ", mesh colliders "+colliderCount+", asphalt collider ray samples "+raySamples+
+                    ", mesh colliders "+colliderCount+", independent mesh assets "+meshAssets+
+                    ", asphalt collider ray samples "+raySamples+
                     ", max ray surface deviation "+maxSurfaceError.ToString("F3")+" m; terrain original clone, zero grading; "+
                     (expanded?"source roads represented / touching "+scope.represented+"/"+scope.touching+
                         ", whole / clipped pieces "+scope.whole+"/"+scope.clipped+", outside inset "+scope.footprintOnly+
@@ -369,6 +393,45 @@ namespace DeliveryDriver.EditorTools
             var asset=AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath);
             if(asset!=null){Selection.activeObject=asset;EditorGUIUtility.PingObject(asset);}
             SceneView.RepaintAll();
+        }
+
+        // NativeFormatImporter warned when a main mesh and several subassets
+        // were written then explicitly reimported. Keep one mesh per file for
+        // disposable pilots; the production persistence path is untouched.
+        private static int PersistPilotMeshes(GameObject root,string folder)
+        {
+            var filters=root.GetComponentsInChildren<MeshFilter>(true);
+            var colliders=root.GetComponentsInChildren<MeshCollider>(true);
+            var filterMeshes=filters.Select(f=>f.sharedMesh).ToArray();
+            var colliderMeshes=colliders.Select(c=>c.sharedMesh).ToArray();
+            var meshes=filterMeshes.Concat(colliderMeshes).Where(m=>m!=null).Distinct().ToList();
+            if(meshes.Count==0)throw new InvalidOperationException("Pilot contains no meshes to persist.");
+            string guid=AssetDatabase.CreateFolder(folder,"Meshes");
+            if(string.IsNullOrEmpty(guid))throw new InvalidOperationException("Could not create pilot mesh folder.");
+            string meshFolder=AssetDatabase.GUIDToAssetPath(guid);
+            var expected=new Dictionary<Mesh,string>();
+            for(int i=0;i<meshes.Count;i++)
+            {
+                var mesh=meshes[i];
+                if(AssetDatabase.Contains(mesh))
+                    throw new InvalidOperationException("Pilot mesh unexpectedly references a pre-existing asset: "+mesh.name);
+                string path=meshFolder+"/Mesh_"+i.ToString("D4")+".asset";
+                AssetDatabase.CreateAsset(mesh,path);
+                AssetDatabase.SaveAssetIfDirty(mesh);
+                expected.Add(mesh,path);
+            }
+            foreach(var entry in expected)
+            {
+                if(!AssetDatabase.Contains(entry.Key)||AssetDatabase.GetAssetPath(entry.Key)!=entry.Value||
+                    AssetDatabase.LoadAssetAtPath<Mesh>(entry.Value)!=entry.Key||
+                    !AssetDatabase.TryGetGUIDAndLocalFileIdentifier(entry.Key,out string assetGuid,out long localId)||
+                    string.IsNullOrEmpty(assetGuid)||localId==0)
+                    throw new InvalidOperationException("Pilot mesh asset reference verification failed: "+entry.Value);
+            }
+            if(!filters.Select(f=>f.sharedMesh).SequenceEqual(filterMeshes)||
+                !colliders.Select(c=>c.sharedMesh).SequenceEqual(colliderMeshes))
+                throw new InvalidOperationException("Pilot filter/collider reference changed during persistence.");
+            return expected.Count;
         }
 
         private int ValidatePilotColliders(Dictionary<SplineRoad,List<Vector3>> roads,

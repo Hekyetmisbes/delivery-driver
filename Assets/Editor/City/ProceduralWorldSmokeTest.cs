@@ -253,6 +253,20 @@ namespace DeliveryDriver.EditorTools
                     neighborhood.edges[2].b.position==new Vector3(94,0,50)&&neighborhood.edges[2].b!=arm3.b&&
                     arm3.points[1]==new Vector3(120,0,50)&&scopeFixture.edges[0]==arm1,
                     "Expanded pilot did not preserve original node/path identities or create a distinct boundary terminal.");
+                var sketch=ProceduralWorldPlanner.PilotScopeSketch(scopeFixture,scopePilot.region,hub.sector,scopeSettings);
+                Require(sketch.roadCount==scopePilot.roadCount&&sketch.wholeRoads==scopePilot.wholeRoads&&
+                    sketch.connectedWholeRoads==scopePilot.connectedWholeRoads,"Pilot topology sketch counts differ.");
+                var isolatedA=new ProceduralWorldPlanner.Node{id=5,position=new Vector3(-10,0,15),sector=hub.sector};
+                var isolatedB=new ProceduralWorldPlanner.Node{id=6,position=new Vector3(110,0,15),sector=hub.sector};
+                var isolatedEdge=new ProceduralWorldPlanner.Edge{a=isolatedA,b=isolatedB,sector=hub.sector,
+                    points=new List<Vector3>{isolatedA.position,isolatedB.position}};
+                scopeFixture.edges.Add(isolatedEdge);
+                bool disconnectedRejected=false;
+                try{ProceduralWorldPlanner.BuildPilotNeighborhoodScope(scopeFixture,
+                    ProceduralWorldPlanner.PilotScopeSketch(scopeFixture,scopePilot.region,hub.sector,scopeSettings),scopeSettings);}
+                catch(InvalidOperationException ex){disconnectedRejected=ex.Message.Contains("2 separate components");}
+                Require(disconnectedRejected,"Pilot accepted a disconnected clipped component.");
+                scopeFixture.edges.Remove(isolatedEdge);
                 Require(Mathf.Abs(ProceduralWorldPlanner.JunctionCurvature(Vector3.zero,new Vector3(-10,1,0),new Vector3(10,1,0))-.02f)<.0001f&&
                     ProceduralWorldPlanner.JunctionCurvature(Vector3.zero,new Vector3(-10,1,0),new Vector3(10,-1,0))<.0001f&&
                     ProceduralWorldPlanner.JunctionCurvature(Vector3.zero,new Vector3(0,1,10),new Vector3(10,1,0))<0,

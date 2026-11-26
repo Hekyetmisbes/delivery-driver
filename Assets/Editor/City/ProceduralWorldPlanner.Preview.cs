@@ -267,7 +267,8 @@ namespace DeliveryDriver.EditorTools
             float b=Mathf.Lerp(p.proposed[(iz+1)*p.nx+ix],p.proposed[(iz+1)*p.nx+ix+1],x-ix);
             h=Mathf.Lerp(a,b,z-iz);return true;
         }
-        internal static PilotSurface FindPilotSurface(Settings s,Layout l,Scene scene,Plan source,string city,string fingerprint)
+        internal static PilotSurface FindPilotSurface(Settings s,Layout l,Scene scene,Plan source,string city,string fingerprint,
+            bool expanded=false)
         {
             if(source==null||source.quality==null||source.virtualReport==null||source.virtualReport.diagnosticSchema!=1||
                 source.virtualReport.issues==null||source.virtualReport.omittedIssues>0||source.virtualReport.overflowCells>0)
@@ -297,7 +298,50 @@ namespace DeliveryDriver.EditorTools
             // area, then more lots. This is a pilot selection, not city clearance.
             var shortlist=choices.OrderBy(c=>source.virtualReport.issues.Count(i=>Contains(c.region,XZ(i.position),s.width*.5f+s.sidewalk+s.blend)))
                 .ThenBy(c=>source.protectedAreas.Count(r=>r.Overlaps(c.region))).ThenByDescending(c=>c.lots)
-                .ThenBy(c=>c.tile.row).ThenBy(c=>c.tile.column).ThenBy(c=>c.region.xMin).ThenBy(c=>c.region.yMin).Take(8).ToList();
+                .ThenBy(c=>c.tile.row).ThenBy(c=>c.tile.column).ThenBy(c=>c.region.xMin).ThenBy(c=>c.region.yMin).ToList();
+            if(expanded)
+            {
+                // The ordinary surface picker has no clipped connectivity gate.
+                // Screen the same deterministic candidate grid for topology first;
+                // spend native-heightmap checks only on viable neighborhoods.
+                int topologyRejected=0,surfaceRejected=0,surfaceTrials=0;
+                var failures=new List<string>();
+                const int maxSurfaceTrials=16;
+                for(int i=0;i<shortlist.Count;i++)
+                {
+                    if(EditorUtility.DisplayCancelableProgressBar("V7.3.2a connected neighborhood",
+                        "Screening square "+(i+1)+"/"+shortlist.Count+"; native trials "+surfaceTrials+"/"+maxSurfaceTrials,
+                        .1f+.8f*i/shortlist.Count))throw new OperationCanceledException();
+                    var choice=shortlist[i];
+                    var sketch=PilotScopeSketch(source,choice.region,city,s);
+                    try{BuildPilotNeighborhoodScope(source,sketch,s);}
+                    catch(InvalidOperationException ex)
+                    {
+                        topologyRejected++;
+                        if(failures.Count<6)failures.Add(choice.region.ToString("F1")+": "+ex.Message);
+                        continue;
+                    }
+                    surfaceTrials++;
+                    var candidate=planner.BuildPilotSurface(choice,city,fingerprint,scene.path);
+                    if(candidate.Pass&&candidate.changedCells==0&&candidate.original!=null&&
+                        candidate.proposed!=null&&candidate.original.SequenceEqual(candidate.proposed))
+                    {
+                        // Recheck with actual measured counts rather than sketch.
+                        var verified=BuildPilotNeighborhoodScope(source,candidate,s);
+                        candidate.limitation+=" Connected neighborhood selected after "+(i+1)+" of "+shortlist.Count+
+                            " squares; "+topologyRejected+" topology rejects, "+surfaceRejected+" native surface rejects; "+
+                            verified.edges.Count+" pieces, "+verified.fullJunctions+" complete junctions.";
+                        return candidate;
+                    }
+                    surfaceRejected++;
+                    if(failures.Count<6)failures.Add(choice.region.ToString("F1")+": "+candidate.Summary());
+                    if(surfaceTrials>=maxSurfaceTrials)break;
+                }
+                throw new InvalidOperationException("No connected zero-grading neighborhood found in bounded search. "+
+                    "Grid candidates "+shortlist.Count+", topology rejects "+topologyRejected+", native trials/rejects "+
+                    surfaceTrials+"/"+surfaceRejected+". First rejected candidates: "+string.Join(" | ",failures));
+            }
+            shortlist=shortlist.Take(8).ToList();
             PilotSurface best=null;
             for(int i=0;i<shortlist.Count;i++)
             {
@@ -398,6 +442,15 @@ namespace DeliveryDriver.EditorTools
             public HashSet<Node> terminals=new HashSet<Node>();
             public int touching,represented,whole,clipped,footprintOnly,components,fullJunctions;
         }
+        internal static PilotSurface PilotScopeSketch(Plan source,Rect region,string city,Settings s)
+        {
+            float half=s.width*.5f+s.sidewalk;
+            var touched=source.edges.Where(e=>!e.Bridge&&e.points.Skip(1)
+                .Select((v,i)=>PilotSegmentNear(region,e.points[i],v,half)).Any(x=>x)).ToList();
+            var whole=touched.Where(e=>e.points.All(v=>Contains(region,XZ(v),-half))).ToList();
+            return new PilotSurface{region=region,city=city,roadCount=touched.Count,wholeRoads=whole.Count,
+                connectedWholeRoads=LargestPilotRoadGroup(whole)};
+        }
         internal static PilotNeighborhoodScope BuildPilotNeighborhoodScope(Plan source,PilotSurface pilot,Settings s)
         {
             // Keep the road + sidewalk footprint in the verified square.
@@ -467,6 +520,9 @@ namespace DeliveryDriver.EditorTools
                 var set=new HashSet<Edge>(group);remaining.RemoveAll(set.Contains);
             }
             var incident=scope.edges.SelectMany(e=>new[]{e.a,e.b}).Distinct().ToList();
+            if(incident.Select(v=>v.position).Distinct().Count()!=incident.Count||
+                incident.Select(v=>v.id).Distinct().Count()!=incident.Count||incident.Any(v=>v.gate||v.existing!=null))
+                throw new InvalidOperationException("Expanded pilot includes coincident distinct nodes, duplicate IDs, gate or authored intersection.");
             foreach(var node in incident.Where(v=>!scope.terminals.Contains(v)))
             {
                 int degree=scope.edges.Count(e=>e.a==node||e.b==node);
@@ -477,8 +533,18 @@ namespace DeliveryDriver.EditorTools
                 if(degree>=3)scope.fullJunctions++;
             }
             if(scope.fullJunctions==0)throw new InvalidOperationException("Expanded pilot has no complete three-or-more-arm intersection.");
-            if(scope.components!=1)throw new InvalidOperationException("Expanded pilot contains "+scope.components+
-                " separate components. No artificial links will be added.");
+            if(scope.components!=1)
+            {
+                var rest=new List<Edge>(scope.edges);var groups=new List<string>();
+                while(rest.Count>0)
+                {
+                    var group=PilotRoadGroup(rest);var set=new HashSet<Edge>(group);
+                    groups.Add(group.Count+" pieces ["+string.Join(", ",group.Select(e=>scope.sourceEdges[e].a.id+"-"+scope.sourceEdges[e].b.id))+"]");
+                    rest.RemoveAll(set.Contains);
+                }
+                throw new InvalidOperationException("Expanded pilot contains "+scope.components+
+                    " separate components: "+string.Join("; ",groups)+". No artificial links will be added.");
+            }
             return scope;
         }
         private PilotSurface BuildPilotSurface(PilotChoice choice,string city,string fingerprint,string scenePath)
