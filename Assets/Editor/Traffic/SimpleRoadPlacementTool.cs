@@ -6140,6 +6140,7 @@ namespace DeliveryDriver.EditorTools
             bridgeTowerHeight = Mathf.Max(bridgeTowerHeight, 22f);
             bridgeTowerSpacing = Mathf.Max(bridgeTowerSpacing, 90f);
 
+            if(initializingIsolatedBatch)return;
             roadMaterial = GetOrCreatePlainAsphaltMaterial();
 
             if (sidewalkMaterial == null)

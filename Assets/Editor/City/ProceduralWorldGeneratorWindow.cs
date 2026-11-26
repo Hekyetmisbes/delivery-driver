@@ -68,6 +68,7 @@ namespace DeliveryDriver.EditorTools
 
         private void OnUndoRedo()
         {
+            if(physicalPilotBuilding)return;
             preview = null;
             previewFingerprint=null;
             layout = null;

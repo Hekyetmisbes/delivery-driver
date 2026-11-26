@@ -166,3 +166,7 @@ urp-build-scene-report.txt
 # Local notes workspace and generated code graph
 /.obsidian/
 /graphify-out/
+
+# Disposable local physical pilot scenes and independent generated assets
+/Assets/ProceduralPilotTests/
+/Assets/ProceduralPilotTests.meta

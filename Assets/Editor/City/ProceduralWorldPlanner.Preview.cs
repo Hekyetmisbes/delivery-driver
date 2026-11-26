@@ -313,24 +313,35 @@ namespace DeliveryDriver.EditorTools
         private static long PilotBlockers(PilotSurface p)=>!p.complete?long.MaxValue:
             (long)p.buriedSamples+p.geometryRoads+p.junctionFlags+p.knownIssues+p.excludedCorridors+p.protectedCells+
             p.overlapCells+p.lotFailures+p.urbanGroundCells+p.steepShoulderPairs+(p.connectedWholeRoads<2?1:0)+(p.roadCount==0?1:0)+(p.lotCount==0?1:0);
-        internal static int LargestPilotRoadGroup(List<Edge> roads)
+        internal static int LargestPilotRoadGroup(List<Edge> roads)=>PilotRoadGroup(roads).Count;
+        internal static List<Edge> PilotRoadGroup(List<Edge> roads)
         {
             var adjacency=roads.SelectMany(e=>new[]{(node:e.a,edge:e),(node:e.b,edge:e)})
                 .GroupBy(x=>x.node).ToDictionary(g=>g.Key,g=>g.Select(x=>x.edge).ToList());
-            var seen=new HashSet<Edge>();int largest=0;
+            var seen=new HashSet<Edge>();var largest=new List<Edge>();
             foreach(var e in roads)
             {
                 if(!seen.Add(e))continue;
-                int count=0;var pending=new Queue<Edge>();pending.Enqueue(e);
+                var group=new List<Edge>();var pending=new Queue<Edge>();pending.Enqueue(e);
                 while(pending.Count>0)
                 {
-                    var current=pending.Dequeue();count++;
+                    var current=pending.Dequeue();group.Add(current);
                     foreach(var node in new[]{current.a,current.b})
                         foreach(var next in adjacency[node])if(seen.Add(next))pending.Enqueue(next);
                 }
-                largest=Mathf.Max(largest,count);
+                if(group.Count>largest.Count)largest=group;
             }
-            return largest;
+            var selected=new HashSet<Edge>(largest);
+            return roads.Where(selected.Contains).ToList();
+        }
+        internal static List<Edge> PhysicalPilotRoads(Plan source,PilotSurface pilot,Settings s)
+        {
+            float half=s.width*.5f+s.sidewalk;
+            var whole=source.edges.Where(e=>!e.Bridge&&e.sector==pilot.city&&e.points.All(v=>Contains(pilot.region,XZ(v),-half))).ToList();
+            var group=PilotRoadGroup(whole);
+            if(whole.Count!=pilot.wholeRoads||group.Count!=pilot.connectedWholeRoads||group.Count<2)
+                throw new InvalidOperationException("Pilot road scope no longer matches the verified surface.");
+            return group;
         }
         private PilotSurface BuildPilotSurface(PilotChoice choice,string city,string fingerprint,string scenePath)
         {

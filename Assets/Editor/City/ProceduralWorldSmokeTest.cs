@@ -218,6 +218,8 @@ namespace DeliveryDriver.EditorTools
                 Require(ProceduralWorldPlanner.ShareVirtualNode(edgeA,edgeB)&&!ProceduralWorldPlanner.ShareVirtualNode(edgeA,edgeC),"Virtual topology relation incorrect.");
                 Require(ProceduralWorldPlanner.LargestPilotRoadGroup(new List<ProceduralWorldPlanner.Edge>{edgeA,edgeB,edgeC})==2,
                     "Pilot connected road grouping incorrect.");
+                Require(ProceduralWorldPlanner.PilotRoadGroup(new List<ProceduralWorldPlanner.Edge>{edgeA,edgeB,edgeC})
+                    .SequenceEqual(new[]{edgeA,edgeB}),"Physical pilot selected a disconnected road or changed source order.");
                 Require(Mathf.Abs(ProceduralWorldPlanner.JunctionCurvature(Vector3.zero,new Vector3(-10,1,0),new Vector3(10,1,0))-.02f)<.0001f&&
                     ProceduralWorldPlanner.JunctionCurvature(Vector3.zero,new Vector3(-10,1,0),new Vector3(10,-1,0))<.0001f&&
                     ProceduralWorldPlanner.JunctionCurvature(Vector3.zero,new Vector3(0,1,10),new Vector3(10,1,0))<0,

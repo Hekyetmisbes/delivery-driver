@@ -10,6 +10,9 @@ namespace DeliveryDriver.EditorTools
         // Only set on the temporary batch instance. Manual SceneView behavior is unchanged.
         private Dictionary<Vector3, int> batchEndpointDegrees;
         private Rect? batchSeaArea;
+        // CreateInstance invokes OnEnable before the batch can set materials.
+        // Suppress only the shared-asset material initialization for an isolated pilot.
+        private static bool initializingIsolatedBatch;
 
         internal static void BakePlannedRoads(
             Dictionary<SplineRoad, List<Vector3>> paths,
@@ -17,11 +20,28 @@ namespace DeliveryDriver.EditorTools
             Rect seaArea,
             float width,
             float pavement,
-            float seaHeight)
+            float seaHeight,
+            Material isolatedAsphalt = null,
+            Material isolatedSidewalk = null,
+            Material isolatedMarkings = null)
         {
-            var tool = CreateInstance<SimpleRoadPlacementTool>();
+            bool isolated=isolatedAsphalt!=null||isolatedSidewalk!=null||isolatedMarkings!=null;
+            if(isolated&&(isolatedAsphalt==null||isolatedSidewalk==null||isolatedMarkings==null))
+                throw new System.ArgumentException("All three isolated pilot materials are required.");
+            SimpleRoadPlacementTool tool;
+            initializingIsolatedBatch=isolated;
+            try{tool=CreateInstance<SimpleRoadPlacementTool>();}
+            finally{initializingIsolatedBatch=false;}
             try
             {
+                if(isolated)
+                {
+                    tool.roadMaterial=isolatedAsphalt;
+                    tool.sidewalkMaterial=isolatedSidewalk;
+                    tool.laneMarkingMaterial=isolatedMarkings;
+                    tool.createMeshCollider=true;
+                    tool.createSidewalkCollider=true;
+                }
                 tool.toolEnabled = false;
                 tool.snapToGround = false; // The planner already solved the final elevation.
                 tool.roadWidth = width;

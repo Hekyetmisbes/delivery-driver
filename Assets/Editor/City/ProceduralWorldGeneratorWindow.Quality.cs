@@ -24,6 +24,7 @@ namespace DeliveryDriver.EditorTools
 
         private void OnPreviewSceneChanged(Scene oldScene,Scene newScene)
         {
+            if(physicalPilotBuilding)return;
             comparisonOwner=null;preview=null;layout=null;previewFingerprint=null;analysisCache=null;analysisCacheKey=null;
             planCache.Clear();cacheOrder.Clear();settings.accessAnchors.Clear();anchorSamples=null;pickAnchor=false;
             refineZone=null;pilotSurface=null;pilotOwner=null;Repaint();SceneView.RepaintAll();
@@ -250,6 +251,22 @@ namespace DeliveryDriver.EditorTools
                     view.Repaint();}
             }
             if(GUILayout.Button("Save pilot surface JSON"))Run(SavePilotSurface);
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("V7.3.1 Physical pilot — isolated scene",EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("First infrastructure proof: only the largest connected group of complete roads, original heightmap cloned without grading. Other corridors, buildings and driving are not included. GameScene and full Generate remain untouched.",MessageType.Info);
+            using(new EditorGUI.DisabledScope(!PhysicalPilotEligible(pilotSurface)))
+                if(GUILayout.Button("Build isolated physical pilot"))Run(BuildPhysicalPilot);
+            if(!string.IsNullOrEmpty(lastPhysicalPilotSummary))
+            {
+                EditorGUILayout.HelpBox(lastPhysicalPilotSummary,MessageType.Info);
+                if(GUILayout.Button("Select last pilot scene asset"))
+                {
+                    var asset=AssetDatabase.LoadAssetAtPath<SceneAsset>(lastPhysicalPilotScene);
+                    if(asset!=null){Selection.activeObject=asset;EditorGUIUtility.PingObject(asset);}
+                }
+                if(GUILayout.Button("Copy physical pilot result"))
+                    EditorGUIUtility.systemCopyBuffer=lastPhysicalPilotSummary;
+            }
         }
         private void PreflightPilot()
         {
@@ -307,6 +324,7 @@ namespace DeliveryDriver.EditorTools
                 "Open spaces / lots: "+preview.openSpaces.Count+" / "+preview.parcels.Count};
             lines.AddRange(preview.stageReports);lines.AddRange(preview.notes);lines.AddRange(preview.warnings.Select(x=>"WARNING: "+x));
             if(HasPilot)lines.Add(pilotSurface.Summary());
+            if(!string.IsNullOrEmpty(lastPhysicalPilotSummary))lines.Add(lastPhysicalPilotSummary);
             lines.Add("--- Settings at calculation ---");lines.Add(previewSettings??"Unknown");
             return string.Join("\n",lines);
         }
