@@ -1239,7 +1239,7 @@ namespace DeliveryDriver.EditorTools
             return false;
         }
 
-        private static bool TryCalculatePreciseLocalBounds(Transform root, out Bounds localBounds)
+        internal static bool TryCalculatePreciseLocalBounds(Transform root, out Bounds localBounds)
         {
             localBounds = default;
             if (root == null)
@@ -1444,6 +1444,23 @@ namespace DeliveryDriver.EditorTools
             }
         }
 
+        // Same asset filter and local bounds calculation as the existing placement tool.
+        // No prefab instantiation, scene writes or runtime dependencies.
+        internal static List<(string name,Vector2 size)> ReadPreviewFootprints()
+        {
+            var result=new List<(string,Vector2)>();
+            foreach(string guid in AssetDatabase.FindAssets("t:Prefab",new[]{BuildingsFolder}))
+            {
+                string path=AssetDatabase.GUIDToAssetPath(guid);
+                var prefab=AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                if(prefab==null||!IsCityBuildingPrefab(prefab.name)||!TryCalculatePreciseLocalBounds(prefab.transform,out Bounds bounds))continue;
+                Vector3 scale=prefab.transform.localScale;
+                float width=Mathf.Abs(bounds.size.x*scale.x),depth=Mathf.Abs(bounds.size.z*scale.z);
+                if(width>.01f&&depth>.01f)result.Add((path,new Vector2(width,depth)));
+            }
+            return result;
+        }
+
         private void LoadDefaultPrefabs()
         {
             buildingPrefabs.Clear();
@@ -1482,7 +1499,7 @@ namespace DeliveryDriver.EditorTools
             }
         }
 
-        private bool IsCityBuildingPrefab(string prefabName)
+        private static bool IsCityBuildingPrefab(string prefabName)
         {
             if (string.IsNullOrEmpty(prefabName))
             {
